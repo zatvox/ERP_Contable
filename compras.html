@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JHIRO ERP - Compras</title>
+  <link rel="stylesheet" href="assets/css/styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      <div class="sidebar-logo">JHIRO</div>
+      <ul class="sidebar-menu">
+        <li><a href="dashboard.html" data-page="dashboard">📊 Dashboard</a></li>
+        <li><a href="inventario.html" data-page="inventario">📦 Inventario</a></li>
+        <li><a href="compras.html" class="active" data-page="compras">📦 Compras</a></li>
+        <li><a href="ventas.html" data-page="ventas">🛒 Ventas</a></li>
+        <li><a href="contabilidad.html" data-page="contabilidad">📑 Contabilidad</a></li>
+        <li><a href="costeo-importaciones.html" class="active" data-page="costeo">📈 Costeo Import.</a></li>
+      </ul>
+      <div class="sidebar-user">
+        <strong id="userDisplay">Admin</strong>
+        <button class="btn-logout" onclick="logout()">Cerrar Sesión</button>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <div class="main-content">
+      <!-- HEADER -->
+      <header class="header">
+        <div class="header-left">
+          <button class="menu-toggle" id="menuToggle">☰</button>
+          <h2 class="header-title">Compras</h2>
+        </div>
+        <div class="header-controls">
+          <button class="theme-toggle" id="themeToggle">🌙 Oscuro</button>
+        </div>
+      </header>
+
+      <!-- CONTENT -->
+      <main class="content">
+        <h1 class="page-title">Módulo Compras</h1>
+
+        <!-- TABS -->
+        <div class="tab-buttons" id="comprasTabs">
+          <button class="tab-btn active" data-tab="ordenes">Órdenes de Compra</button>
+          <button class="tab-btn" data-tab="proveedores">Proveedores</button>
+        </div>
+
+        <!-- TAB ÓRDENES -->
+        <div id="tab-ordenes" class="tab-content active">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Órdenes de Compra</h3>
+              <button class="btn btn-primary btn-small" onclick="openModal('modal-nueva-oc')">+ Nueva OC</button>
+            </div>
+            <div id="tabla-oc" class="table-container">
+              <p style="text-align: center; color: var(--text-secondary);">Cargando...</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB PROVEEDORES -->
+        <div id="tab-proveedores" class="tab-content">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Proveedores</h3>
+              <button class="btn btn-primary btn-small" onclick="openModal('modal-nuevo-proveedor')">+ Nuevo</button>
+            </div>
+            <div id="tabla-proveedores" class="table-container">
+              <p style="text-align: center; color: var(--text-secondary);">Cargando...</p>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- MODAL NUEVA OC -->
+  <div id="modal-nueva-oc" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Nueva Orden de Compra</h3>
+        <button class="modal-close" onclick="closeModal('modal-nueva-oc')">✕</button>
+      </div>
+      <form id="formNewOC">
+        <div class="form-group">
+          <div style="display: flex; gap: 10px; align-items: flex-end;">
+            <div style="flex: 1;">
+              <label>Proveedor *</label>
+              <select id="ocProveedor" required>
+                <option value="">-- Selecciona --</option>
+              </select>
+            </div>
+            <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioProveedor()" style="margin-bottom: 0;">+ Nuevo</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Moneda</label>
+          <select id="ocMoneda">
+            <option value="USD" selected>USD</option>
+            <option value="PEN">PEN</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <div style="display: flex; gap: 10px; align-items: flex-end;">
+            <div style="flex: 1;">
+              <label>Producto *</label>
+              <select id="ocProducto" required onchange="cargarLotesPorProducto()">
+                <option value="">-- Selecciona --</option>
+              </select>
+            </div>
+            <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioProducto()" style="margin-bottom: 0;">+ Nuevo</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div style="display: flex; gap: 10px; align-items: flex-end;">
+            <div style="flex: 1;">
+              <label>Lote *</label>
+              <select id="ocLote" required>
+                <option value="">-- Selecciona --</option>
+              </select>
+            </div>
+            <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioLote()" style="margin-bottom: 0;">+ Nuevo</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Cantidad *</label>
+          <input type="number" id="ocCantidad" placeholder="0" min="1" required>
+        </div>
+
+        <div class="form-group">
+          <label>IGV (%)</label>
+          <select id="ocIGV">
+            <option value="18" selected>18%</option>
+            <option value="10">10%</option>
+            <option value="0">Exonerado</option>
+          </select>
+        </div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-nueva-oc')">Cancelar</button>
+        <button class="btn btn-primary" onclick="guardarOC()">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL NUEVO PROVEEDOR -->
+  <div id="modal-nuevo-proveedor" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Nuevo Proveedor</h3>
+        <button class="modal-close" onclick="closeModal('modal-nuevo-proveedor')">✕</button>
+      </div>
+      <form id="formNewProveedor">
+        <div class="form-group">
+          <label>Nombre *</label>
+          <input type="text" id="provNombre" required>
+        </div>
+        <div class="form-group">
+          <label>RUC *</label>
+          <input type="text" id="provRUC" placeholder="11 dígitos" required>
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="provEmail">
+        </div>
+        <div class="form-group">
+          <label>Teléfono</label>
+          <input type="text" id="provPhone">
+        </div>
+        <div class="grid grid-2">
+          <div class="form-group">
+            <label>País</label>
+            <input type="text" id="provPais" value="China">
+          </div>
+          <div class="form-group">
+            <label>Moneda</label>
+            <select id="provMoneda">
+              <option value="USD" selected>USD</option>
+              <option value="PEN">PEN</option>
+            </select>
+          </div>
+        </div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-nuevo-proveedor')">Cancelar</button>
+        <button class="btn btn-primary" onclick="guardarProveedor()">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL NUEVO PRODUCTO -->
+  <div id="modal-nuevo-producto" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Nuevo Producto</h3>
+        <button class="modal-close" onclick="closeModal('modal-nuevo-producto')">✕</button>
+      </div>
+      <form id="formNewProducto">
+        <div class="form-group">
+          <label>Nombre *</label>
+          <input type="text" id="prodNombre" placeholder="Ej: Laptop HP 15.6" required>
+        </div>
+        
+        <div class="form-group">
+          <label>SKU *</label>
+          <input type="text" id="prodSKU" placeholder="Ej: LP-HP-001" required>
+        </div>
+
+        <div class="form-group">
+          <label>Descripción</label>
+          <textarea id="prodDescripcion" placeholder="Detalles del producto" style="min-height: 80px;"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Categoría</label>
+          <input type="text" id="prodCategoria" placeholder="Ej: Electrónica">
+        </div>
+
+        <div class="form-group">
+          <label>Activo</label>
+          <select id="prodActivo">
+            <option value="true" selected>Sí</option>
+            <option value="false">No</option>
+          </select>
+        </div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-nuevo-producto')">Cancelar</button>
+        <button class="btn btn-primary" onclick="guardarProductoDesdeCompras()">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL NUEVO LOTE -->
+  <div id="modal-nuevo-lote" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Nuevo Lote</h3>
+        <button class="modal-close" onclick="closeModal('modal-nuevo-lote')">✕</button>
+      </div>
+      <form id="formNewLote">
+        <div class="form-group">
+          <label>Producto *</label>
+          <select id="loteProducto" required>
+            <option value="">-- Selecciona --</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Número de Lote *</label>
+          <input type="text" id="loteNumero" placeholder="Ej: LOTE-001-2025" required>
+        </div>
+
+        <div class="form-group">
+          <label>Cantidad Inicial *</label>
+          <input type="number" id="loteStock" placeholder="0" min="1" required>
+        </div>
+
+        <div class="form-group">
+          <label>Costo Unitario *</label>
+          <input type="number" id="loteCosto" placeholder="0.00" step="0.01" required>
+        </div>
+
+        <div class="form-group">
+          <label>Costo de Destino (Flete, Impuestos)</label>
+          <input type="number" id="loteDestino" placeholder="0.00" step="0.01" value="0">
+        </div>
+
+        <div class="form-group">
+          <label>Fecha de Vencimiento *</label>
+          <input type="date" id="loteVencimiento" required>
+        </div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-nuevo-lote')">Cancelar</button>
+        <button class="btn btn-primary" onclick="guardarLoteDesdeCompras()">Guardar</button>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="assets/js/config.js"></script>
+  <script type="module" src="assets/js/supabase-client.js"></script>
+  <script type="module" src="assets/js/auth-supabase.js"></script>
+  <script type="module" src="assets/js/auth-init.js"></script>
+  <script type="module" src="assets/js/supabase-data.js"></script>
+  <script type="module" src="assets/js/helpers.js"></script>
+  <script type="module" src="assets/js/main.js"></script>
+  <script type="module" src="assets/js/compras.js"></script>
+</body>
+</html>

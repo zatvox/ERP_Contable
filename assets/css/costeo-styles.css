@@ -1,0 +1,351 @@
+/* ============================================================================
+   COSTEO-STYLES.CSS - Estilos específicos para Costeo de Importaciones
+   ============================================================================ */
+
+.costeo-header-controls {
+  display: flex;
+  gap: var(--spacing-lg);
+  align-items: center;
+  margin-bottom: var(--spacing-lg);
+  padding: var(--spacing-lg);
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+}
+
+.costeo-selector {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  flex: 1;
+}
+
+.costeo-selector label {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.costeo-selector select {
+  flex: 1;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--font-size-base);
+}
+
+/* FORMA DE COSTEO */
+.costeo-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.costeo-form .form-group {
+  margin-bottom: 0;
+}
+
+/* TABLAS DE COSTEO */
+.costeo-pagos-table,
+.costeo-impuestos-table,
+.costeo-despacho-table,
+.costeo-resumen-table {
+  width: 100%;
+  overflow-x: auto;
+  margin-top: var(--spacing-lg);
+}
+
+.costeo-pagos-table table,
+.costeo-impuestos-table table,
+.costeo-despacho-table table,
+.costeo-resumen-table table {
+  width: 100%;
+  border-collapse: collapse;
+  background-color: var(--bg-primary);
+}
+
+.costeo-pagos-table thead,
+.costeo-impuestos-table thead,
+.costeo-despacho-table thead,
+.costeo-resumen-table thead {
+  background-color: var(--bg-tertiary);
+}
+
+.costeo-pagos-table th,
+.costeo-impuestos-table th,
+.costeo-despacho-table th,
+.costeo-resumen-table th {
+  padding: var(--spacing-md);
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 2px solid var(--border-color);
+  font-size: var(--font-size-sm);
+}
+
+.costeo-pagos-table td,
+.costeo-impuestos-table td,
+.costeo-despacho-table td,
+.costeo-resumen-table td {
+  padding: var(--spacing-md);
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+.costeo-pagos-table tbody tr:hover,
+.costeo-impuestos-table tbody tr:hover,
+.costeo-despacho-table tbody tr:hover,
+.costeo-resumen-table tbody tr:hover {
+  background-color: var(--bg-secondary);
+}
+
+/* INPUTS DENTRO DE TABLAS */
+.costeo-pagos-table input,
+.costeo-impuestos-table input,
+.costeo-despacho-table input,
+.costeo-resumen-table input {
+  padding: var(--spacing-sm);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  width: 100%;
+  font-size: var(--font-size-sm);
+}
+
+.costeo-pagos-table input:focus,
+.costeo-impuestos-table input:focus,
+.costeo-despacho-table input:focus,
+.costeo-resumen-table input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(49, 46, 129, 0.1);
+}
+
+.costeo-pagos-table input[readonly],
+.costeo-impuestos-table input[readonly],
+.costeo-despacho-table input[readonly],
+.costeo-resumen-table input[readonly] {
+  background-color: var(--bg-secondary);
+  color: var(--text-secondary);
+  cursor: not-allowed;
+}
+
+/* RESUMEN BOXES */
+.costeo-resumen-box {
+  padding: var(--spacing-lg);
+  background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
+  color: white;
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--spacing-lg);
+}
+
+.costeo-resumen-box h4 {
+  margin-bottom: var(--spacing-md);
+  font-size: var(--font-size-lg);
+}
+
+.costeo-resumen-rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: var(--spacing-md);
+}
+
+.costeo-resumen-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-md);
+  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-md);
+}
+
+.costeo-resumen-row label {
+  font-weight: 600;
+  color: white;
+}
+
+.costeo-resumen-row .value {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  color: var(--color-secondary);
+}
+
+/* TABLA DE RESUMEN FINAL */
+.costeo-tabla-final {
+  width: 100%;
+  margin-top: var(--spacing-lg);
+}
+
+.costeo-tabla-final table {
+  width: 100%;
+  border-collapse: collapse;
+  background-color: var(--bg-primary);
+}
+
+.costeo-tabla-final thead {
+  background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
+  color: white;
+}
+
+.costeo-tabla-final th {
+  padding: var(--spacing-md);
+  text-align: left;
+  font-weight: 600;
+  border: none;
+}
+
+.costeo-tabla-final td {
+  padding: var(--spacing-md);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.costeo-tabla-final tbody tr:nth-child(even) {
+  background-color: var(--bg-secondary);
+}
+
+.costeo-tabla-final tbody tr:hover {
+  background-color: var(--bg-tertiary);
+}
+
+.costeo-tabla-final .value-number {
+  text-align: right;
+  font-weight: 600;
+  font-family: 'Courier New', monospace;
+  color: var(--color-success);
+}
+
+.costeo-tabla-final .value-number.negative {
+  color: var(--color-danger);
+}
+
+/* GRID RESPONSIVO */
+.grid {
+  display: grid;
+  gap: var(--spacing-lg);
+}
+
+.grid-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.grid-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+/* ACCIONES TABLA */
+.costeo-acciones {
+  display: flex;
+  gap: var(--spacing-sm);
+  justify-content: flex-end;
+}
+
+.costeo-acciones .btn {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: var(--font-size-xs);
+  min-height: 32px;
+}
+
+/* ESTADOS */
+.costeo-estado {
+  display: inline-block;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.costeo-estado.pendiente {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.costeo-estado.recibido {
+  background-color: #dcfce7;
+  color: #166534;
+}
+
+.costeo-estado.despachado {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+.costeo-estado.confirmado {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.costeo-estado.borrador {
+  background-color: #f3f4f6;
+  color: #374151;
+}
+
+/* RESPONSIVE */
+@media (max-width: 1200px) {
+  .costeo-header-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .costeo-selector {
+    flex-direction: column;
+  }
+
+  .costeo-selector select {
+    width: 100%;
+  }
+
+  .grid-3 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .costeo-header-controls {
+    flex-direction: column;
+  }
+
+  .grid-2, .grid-3 {
+    grid-template-columns: 1fr;
+  }
+
+  .costeo-pagos-table,
+  .costeo-impuestos-table,
+  .costeo-despacho-table,
+  .costeo-resumen-table {
+    font-size: var(--font-size-xs);
+  }
+
+  .costeo-pagos-table th,
+  .costeo-impuestos-table th,
+  .costeo-despacho-table th,
+  .costeo-resumen-table th,
+  .costeo-pagos-table td,
+  .costeo-impuestos-table td,
+  .costeo-despacho-table td,
+  .costeo-resumen-table td {
+    padding: var(--spacing-sm);
+  }
+
+  .costeo-pagos-table input,
+  .costeo-impuestos-table input,
+  .costeo-despacho-table input,
+  .costeo-resumen-table input {
+    font-size: var(--font-size-xs);
+    padding: var(--spacing-xs);
+  }
+
+  .costeo-resumen-rows {
+    grid-template-columns: 1fr;
+  }
+
+  .costeo-acciones {
+    flex-direction: column;
+  }
+
+  .costeo-acciones .btn {
+    width: 100%;
+  }
+}

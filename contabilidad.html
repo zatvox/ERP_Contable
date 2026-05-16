@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JHIRO ERP - Contabilidad</title>
+  <link rel="stylesheet" href="assets/css/styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <aside class="sidebar">
+      <div class="sidebar-logo">JHIRO</div>
+      <ul class="sidebar-menu">
+        <li><a href="dashboard.html" data-page="dashboard">📊 Dashboard</a></li>
+        <li><a href="inventario.html" data-page="inventario">📦 Inventario</a></li>
+        <li><a href="compras.html" data-page="compras">📦 Compras</a></li>
+        <li><a href="ventas.html" data-page="ventas">🛒 Ventas</a></li>
+        <li><a href="contabilidad.html" class="active" data-page="contabilidad">📑 Contabilidad</a></li>
+        <li><a href="costeo-importaciones.html" class="active" data-page="costeo">📈 Costeo Import.</a></li>
+      </ul>
+      <div class="sidebar-user">
+        <strong id="userDisplay">Admin</strong>
+        <button class="btn-logout" onclick="logout()">Cerrar Sesión</button>
+      </div>
+    </aside>
+
+    <div class="main-content">
+      <header class="header">
+        <div class="header-left">
+          <button class="menu-toggle" id="menuToggle">☰</button>
+          <h2 class="header-title">Contabilidad</h2>
+        </div>
+        <div class="header-controls">
+          <button class="theme-toggle" id="themeToggle">🌙 Oscuro</button>
+        </div>
+      </header>
+
+      <main class="content">
+        <h1 class="page-title">Módulo Contabilidad</h1>
+
+        <div class="tab-buttons" id="contaTabs">
+          <button class="tab-btn active" data-tab="cuentas">Plan de Cuentas</button>
+          <button class="tab-btn" data-tab="diario">Libro Diario</button>
+          <button class="tab-btn" data-tab="balance">Balance Comprobación</button>
+          <button class="tab-btn" data-tab="resultado">Estado Resultados</button>
+          <button class="tab-btn" data-tab="general">Balance General</button>
+        </div>
+
+        <div id="tab-cuentas" class="tab-content active">
+          <div id="content-cuentas" class="card">Cargando...</div>
+        </div>
+
+        <div id="tab-diario" class="tab-content">
+          <div id="content-diario" class="card">Cargando...</div>
+        </div>
+
+        <div id="tab-balance" class="tab-content">
+          <div id="content-balance" class="card">Cargando...</div>
+        </div>
+
+        <div id="tab-resultado" class="tab-content">
+          <div id="content-resultado" class="card">Cargando...</div>
+        </div>
+
+        <div id="tab-general" class="tab-content">
+          <div id="content-general" class="card">Cargando...</div>
+        </div>
+      </main>
+    </div>
+  </div>
+  <script type="module" src="assets/js/config.js"></script>
+  <script type="module" src="assets/js/supabase-client.js"></script>
+  <script type="module" src="assets/js/auth-supabase.js"></script>
+  <script type="module" src="assets/js/auth-init.js"></script>
+  <script type="module" src="assets/js/supabase-data.js"></script>
+  <script type="module" src="assets/js/helpers.js"></script>
+  <script type="module" src="assets/js/main.js"></script>
+  <script type="module" src="assets/js/contabilidad.js"></script>
+</body>
+</html>

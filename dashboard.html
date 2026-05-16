@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JHIRO ERP - Dashboard</title>
+  <link rel="stylesheet" href="assets/css/styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      <div class="sidebar-logo">JHIRO</div>
+      <ul class="sidebar-menu">
+        <li><a href="dashboard.html" class="active" data-page="dashboard">📊 Dashboard</a></li>
+        <li><a href="inventario.html" data-page="inventario">📦 Inventario</a></li>
+        <li><a href="compras.html" data-page="compras">📦 Compras</a></li>
+        <li><a href="ventas.html" data-page="ventas">🛒 Ventas</a></li>
+        <li><a href="contabilidad.html" data-page="contabilidad">📑 Contabilidad</a></li>
+        <li><a href="costeo-importaciones.html" class="active" data-page="costeo">📈 Costeo Import.</a></li>
+      </ul>
+      <div class="sidebar-user">
+        <strong id="userDisplay">Admin</strong>
+        <button class="btn-logout" onclick="logout()">Cerrar Sesión</button>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <div class="main-content">
+      <!-- HEADER -->
+      <header class="header">
+        <div class="header-left">
+          <button class="menu-toggle" id="menuToggle">☰</button>
+          <h2 class="header-title">Dashboard</h2>
+        </div>
+        <div class="header-controls">
+          <button class="theme-toggle" id="themeToggle">🌙 Oscuro</button>
+        </div>
+      </header>
+
+      <!-- CONTENT -->
+      <main class="content">
+        <h1 class="page-title">Dashboard</h1>
+
+        <!-- KPIs -->
+        <div class="grid grid-4">
+          <div class="kpi-card">
+            <div class="kpi-label">Órdenes Compra</div>
+            <div class="kpi-value" id="kpi-oc">0</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Cotizaciones Venta</div>
+            <div class="kpi-value" id="kpi-cot">0</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Asientos Contables</div>
+            <div class="kpi-value" id="kpi-asientos">0</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Saldo Caja Soles</div>
+            <div class="kpi-value" id="kpi-caja">S/. 0</div>
+          </div>
+        </div>
+
+        <!-- Resumen Financiero -->
+        <div class="card" style="margin-top: 30px;">
+          <div class="card-header">
+            <h3 class="card-title">Resumen Financiero</h3>
+          </div>
+          <div class="grid grid-3">
+            <div style="padding: 20px; background-color: var(--bg-secondary); border-radius: 8px;">
+              <p style="color: var(--text-secondary); margin-bottom: 10px;">Total Activos</p>
+              <p id="total-activos" style="font-size: 24px; font-weight: bold; color: var(--color-success);">S/. 0</p>
+            </div>
+            <div style="padding: 20px; background-color: var(--bg-secondary); border-radius: 8px;">
+              <p style="color: var(--text-secondary); margin-bottom: 10px;">Total Pasivos</p>
+              <p id="total-pasivos" style="font-size: 24px; font-weight: bold; color: var(--color-danger);">S/. 0</p>
+            </div>
+            <div style="padding: 20px; background-color: var(--bg-secondary); border-radius: 8px;">
+              <p style="color: var(--text-secondary); margin-bottom: 10px;">Total Patrimonio</p>
+              <p id="total-patrimonio" style="font-size: 24px; font-weight: bold; color: var(--color-primary);">S/. 0</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Últimas Operaciones -->
+        <div class="grid grid-2" style="margin-top: 30px;">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Órdenes Compra Recientes</h3>
+            </div>
+            <div id="ultimas-oc" class="table-container">
+              <p style="text-align: center; color: var(--text-secondary);">Sin registros</p>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Cotizaciones Recientes</h3>
+            </div>
+            <div id="ultimas-cot" class="table-container">
+              <p style="text-align: center; color: var(--text-secondary);">Sin registros</p>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+  <script type="module" src="assets/js/config.js"></script>
+  <script type="module" src="assets/js/supabase-client.js"></script>
+  <script type="module" src="assets/js/auth-supabase.js"></script>
+  <script type="module" src="assets/js/auth-init.js"></script>
+  <script type="module" src="assets/js/supabase-data.js"></script>
+  <script type="module" src="assets/js/helpers.js"></script>
+  <script type="module" src="assets/js/main.js"></script>
+  <script type="module" src="assets/js/dashboard-init.js"></script>
+</body>
+</html>
