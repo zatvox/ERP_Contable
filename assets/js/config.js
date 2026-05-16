@@ -18,3 +18,4 @@ if (!SUPABASE_CONFIG.URL || !SUPABASE_CONFIG.ANON_KEY) {
 }
 
 console.log('✅ Configuración de Supabase cargada correctamente')
+  

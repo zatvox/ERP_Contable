@@ -285,11 +285,6 @@ export async function getCustomerById(id) {
   return contacts.find(c => c.id === id && c.tipo_contacto === 'Cliente')
 }
 
-export async function getContactById(id) {
-  if (!id) return null
-  return await getById('contacts', id)
-}
-
 // ============================================================================
 // CONTABILIDAD HELPERS
 // ============================================================================
