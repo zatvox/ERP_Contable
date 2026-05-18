@@ -3,17 +3,7 @@
 // ============================================================================
 
 import { getCurrentUser } from './auth-supabase.js'
-import {
-  getPurchaseOrders,
-  getPurchaseOrderById,
-  addPurchaseOrder,
-  updatePurchaseOrder,
-  getLoteById,
-  getProductById,
-  getSuppliers,
-  addJournalEntry,
-  getLotes
-} from './supabase-data.js'
+import {  getPurchaseOrders, getPurchaseOrderById, addPurchaseOrder, updatePurchaseOrder, getLoteById, getProductById, getSuppliers, addJournalEntry, getLotes} from './supabase-data.js'
 import { showToast } from './helpers.js'
 
 // ============================================================================
@@ -137,17 +127,17 @@ window.verOC = async function (id) {
     const prod = await getProductById(lote?.product_id)
 
     const mensaje = `
-OC #${oc.numero || oc.id}
-Proveedor: ${prov?.name || '-'}
-Producto: ${prod?.name || '-'}
-Lote: ${lote?.numero_lote || '-'}
-Cantidad: ${oc.cantidad || 0}
-Precio Unit: ${oc.currency || 'PEN'} ${(oc.precio_unitario || 0).toFixed(2)}
-Subtotal: ${oc.currency || 'PEN'} ${(oc.subtotal || 0).toFixed(2)}
-IGV: ${oc.currency || 'PEN'} ${(oc.igv || 0).toFixed(2)}
-Total: ${oc.currency || 'PEN'} ${(oc.total || 0).toFixed(2)}
-Usuario: ${oc.user || '-'}
-Estado: ${oc.status || '-'}
+    OC #${oc.numero || oc.id}
+    Proveedor: ${prov?.name || '-'}
+    Producto: ${prod?.name || '-'}
+    Lote: ${lote?.numero_lote || '-'}
+    Cantidad: ${oc.cantidad || 0}
+    Precio Unit: ${oc.currency || 'PEN'} ${(oc.precio_unitario || 0).toFixed(2)}
+    Subtotal: ${oc.currency || 'PEN'} ${(oc.subtotal || 0).toFixed(2)}
+    IGV: ${oc.currency || 'PEN'} ${(oc.igv || 0).toFixed(2)}
+    Total: ${oc.currency || 'PEN'} ${(oc.total || 0).toFixed(2)}
+    Usuario: ${oc.user || '-'}
+    Estado: ${oc.status || '-'}
     `
 
     alert(mensaje)
@@ -375,4 +365,20 @@ async function cargarProductosSelect() {
   } catch (error) {
     console.error('Error en cargarProductosSelect:', error)
   }
+}
+
+// ============================================================================
+// ABRIR FORMULARIOS (Modal Helpers)
+// ============================================================================
+
+window.abrirFormularioProveedor = function() {
+  window.openModal('modal-nuevo-proveedor')
+}
+
+window.abrirFormularioProducto = function() {
+  window.openModal('modal-nuevo-producto')
+}
+
+window.abrirFormularioLote = function() {
+  window.openModal('modal-nuevo-lote')
 }

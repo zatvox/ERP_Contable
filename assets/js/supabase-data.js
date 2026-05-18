@@ -285,7 +285,7 @@ export async function getCustomerById(id) {
   return contacts.find(c => c.id === id && c.tipo_contacto === 'Cliente')
 }
 
-// ============================================================================
+// ======================gi======================================================
 // CONTABILIDAD HELPERS
 // ============================================================================
 
@@ -314,8 +314,8 @@ export async function calcularBalancesCuentas() {
     return []
   }
 }
-
+/*
 export async function getProductById(id) {
   if (!id) return null
   return await getById('products', id)
-}
+}*/

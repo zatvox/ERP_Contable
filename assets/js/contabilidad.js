@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { getCurrentUser } from './auth-supabase.js'
-import { getJournalEntries, getAccounts } from './supabase-data.js'
+import { getJournalEntries, getAccounts, calcularBalancesCuentas } from './supabase-data.js'
 import { showToast } from './helpers.js'
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -54,7 +54,7 @@ function initTabsContabilidad() {
 
 async function renderPlanCuentas() {
   try {
-    const cuentas = await window.calcularBalancesCuentas()
+    const cuentas = await calcularBalancesCuentas()
     const container = document.getElementById('content-cuentas')
 
     if (!container) return
@@ -166,7 +166,7 @@ async function renderLibroDiario() {
 
 async function renderBalanceComprobacion() {
   try {
-    const cuentas = await window.calcularBalancesCuentas()
+    const cuentas = await calcularBalancesCuentas()
     const container = document.getElementById('content-balance')
 
     if (!container) return
@@ -234,7 +234,7 @@ async function renderBalanceComprobacion() {
 
 async function renderEstadoResultados() {
   try {
-    const cuentas = await window.calcularBalancesCuentas()
+    const cuentas = await calcularBalancesCuentas()
     const container = document.getElementById('content-resultado')
 
     if (!container) return
@@ -317,7 +317,7 @@ async function renderEstadoResultados() {
 
 async function renderBalanceGeneral() {
   try {
-    const cuentas = await window.calcularBalancesCuentas()
+    const cuentas = await calcularBalancesCuentas()
     const container = document.getElementById('content-general')
 
     if (!container) return
@@ -428,7 +428,7 @@ async function renderBalanceGeneral() {
 // ============================================================================
 // 3. BALANCE DE COMPROBACIÓN
 // ============================================================================
-
+/*
 function renderBalanceComprobacion() {
   const cuentas = calcularBalancesCuentas();
   
@@ -546,4 +546,4 @@ function renderEstadoResultados() {
   `;
 
   document.getElementById('content-resultado').innerHTML = html;
-}
+}*/

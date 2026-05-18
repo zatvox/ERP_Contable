@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { getCurrentUser } from './auth-supabase.js'
-import { getSalesQuotes, getSalesQuoteById, addSalesQuote, updateSalesQuote, getCustomers, addCustomer, getLotes } from './supabase-data.js'
+import { getSalesQuotes, getSalesQuoteById, addSalesQuote, updateSalesQuote, getCustomers, addContact, getLotes } from './supabase-data.js'
 import { showToast } from './helpers.js'
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -115,18 +115,18 @@ window.verCotizacion = async function (id) {
     }
 
     const cli = await window.getCustomerById(cot.customer_id)
-    const lote = await window.getLotes().then(lotes => lotes.find(l => l.id === cot.lote_id))
+    const lote = await getLotes().then(lotes => lotes.find(l => l.id === cot.lote_id))
 
     const mensaje = `
-COT #${cot.numero || cot.id}
-Cliente: ${cli?.name || '-'}
-Cantidad: ${cot.cantidad || 0}
-Precio Unit: ${cot.currency || 'PEN'} ${(cot.precio_unitario || 0).toFixed(2)}
-Subtotal: ${cot.currency || 'PEN'} ${(cot.subtotal || 0).toFixed(2)}
-IGV: ${cot.currency || 'PEN'} ${(cot.igv || 0).toFixed(2)}
-Total: ${cot.currency || 'PEN'} ${(cot.total || 0).toFixed(2)}
-Usuario: ${cot.user || '-'}
-Estado: ${cot.status || '-'}
+    COT #${cot.numero || cot.id}
+    Cliente: ${cli?.name || '-'}
+    Cantidad: ${cot.cantidad || 0}
+    Precio Unit: ${cot.currency || 'PEN'} ${(cot.precio_unitario || 0).toFixed(2)}
+    Subtotal: ${cot.currency || 'PEN'} ${(cot.subtotal || 0).toFixed(2)}
+    IGV: ${cot.currency || 'PEN'} ${(cot.igv || 0).toFixed(2)}
+    Total: ${cot.currency || 'PEN'} ${(cot.total || 0).toFixed(2)}
+    Usuario: ${cot.user || '-'}
+    Estado: ${cot.status || '-'}
     `
 
     alert(mensaje)
@@ -181,7 +181,7 @@ window.guardarCotizacion = async function () {
       return
     }
 
-    const lote = await window.getLotes().then(lotes => lotes.find(l => l.id === loteId))
+    const lote = await getLotes().then(lotes => lotes.find(l => l.id === loteId))
     if (!lote) {
       showToast('Lote no encontrado', 'warning')
       return
@@ -328,7 +328,7 @@ async function cargarClientesSelect() {
 
 async function cargarLotesSelectVenta() {
   try {
-    const lotes = await window.getLotes()
+    const lotes = await getLotes()
     const select = document.getElementById('cotLote')
 
     if (!select) return
@@ -342,6 +342,7 @@ async function cargarLotesSelectVenta() {
   }
 }
 
+/*
 function verCotizacion(id) {
   const cot = getSalesQuoteById(id);
   const cli = getCustomerById(cot.customerId);
@@ -583,4 +584,4 @@ function cargarLotesSelectVenta() {
     const prod = getProductById(l.productId);
     select.innerHTML += `<option value="${l.id}">${prod.name} - ${l.numeroLote} (Stock: ${l.stock})</option>`;
   });
-}
+}*/

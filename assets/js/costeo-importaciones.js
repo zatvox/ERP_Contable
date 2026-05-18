@@ -482,3 +482,11 @@ async function cargarProductosSelectCosteo() {
     console.error('Error en cargarProductosSelectCosteo:', error)
   }
 }
+
+// ============================================================================
+// ABRIR FORMULARIOS (Modal Helpers)
+// ============================================================================
+
+window.abrirFormularioProveedorCosteo = function() {
+  window.openModal('modal-nuevo-proveedor')
+}

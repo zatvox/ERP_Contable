@@ -86,7 +86,7 @@ async function renderProductos() {
     `
 
     for (const prod of productos) {
-      const lotes = await window.getLotes()
+      const lotes = await getLotes()
       const lotesProducto = lotes.filter(l => l.product_id === prod.id)
       const stockTotal = lotesProducto.reduce((sum, l) => sum + l.cantidad, 0)
       const valorTotal = lotesProducto.reduce((sum, l) => sum + (l.cantidad * l.costo_unitario), 0)
@@ -219,7 +219,7 @@ window.eliminarProducto = async function (prodId) {
 
 async function renderLotes() {
   try {
-    const lotes = await window.getLotes()
+    const lotes = await getLotes()
     const container = document.getElementById('tabla-lotes')
 
     if (!container) return
@@ -395,7 +395,7 @@ window.eliminarLote = async function (loteId) {
 async function renderResumenStock() {
   try {
     const productos = await getProducts()
-    const lotes = await window.getLotes()
+    const lotes = await getLotes()
     const container = document.getElementById('tabla-resumen')
 
     if (!container) return
@@ -481,7 +481,7 @@ async function cargarProductosSelect() {
   }
 }
 
-function abrirModalLote() {
+window.abrirModalLote = function() {
   cargarProductosSelect()
   window.openModal('modal-nuevo-lote')
 }
