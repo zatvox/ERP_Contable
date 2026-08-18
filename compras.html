@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+  <link rel="icon" href="data:,">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>JHIRO ERP - Compras</title>
@@ -15,9 +16,15 @@
         <li><a href="dashboard.html" data-page="dashboard">📊 Dashboard</a></li>
         <li><a href="inventario.html" data-page="inventario">📦 Inventario</a></li>
         <li><a href="compras.html" class="active" data-page="compras">🛒 Compras</a></li>
-        <li><a href="ventas.html" data-page="ventas">💰 Ventas</a></li>
+        <li><a href="ventas.html" data-page="ventas">📈 Ventas</a></li>
+        <li><a href="cobranzas.html" data-page="cobranzas">💰 Cuentas x Cobrar/Pagar</a></li>
+        <li><a href="bancos.html" data-page="bancos">🏦 Bancos</a></li>
         <li><a href="contabilidad.html" data-page="contabilidad">📑 Contabilidad</a></li>
-        <li><a href="costeo-importaciones.html" class="active" data-page="costeo">📈 Costeo Import.</a></li>
+        <li data-solo-admin><a href="usuarios.html" data-page="usuarios">👤 Usuarios</a></li>
+        <li><a href="perfil.html" data-page="perfil">🙍 Perfil</a></li>
+        <!-- En standby hasta la v3: módulo de importaciones.
+        <li><a href="costeo-importaciones.html" data-page="costeo">🚢 Costeo Importaciones</a></li>
+        -->
       </ul>
       <div class="sidebar-user">
         <strong id="userDisplay">Admin</strong>
@@ -33,6 +40,23 @@
           <button class="menu-toggle" id="menuToggle">☰</button>
           <h2 class="header-title">Compras</h2>
         </div>
+
+        <nav class="module-nav" id="comprasTabs">
+          <div class="module-nav-group">
+            <button type="button" class="module-nav-group-toggle">Documentos</button>
+            <div class="module-nav-dropdown">
+              <button class="tab-btn active" data-tab="compras">Compras</button>
+              <button class="tab-btn" data-tab="guias">Guía de Remisión</button>
+              <!-- Órdenes de Compra en standby: quitar este comentario para reactivar el tab.
+              <button class="tab-btn" data-tab="ordenes">Órdenes de Compra</button>
+              -->
+            </div>
+          </div>
+          <button type="button" class="tab-btn" data-tab="proveedores">Proveedores</button>
+          <button type="button" class="tab-btn" data-tab="reportes">📊 Reportes</button>
+          <button type="button" class="tab-btn module-nav-config" data-tab="configuracion">⚙️ Configuración</button>
+        </nav>
+
         <div class="header-controls">
           <button class="theme-toggle" id="themeToggle">🌙 Oscuro</button>
         </div>
@@ -42,20 +66,60 @@
       <main class="content">
         <h1 class="page-title">Módulo Compras</h1>
 
-        <!-- TABS -->
-        <div class="tab-buttons" id="comprasTabs">
-          <button class="tab-btn active" data-tab="ordenes">Órdenes de Compra</button>
-          <button class="tab-btn" data-tab="proveedores">Proveedores</button>
-        </div>
-
-        <!-- TAB ÓRDENES -->
-        <div id="tab-ordenes" class="tab-content active">
+        <!-- Órdenes de Compra en standby: quitar este comentario para reactivar.
+        <div id="tab-ordenes" class="tab-content">
           <div class="card">
             <div class="card-header">
               <h3 class="card-title">Órdenes de Compra</h3>
-              <button class="btn btn-primary btn-small" onclick="openModal('modal-nueva-oc')">+ Nueva OC</button>
+              <button class="btn btn-primary btn-small" onclick="openModal('modal-nueva-oc')">+ Nueva Orden de Compra</button>
             </div>
             <div id="tabla-oc" class="table-container">
+              <p style="text-align: center; color: var(--text-secondary);">Cargando...</p>
+            </div>
+          </div>
+        </div>
+        -->
+
+        <!-- TAB COMPRAS -->
+        <div id="tab-compras" class="tab-content active">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Compras</h3>
+              <div style="display:flex; gap: 10px;">
+                <button class="btn btn-secondary btn-small" onclick="window.abrirModalImportarCompras()">📥 Importar</button>
+                <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevaCompraMercaderia()">+ Nueva Compra (Mercadería)</button>
+                <button class="btn btn-secondary btn-small" onclick="window.abrirModalCompraServicio()">+ Compra Servicio/Gasto</button>
+              </div>
+            </div>
+            <div style="padding:12px 16px; border-bottom:1px solid var(--border-color, #e0e0e0); display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+              <input type="text" id="buscarCompra" placeholder="Buscar por proveedor, referencia, comprobante o descripción..." style="flex:1; min-width:260px; max-width:420px;" oninput="window.filtrarCompras()">
+              <select id="filtroAnuladasCompras" onchange="window.filtrarCompras()" style="max-width:210px;" title="Los comprobantes anulados se conservan pero no suman en reportes ni en el crédito fiscal">
+                <option value="activos" selected>Solo vigentes</option>
+                <option value="todos">Vigentes y anulados</option>
+                <option value="anulados">Solo anulados</option>
+              </select>
+            </div>
+            <div id="tabla-compras" class="table-container">
+              <p style="text-align: center; color: var(--text-secondary);">Cargando...</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB GUÍA DE REMISIÓN -->
+        <div id="tab-guias" class="tab-content">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Guías de Remisión</h3>
+              <div style="display:flex; gap:10px;">
+                <button id="btnEliminarGuiasSel" class="btn btn-danger btn-small" style="display:none;" onclick="window.eliminarGuiasSeleccionadas()">🗑 Eliminar seleccionadas (0)</button>
+                <button class="btn btn-secondary btn-small" onclick="window.abrirModalImportarGuias()">📥 Importar</button>
+                <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevaGuia()">+ Nueva Guía</button>
+              </div>
+            </div>
+            <div style="padding:12px 16px; border-bottom:1px solid var(--border-color, #e0e0e0);">
+              <input type="text" id="buscarGuia" placeholder="Buscar por N° guía, proveedor, referencia de compra u observaciones..." style="width:100%; max-width:420px;" oninput="window.filtrarGuias()">
+            </div>
+            <div id="tabla-guias" class="table-container">
               <p style="text-align: center; color: var(--text-secondary);">Cargando...</p>
             </div>
           </div>
@@ -66,11 +130,38 @@
           <div class="card">
             <div class="card-header">
               <h3 class="card-title">Proveedores</h3>
-              <button class="btn btn-primary btn-small" onclick="openModal('modal-nuevo-proveedor')">+ Nuevo</button>
+              <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevoProveedor()">+ Nuevo</button>
+            </div>
+            <div style="padding:12px 16px; border-bottom:1px solid var(--border-color, #e0e0e0);">
+              <input type="text" id="buscarProveedor" placeholder="Buscar por nombre o N° documento..." style="width:100%; max-width:360px;" oninput="window.filtrarProveedores()">
             </div>
             <div id="tabla-proveedores" class="table-container">
               <p style="text-align: center; color: var(--text-secondary);">Cargando...</p>
             </div>
+          </div>
+        </div>
+
+        <!-- TAB REPORTES -->
+        <div id="tab-reportes" class="tab-content">
+          <div class="subtab-bar" id="com-subtabs-reportes">
+            <button class="subtab active" data-sub="repcm-evolucion">Evolución de compras</button>
+            <button class="subtab" data-sub="repcm-proveedores">Por proveedor</button>
+            <button class="subtab" data-sub="repcm-productos">Por producto</button>
+            <button class="subtab" data-sub="repcm-pagos">Estado de pago</button>
+          </div>
+          <div id="repcm-evolucion"   class="subtab-panel active"></div>
+          <div id="repcm-proveedores" class="subtab-panel"></div>
+          <div id="repcm-productos"   class="subtab-panel"></div>
+          <div id="repcm-pagos"       class="subtab-panel"></div>
+        </div>
+
+        <!-- TAB CONFIGURACIÓN -->
+        <div id="tab-configuracion" class="tab-content">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Configuración — Compras</h3>
+            </div>
+            <p style="text-align:center; color:var(--text-secondary); padding:30px;">Cargando...</p>
           </div>
         </div>
       </main>
@@ -79,73 +170,559 @@
 
   <!-- MODAL NUEVA OC -->
   <div id="modal-nueva-oc" class="modal">
-    <div class="modal-content">
+    <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
       <div class="modal-header">
         <h3 class="modal-title">Nueva Orden de Compra</h3>
         <button class="modal-close" onclick="closeModal('modal-nueva-oc')">✕</button>
       </div>
       <form id="formNewOC">
-        <div class="form-group">
-          <div style="display: flex; gap: 10px; align-items: flex-end;">
-            <div style="flex: 1;">
-              <label>Proveedor *</label>
-              <select id="ocProveedor" required>
-                <option value="">-- Selecciona --</option>
+        <!-- SECCIÓN 1: INFORMACIÓN BÁSICA -->
+        <div style="padding: 20px; border-bottom: 1px solid var(--border-color);">
+          <h4 style="margin-bottom: 15px; color: var(--text-primary);">Información Básica</h4>
+          
+          <div class="form-group">
+            <div style="display: flex; gap: 10px; align-items: flex-end;">
+              <div style="flex: 1;">
+                <label>Proveedor *</label>
+                <select id="ocProveedor" required>
+                  <option value="">-- Selecciona --</option>
+                </select>
+              </div>
+              <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioProveedor()" style="margin-bottom: 0;">+ Nuevo</button>
+            </div>
+          </div>
+
+          <div class="grid grid-2">
+            <div class="form-group">
+              <label>Moneda</label>
+              <select id="ocMoneda">
+                <option value="USD" selected>USD</option>
+                <option value="PEN">PEN</option>
               </select>
             </div>
-            <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioProveedor()" style="margin-bottom: 0;">+ Nuevo</button>
+            <div class="form-group">
+              <label>Fecha *</label>
+              <input type="date" id="ocFecha" required>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Tipo de Pago</label>
+            <select id="ocTipoPago">
+              <option value="credito" selected>Crédito</option>
+              <option value="contado">Contado</option>
+            </select>
           </div>
         </div>
 
-        <div class="form-group">
-          <label>Moneda</label>
-          <select id="ocMoneda">
-            <option value="USD" selected>USD</option>
-            <option value="PEN">PEN</option>
-          </select>
-        </div>
+        <!-- SECCIÓN 2: DETALLES DE PRODUCTOS -->
+        <div style="padding: 20px;">
+          <h4 style="margin-bottom: 15px; color: var(--text-primary); display: flex; justify-content: space-between; align-items: center;">
+            <span>Detalles de Productos</span>
+            <button type="button" class="btn btn-primary btn-small" onclick="abrirModalDetalleDesdeCrearOC()">+ Agregar Producto</button>
+          </h4>
 
-        <div class="form-group">
-          <div style="display: flex; gap: 10px; align-items: flex-end;">
-            <div style="flex: 1;">
-              <label>Producto *</label>
-              <select id="ocProducto" required onchange="cargarLotesPorProducto()">
-                <option value="">-- Selecciona --</option>
-              </select>
-            </div>
-            <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioProducto()" style="margin-bottom: 0;">+ Nuevo</button>
+          <div id="tabla-detalle-nueva-oc" style="margin-top: 15px;">
+            <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Sin productos agregados</p>
           </div>
-        </div>
 
-        <div class="form-group">
-          <div style="display: flex; gap: 10px; align-items: flex-end;">
-            <div style="flex: 1;">
-              <label>Lote *</label>
-              <select id="ocLote" required>
-                <option value="">-- Selecciona --</option>
-              </select>
+          <!-- RESUMEN DE TOTALES -->
+          <div style="margin-top: 20px; padding: 15px; background-color: var(--bg-secondary); border-radius: var(--radius-md); display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
+            <div style="text-align: center;">
+              <div style="font-size: 12px; color: var(--text-secondary);">Cantidad Total</div>
+              <div style="font-size: 18px; font-weight: 600; color: var(--text-primary);" id="totalCantidadOC">0</div>
             </div>
-            <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioLote()" style="margin-bottom: 0;">+ Nuevo</button>
+            <div style="text-align: center;">
+              <div style="font-size: 12px; color: var(--text-secondary);">Subtotal</div>
+              <div style="font-size: 18px; font-weight: 600; color: var(--text-primary);" id="totalSubtotalOC">0.00</div>
+            </div>
+            <div style="text-align: center;">
+              <div style="font-size: 12px; color: var(--text-secondary);">Total</div>
+              <div style="font-size: 18px; font-weight: 600; color: var(--color-success);" id="totalMontOC">0.00</div>
+            </div>
           </div>
-        </div>
-
-        <div class="form-group">
-          <label>Cantidad *</label>
-          <input type="number" id="ocCantidad" placeholder="0" min="1" required>
-        </div>
-
-        <div class="form-group">
-          <label>IGV (%)</label>
-          <select id="ocIGV">
-            <option value="18" selected>18%</option>
-            <option value="10">10%</option>
-            <option value="0">Exonerado</option>
-          </select>
         </div>
       </form>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeModal('modal-nueva-oc')">Cancelar</button>
-        <button class="btn btn-primary" onclick="guardarOC()">Guardar</button>
+        <button class="btn btn-primary" onclick="guardarOC()">Guardar OC</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL NUEVO DETALLE OC -->
+  <div id="modal-nuevo-detalle-oc" class="modal">
+    <div class="modal-content" style="max-width: 800px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="tituloModalDetalleOC">Agregar Producto a OC</h3>
+        <button class="modal-close" onclick="cerrarModalDetalleOC()">✕</button>
+      </div>
+
+      <form id="formNewDetalleOC" style="padding: 20px;">
+        <div style="display: flex; gap: 20px; align-items: flex-end;">
+          <div class="form-group" style="flex: 1;">
+            <label>Producto *</label>
+            <div style="display: flex; gap: 10px; align-items: flex-end;">
+              <select id="newDetalleOCProducto" style="flex: 1;" required>
+                <option value="">-- Selecciona un producto --</option>
+              </select>
+              <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioProducto()" style="margin-bottom: 0;">+ Nuevo</button>
+            </div>
+          </div>
+          <div class="form-group" style="flex: 0 0 auto;">
+            <label>IGV (%)</label>
+            <select id="newDetalleOCIGV" onchange="calcularDetalleOC()">
+              <option value="18" selected>18%</option>
+              <option value="10">10%</option>
+              <option value="0">Importacion</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-4">
+          <div class="form-group">
+            <label>Cantidad *</label>
+            <input type="number" id="newDetalleOCCantidad" placeholder="0" step="1" min="1" required onchange="calcularDetalleOC()">
+          </div>
+          <div class="form-group">
+            <label>Unidad de Medida *</label>
+            <select id="newDetalleOCUnidad" placeholder="Ej: kg, m, unidad" required>
+              <option value="KG" selected>KG</option>
+              <option value="M">M</option>
+              <option value="UNIDAD">Unidad</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Precio Unitario *</label>
+            <input type="number" id="newDetalleOCPrecio" placeholder="0.00" step="0.01" min="0" required onchange="calcularDetalleOC()">
+          </div>
+          <div class="form-group">
+            <label>Descuento %</label>
+            <input type="number" id="newDetalleOCDescuento" placeholder="0" step="0.01" min="0" max="100" value="0" onchange="calcularDetalleOC()">
+          </div>
+        </div>
+
+        <div class="grid grid-3">
+          <div class="form-group">
+            <label>Subtotal</label>
+            <input type="number" id="newDetalleOCSubtotal" readonly disabled placeholder="0.00">
+          </div>
+          <div class="form-group">
+            <label>IGV</label>
+            <input type="number" id="newDetalleOCIGVMonto" readonly disabled placeholder="0.00">
+          </div>
+          <div class="form-group">
+            <label>Total</label>
+            <input type="number" id="newDetalleOCTotal" readonly disabled placeholder="0.00">
+          </div>
+        </div>
+      </form>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="cerrarModalDetalleOC()">Cancelar</button>
+        <button class="btn btn-primary" onclick="crearDetalleOC()">Agregar Producto</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL NUEVA COMPRA (MERCADERÍA) — registro directo, sin Orden de Compra -->
+  <div id="modal-nueva-compra-mercaderia" class="modal">
+    <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+      <div class="modal-header">
+        <h3 class="modal-title">Nueva Compra (Mercadería)</h3>
+        <button class="modal-close" onclick="closeModal('modal-nueva-compra-mercaderia')">✕</button>
+      </div>
+      <form id="formNewCompraMercaderia">
+        <div style="padding: 20px; border-bottom: 1px solid var(--border-color);">
+          <div class="form-group">
+            <div style="display: flex; gap: 10px; align-items: flex-end;">
+              <div style="flex: 1;">
+                <label>Proveedor *</label>
+                <select id="cmProveedor" required onchange="window.onCambiarProveedorCompra()">
+                  <option value="">-- Selecciona --</option>
+                </select>
+              </div>
+              <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioProveedor()" style="margin-bottom: 0;">+ Nuevo</button>
+            </div>
+          </div>
+
+          <div class="grid grid-3">
+            <div class="form-group">
+              <label>Moneda</label>
+              <select id="cmMoneda" onchange="window.onCambiarMonedaCompra()">
+                <option value="USD" selected>USD</option>
+                <option value="PEN">PEN</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Fecha *</label>
+              <input type="date" id="cmFecha" required onchange="window.onCambiarFechaCompra()">
+            </div>
+            <div class="form-group">
+              <label>Fecha Vencimiento</label>
+              <input type="date" id="cmFechaVencimiento" readonly title="La calcula el cronograma de pago: es el vencimiento de la última cuota">
+              <small style="color:var(--text-secondary); font-size:0.72rem;">La define el cronograma de abajo.</small>
+            </div>
+          </div>
+          <div class="grid grid-2">
+            <div class="form-group">
+              <label>N° Comprobante (Factura del Proveedor)</label>
+              <input type="text" id="cmNumeroComprobante" placeholder="Ej: F001-00012345">
+            </div>
+            <div class="form-group" id="cmTipoCambioGroup">
+              <label>
+                Tipo de Cambio (USD → PEN)
+                <span style="font-size:0.75rem; font-weight:600; color:var(--color-info);">COMPRA SBS</span>
+                <button type="button" id="btnAutoTCMercaderia" onclick="window.autoFetchTCMercaderia()" title="Obtener el TC COMPRA del día (SBS)"
+                        style="margin-left:4px; background:none; border:1px solid var(--border-color); border-radius:4px; padding:1px 6px; font-size:0.72rem; cursor:pointer; color:var(--color-info);">↻ Auto</button>
+              </label>
+              <input type="number" step="0.001" id="cmTipoCambio" placeholder="Ej: 3.750" value="1">
+              <small id="cmTCAviso" style="color:var(--text-secondary); font-size:0.72rem;">Art. 61° LIR: las compras en USD se registran al T.C. COMPRA del día.</small>
+            </div>
+          </div>
+
+          <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border-color);">
+            <strong style="display:block; margin-bottom:6px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">
+              Condición y cronograma de pago
+            </strong>
+            <div id="compra-cronograma"></div>
+          </div>
+        </div>
+
+        <div style="padding: 20px;">
+          <h4 style="margin-bottom: 15px; color: var(--text-primary); display: flex; justify-content: space-between; align-items: center;">
+            <span>Detalles de Productos</span>
+            <button type="button" class="btn btn-primary btn-small" onclick="window.abrirModalDetalleCompraMercaderia()">+ Agregar Producto</button>
+          </h4>
+
+          <div id="tabla-detalle-nueva-compra" style="margin-top: 15px;">
+            <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Sin productos agregados</p>
+          </div>
+
+          <div style="margin-top: 20px; padding: 15px; background-color: var(--bg-secondary); border-radius: var(--radius-md); display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px;">
+            <div style="text-align: center;">
+              <div style="font-size: 12px; color: var(--text-secondary);">Cantidad Total</div>
+              <div style="font-size: 18px; font-weight: 600; color: var(--text-primary);" id="totalCantidadCompra">0</div>
+            </div>
+            <div style="text-align: center;">
+              <div style="font-size: 12px; color: var(--text-secondary);">N° Total Unidades</div>
+              <div style="font-size: 18px; font-weight: 600; color: var(--text-primary);" id="totalUnidadesCompra">0</div>
+            </div>
+            <div style="text-align: center;">
+              <div style="font-size: 12px; color: var(--text-secondary);">Subtotal</div>
+              <div style="font-size: 18px; font-weight: 600; color: var(--text-primary);" id="totalSubtotalCompra">0.00</div>
+            </div>
+            <div style="text-align: center;">
+              <div style="font-size: 12px; color: var(--text-secondary);">Total</div>
+              <div style="font-size: 18px; font-weight: 600; color: var(--color-success);" id="totalMontoCompra">0.00</div>
+            </div>
+          </div>
+        </div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-nueva-compra-mercaderia')">Cancelar</button>
+        <button class="btn btn-primary" id="btnGuardarCompraMercaderia" onclick="window.guardarCompraMercaderia()">Guardar Compra</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Importar Compras Masivas (desde Excel/CSV) -->
+  <div id="modal-importar-compras" class="modal">
+    <div class="modal-content" style="max-width: 700px; max-height: 90vh; overflow-y: auto;">
+      <div class="modal-header">
+        <h3 class="modal-title">Importar Compras (masivo)</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-importar-compras')">✕</button>
+      </div>
+      <div style="padding: 20px;">
+        <p style="color: var(--text-secondary); margin-bottom: 12px;">
+          Sube un archivo Excel (.xlsx) o CSV con las columnas:
+          <code>proveedor_ruc, numero_comprobante, fecha_emision, moneda, tipo_cambio, sku, cantidad, precio_unitario, igv_porcentaje, termino_pago</code>.
+          Varias filas con el mismo <code>numero_comprobante</code> forman una sola compra con varias líneas.
+          Solo se llenan Compra + Detalle de Compra — <strong>no</strong> toca stock ni kardex: la Guía de Remisión de cada compra
+          importada queda pendiente, igual que si la hubieras registrado a mano.
+          Se crea también la Cuenta por Pagar (con su cronograma de cuotas) para cada comprobante.
+          <code>termino_pago</code> es opcional y texto libre — tal cual venga de tu ERP anterior (ej. <code>CONTADO</code>, <code>45 DIAS</code>, <code>60-75-90 DIAS</code>);
+          si viene vacío o no se reconoce, se usa el término habitual del proveedor o Contado.
+        </p>
+        <p style="margin-bottom: 16px;">
+          <a href="assets/sql/plantilla_importar_compras.xlsx" download style="color: var(--color-info);">📄 Descargar plantilla de ejemplo</a>
+        </p>
+        <div class="form-group">
+          <label>Archivo (.xlsx / .csv) *</label>
+          <input type="file" id="fileImportarCompras" accept=".xlsx,.xls,.csv">
+        </div>
+        <div id="importar-compras-resumen" style="margin-top: 16px;"></div>
+        <div id="importar-compras-log" style="margin-top: 12px; max-height: 260px; overflow-y: auto; font-size: 13px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-importar-compras')">Cerrar</button>
+        <button class="btn btn-primary" id="btnProcesarImportarCompras" onclick="window.procesarImportacionCompras()">Procesar Importación</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Importar Guías de Ingreso masivas (desde Excel/CSV) -->
+  <div id="modal-importar-guias" class="modal">
+    <div class="modal-content" style="max-width: 780px; max-height: 90vh; overflow-y: auto;">
+      <div class="modal-header">
+        <h3 class="modal-title">Importar Guías de Ingreso (masivo)</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-importar-guias')">✕</button>
+      </div>
+      <div style="padding: 20px;">
+        <p style="color: var(--text-secondary); margin-bottom: 12px;">
+          Sube un archivo Excel (.xlsx) o CSV con estas columnas:
+          <code>numero_guia, fecha_guia, compra_numero, sku, cantidad, numero_unidades, numero_lote, marca, codigo_partida, almacen, zona, observaciones</code>.
+        </p>
+        <ul style="color: var(--text-secondary); font-size: 0.85rem; margin: 0 0 12px 18px; line-height: 1.6;">
+          <li>Varias filas con el mismo <code>numero_guia</code> forman una sola guía con varias líneas.</li>
+          <li><code>compra_numero</code> es el N° de comprobante de la compra (o su referencia) a la que pertenece la guía.</li>
+          <li>Esta importación <strong>SÍ mueve stock</strong>: crea/suma lotes, escribe stock por zona y genera kardex — igual que registrar la guía a mano.</li>
+          <li>Si el <code>numero_lote</code> ya existe para ese producto, la cantidad <strong>se suma</strong> a ese lote (no se duplica).</li>
+        </ul>
+        <p style="margin-bottom: 16px;">
+          <a href="#" onclick="event.preventDefault(); window.descargarPlantillaGuiasCompra()" style="color: var(--color-info);">📄 Descargar plantilla de ejemplo</a>
+        </p>
+        <div class="form-group">
+          <label>Archivo (.xlsx / .csv) *</label>
+          <input type="file" id="fileImportarGuias" accept=".xlsx,.xls,.csv">
+        </div>
+        <label style="display:flex; align-items:center; gap:8px; margin-top:10px; font-weight:normal; cursor:pointer;">
+          <input type="checkbox" id="chkSimularGuias" checked>
+          <span>Simular primero (valida todo y muestra el resultado <strong>sin grabar nada</strong>)</span>
+        </label>
+        <div id="importar-guias-resumen" style="margin-top: 16px;"></div>
+        <div id="importar-guias-log" style="margin-top: 12px; max-height: 300px; overflow-y: auto; font-size: 13px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-importar-guias')">Cerrar</button>
+        <button class="btn btn-primary" id="btnProcesarImportarGuias" onclick="window.procesarImportacionGuias()">Procesar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL AGREGAR PRODUCTO A COMPRA (MERCADERÍA) -->
+  <!-- Lote, Marca y Partida ya NO se piden aquí: se piden al registrar la
+       Guía de Remisión (recepción física), que es cuando se agrega el stock. -->
+  <div id="modal-nuevo-detalle-compra" class="modal">
+    <div class="modal-content" style="max-width: 800px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Agregar Producto a la Compra</h3>
+        <button class="modal-close" onclick="window.cerrarModalDetalleCompraMercaderia()">✕</button>
+      </div>
+
+      <form id="formNewDetalleCompra" style="padding: 20px;">
+        <div style="display: flex; gap: 20px; align-items: flex-end;">
+          <div class="form-group" style="flex: 1;">
+            <label>Producto *</label>
+            <div style="display: flex; gap: 10px; align-items: flex-end;">
+              <select id="newDetalleCompraProducto" style="flex: 1;" required>
+                <option value="">-- Selecciona un producto --</option>
+              </select>
+              <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioProducto()" style="margin-bottom: 0;">+ Nuevo</button>
+            </div>
+          </div>
+          <div class="form-group" style="flex: 0 0 auto;">
+            <label>IGV (%)</label>
+            <select id="newDetalleCompraIGV" onchange="window.calcularDetalleCompraMercaderia()">
+              <option value="18" selected>18%</option>
+              <option value="10">10%</option>
+              <option value="0">Importacion</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-4">
+          <div class="form-group">
+            <label>Cantidad *</label>
+            <input type="number" id="newDetalleCompraCantidad" placeholder="0" step="1" min="1" required onchange="window.calcularDetalleCompraMercaderia()">
+          </div>
+          <div class="form-group">
+            <label>Unidad de Medida *</label>
+            <select id="newDetalleCompraUnidad" required>
+              <option value="KG" selected>KG</option>
+              <option value="M">M</option>
+              <option value="UNIDAD">Unidad</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Precio Unitario *</label>
+            <input type="number" id="newDetalleCompraPrecio" placeholder="0.00" step="0.01" min="0" required onchange="window.calcularDetalleCompraMercaderia()">
+          </div>
+          <div class="form-group">
+            <label>Descuento %</label>
+            <input type="number" id="newDetalleCompraDescuento" placeholder="0" step="0.01" min="0" max="100" value="0" onchange="window.calcularDetalleCompraMercaderia()">
+          </div>
+        </div>
+
+        <div class="grid grid-3">
+          <div class="form-group">
+            <label>Subtotal</label>
+            <input type="number" id="newDetalleCompraSubtotal" readonly disabled placeholder="0.00">
+          </div>
+          <div class="form-group">
+            <label>IGV</label>
+            <input type="number" id="newDetalleCompraIGVMonto" readonly disabled placeholder="0.00">
+          </div>
+          <div class="form-group">
+            <label>Total</label>
+            <input type="number" id="newDetalleCompraTotal" readonly disabled placeholder="0.00">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>N° de Unidades (bultos/cajas)</label>
+          <input type="number" id="newDetalleCompraUnidades" placeholder="Ej: 10" step="1" min="0">
+        </div>
+      </form>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.cerrarModalDetalleCompraMercaderia()">Cancelar</button>
+        <button class="btn btn-primary" onclick="window.crearDetalleCompraMercaderia()">Agregar Producto</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL NUEVA GUÍA DE REMISIÓN -->
+  <!-- Aquí es donde recién se agrega el stock a Inventario: se elige la
+       compra ya registrada, se confirma/ajusta la cantidad recibida por
+       línea y se pide N° de Lote (obligatorio) + Marca (obligatorio) +
+       Partida (opcional) por producto. -->
+  <div id="modal-nueva-guia" class="modal">
+    <div class="modal-content" style="max-width: 1200px; max-height: 90vh; overflow-y: auto; overflow-x: hidden;">
+      <div class="modal-header">
+        <h3 class="modal-title">Nueva Guía de Remisión</h3>
+        <button class="modal-close" onclick="window.cerrarModalNuevaGuia()">✕</button>
+      </div>
+      <form id="formNuevaGuia" onsubmit="return false;">
+        <div style="padding: 20px; border-bottom: 1px solid var(--border-color);">
+          <div class="form-group">
+            <label>Compra *</label>
+            <select id="ngCompra" required onchange="window.onSeleccionarCompraGuia()">
+              <option value="">-- Selecciona una compra registrada --</option>
+            </select>
+          </div>
+
+          <div id="ngInfoCompra" style="display:none; padding:10px 12px; background:var(--bg-secondary); border-radius:var(--radius-md); margin-bottom:12px; font-size:0.9rem;">
+          </div>
+
+          <div class="grid grid-3">
+            <div class="form-group">
+              <label>N° de Guía *</label>
+              <input type="text" id="ngNumeroGuia" placeholder="Ej: T001-00001" required>
+            </div>
+            <div class="form-group">
+              <label>Fecha de Guía *</label>
+              <input type="date" id="ngFechaGuia" required>
+            </div>
+            <div class="form-group">
+              <label>Observaciones</label>
+              <input type="text" id="ngObservaciones" placeholder="Opcional">
+            </div>
+          </div>
+        </div>
+
+        <div style="padding: 20px;">
+          <h4 style="margin-bottom: 15px;">Detalle de Productos Recibidos</h4>
+          <div id="tabla-detalle-guia">
+            <p style="text-align:center; color:var(--text-secondary); padding:20px;">Selecciona una compra para ver sus productos.</p>
+          </div>
+        </div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.cerrarModalNuevaGuia()">Cancelar</button>
+        <button class="btn btn-primary" id="btnGuardarGuiaIngresoCompra" onclick="window.guardarGuiaIngresoCompra()">Guardar Guía (ingresa stock)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL EDITAR GUÍA (solo cabecera; lote/marca/zona/cantidad no se editan aquí) -->
+  <div id="modal-editar-guia" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Editar Guía de Remisión</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-editar-guia')">✕</button>
+      </div>
+      <form id="formEditarGuia" onsubmit="return false;">
+        <input type="hidden" id="egId">
+        <div class="form-group">
+          <label>N° de Guía *</label>
+          <input type="text" id="egNumeroGuia" class="form-control" required>
+        </div>
+        <div class="form-group">
+          <label>Fecha de Guía *</label>
+          <input type="date" id="egFechaGuia" class="form-control" required>
+        </div>
+        <div class="form-group">
+          <label>Observaciones</label>
+          <input type="text" id="egObservaciones" class="form-control">
+        </div>
+        <p style="color:var(--text-secondary); font-size:0.85rem;">
+          Nota: los lotes, marcas, zonas y cantidades recibidas no se editan aquí (ya generaron stock en Inventario).
+          Si necesitas corregir cantidades, elimina la guía (si no tiene ventas) y regístrala de nuevo.
+        </p>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-editar-guia')">Cancelar</button>
+        <button class="btn btn-primary" onclick="window.guardarEdicionGuia()">Guardar Cambios</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL EDITAR COMPRA (solo cabecera; cantidades/lotes no se editan aquí) -->
+  <div id="modal-editar-compra" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Editar Compra</h3>
+        <button class="modal-close" onclick="closeModal('modal-editar-compra')">✕</button>
+      </div>
+      <form id="formEditarCompra" onsubmit="return false;">
+        <input type="hidden" id="ecId">
+        <div class="form-group">
+          <label>Referencia</label>
+          <input type="text" id="ecReferencia" class="form-control">
+        </div>
+        <div class="form-row" style="display:flex; gap:12px;">
+          <div class="form-group" style="flex:1;">
+            <label>Fecha Emisión</label>
+            <input type="date" id="ecFechaEmision" class="form-control">
+          </div>
+          <div class="form-group" style="flex:1;">
+            <label>Fecha Recepción</label>
+            <input type="date" id="ecFechaRecepcion" class="form-control">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>N° Comprobante</label>
+          <input type="text" id="ecNumeroComprobante" class="form-control">
+        </div>
+        <div class="form-row" style="display:flex; gap:12px;">
+          <div class="form-group" style="flex:1;">
+            <label>Moneda</label>
+            <select id="ecMoneda" class="form-control">
+              <option value="PEN">PEN</option>
+              <option value="USD">USD</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex:1;">
+            <label>Tipo de Cambio</label>
+            <input type="number" step="0.001" id="ecTipoCambio" class="form-control">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Estado de Pago</label>
+          <select id="ecEstadoPago" class="form-control">
+            <option value="pendiente">Pendiente</option>
+            <option value="parcial">Parcial</option>
+            <option value="pagado">Pagado</option>
+          </select>
+        </div>
+        <p style="color:var(--text-secondary); font-size:0.85rem;">
+          Nota: los productos, cantidades y lotes de esta compra no se editan aquí (ya afectaron el stock).
+          Si necesitas corregir cantidades, elimina la compra (si no tiene ventas asociadas) y regístrala de nuevo.
+        </p>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-editar-compra')">Cancelar</button>
+        <button class="btn btn-primary" onclick="window.guardarEdicionCompra()">Guardar Cambios</button>
       </div>
     </div>
   </div>
@@ -154,7 +731,7 @@
   <div id="modal-nuevo-proveedor" class="modal">
     <div class="modal-content">
       <div class="modal-header">
-        <h3 class="modal-title">Nuevo Proveedor</h3>
+        <h3 class="modal-title" id="modalProveedorTitle">Nuevo Proveedor</h3>
         <button class="modal-close" onclick="closeModal('modal-nuevo-proveedor')">✕</button>
       </div>
       <form id="formNewProveedor">
@@ -162,9 +739,20 @@
           <label>Nombre *</label>
           <input type="text" id="provNombre" required>
         </div>
-        <div class="form-group">
-          <label>RUC *</label>
-          <input type="text" id="provRUC" placeholder="11 dígitos" required>
+        <div class="grid grid-2">
+          <div class="form-group">
+              <label>Tipo Documento *</label>
+              <select id="provTipoDocumento" required>
+                <option value="">-- Selecciona --</option>
+                <option value="RUC">RUC</option>
+                <option value="DNI">DNI</option>
+                <option value="VAT">VAT</option>
+              </select>
+          </div>
+          <div class="form-group">
+            <label>Nro Documento</label>
+            <input type="text" id="provRUC" placeholder="11 dígitos" required>
+          </div>
         </div>
         <div class="form-group">
           <label>Email</label>
@@ -174,17 +762,18 @@
           <label>Teléfono</label>
           <input type="text" id="provPhone">
         </div>
+        <div class="form-group">
+          <label>Direccion *</label>
+          <input type="text" id="provDireccion" value="" required>
+        </div>
         <div class="grid grid-2">
           <div class="form-group">
-            <label>País</label>
-            <input type="text" id="provPais" value="China">
+              <label>Distrito *</label>
+              <input type="text" id="provDistrito" value="" required>
           </div>
           <div class="form-group">
-            <label>Moneda</label>
-            <select id="provMoneda">
-              <option value="USD" selected>USD</option>
-              <option value="PEN">PEN</option>
-            </select>
+            <label>Pais *</label>
+            <input type="text" id="provPais" value="" required>
           </div>
         </div>
       </form>
@@ -205,12 +794,17 @@
       <form id="formNewProducto">
         <div class="form-group">
           <label>Nombre *</label>
-          <input type="text" id="prodNombre" placeholder="Ej: Laptop HP 15.6" required>
+          <input type="text" id="prodNombre" placeholder="Ej: HILADO SPUN 10/1 RW" required>
         </div>
         
         <div class="form-group">
           <label>SKU *</label>
-          <input type="text" id="prodSKU" placeholder="Ej: LP-HP-001" required>
+          <input type="text" id="prodSKU" placeholder="Ej: SPUN-10-1-RW" required>
+        </div>
+
+        <div class="form-group">
+          <label>Marca</label>
+          <input type="text" id="prodMarca" placeholder="Ej: BENJI" required>
         </div>
 
         <div class="form-group">
@@ -284,6 +878,229 @@
       </div>
     </div>
   </div>
+  <!-- MODAL NUEVA COMPRA DE SERVICIO/GASTO -->
+  <div id="modal-nueva-compra-servicio" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Nueva Compra de Servicio/Gasto</h3>
+        <button class="modal-close" onclick="closeModal('modal-nueva-compra-servicio')">✕</button>
+      </div>
+      <form id="formNewCompraServicio">
+        <div class="form-group">
+          <label>Proveedor *</label>
+          <select id="csProveedor" required>
+            <option value="">-- Selecciona --</option>
+          </select>
+        </div>
+        <div class="grid grid-3">
+          <div class="form-group">
+            <label>Moneda</label>
+            <select id="csMoneda" onchange="window.onCambiarMonedaServicio()">
+              <option value="USD" selected>USD</option>
+              <option value="PEN">PEN</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Fecha *</label>
+            <input type="date" id="csFecha" required>
+          </div>
+          <div class="form-group" id="csTipoCambioGroup">
+            <label>
+              Tipo de Cambio (USD → PEN)
+              <button type="button" id="btnAutoTCServicio" onclick="window.autoFetchTCServicio()" title="Obtener el TC COMPRA del día (SBS)"
+                      style="margin-left:4px; background:none; border:1px solid var(--border-color); border-radius:4px; padding:1px 6px; font-size:0.72rem; cursor:pointer; color:var(--color-info);">↻ Auto</button>
+            </label>
+            <input type="number" step="0.001" id="csTipoCambio" placeholder="Ej: 3.750" value="1">
+            <small id="csTCAviso" style="color:var(--text-secondary); font-size:0.72rem;"></small>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Descripción *</label>
+          <input type="text" id="csDescripcion" placeholder="Ej: Servicio de transporte" required>
+        </div>
+        <div class="form-group">
+          <label>Cuenta de Gasto *</label>
+          <select id="csCuentaGasto" required>
+            <option value="">-- Selecciona --</option>
+          </select>
+        </div>
+        <div class="grid grid-2">
+          <div class="form-group">
+            <label>Tipo de Pago</label>
+            <select id="csTipoPago">
+              <option value="credito" selected>Crédito</option>
+              <option value="contado">Contado</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>IGV (%)</label>
+            <select id="csIGV" onchange="window.calcularCompraServicio()">
+              <option value="18" selected>18%</option>
+              <option value="10">10%</option>
+              <option value="0">Exonerado</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid grid-3">
+          <div class="form-group">
+            <label>Subtotal *</label>
+            <input type="number" id="csSubtotal" placeholder="0.00" step="0.01" min="0" required onchange="window.calcularCompraServicio()">
+          </div>
+          <div class="form-group">
+            <label>IGV</label>
+            <input type="number" id="csIGVMonto" readonly disabled placeholder="0.00">
+          </div>
+          <div class="form-group">
+            <label>Total</label>
+            <input type="number" id="csTotal" readonly disabled placeholder="0.00">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Documento (opcional — PDF, JPEG o PNG)</label>
+          <input type="file" id="csAdjunto" accept="application/pdf,image/jpeg,image/png">
+          <small style="color:var(--text-secondary);">Si aún no te llega la factura (ej. comisión bancaria), déjalo vacío y súbelo después desde el kebab de la tabla.</small>
+        </div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-nueva-compra-servicio')">Cancelar</button>
+        <button class="btn btn-primary" onclick="window.guardarCompraServicio()">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL ADJUNTO DE COMPRA (1 archivo por compra: PDF/JPEG/PNG) -->
+  <div id="modal-adjunto-compra" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Documento Adjunto</h3>
+        <button class="modal-close" onclick="closeModal('modal-adjunto-compra')">✕</button>
+      </div>
+      <div style="padding:16px;">
+        <input type="hidden" id="adjCompraId">
+        <div id="adjActual" style="margin-bottom:14px;"></div>
+        <div class="form-group">
+          <label>Subir / reemplazar (PDF, JPEG o PNG, máx. 10 MB)</label>
+          <input type="file" id="adjArchivo" accept="application/pdf,image/jpeg,image/png">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-danger" id="btnEliminarAdjunto" onclick="window.eliminarAdjuntoCompraActual()" style="display:none;">Eliminar adjunto</button>
+        <button class="btn btn-secondary" onclick="closeModal('modal-adjunto-compra')">Cerrar</button>
+        <button class="btn btn-primary" onclick="window.guardarAdjuntoCompra()">Subir</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL GUÍA DE REMISIÓN - obsoleto: el ingreso a almacén ahora se hace
+       directamente al confirmar la compra (ver modal-confirmar-compra, campos
+       N° Lote / N° Partida). Se deja comentado por si se retoma más adelante.
+  <div id="modal-guia-remision-lotes" class="modal">
+    ...
+  </div>
+  -->
+
+  <!-- MODAL CONFIRMAR COMPRA (desde OC) -->
+  <div id="modal-confirmar-compra" class="modal">
+    <div class="modal-content" style="max-width:920px; max-height:90vh; overflow-y:auto;">
+      <div class="modal-header">
+        <h3 class="modal-title">Confirmar Compra</h3>
+        <button class="modal-close" onclick="closeModal('modal-confirmar-compra')">✕</button>
+      </div>
+
+      <!-- Info OC (solo lectura) -->
+      <div style="padding:12px 16px; background:var(--bg-secondary); border-radius:8px; margin:16px 16px 0;">
+        <div class="grid grid-3">
+          <div>
+            <label style="font-size:0.8em;color:var(--text-secondary);">OC Número</label>
+            <p id="cc-oc-numero" style="font-weight:600;margin:4px 0;"></p>
+          </div>
+          <div>
+            <label style="font-size:0.8em;color:var(--text-secondary);">Proveedor</label>
+            <p id="cc-proveedor" style="font-weight:600;margin:4px 0;"></p>
+          </div>
+          <div>
+            <label style="font-size:0.8em;color:var(--text-secondary);">Moneda</label>
+            <p id="cc-moneda" style="font-weight:600;margin:4px 0;"></p>
+          </div>
+        </div>
+      </div>
+
+      <div style="padding:16px;">
+        <!-- Fila 1: Tipo Documento, Tipo de Cambio, Fecha -->
+        <div class="grid grid-3">
+          <div class="form-group">
+            <label>Tipo de Documento *</label>
+            <select id="ccTipoDocumento" required>
+              <option value="">-- Selecciona --</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>
+              T.C. <span style="font-size:0.78rem; font-weight:600; color:var(--color-warning);">COMPRA SBS</span>
+              <button type="button" id="btnAutoTCCompra" onclick="window.autoFetchTCCompra()" title="Obtener TC COMPRA del día (SBS)" style="margin-left:6px; background:none; border:1px solid var(--border-color); border-radius:4px; padding:1px 6px; font-size:0.75rem; cursor:pointer; color:var(--color-info);">↻ Auto</button>
+            </label>
+            <input type="number" id="ccTipoCambio" step="0.001" min="0" placeholder="1.000" value="1.000">
+            <small id="ccTCAviso" style="color:var(--color-muted); font-size:0.75rem;"></small>
+          </div>
+          <div class="form-group">
+            <label>Fecha *</label>
+            <input type="date" id="ccFecha" required>
+          </div>
+        </div>
+
+        <!-- Fila 2: N° Comprobante, Tipo de Pago -->
+        <div class="grid grid-2">
+          <div class="form-group">
+            <label>N° Comprobante (Factura del Proveedor)</label>
+            <input type="text" id="ccNumeroComprobante" placeholder="Ej: F001-00012345">
+          </div>
+          <div class="form-group">
+            <label>Tipo de Pago</label>
+            <select id="ccTipoPago">
+              <option value="credito">Crédito</option>
+              <option value="contado">Contado</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Descripción -->
+        <div class="form-group">
+          <label>Descripción</label>
+          <input type="text" id="ccDescripcion" placeholder="Descripción del asiento contable">
+        </div>
+
+        <!-- Detalle de productos: categoría/marca informativos, lote/partida a completar -->
+        <h4 style="margin:16px 0 8px; color:var(--text-primary);">Detalle de Productos (de la OC)</h4>
+        <p style="margin-bottom:8px;color:var(--text-secondary);font-size:0.85em;">
+          Completa <strong>N° de Lote</strong> (obligatorio) y <strong>N° de Partida</strong> (opcional) por producto.
+          Al confirmar, se crea/actualiza el lote y se suma el stock directamente en Inventario.
+        </p>
+        <div id="cc-detalle-productos" style="overflow-x:auto;"></div>
+
+        <!-- Totales -->
+        <div style="margin-top:16px; padding:12px; background:var(--bg-secondary); border-radius:8px; display:grid; grid-template-columns:repeat(3,1fr); gap:12px; text-align:center;">
+          <div>
+            <div style="font-size:12px;color:var(--text-secondary);">Subtotal</div>
+            <div id="cc-subtotal" style="font-size:18px;font-weight:600;">0.00</div>
+          </div>
+          <div>
+            <div style="font-size:12px;color:var(--text-secondary);">IGV</div>
+            <div id="cc-igv" style="font-size:18px;font-weight:600;">0.00</div>
+          </div>
+          <div>
+            <div style="font-size:12px;color:var(--text-secondary);">Total</div>
+            <div id="cc-total" style="font-size:18px;font-weight:600;color:var(--color-success);">0.00</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-confirmar-compra')">Cancelar</button>
+        <button class="btn btn-primary" onclick="window.ejecutarConfirmarCompra()">Confirmar y Generar Asiento</button>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="assets/js/config.js"></script>
   <script type="module" src="assets/js/supabase-client.js"></script>
   <script type="module" src="assets/js/auth-supabase.js"></script>

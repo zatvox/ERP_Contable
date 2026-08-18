@@ -1,155 +1,116 @@
 // ============================================================================
-// AUTH-SUPABASE.JS - Autenticación para JHIRO ERP V3
+// AUTH-SUPABASE.JS - Autenticación ERP via Supabase Auth
+// ============================================================================
+// Usa supabase.auth.* (auth.users) + tabla public.agentes para el perfil.
+// Misma tabla y patrón que el Task Manager — no se necesita erp_usuarios.
+// No se necesita service_role key: el JWT del usuario autenticado habilita
+// el rol 'authenticated' en las políticas RLS.
 // ============================================================================
 
-import { supabase, getAll, insert, update } from './supabase-client.js'
+import { supabase } from './supabase-client.js'
 
-const AUTH_KEY = 'erp_user_session'
+let _userCache = null  // { id, email, nombre, foto_url, estado }
+
+// ============================================================================
+// INICIALIZACIÓN DE AUTH STATE
+// Llamar una vez desde auth-init.js antes de cualquier uso
+// ============================================================================
+
+export async function initAuthState() {
+  const { data: { session } } = await supabase.auth.getSession()
+
+  if (session) {
+    await _populateCache(session)
+  }
+
+  // IMPORTANTE: no se debe hacer ninguna llamada autenticada (supabase.from(),
+  // supabase.auth.getSession(), etc.) de forma síncrona dentro del callback de
+  // onAuthStateChange. GoTrueClient mantiene un lock exclusivo mientras
+  // despacha el evento, y cualquier llamada anidada que intente re-adquirir
+  // ese mismo lock (como el .from('users') de _populateCache) se queda
+  // esperando para siempre → deadlock. Esto ocurre en cada login y también
+  // cada vez que el token se auto-refresca en segundo plano, lo cual explica
+  // por qué el guardado se colgaba de forma intermitente sin error en consola.
+  // Fix recomendado por Supabase: diferir con setTimeout para salir del
+  // contexto síncrono del callback antes de hacer la llamada anidada.
+  supabase.auth.onAuthStateChange((event, session) => {
+    if (session) {
+      setTimeout(() => { _populateCache(session) }, 0)
+    } else {
+      _userCache = null
+      if (!window.location.pathname.includes('login.html')) {
+        window.location.href = 'login.html'
+      }
+    }
+  })
+}
+
+async function _populateCache(session) {
+  // Lee perfil desde public.users (vinculado por auth_id = auth.uid())
+  const { data: perfil } = await supabase
+    .from('users')
+    .select('id, email, nombre, role, active')
+    .eq('auth_id', session.user.id)
+    .single()
+
+  _userCache = {
+    id:      session.user.id,           // UUID de auth.users
+    db_id:   perfil?.id   || null,      // bigint de public.users (para FKs)
+    email:   session.user.email,
+    nombre:  perfil?.nombre || session.user.user_metadata?.nombre || session.user.email,
+    role:    perfil?.role   || session.user.user_metadata?.role   || 'user',
+    active:  perfil?.active ?? true
+  }
+}
 
 // ============================================================================
 // AUTENTICACIÓN
 // ============================================================================
 
 /**
- * Login: verifica usuario en tabla users
+ * Login con email y contraseña.
+ * Retorna { success: true } o { success: false, message: '...' }
  */
-export async function login(username, password) {
+export async function login(email, password) {
   try {
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('username', username)
-      .eq('password_hash', password)
-      .single()
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
 
-    if (error || !data) {
-      console.error('Login error:', error)
-      return false
+    if (error || !data.user) {
+      const msg = error?.message === 'Invalid login credentials'
+        ? 'Correo o contraseña incorrectos'
+        : (error?.message || 'Error al iniciar sesión')
+      return { success: false, message: msg }
     }
 
-    // Guardar sesión
-    const session = {
-      userId: data.id,
-      username: data.username,
-      nombre: data.nombre,
-      email: data.email,
-      role: data.role,
-      loginAt: new Date().toISOString()
-    }
+    await _populateCache(data.session)
+    return { success: true }
 
-    localStorage.setItem(AUTH_KEY, JSON.stringify(session))
-    return true
-  } catch (error) {
-    console.error('Error en login:', error)
-    return false
+  } catch (err) {
+    console.error('Error en login:', err)
+    return { success: false, message: 'Error de conexión' }
   }
 }
 
 /**
- * Obtener usuario actual
+ * Obtener el usuario actual (sincrónico — usa el cache).
+ * Cache poblado en initAuthState() antes de DOMContentLoaded.
  */
 export function getCurrentUser() {
-  const session = localStorage.getItem(AUTH_KEY)
-  if (!session) {
-    window.location.href = 'login.html'
-    return null
-  }
-  return JSON.parse(session)
+  return _userCache
 }
 
 /**
- * Logout
- */
-export function logout() {
-  localStorage.removeItem(AUTH_KEY)
-  window.location.href = 'login.html'
-}
-
-/**
- * Verificar si está autenticado
+ * Verificar si hay sesión activa (sincrónico — usa el cache).
  */
 export function isAuthenticated() {
-  return !!localStorage.getItem(AUTH_KEY)
+  return _userCache !== null
 }
 
 /**
- * Cambiar contraseña
+ * Logout — cierra sesión en Supabase y redirige a login.
  */
-export async function changePassword(currentPassword, newPassword) {
-  try {
-    const user = getCurrentUser()
-    if (!user) return false
-
-    // Obtener usuario actual de BD
-    const { data, error: fetchError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', user.userId)
-      .single()
-
-    if (fetchError || data.password_hash !== currentPassword) {
-      return false
-    }
-
-    // Actualizar contraseña
-    const { error: updateError } = await supabase
-      .from('users')
-      .update({ password_hash: newPassword })
-      .eq('id', user.userId)
-
-    return !updateError
-  } catch (error) {
-    console.error('Error en changePassword:', error)
-    return false
-  }
-}
-
-/**
- * Crear nuevo usuario (solo admin)
- */
-export async function createUser(userData) {
-  try {
-    const result = await insert('users', {
-      username: userData.username,
-      password_hash: userData.password,
-      nombre: userData.nombre,
-      email: userData.email,
-      role: userData.role || 'user',
-      active: true
-    })
-
-    return result ? true : false
-  } catch (error) {
-    console.error('Error creando usuario:', error)
-    return false
-  }
-}
-
-/**
- * Obtener todos los usuarios (admin)
- */
-export async function getUsers() {
-  try {
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-
-    if (error) {
-      console.error('Error fetching users:', error)
-      return []
-    }
-
-    return data || []
-  } catch (error) {
-    console.error('Error en getUsers:', error)
-    return []
-  }
-}
-
-// ============================================================================
-// REDIRECCIÓN AUTOMÁTICA
-// ============================================================================
-
-if (!isAuthenticated() && !window.location.pathname.includes('login.html')) {
+export async function logout() {
+  _userCache = null
+  await supabase.auth.signOut()
   window.location.href = 'login.html'
 }

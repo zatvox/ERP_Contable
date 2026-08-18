@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+  <link rel="icon" href="data:,">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>JHIRO ERP - Dashboard</title>
@@ -14,10 +15,16 @@
       <ul class="sidebar-menu">
         <li><a href="dashboard.html" class="active" data-page="dashboard">📊 Dashboard</a></li>
         <li><a href="inventario.html" data-page="inventario">📦 Inventario</a></li>
-        <li><a href="compras.html" data-page="compras">📦 Compras</a></li>
-        <li><a href="ventas.html" data-page="ventas">🛒 Ventas</a></li>
+        <li><a href="compras.html" data-page="compras">🛒 Compras</a></li>
+        <li><a href="ventas.html" data-page="ventas">📈 Ventas</a></li>
+        <li><a href="cobranzas.html" data-page="cobranzas">💰 Cuentas x Cobrar/Pagar</a></li>
+        <li><a href="bancos.html" data-page="bancos">🏦 Bancos</a></li>
         <li><a href="contabilidad.html" data-page="contabilidad">📑 Contabilidad</a></li>
-        <li><a href="costeo-importaciones.html" class="active" data-page="costeo">📈 Costeo Import.</a></li>
+        <li data-solo-admin><a href="usuarios.html" data-page="usuarios">👤 Usuarios</a></li>
+        <li><a href="perfil.html" data-page="perfil">🙍 Perfil</a></li>
+        <!-- En standby hasta la v3: módulo de importaciones.
+        <li><a href="costeo-importaciones.html" data-page="costeo">🚢 Costeo Importaciones</a></li>
+        -->
       </ul>
       <div class="sidebar-user">
         <strong id="userDisplay">Admin</strong>
@@ -25,87 +32,246 @@
       </div>
     </aside>
 
-    <!-- MAIN CONTENT -->
     <div class="main-content">
-      <!-- HEADER -->
       <header class="header">
         <div class="header-left">
           <button class="menu-toggle" id="menuToggle">☰</button>
           <h2 class="header-title">Dashboard</h2>
         </div>
+
+        <nav class="module-nav" id="dashTabs">
+          <button type="button" class="tab-btn active" data-tab="financiero">💼 Financiero / Contable</button>
+          <button type="button" class="tab-btn" data-tab="comercial">📈 Ventas / Inventario</button>
+          <button type="button" class="tab-btn module-nav-config" data-tab="configuracion">⚙️ Configuración</button>
+        </nav>
+
         <div class="header-controls">
           <button class="theme-toggle" id="themeToggle">🌙 Oscuro</button>
         </div>
       </header>
 
-      <!-- CONTENT -->
       <main class="content">
-        <h1 class="page-title">Dashboard</h1>
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:12px;">
+          <h1 class="page-title" style="margin-bottom:0;">Dashboard</h1>
+          <div id="dash-ultima-act" style="font-size:0.78rem; color:var(--text-secondary);"></div>
+        </div>
 
-        <!-- KPIs -->
-        <div class="grid grid-4">
-          <div class="kpi-card">
-            <div class="kpi-label">Órdenes Compra</div>
-            <div class="kpi-value" id="kpi-oc">0</div>
-          </div>
-          <div class="kpi-card">
-            <div class="kpi-label">Cotizaciones Venta</div>
-            <div class="kpi-value" id="kpi-cot">0</div>
-          </div>
-          <div class="kpi-card">
-            <div class="kpi-label">Asientos Contables</div>
-            <div class="kpi-value" id="kpi-asientos">0</div>
-          </div>
-          <div class="kpi-card">
-            <div class="kpi-label">Saldo Caja Soles</div>
-            <div class="kpi-value" id="kpi-caja">S/. 0</div>
+        <!-- FILTROS GLOBALES -->
+        <div class="card" style="margin:16px 0 20px;">
+          <div class="reporte-filtros" style="border-bottom:none;">
+            <div class="reporte-filtro">
+              <label>Período</label>
+              <select id="dashPeriodo" onchange="window.onCambiarPeriodoDash()">
+                <option value="mes">Mes actual</option>
+                <option value="mes_anterior">Mes anterior</option>
+                <option value="trimestre">Últimos 3 meses</option>
+                <option value="anio">Año actual</option>
+                <option value="12m">Últimos 12 meses</option>
+                <option value="todo">Todo el historial</option>
+                <option value="personalizado">Personalizado</option>
+              </select>
+            </div>
+            <div class="reporte-filtro" id="dash-rango-personalizado" style="display:none;">
+              <label>Desde / Hasta</label>
+              <div style="display:flex; gap:6px; align-items:center;">
+                <input type="date" id="dashDesde" onchange="window.refrescarDashboard()" style="max-width:150px;">
+                <span style="color:var(--text-secondary);">a</span>
+                <input type="date" id="dashHasta" onchange="window.refrescarDashboard()" style="max-width:150px;">
+              </div>
+            </div>
+            <div class="reporte-filtro">
+              <label>Moneda</label>
+              <select id="dashMoneda" onchange="window.refrescarDashboard()">
+                <option value="">Todas</option>
+                <option value="PEN">PEN</option>
+                <option value="USD">USD</option>
+              </select>
+            </div>
+            <div class="reporte-filtro">
+              <label>&nbsp;</label>
+              <button class="btn btn-secondary btn-small" onclick="window.recargarDashboard()">↻ Recargar datos</button>
+            </div>
+            <div class="reporte-filtro" style="flex:1; min-width:180px;">
+              <label>&nbsp;</label>
+              <div id="dash-rango-texto" style="font-size:0.8rem; color:var(--text-secondary); padding-top:6px;"></div>
+            </div>
           </div>
         </div>
 
-        <!-- Resumen Financiero -->
-        <div class="card" style="margin-top: 30px;">
-          <div class="card-header">
-            <h3 class="card-title">Resumen Financiero</h3>
+        <!-- ============ VISTA FINANCIERO / CONTABLE ============ -->
+        <div id="tab-financiero" class="tab-content active">
+          <div class="grid grid-4">
+            <div class="kpi-card kpi-clickable" onclick="window.irA('cobranzas.html', 'cxc')">
+              <div class="kpi-label">Por cobrar</div>
+              <div class="kpi-value" id="f-kpi-cxc" style="color:var(--color-warning);">—</div>
+              <div class="kpi-sub" id="f-kpi-cxc-sub"></div>
+            </div>
+            <div class="kpi-card kpi-clickable" onclick="window.irA('cobranzas.html', 'cxp')">
+              <div class="kpi-label">Por pagar</div>
+              <div class="kpi-value" id="f-kpi-cxp" style="color:var(--color-danger);">—</div>
+              <div class="kpi-sub" id="f-kpi-cxp-sub"></div>
+            </div>
+            <div class="kpi-card kpi-clickable" onclick="window.irA('bancos.html', 'cuentas-banco')">
+              <div class="kpi-label">Disponible en bancos</div>
+              <div class="kpi-value" id="f-kpi-bancos" style="color:var(--color-success);">—</div>
+              <div class="kpi-sub" id="f-kpi-bancos-sub"></div>
+            </div>
+            <div class="kpi-card kpi-clickable" onclick="window.irA('bancos.html', 'reportes')">
+              <div class="kpi-label">Posición proyectada</div>
+              <div class="kpi-value" id="f-kpi-posicion">—</div>
+              <div class="kpi-sub">Disponible + CxC − CxP</div>
+            </div>
           </div>
-          <div class="grid grid-3">
-            <div style="padding: 20px; background-color: var(--bg-secondary); border-radius: 8px;">
-              <p style="color: var(--text-secondary); margin-bottom: 10px;">Total Activos</p>
-              <p id="total-activos" style="font-size: 24px; font-weight: bold; color: var(--color-success);">S/. 0</p>
+
+          <div class="grid grid-4" style="margin-top:16px;">
+            <div class="kpi-card kpi-clickable" onclick="window.irA('cobranzas.html', 'cobros')">
+              <div class="kpi-label">Cobrado en el período</div>
+              <div class="kpi-value" id="f-kpi-cobrado" style="color:var(--color-success);">—</div>
+              <div class="kpi-sub" id="f-kpi-cobrado-sub"></div>
             </div>
-            <div style="padding: 20px; background-color: var(--bg-secondary); border-radius: 8px;">
-              <p style="color: var(--text-secondary); margin-bottom: 10px;">Total Pasivos</p>
-              <p id="total-pasivos" style="font-size: 24px; font-weight: bold; color: var(--color-danger);">S/. 0</p>
+            <div class="kpi-card kpi-clickable" onclick="window.irA('cobranzas.html', 'pagos-prov')">
+              <div class="kpi-label">Pagado en el período</div>
+              <div class="kpi-value" id="f-kpi-pagado" style="color:var(--color-danger);">—</div>
+              <div class="kpi-sub" id="f-kpi-pagado-sub"></div>
             </div>
-            <div style="padding: 20px; background-color: var(--bg-secondary); border-radius: 8px;">
-              <p style="color: var(--text-secondary); margin-bottom: 10px;">Total Patrimonio</p>
-              <p id="total-patrimonio" style="font-size: 24px; font-weight: bold; color: var(--color-primary);">S/. 0</p>
+            <div class="kpi-card kpi-clickable" onclick="window.irA('contabilidad.html', 'reportes')">
+              <div class="kpi-label">IGV estimado del período</div>
+              <div class="kpi-value" id="f-kpi-igv" style="color:var(--color-warning);">—</div>
+              <div class="kpi-sub" id="f-kpi-igv-sub">Ventas − Compras</div>
+            </div>
+            <div class="kpi-card kpi-clickable" onclick="window.irA('cobranzas.html', 'retenciones')">
+              <div class="kpi-label">Retenciones sin sustento</div>
+              <div class="kpi-value" id="f-kpi-retenciones" style="color:var(--color-info);">—</div>
+              <div class="kpi-sub" id="f-kpi-retenciones-sub"></div>
+            </div>
+          </div>
+
+          <div class="grid grid-2" style="margin-top:20px;">
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Antigüedad de la cobranza</h3>
+                <button class="btn btn-secondary btn-small" onclick="window.irA('cobranzas.html', 'reportes')">Ver detalle →</button>
+              </div>
+              <div id="f-aging" style="padding:14px 16px;"><p class="reporte-vacio">Cargando...</p></div>
+            </div>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Flujo: cobros vs pagos por mes</h3>
+                <button class="btn btn-secondary btn-small" onclick="window.irA('bancos.html', 'reportes')">Ver detalle →</button>
+              </div>
+              <div id="f-flujo" style="padding:14px 16px;"><p class="reporte-vacio">Cargando...</p></div>
+            </div>
+          </div>
+
+          <div class="grid grid-2" style="margin-top:20px;">
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Top deudores (clientes)</h3>
+                <button class="btn btn-secondary btn-small" onclick="window.irA('cobranzas.html', 'cxc')">Ver todos →</button>
+              </div>
+              <div id="f-top-deudores" class="table-container"><p class="reporte-vacio">Cargando...</p></div>
+            </div>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Próximos vencimientos (30 días)</h3>
+                <button class="btn btn-secondary btn-small" onclick="window.irA('cobranzas.html', 'reportes')">Ver flujo →</button>
+              </div>
+              <div id="f-vencimientos" class="table-container"><p class="reporte-vacio">Cargando...</p></div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-top:20px;">
+            <div class="card-header"><h3 class="card-title">⚠️ Alertas y pendientes</h3></div>
+            <div id="f-alertas" style="padding:14px 16px;"><p class="reporte-vacio">Revisando...</p></div>
+          </div>
+        </div>
+
+        <!-- ============ VISTA COMERCIAL / INVENTARIO ============ -->
+        <div id="tab-comercial" class="tab-content">
+          <div class="grid grid-4">
+            <div class="kpi-card kpi-clickable" onclick="window.irA('ventas.html', 'ventas')">
+              <div class="kpi-label">Ventas del período</div>
+              <div class="kpi-value" id="c-kpi-ventas" style="color:var(--color-success);">—</div>
+              <div class="kpi-sub" id="c-kpi-ventas-sub"></div>
+            </div>
+            <div class="kpi-card kpi-clickable" onclick="window.irA('compras.html', 'compras')">
+              <div class="kpi-label">Compras del período</div>
+              <div class="kpi-value" id="c-kpi-compras" style="color:var(--color-info);">—</div>
+              <div class="kpi-sub" id="c-kpi-compras-sub"></div>
+            </div>
+            <div class="kpi-card kpi-clickable" onclick="window.irA('inventario.html', 'resumen')">
+              <div class="kpi-label">Valor del inventario</div>
+              <div class="kpi-value" id="c-kpi-inventario">—</div>
+              <div class="kpi-sub" id="c-kpi-inventario-sub"></div>
+            </div>
+            <div class="kpi-card kpi-clickable" onclick="window.irA('ventas.html', 'guias-despacho')">
+              <div class="kpi-label">Pendiente de despachar</div>
+              <div class="kpi-value" id="c-kpi-despacho" style="color:var(--color-warning);">—</div>
+              <div class="kpi-sub" id="c-kpi-despacho-sub"></div>
+            </div>
+          </div>
+
+          <div class="grid grid-2" style="margin-top:20px;">
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Ventas por mes</h3>
+                <button class="btn btn-secondary btn-small" onclick="window.irA('ventas.html', 'reportes')">Ver reportes →</button>
+              </div>
+              <div id="c-ventas-mes" style="padding:14px 16px;"><p class="reporte-vacio">Cargando...</p></div>
+            </div>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Compras vs Ventas por mes</h3>
+                <button class="btn btn-secondary btn-small" onclick="window.irA('compras.html', 'reportes')">Ver reportes →</button>
+              </div>
+              <div id="c-compras-ventas" style="padding:14px 16px;"><p class="reporte-vacio">Cargando...</p></div>
+            </div>
+          </div>
+
+          <div class="grid grid-2" style="margin-top:20px;">
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Top clientes del período</h3>
+                <button class="btn btn-secondary btn-small" onclick="window.irA('ventas.html', 'clientes')">Ver clientes →</button>
+              </div>
+              <div id="c-top-clientes" class="table-container"><p class="reporte-vacio">Cargando...</p></div>
+            </div>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Top productos vendidos</h3>
+                <button class="btn btn-secondary btn-small" onclick="window.irA('inventario.html', 'productos')">Ver productos →</button>
+              </div>
+              <div id="c-top-productos" class="table-container"><p class="reporte-vacio">Cargando...</p></div>
+            </div>
+          </div>
+
+          <div class="grid grid-2" style="margin-top:20px;">
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">🔴 Stock crítico</h3>
+                <button class="btn btn-secondary btn-small" onclick="window.irA('inventario.html', 'resumen')">Ver stock →</button>
+              </div>
+              <div id="c-stock-critico" class="table-container"><p class="reporte-vacio">Cargando...</p></div>
+            </div>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Ventas pendientes de despacho</h3>
+                <button class="btn btn-secondary btn-small" onclick="window.irA('ventas.html', 'guias-despacho')">Despachar →</button>
+              </div>
+              <div id="c-pendientes-despacho" class="table-container"><p class="reporte-vacio">Cargando...</p></div>
             </div>
           </div>
         </div>
 
-        <!-- Últimas Operaciones -->
-        <div class="grid grid-2" style="margin-top: 30px;">
-          <div class="card">
-            <div class="card-header">
-              <h3 class="card-title">Órdenes Compra Recientes</h3>
-            </div>
-            <div id="ultimas-oc" class="table-container">
-              <p style="text-align: center; color: var(--text-secondary);">Sin registros</p>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card-header">
-              <h3 class="card-title">Cotizaciones Recientes</h3>
-            </div>
-            <div id="ultimas-cot" class="table-container">
-              <p style="text-align: center; color: var(--text-secondary);">Sin registros</p>
-            </div>
-          </div>
+        <!-- TAB CONFIGURACIÓN -->
+        <div id="tab-configuracion" class="tab-content">
+          <div id="dash-config-container"></div>
         </div>
+
       </main>
     </div>
   </div>
+
   <script type="module" src="assets/js/config.js"></script>
   <script type="module" src="assets/js/supabase-client.js"></script>
   <script type="module" src="assets/js/auth-supabase.js"></script>

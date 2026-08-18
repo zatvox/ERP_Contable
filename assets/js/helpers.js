@@ -5,17 +5,18 @@
 import { 
   getSupplierById as getSupplierByIdAsync,
   getCustomerById as getCustomerByIdAsync,
-  getProductById as getProductByIdAsync,
+  getItemById as getItemByIdAsync,
   getContacts,
-  getPurchaseOrders as getPurchaseOrdersAsync,
-  getPurchaseOrderById as getPurchaseOrderByIdAsync,
+  tiposDeContacto,
+  getOrderCompras as getOrderComprasAsync,
+  getOrderCompraById as getOrderCompraByIdAsync,
   getSalesQuotes as getSalesQuotesAsync,
   getSalesQuoteById as getSalesQuoteByIdAsync,
   getJournalEntries as getJournalEntriesAsync,
   getLotes as getLotesAsync,
   getLoteById as getLoteByIdAsync,
-  getLotesByProductId as getLotesByProductIdAsync,
-  getProducts as getProductsAsync,
+  getLotesByItemId as getLotesByItemIdAsync,
+  getItems as getItemsAsync,
   formatDate as formatDateFn,
   formatCurrency as formatCurrencyFn
 } from './supabase-data.js'
@@ -77,8 +78,19 @@ export function formatCurrency(value, currency = 'PEN') {
   return formatCurrencyFn(value, currency)
 }
 
-export function formatNumber(value) {
-  return parseFloat(value || 0).toFixed(2)
+// Helper único de formato numérico para todo el sistema: separador de
+// miles + decimales fijos (para montos/precios/costos). decimals=2 por
+// defecto; usar 4 para costos unitarios (S/. 0.xxxx), etc.
+export function formatNumber(value, decimals = 2) {
+  const num = parseFloat(value)
+  return (isNaN(num) ? 0 : num).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+}
+
+// Igual que formatNumber pero SIN decimales forzados — para cantidades/
+// stock/unidades, donde un entero debe verse "24,500" y no "24,500.00".
+export function formatQty(value, maxDecimals = 2) {
+  const num = parseFloat(value)
+  return (isNaN(num) ? 0 : num).toLocaleString('en-US', { maximumFractionDigits: maxDecimals })
 }
 
 // ============================================================================
@@ -136,12 +148,12 @@ export async function getCustomerById(id) {
   }
 }
 
-export async function getProductById(id) {
+export async function getItemById(id) {
   if (!id) return null
   try {
-    return await getProductByIdAsync(id)
+    return await getItemByIdAsync(id)
   } catch (error) {
-    console.error('Error en getProductById:', error)
+    console.error('Error en getItemById:', error)
     return null
   }
 }
@@ -212,21 +224,21 @@ export async function getLoteById(id) {
   }
 }
 
-export async function getLotesByProductId(productId) {
-  if (!productId) return []
+export async function getLotesByItemId(itemId) {
+  if (!itemId) return []
   try {
-    return await getLotesByProductIdAsync(productId)
+    return await getLotesByItemIdAsync(itemId)
   } catch (error) {
-    console.error('Error en getLotesByProductId:', error)
+    console.error('Error en getLotesByItemId:', error)
     return []
   }
 }
 
-export async function getProducts() {
+export async function getItems() {
   try {
-    return await getProductsAsync()
+    return await getItemsAsync()
   } catch (error) {
-    console.error('Error en getProducts:', error)
+    console.error('Error en getItems:', error)
     return []
   }
 }
@@ -234,7 +246,8 @@ export async function getProducts() {
 export async function getSuppliers() {
   try {
     const contacts = await getContacts()
-    return contacts.filter(c => c.tipo_contacto === 'Proveedor')
+    // tipo_contacto es text[] en la BD, ej: ['cliente','proveedor']
+    return contacts.filter(c => tiposDeContacto(c).includes('proveedor'))
   } catch (error) {
     console.error('Error en getSuppliers:', error)
     return []
@@ -244,7 +257,7 @@ export async function getSuppliers() {
 export async function getCustomers() {
   try {
     const contacts = await getContacts()
-    return contacts.filter(c => c.tipo_contacto === 'Cliente')
+    return contacts.filter(c => tiposDeContacto(c).includes('cliente'))
   } catch (error) {
     console.error('Error en getCustomers:', error)
     return []
@@ -259,5 +272,6 @@ window.showToast = showToast
 window.formatDate = formatDate
 window.formatCurrency = formatCurrency
 window.formatNumber = formatNumber
+window.formatQty = formatQty
 window.openModal = openModalGlobal
 window.closeModal = closeModalGlobal

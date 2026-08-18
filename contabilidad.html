@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+  <link rel="icon" href="data:,">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>JHIRO ERP - Contabilidad</title>
@@ -13,10 +14,16 @@
       <ul class="sidebar-menu">
         <li><a href="dashboard.html" data-page="dashboard">📊 Dashboard</a></li>
         <li><a href="inventario.html" data-page="inventario">📦 Inventario</a></li>
-        <li><a href="compras.html" data-page="compras">📦 Compras</a></li>
-        <li><a href="ventas.html" data-page="ventas">🛒 Ventas</a></li>
+        <li><a href="compras.html" data-page="compras">🛒 Compras</a></li>
+        <li><a href="ventas.html" data-page="ventas">📈 Ventas</a></li>
+        <li><a href="cobranzas.html" data-page="cobranzas">💰 Cuentas x Cobrar/Pagar</a></li>
+        <li><a href="bancos.html" data-page="bancos">🏦 Bancos</a></li>
         <li><a href="contabilidad.html" class="active" data-page="contabilidad">📑 Contabilidad</a></li>
-        <li><a href="costeo-importaciones.html" class="active" data-page="costeo">📈 Costeo Import.</a></li>
+        <li data-solo-admin><a href="usuarios.html" data-page="usuarios">👤 Usuarios</a></li>
+        <li><a href="perfil.html" data-page="perfil">🙍 Perfil</a></li>
+        <!-- En standby hasta la v3: módulo de importaciones.
+        <li><a href="costeo-importaciones.html" data-page="costeo">🚢 Costeo Importaciones</a></li>
+        -->
       </ul>
       <div class="sidebar-user">
         <strong id="userDisplay">Admin</strong>
@@ -30,6 +37,43 @@
           <button class="menu-toggle" id="menuToggle">☰</button>
           <h2 class="header-title">Contabilidad</h2>
         </div>
+
+        <nav class="module-nav" id="contaTabs">
+          <div class="module-nav-group">
+            <button type="button" class="module-nav-group-toggle">Registro</button>
+            <div class="module-nav-dropdown">
+              <button class="tab-btn active" data-tab="cuentas">Plan de Cuentas</button>
+              <button class="tab-btn" data-tab="asientos">Asientos</button>
+              <button class="tab-btn" data-tab="apuntes">Apuntes</button>
+              <button class="tab-btn" data-tab="diarios">Plantillas de Diario</button>
+            </div>
+          </div>
+          <div class="module-nav-group">
+            <button type="button" class="module-nav-group-toggle">Libros</button>
+            <div class="module-nav-dropdown">
+              <button class="tab-btn" data-tab="diario">Libro Diario</button>
+              <button class="tab-btn" data-tab="mayor">Libro Mayor</button>
+              <button class="tab-btn" data-tab="balance">Balance de Comprobación</button>
+            </div>
+          </div>
+          <div class="module-nav-group">
+            <button type="button" class="module-nav-group-toggle">Estados Financieros</button>
+            <div class="module-nav-dropdown">
+              <button class="tab-btn" data-tab="resultado">Estado de Resultados</button>
+              <button class="tab-btn" data-tab="general">Balance General</button>
+            </div>
+          </div>
+          <div class="module-nav-group">
+            <button type="button" class="module-nav-group-toggle">Cierre</button>
+            <div class="module-nav-dropdown">
+              <button class="tab-btn" data-tab="periodos">Períodos Contables</button>
+              <button class="tab-btn" data-tab="cobrospagos">Cobros y Pagos</button>
+            </div>
+          </div>
+          <button type="button" class="tab-btn" data-tab="reportes">📊 Reportes</button>
+          <button type="button" class="tab-btn module-nav-config" data-tab="configuracion">⚙️ Configuración</button>
+        </nav>
+
         <div class="header-controls">
           <button class="theme-toggle" id="themeToggle">🌙 Oscuro</button>
         </div>
@@ -38,12 +82,9 @@
       <main class="content">
         <h1 class="page-title">Módulo Contabilidad</h1>
 
-        <div class="tab-buttons" id="contaTabs">
-          <button class="tab-btn active" data-tab="cuentas">Plan de Cuentas</button>
-          <button class="tab-btn" data-tab="diario">Libro Diario</button>
-          <button class="tab-btn" data-tab="balance">Balance Comprobación</button>
-          <button class="tab-btn" data-tab="resultado">Estado Resultados</button>
-          <button class="tab-btn" data-tab="general">Balance General</button>
+        <!-- Botón flotante: Nuevo Asiento Manual -->
+        <div style="margin:10px 0; text-align:right;">
+          <button class="btn btn-primary" onclick="window.abrirModalNuevoAsiento()">+ Nuevo Asiento Manual</button>
         </div>
 
         <div id="tab-cuentas" class="tab-content active">
@@ -51,6 +92,14 @@
         </div>
 
         <div id="tab-diario" class="tab-content">
+          <div class="card" style="margin-bottom:15px; padding:15px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <label for="cierrePeriodo" style="margin:0;">Filtrar período (AAAA-MM)</label>
+            <input type="month" id="diarioFiltroMes">
+            <button class="btn btn-secondary btn-small" onclick="window.filtrarDiario()">Filtrar</button>
+            <label for="cierrePeriodo" style="margin:0; margin-left:20px;">Cierre de período</label>
+            <input type="month" id="cierrePeriodo">
+            <button class="btn btn-warning btn-small" onclick="window.ejecutarCierre()">Ejecutar Cierre</button>
+          </div>
           <div id="content-diario" class="card">Cargando...</div>
         </div>
 
@@ -65,9 +114,201 @@
         <div id="tab-general" class="tab-content">
           <div id="content-general" class="card">Cargando...</div>
         </div>
+
+        <div id="tab-mayor" class="tab-content">
+          <div id="content-mayor" class="card">Cargando...</div>
+        </div>
+
+        <div id="tab-asientos" class="tab-content">
+          <div id="content-asientos" class="card">Cargando...</div>
+        </div>
+
+        <div id="tab-apuntes" class="tab-content">
+          <div id="content-apuntes" class="card">Cargando...</div>
+        </div>
+
+        <div id="tab-diarios" class="tab-content">
+          <div id="content-diarios" class="card">Cargando...</div>
+        </div>
+
+        <div id="tab-periodos" class="tab-content">
+          <div id="content-periodos" class="card">Cargando...</div>
+        </div>
+
+        <div id="tab-cobrospagos" class="tab-content">
+          <div id="content-cobrospagos" class="card">Cargando...</div>
+        </div>
+
+        <!-- TAB: REPORTES -->
+        <div id="tab-reportes" class="tab-content">
+          <div class="subtab-bar" id="conta-subtabs-reportes">
+            <button class="subtab active" data-sub="repc-cuentas">Saldos por cuenta</button>
+            <button class="subtab" data-sub="repc-movimiento">Movimiento contable</button>
+            <button class="subtab" data-sub="repc-igv">IGV del período</button>
+            <button class="subtab" data-sub="repc-descuadres">Control de asientos</button>
+          </div>
+          <div id="repc-cuentas"    class="subtab-panel active"></div>
+          <div id="repc-movimiento" class="subtab-panel"></div>
+          <div id="repc-igv"        class="subtab-panel"></div>
+          <div id="repc-descuadres" class="subtab-panel"></div>
+        </div>
+
+        <!-- TAB: CONFIGURACIÓN -->
+        <div id="tab-configuracion" class="tab-content">
+          <div id="conta-config-container"></div>
+        </div>
       </main>
     </div>
   </div>
+
+  <!-- Modal: Agregar línea manual a un asiento -->
+  <div id="modal-linea-manual" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Agregar Línea Manual</h3>
+        <button class="modal-close" onclick="closeModal('modal-linea-manual')">&times;</button>
+      </div>
+      <form id="formLineaManual" onsubmit="event.preventDefault(); window.guardarLineaManual()">
+        <input type="hidden" id="lineaManualEntryId">
+        <div class="form-group">
+          <label for="lineaManualCuenta">Cuenta</label>
+          <select id="lineaManualCuenta" required></select>
+        </div>
+        <div class="form-group">
+          <label for="lineaManualTipo">Tipo</label>
+          <select id="lineaManualTipo" required>
+            <option value="debe">Debe</option>
+            <option value="haber">Haber</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="lineaManualImporte">Importe</label>
+          <input type="number" id="lineaManualImporte" step="0.01" min="0" required>
+        </div>
+        <div class="form-group">
+          <label for="lineaManualDescripcion">Descripción</label>
+          <input type="text" id="lineaManualDescripcion">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn" onclick="closeModal('modal-linea-manual')">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ====================================================
+       MODAL: Nuevo Asiento Manual (Partida Doble)
+       ==================================================== -->
+  <div id="modal-nuevo-asiento" class="modal">
+    <div class="modal-content" style="max-width:900px; width:95%;">
+      <div class="modal-header">
+        <h3>Nuevo Asiento Contable Manual</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-nuevo-asiento')">&times;</button>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; padding:15px 15px 0;">
+        <div class="form-group">
+          <label>Fecha</label>
+          <input type="date" id="nuevoAsientoFecha">
+        </div>
+        <div class="form-group">
+          <label>Período Contable</label>
+          <input type="text" id="nuevoAsientoPeriodo" placeholder="YYYY-MM" maxlength="7" readonly>
+        </div>
+        <div class="form-group">
+          <label>Doc. Referencia (opcional)</label>
+          <input type="text" id="nuevoAsientoDocRef" placeholder="Nº factura, guía, etc.">
+        </div>
+      </div>
+      <div style="padding:0 15px 10px;">
+        <div class="form-group">
+          <label>Descripción / Glosa</label>
+          <input type="text" id="nuevoAsientoDesc" placeholder="Descripción del asiento" style="width:100%;">
+        </div>
+      </div>
+
+      <div style="padding:0 15px; overflow-x:auto;">
+        <div style="display:grid; grid-template-columns:2fr 1fr 1fr 1fr auto; gap:6px; margin-bottom:4px; font-weight:bold; font-size:0.85rem; color:var(--text-secondary);">
+          <span>Cuenta</span><span>Tipo</span><span>Importe</span><span>Descripción línea</span><span></span>
+        </div>
+        <div id="nuevoAsientoLineas"></div>
+        <button class="btn btn-secondary btn-small" onclick="window.agregarFilaLinea()" style="margin-top:6px;">+ Agregar línea</button>
+      </div>
+
+      <div style="padding:12px 15px; background:var(--bg-secondary); border-top:1px solid var(--border-color); display:flex; gap:20px; font-weight:bold;">
+        <span>Debe: <span id="asiento-total-debe" style="color:var(--color-info);">0.00</span></span>
+        <span>Haber: <span id="asiento-total-haber" style="color:var(--color-info);">0.00</span></span>
+        <span>Diferencia: <span id="asiento-diferencia" style="color:var(--color-danger);">0.00</span></span>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn" onclick="window.closeModal('modal-nuevo-asiento')">Cancelar</button>
+        <button class="btn btn-primary" onclick="window.guardarNuevoAsiento()">Guardar Asiento</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================================================
+       MODAL: Nuevo Diario (Plantilla)
+       ==================================================== -->
+  <div id="modal-nuevo-diario" class="modal">
+    <div class="modal-content" style="max-width:500px;">
+      <div class="modal-header">
+        <h3>Nueva Plantilla de Diario</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-nuevo-diario')">&times;</button>
+      </div>
+      <div style="padding:15px; display:flex; flex-direction:column; gap:10px;">
+        <div class="form-group">
+          <label>Nombre</label>
+          <input type="text" id="nuevoDiarioNombre" placeholder="Ej: Venta al contado PEN">
+        </div>
+        <div class="form-group">
+          <label>Tipo de Movimiento</label>
+          <input type="text" id="nuevoDiarioTipoMov" placeholder="Ej: Venta, Compra, Pago, Cobro">
+        </div>
+        <div class="form-group">
+          <label>Tipo de Documento SUNAT (opcional)</label>
+          <select id="nuevoDiarioTipoDoc">
+            <option value="">— Ninguno —</option>
+            <option value="01">01 - Factura</option>
+            <option value="03">03 - Boleta</option>
+            <option value="07">07 - Nota Crédito</option>
+            <option value="08">08 - Nota Débito</option>
+            <option value="09">09 - Guía Remisión</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Moneda</label>
+          <select id="nuevoDiarioMoneda">
+            <option value="">— Ambas —</option>
+            <option value="PEN">PEN - Soles</option>
+            <option value="USD">USD - Dólares</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="window.closeModal('modal-nuevo-diario')">Cancelar</button>
+        <button class="btn btn-primary" onclick="window.guardarNuevoDiario()">Crear Diario</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================================================
+       MODAL: Ver / Editar Líneas de Diario
+       ==================================================== -->
+  <div id="modal-lineas-diario" class="modal">
+    <div class="modal-content" style="max-width:900px; width:95%;">
+      <div class="modal-header">
+        <h3>Líneas del Diario</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-lineas-diario')">&times;</button>
+      </div>
+      <div id="modal-lineas-diario-body" style="padding:15px; overflow-x:auto;"></div>
+      <div class="modal-footer">
+        <button class="btn" onclick="window.closeModal('modal-lineas-diario')">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="assets/js/config.js"></script>
   <script type="module" src="assets/js/supabase-client.js"></script>
   <script type="module" src="assets/js/auth-supabase.js"></script>

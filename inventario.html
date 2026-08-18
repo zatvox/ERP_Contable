@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+  <link rel="icon" href="data:,">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>JHIRO ERP - Inventario</title>
@@ -14,9 +15,15 @@
         <li><a href="dashboard.html" data-page="dashboard">📊 Dashboard</a></li>
         <li><a href="inventario.html" class="active" data-page="inventario">📦 Inventario</a></li>
         <li><a href="compras.html" data-page="compras">🛒 Compras</a></li>
-        <li><a href="ventas.html" data-page="ventas">💰 Ventas</a></li>
+        <li><a href="ventas.html" data-page="ventas">📈 Ventas</a></li>
+        <li><a href="cobranzas.html" data-page="cobranzas">💰 Cuentas x Cobrar/Pagar</a></li>
+        <li><a href="bancos.html" data-page="bancos">🏦 Bancos</a></li>
         <li><a href="contabilidad.html" data-page="contabilidad">📑 Contabilidad</a></li>
-        <li><a href="costeo-importaciones.html" class="active" data-page="costeo">📈 Costeo Import.</a></li>
+        <li data-solo-admin><a href="usuarios.html" data-page="usuarios">👤 Usuarios</a></li>
+        <li><a href="perfil.html" data-page="perfil">🙍 Perfil</a></li>
+        <!-- En standby hasta la v3: módulo de importaciones.
+        <li><a href="costeo-importaciones.html" data-page="costeo">🚢 Costeo Importaciones</a></li>
+        -->
       </ul>
       <div class="sidebar-user">
         <strong id="userDisplay">Admin</strong>
@@ -30,6 +37,36 @@
           <button class="menu-toggle" id="menuToggle">☰</button>
           <h2 class="header-title">Inventario</h2>
         </div>
+
+        <nav class="module-nav" id="inventarioTabs">
+          <div class="module-nav-group">
+            <button type="button" class="module-nav-group-toggle">Catálogo</button>
+            <div class="module-nav-dropdown">
+              <button class="tab-btn active" data-tab="productos">Productos</button>
+              <button class="tab-btn" data-tab="categorias">Categorías</button>
+              <button class="tab-btn" data-tab="marcas">Marcas</button>
+              <button class="tab-btn" data-tab="partidas">Partidas</button>
+            </div>
+          </div>
+          <div class="module-nav-group">
+            <button type="button" class="module-nav-group-toggle">Almacenes y Stock</button>
+            <div class="module-nav-dropdown">
+              <button class="tab-btn" data-tab="lotes">Lotes</button>
+              <button class="tab-btn" data-tab="almacenes">Almacenes</button>
+              <button class="tab-btn" data-tab="resumen">Resumen Stock</button>
+              <button class="tab-btn" data-tab="kardex">Kardex Valorizado</button>
+            </div>
+          </div>
+          <div class="module-nav-group">
+            <button type="button" class="module-nav-group-toggle">Reportes</button>
+            <div class="module-nav-dropdown">
+              <button class="tab-btn" data-tab="reportes">Stock por Partida</button>
+              <button class="tab-btn" data-tab="reportes-gerenciales">📊 Reportes gerenciales</button>
+            </div>
+          </div>
+          <button type="button" class="tab-btn module-nav-config" data-tab="configuracion">⚙️ Configuración</button>
+        </nav>
+
         <div class="header-controls">
           <button class="theme-toggle" id="themeToggle">🌙 Oscuro</button>
         </div>
@@ -38,18 +75,41 @@
       <main class="content">
         <h1 class="page-title">Módulo Inventario</h1>
 
-        <div class="tab-buttons" id="inventarioTabs">
-          <button class="tab-btn active" data-tab="productos">Productos</button>
-          <button class="tab-btn" data-tab="lotes">Lotes</button>
-          <button class="tab-btn" data-tab="resumen">Resumen Stock</button>
-        </div>
-
         <!-- TAB PRODUCTOS -->
         <div id="tab-productos" class="tab-content active">
           <div class="card">
             <div class="card-header">
               <h3 class="card-title">Productos</h3>
-              <button class="btn btn-primary btn-small" onclick="openModal('modal-nuevo-producto')">+ Nuevo Producto</button>
+              <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevoProducto()">+ Nuevo Producto</button>
+            </div>
+            <!-- FILTROS PRODUCTOS -->
+            <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; padding:12px 16px; border-bottom:1px solid var(--border-color, #e0e0e0);">
+              <div class="form-group" style="margin:0; min-width:220px; flex:1;">
+                <label style="font-size:0.8rem;">Buscar</label>
+                <input type="text" id="buscarProducto" placeholder="Nombre o SKU..." oninput="window.aplicarFiltrosProductos()">
+              </div>
+              <div class="form-group" style="margin:0; min-width:180px;">
+                <label style="font-size:0.8rem;">Categoría</label>
+                <select id="filtroProdCategoria" onchange="window.aplicarFiltrosProductos()">
+                  <option value="">Todas</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin:0; min-width:160px;">
+                <label style="font-size:0.8rem;">Stock Total</label>
+                <select id="filtroProdStock" onchange="window.aplicarFiltrosProductos()">
+                  <option value="con" selected>Con stock (&gt; 0)</option>
+                  <option value="sin">Sin stock (= 0)</option>
+                  <option value="">Todos</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin:0; min-width:140px;">
+                <label style="font-size:0.8rem;">Estado</label>
+                <select id="filtroProdEstado" onchange="window.aplicarFiltrosProductos()">
+                  <option value="activo" selected>Activo</option>
+                  <option value="inactivo">Inactivo</option>
+                  <option value="">Todos</option>
+                </select>
+              </div>
             </div>
             <div id="tabla-productos" class="table-container">
               <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Cargando...</p>
@@ -64,21 +124,184 @@
               <h3 class="card-title">Lotes</h3>
               <button class="btn btn-primary btn-small" onclick="abrirModalLote()">+ Nuevo Lote</button>
             </div>
+            <div style="padding:12px 16px; border-bottom:1px solid var(--border-color, #e0e0e0);">
+              <input type="text" id="buscarLote" placeholder="Buscar por N° de lote, partida o producto..." style="width:100%; max-width:420px;" oninput="window.filtrarLotes()">
+            </div>
             <div id="tabla-lotes" class="table-container">
               <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Cargando...</p>
             </div>
           </div>
         </div>
 
-        <!-- TAB RESUMEN -->
         <div id="tab-resumen" class="tab-content">
           <div class="card">
             <div class="card-header">
               <h3 class="card-title">Resumen de Stock</h3>
             </div>
+            <!-- FILTROS RESUMEN STOCK (igual que tab Productos) -->
+            <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; padding:12px 16px; border-bottom:1px solid var(--border-color, #e0e0e0);">
+              <div class="form-group" style="margin:0; min-width:220px; flex:1;">
+                <label style="font-size:0.8rem;">Buscar</label>
+                <input type="text" id="buscarResumenStock" placeholder="Nombre o SKU..." oninput="window.aplicarFiltrosResumenStock()">
+              </div>
+              <div class="form-group" style="margin:0; min-width:180px;">
+                <label style="font-size:0.8rem;">Categoría</label>
+                <select id="filtroResumenCategoria" onchange="window.aplicarFiltrosResumenStock()">
+                  <option value="">Todas</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin:0; min-width:160px;">
+                <label style="font-size:0.8rem;">Stock Total</label>
+                <select id="filtroResumenStock" onchange="window.aplicarFiltrosResumenStock()">
+                  <option value="con" selected>Con stock (&gt; 0)</option>
+                  <option value="sin">Sin stock (= 0)</option>
+                  <option value="">Todos</option>
+                </select>
+              </div>
+            </div>
             <div id="tabla-resumen" class="table-container">
               <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Cargando...</p>
             </div>
+          </div>
+        </div>
+
+        <!-- TAB CATEGORÍAS -->
+        <div id="tab-categorias" class="tab-content">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Categorías de Productos</h3>
+              <button class="btn btn-primary btn-small" onclick="openModal('modal-nueva-categoria')">+ Nueva Categoría</button>
+            </div>
+            <div id="tabla-categorias" class="table-container">
+              <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Cargando...</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB MARCAS -->
+        <div id="tab-marcas" class="tab-content">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Marcas de Productos</h3>
+              <button class="btn btn-primary btn-small" onclick="openModal('modal-nueva-marca')">+ Nueva Marca</button>
+            </div>
+            <div id="tabla-marcas" class="table-container">
+              <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Cargando...</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB PARTIDAS -->
+        <div id="tab-partidas" class="tab-content">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Partidas de Productos</h3>
+              <button class="btn btn-primary btn-small" onclick="openModal('modal-nueva-partida')">+ Nueva Partida</button>
+            </div>
+            <div id="tabla-partidas" class="table-container">
+              <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Cargando...</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB ALMACENES -->
+        <div id="tab-almacenes" class="tab-content">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Almacenes</h3>
+              <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevoAlmacen()">+ Nuevo Almacén</button>
+            </div>
+            <div id="tabla-almacenes" class="table-container">
+              <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Cargando...</p>
+            </div>
+          </div>
+
+          <div class="card" style="margin-top:16px;">
+            <div class="card-header">
+              <h3 class="card-title">Zonas</h3>
+              <div style="display:flex; gap:10px; align-items:center;">
+                <select id="filtroZonaAlmacen" onchange="window.renderZonas()" style="min-width:220px;">
+                  <option value="">-- Todos los almacenes --</option>
+                </select>
+                <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevaZona()">+ Nueva Zona</button>
+              </div>
+            </div>
+            <div id="tabla-zonas" class="table-container">
+              <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Selecciona o crea un almacén primero.</p>
+            </div>
+          </div>
+
+          <div class="card" style="margin-top:16px;">
+            <div class="card-header">
+              <h3 class="card-title">Stock por Zona</h3>
+              <div style="display:flex; gap:8px;">
+                <button class="btn btn-secondary btn-small" onclick="window.abrirModalImportarTraslados()">📥 Importar</button>
+                <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevoTraslado()">+ Nuevo Traslado</button>
+              </div>
+            </div>
+            <div id="tabla-stock-zonas" class="table-container">
+              <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Cargando...</p>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-kardex" class="tab-content">
+          <div id="content-kardex" class="card">Cargando...</div>
+        </div>
+
+        <!-- TAB REPORTES: bloque de reportes del módulo, se arranca con
+             Stock por Partida (agrupa los lotes de una misma partida). -->
+        <div id="tab-reportes" class="tab-content">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Stock por Partida</h3>
+            </div>
+            <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; padding:12px 16px; border-bottom:1px solid var(--border-color, #e0e0e0);">
+              <div class="form-group" style="margin:0; min-width:220px; flex:1;">
+                <label style="font-size:0.8rem;">Buscar</label>
+                <input type="text" id="buscarReportePartida" placeholder="Partida, producto o SKU..." oninput="window.aplicarFiltrosReportePartidas()">
+              </div>
+              <div class="form-group" style="margin:0; min-width:180px;">
+                <label style="font-size:0.8rem;">Categoría</label>
+                <select id="filtroReportePartidaCategoria" onchange="window.aplicarFiltrosReportePartidas()">
+                  <option value="">Todas</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin:0; min-width:160px;">
+                <label style="font-size:0.8rem;">Solo con Partida</label>
+                <select id="filtroReporteSoloConPartida" onchange="window.aplicarFiltrosReportePartidas()">
+                  <option value="1" selected>Sí</option>
+                  <option value="0">Todos (incluye lotes sin partida)</option>
+                </select>
+              </div>
+            </div>
+            <div id="tabla-reporte-partidas" class="table-container">
+              <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Cargando...</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB CONFIGURACIÓN — se completa al final del rediseño de menú -->
+        <!-- TAB: REPORTES GERENCIALES -->
+        <div id="tab-reportes-gerenciales" class="tab-content">
+          <div class="subtab-bar" id="inv-subtabs-reportes">
+            <button class="subtab active" data-sub="repi-valorizacion">Valorización</button>
+            <button class="subtab" data-sub="repi-rotacion">Rotación / Sin movimiento</button>
+            <button class="subtab" data-sub="repi-lotes">Lotes y ubicaciones</button>
+            <button class="subtab" data-sub="repi-kardex">Kardex resumido</button>
+          </div>
+          <div id="repi-valorizacion" class="subtab-panel active"></div>
+          <div id="repi-rotacion"     class="subtab-panel"></div>
+          <div id="repi-lotes"        class="subtab-panel"></div>
+          <div id="repi-kardex"       class="subtab-panel"></div>
+        </div>
+
+        <div id="tab-configuracion" class="tab-content">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Configuración — Inventario</h3>
+            </div>
+            <p style="text-align:center; color:var(--text-secondary); padding:30px;">Cargando...</p>
           </div>
         </div>
       </main>
@@ -89,7 +312,7 @@
   <div id="modal-nuevo-producto" class="modal">
     <div class="modal-content">
       <div class="modal-header">
-        <h3 class="modal-title">Nuevo Producto</h3>
+        <h3 class="modal-title" id="modalProductoTitle">Nuevo Producto</h3>
         <button class="modal-close" onclick="closeModal('modal-nuevo-producto')">✕</button>
       </div>
       <form id="formNewProducto">
@@ -97,20 +320,34 @@
           <label>Nombre *</label>
           <input type="text" id="prodNombre" placeholder="Ej: Laptop HP 15.6" required>
         </div>
-        
-        <div class="form-group">
-          <label>SKU *</label>
-          <input type="text" id="prodSKU" placeholder="Ej: LP-HP-001" required>
+        <div class="grid grid-2">        
+          <div class="form-group">
+            <label>SKU *</label>
+            <input type="text" id="prodSKU" placeholder="Ej: LP-HP-001" required>
+          </div>
+          <div class="form-group">
+            <label>Unidad de Medida</label>
+            <input type="text" id="prodUnidadMedida" placeholder="Ej: Unidad, KG, MTR" required>    
+          </div>  
         </div>
-
         <div class="form-group">
           <label>Descripción</label>
           <textarea id="prodDescripcion" placeholder="Detalles del producto" style="min-height: 80px;"></textarea>
         </div>
 
-        <div class="form-group">
-          <label>Categoría</label>
-          <input type="text" id="prodCategoria" placeholder="Ej: Electrónica">
+        <div class="grid grid-2">
+          <div class="form-group">
+            <label>Categoría</label>
+            <select id="prodCategoria">
+              <option value="">-- Selecciona --</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Marca</label>
+            <select id="prodMarca">
+              <option value="">-- Selecciona --</option>
+            </select>
+          </div>
         </div>
 
         <div class="form-group">
@@ -144,13 +381,36 @@
         </div>
 
         <div class="form-group">
+          <label>Partida</label>
+          <select id="lotePartida">
+            <option value="">-- Selecciona --</option>
+          </select>
+        </div>
+
+        <div class="form-group">
           <label>Número de Lote *</label>
           <input type="text" id="loteNumero" placeholder="Ej: LOTE-001-2025" required>
         </div>
 
+        <div class="grid grid-2">
+          <div class="form-group">
+            <label>Cantidad Inicial</label>
+            <input type="number" id="loteStock" placeholder="0" min="1" required>
+          </div>
+          <div class="form-group">
+            <label>Unidad de Medida</label>
+            <select id="loteUnidadMedida">
+              <option value="KG" selected>KG</option>
+              <option value="M">M</option>
+              <option value="UNIDAD">Unidad</option>
+            </select>
+          </div>
+        </div>
+
         <div class="form-group">
-          <label>Cantidad Inicial</label>
-          <input type="number" id="loteStock" placeholder="0" min="1" required>
+          <label>N° de Unidades (bultos/cajas)</label>
+          <input type="number" id="loteUnidades" placeholder="Ej: 10" step="1" min="0">
+          <small style="color:var(--text-secondary);">Opcional. Si se indica, se calcula el peso por unidad automáticamente.</small>
         </div>
 
         <div class="form-group">
@@ -193,9 +453,24 @@
           <input type="text" id="editLoteNumero" disabled>
         </div>
 
+        <div class="grid grid-2">
+          <div class="form-group">
+            <label>Stock Actual *</label>
+            <input type="number" id="editLoteStock" min="0" required>
+          </div>
+          <div class="form-group">
+            <label>Unidad de Medida</label>
+            <select id="editLoteUnidadMedida">
+              <option value="KG">KG</option>
+              <option value="M">M</option>
+              <option value="UNIDAD">Unidad</option>
+            </select>
+          </div>
+        </div>
+
         <div class="form-group">
-          <label>Stock Actual *</label>
-          <input type="number" id="editLoteStock" min="0" required>
+          <label>N° de Unidades (bultos/cajas)</label>
+          <input type="number" id="editLoteUnidades" placeholder="Ej: 10" step="1" min="0">
         </div>
 
         <div class="form-group">
@@ -219,6 +494,400 @@
       </div>
     </div>
   </div>
+
+  <!-- MODAL NUEVA CATEGORÍA -->
+  <div id="modal-nueva-categoria" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Nueva Categoría</h3>
+        <button class="modal-close" onclick="closeModal('modal-nueva-categoria')">✕</button>
+      </div>
+      <form id="formNewCategoria">
+        <div class="form-group">
+          <label>Nombre *</label>
+          <input type="text" id="catNombre" placeholder="Ej: Electrónica" required>
+        </div>
+
+        <div class="form-group">
+          <label>Descripción</label>
+          <textarea id="catDescripcion" placeholder="Detalles de la categoría" style="min-height: 80px;"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Activo</label>
+          <select id="catActivo">
+            <option value="true" selected>Sí</option>
+            <option value="false">No</option>
+          </select>
+        </div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-nueva-categoria')">Cancelar</button>
+        <button class="btn btn-primary" onclick="guardarCategoria()">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL NUEVA MARCA -->
+  <div id="modal-nueva-marca" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Nueva Marca</h3>
+        <button class="modal-close" onclick="closeModal('modal-nueva-marca')">✕</button>
+      </div>
+      <form id="formNewMarca">
+        <div class="form-group">
+          <label>Nombre *</label>
+          <input type="text" id="marNombre" placeholder="Ej: Samsung" required>
+        </div>
+
+        <div class="form-group">
+          <label>Descripción</label>
+          <textarea id="marDescripcion" placeholder="Detalles de la marca" style="min-height: 80px;"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>País de Origen</label>
+          <input type="text" id="marPais" placeholder="Ej: Corea del Sur">
+        </div>
+
+        <div class="form-group">
+          <label>Activo</label>
+          <select id="marActivo">
+            <option value="true" selected>Sí</option>
+            <option value="false">No</option>
+          </select>
+        </div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-nueva-marca')">Cancelar</button>
+        <button class="btn btn-primary" onclick="guardarMarca()">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+   <!-- MODAL NUEVA PARTIDA -->
+  <div id="modal-nueva-partida" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Nueva Partida</h3>
+        <button class="modal-close" onclick="closeModal('modal-nueva-partida')">✕</button>
+      </div>
+      <form id="formNewPartida">
+        <div class="form-group">
+          <label>Producto *</label>
+          <select id="partProducto" required>
+            <option value="">-- Selecciona --</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Número de Partida *</label>
+          <input type="text" id="partNumero" placeholder="Ej: PART-001-2025" required>
+        </div>
+
+        <div class="form-group">
+          <label>Descripción</label>
+          <textarea id="partDescripcion" placeholder="Detalles de la partida" style="min-height: 80px;"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Fecha Inicio *</label>
+          <input type="date" id="partFechaInicio" required>
+        </div>
+
+        <div class="form-group">
+          <label>Fecha Fin</label>
+          <input type="date" id="partFechaFin">
+        </div>
+
+        <div class="form-group">
+          <label>Estado</label>
+          <select id="partStatus">
+            <option value="activa" selected>Activa</option>
+            <option value="cerrada">Cerrada</option>
+            <option value="cancelada">Cancelada</option>
+          </select>
+        </div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-nueva-partida')">Cancelar</button>
+        <button class="btn btn-primary" onclick="guardarPartida()">Guardar</button>
+      </div>
+    </div>
+  </div>
+  <!-- MODAL NUEVO/EDITAR ALMACÉN -->
+  <div id="modal-nuevo-almacen" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modalAlmacenTitle">Nuevo Almacén</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-nuevo-almacen')">✕</button>
+      </div>
+      <form id="formNewAlmacen" onsubmit="return false;">
+        <input type="hidden" id="almId">
+        <div class="grid grid-2">
+          <div class="form-group">
+            <label>Código *</label>
+            <input type="text" id="almCodigo" placeholder="Ej: ALM-01" required>
+          </div>
+          <div class="form-group">
+            <label>Nombre *</label>
+            <input type="text" id="almNombre" placeholder="Ej: Almacén Lima" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Dirección *</label>
+          <input type="text" id="almDireccion" placeholder="Dirección fiscal" required>
+        </div>
+        <div class="grid grid-2">
+          <div class="form-group">
+            <label>Ubigeo</label>
+            <input type="text" id="almUbigeo" placeholder="Ej: 150101">
+          </div>
+          <div class="form-group">
+            <label>Código Establecimiento SUNAT</label>
+            <input type="text" id="almEstablecimientoSunat" placeholder="Opcional">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="almPrincipal" style="width:auto; margin-right:6px;"> Es almacén principal
+          </label>
+        </div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-nuevo-almacen')">Cancelar</button>
+        <button class="btn btn-primary" onclick="window.guardarAlmacen()">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL NUEVA/EDITAR ZONA (ubicación) -->
+  <div id="modal-nueva-zona" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modalZonaTitle">Nueva Zona</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-nueva-zona')">✕</button>
+      </div>
+      <form id="formNewZona" onsubmit="return false;">
+        <input type="hidden" id="zonaId">
+        <div class="form-group">
+          <label>Almacén *</label>
+          <select id="zonaAlmacen" required>
+            <option value="">-- Selecciona --</option>
+          </select>
+        </div>
+        <div class="grid grid-2">
+          <div class="form-group">
+            <label>Código *</label>
+            <input type="text" id="zonaCodigo" placeholder="Ej: ZONA-A" required>
+          </div>
+          <div class="form-group">
+            <label>Nombre *</label>
+            <input type="text" id="zonaNombre" placeholder="Ej: Zona A" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Tipo</label>
+          <select id="zonaTipo">
+            <option value="zona" selected>Zona</option>
+            <option value="rack">Rack</option>
+            <option value="pasillo">Pasillo</option>
+            <option value="otro">Otro</option>
+          </select>
+        </div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-nueva-zona')">Cancelar</button>
+        <button class="btn btn-primary" onclick="window.guardarZona()">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL TRASLADO INTERNO (mover stock entre zonas, sin tocar el costeo) -->
+  <div id="modal-traslado-interno" class="modal">
+    <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+      <div class="modal-header">
+        <h3 class="modal-title">Traslado Interno entre Zonas</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-traslado-interno')">✕</button>
+      </div>
+      <form id="formTrasladoInterno" onsubmit="return false;">
+        <div style="padding: 20px; border-bottom: 1px solid var(--border-color);">
+          <div class="grid grid-2">
+            <div class="form-group">
+              <label>Zona Origen *</label>
+              <select id="tiZonaOrigen" required onchange="window.onCambiarZonaOrigenTraslado()">
+                <option value="">-- Selecciona --</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Zona Destino *</label>
+              <select id="tiZonaDestino" required>
+                <option value="">-- Selecciona --</option>
+              </select>
+            </div>
+          </div>
+          <div class="grid grid-2">
+            <div class="form-group">
+              <label>Fecha *</label>
+              <input type="date" id="tiFecha" required>
+            </div>
+            <div class="form-group">
+              <label>Documento de Referencia <small style="color:var(--text-secondary);">(opcional)</small></label>
+              <input type="text" id="tiDocumentoReferencia" placeholder="Ej: N° de guía interna, ticket, etc.">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Descripción <small style="color:var(--text-secondary);">(opcional)</small></label>
+            <input type="text" id="tiDescripcion" placeholder="Motivo del traslado">
+          </div>
+        </div>
+
+        <div style="padding: 20px;">
+          <h4 style="margin-bottom: 15px; color: var(--text-primary); display: flex; justify-content: space-between; align-items: center;">
+            <span>Detalle del Traslado</span>
+            <button type="button" class="btn btn-primary btn-small" onclick="window.abrirModalDetalleTraslado()">+ Agregar Producto</button>
+          </h4>
+
+          <div id="tabla-detalle-traslado" style="margin-top: 15px;">
+            <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Sin productos agregados</p>
+          </div>
+
+          <div style="margin-top: 20px; padding: 15px; background-color: var(--bg-secondary); border-radius: var(--radius-md); display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
+            <div style="text-align: center;">
+              <div style="font-size: 12px; color: var(--text-secondary);">Cantidad Total</div>
+              <div style="font-size: 18px; font-weight: 600; color: var(--text-primary);" id="tiTotalCantidad">0</div>
+            </div>
+            <div style="text-align: center;">
+              <div style="font-size: 12px; color: var(--text-secondary);">N° de Líneas</div>
+              <div style="font-size: 18px; font-weight: 600; color: var(--text-primary);" id="tiTotalLineas">0</div>
+            </div>
+          </div>
+        </div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-traslado-interno')">Cancelar</button>
+        <button class="btn btn-primary" id="btnGuardarTrasladoInterno" onclick="window.guardarTrasladoInterno()">Trasladar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SUB-MODAL: Agregar Producto al Traslado -->
+  <div id="modal-detalle-traslado" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Agregar Producto al Traslado</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-detalle-traslado')">✕</button>
+      </div>
+      <form id="formDetalleTraslado" onsubmit="return false;">
+        <div class="form-group">
+          <label>Producto *</label>
+          <select id="tdProducto" required onchange="window.onCambiarProductoDetalleTraslado()">
+            <option value="">-- Selecciona un producto con stock en la zona origen --</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Lote *</label>
+          <select id="tdLote" required onchange="window.onCambiarLoteDetalleTraslado()">
+            <option value="">-- Selecciona un producto primero --</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Cantidad (kg) *</label>
+          <input type="number" id="tdCantidad" step="0.01" min="0.01" required oninput="window.onCambiarCantidadDetalleTraslado()">
+          <small id="tdDisponible" style="color:var(--text-secondary);"></small>
+        </div>
+        <div class="form-group">
+          <label title="Bultos/conos/cajas que se trasladan. Se sugiere automáticamente si el lote tiene peso por unidad calculado.">N° Unidades</label>
+          <input type="number" id="tdCantUnidades" step="0.01" min="0" placeholder="—">
+        </div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-detalle-traslado')">Cancelar</button>
+        <button class="btn btn-primary" onclick="window.agregarLineaTraslado()">Agregar Producto</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Importar Traslados Internos Masivos (desde Excel/CSV) -->
+  <div id="modal-importar-traslados" class="modal">
+    <div class="modal-content" style="max-width: 700px; max-height: 90vh; overflow-y: auto;">
+      <div class="modal-header">
+        <h3 class="modal-title">Importar Traslados Internos (masivo)</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-importar-traslados')">✕</button>
+      </div>
+      <div style="padding: 20px;">
+        <p style="color: var(--text-secondary); margin-bottom: 12px;">
+          Sube un archivo Excel (.xlsx) o CSV con las columnas:
+          <code>sku, numero_lote, zona_origen, zona_destino, cantidad, fecha, documento_referencia, descripcion</code>.
+          Cada fila crea un traslado interno independiente (mismo efecto que hacerlo manual, uno por uno).
+        </p>
+        <p style="margin-bottom: 16px;">
+          <a href="assets/sql/plantilla_importar_traslados_internos.xlsx" download style="color: var(--color-info);">📄 Descargar plantilla de ejemplo</a>
+        </p>
+        <div class="form-group">
+          <label>Archivo (.xlsx / .csv) *</label>
+          <input type="file" id="fileImportarTraslados" accept=".xlsx,.xls,.csv">
+        </div>
+        <div id="importar-traslados-resumen" style="margin-top: 16px;"></div>
+        <div id="importar-traslados-log" style="margin-top: 12px; max-height: 260px; overflow-y: auto; font-size: 13px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-importar-traslados')">Cerrar</button>
+        <button class="btn btn-primary" id="btnProcesarImportarTraslados" onclick="window.procesarImportacionTraslados()">Procesar Importación</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Ajuste de Inventario (Kardex) -->
+  <div id="modal-ajuste-kardex" class="modal">
+    <div class="modal-content" style="max-width:480px;">
+      <div class="modal-header">
+        <h3>Ajuste de Inventario</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-ajuste-kardex')">&times;</button>
+      </div>
+      <div style="padding:15px; display:flex; flex-direction:column; gap:10px;">
+        <div class="form-group">
+          <label>Ítem</label>
+          <select id="ajusteKardexItem">
+            <option value="">-- Selecciona ítem --</option>
+          </select>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="form-group">
+            <label>Tipo de Ajuste</label>
+            <select id="ajusteKardexTipo">
+              <option value="ajuste_entrada">Ajuste Entrada (+)</option>
+              <option value="ajuste_salida">Ajuste Salida (-)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Fecha</label>
+            <input type="date" id="ajusteKardexFecha">
+          </div>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="form-group">
+            <label>Cantidad</label>
+            <input type="number" id="ajusteKardexCant" step="0.001" min="0.001" placeholder="0.000">
+          </div>
+          <div class="form-group">
+            <label>Costo Unitario</label>
+            <input type="number" id="ajusteKardexCosto" step="0.0001" min="0" placeholder="0.0000">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Concepto / Motivo</label>
+          <input type="text" id="ajusteKardexConcepto" placeholder="Ej: Ajuste por conteo físico">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="window.closeModal('modal-ajuste-kardex')">Cancelar</button>
+        <button class="btn btn-primary" onclick="window.guardarAjusteKardex()">Guardar Ajuste</button>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="assets/js/config.js"></script>
   <script type="module" src="assets/js/supabase-client.js"></script>
   <script type="module" src="assets/js/auth-supabase.js"></script>

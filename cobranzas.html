@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <link rel="icon" href="data:,">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JHIRO ERP - Cuentas x Cobrar/Pagar</title>
+  <link rel="stylesheet" href="assets/css/styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <aside class="sidebar">
+      <div class="sidebar-logo">JHIRO</div>
+      <ul class="sidebar-menu">
+        <li><a href="dashboard.html" data-page="dashboard">📊 Dashboard</a></li>
+        <li><a href="inventario.html" data-page="inventario">📦 Inventario</a></li>
+        <li><a href="compras.html" data-page="compras">🛒 Compras</a></li>
+        <li><a href="ventas.html" data-page="ventas">📈 Ventas</a></li>
+        <li><a href="cobranzas.html" class="active" data-page="cobranzas">💰 Cuentas x Cobrar/Pagar</a></li>
+        <li><a href="bancos.html" data-page="bancos">🏦 Bancos</a></li>
+        <li><a href="contabilidad.html" data-page="contabilidad">📑 Contabilidad</a></li>
+        <li data-solo-admin><a href="usuarios.html" data-page="usuarios">👤 Usuarios</a></li>
+        <li><a href="perfil.html" data-page="perfil">🙍 Perfil</a></li>
+        <!-- En standby hasta la v3: módulo de importaciones.
+        <li><a href="costeo-importaciones.html" data-page="costeo">🚢 Costeo Importaciones</a></li>
+        -->
+      </ul>
+      <div class="sidebar-user">
+        <strong id="userDisplay">Admin</strong>
+        <button class="btn-logout" onclick="logout()">Cerrar Sesión</button>
+      </div>
+    </aside>
+
+    <div class="main-content">
+      <header class="header">
+        <div class="header-left">
+          <button class="menu-toggle" id="menuToggle">☰</button>
+          <h2 class="header-title">Cuentas x Cobrar/Pagar</h2>
+        </div>
+
+        <nav class="module-nav" id="cobTabs">
+          <div class="module-nav-group">
+            <button type="button" class="module-nav-group-toggle">Por Cobrar</button>
+            <div class="module-nav-dropdown">
+              <button class="tab-btn active" data-tab="cxc">Cuentas por Cobrar</button>
+              <button class="tab-btn" data-tab="cobros">Registrar Cobro</button>
+              <button class="tab-btn" data-tab="retenciones">Retenciones IGV</button>
+            </div>
+          </div>
+          <div class="module-nav-group">
+            <button type="button" class="module-nav-group-toggle">Por Pagar</button>
+            <div class="module-nav-dropdown">
+              <button class="tab-btn" data-tab="cxp">Cuentas por Pagar</button>
+              <button class="tab-btn" data-tab="pagos-prov">Registrar Pago</button>
+            </div>
+          </div>
+          <button type="button" class="tab-btn" data-tab="terminos">📅 Términos de Pago</button>
+          <button type="button" class="tab-btn" data-tab="letras">💱 Letras</button>
+          <button type="button" class="tab-btn" data-tab="reportes">📊 Reportes</button>
+          <button type="button" class="tab-btn module-nav-config" data-tab="configuracion">⚙️ Configuración</button>
+        </nav>
+
+        <div class="header-controls">
+          <button class="theme-toggle" id="themeToggle">🌙 Oscuro</button>
+        </div>
+      </header>
+
+      <main class="content">
+        <h1 class="page-title">Cuentas por Cobrar y por Pagar</h1>
+
+        <!-- KPIs rápidos (clickeables → llevan al tab correspondiente) -->
+        <div class="grid grid-4" id="cob-kpis" style="margin-bottom:20px;">
+          <div class="kpi-card kpi-clickable" onclick="window.irATab('cxc')">
+            <div class="kpi-label">CxC Pendiente</div>
+            <div class="kpi-value" id="kpi-cxc-pendiente" style="color:var(--color-warning);">S/ 0.00</div>
+            <div class="kpi-sub" id="kpi-cxc-pendiente-sub"></div>
+          </div>
+          <div class="kpi-card kpi-clickable" onclick="window.irATab('cxc')">
+            <div class="kpi-label">CxC Vencida</div>
+            <div class="kpi-value" id="kpi-cxc-vencida" style="color:var(--color-danger);">S/ 0.00</div>
+            <div class="kpi-sub" id="kpi-cxc-vencida-sub"></div>
+          </div>
+          <div class="kpi-card kpi-clickable" onclick="window.irATab('cxp')">
+            <div class="kpi-label">CxP Pendiente</div>
+            <div class="kpi-value" id="kpi-cxp-pendiente" style="color:var(--color-info);">S/ 0.00</div>
+            <div class="kpi-sub" id="kpi-cxp-pendiente-sub"></div>
+          </div>
+          <div class="kpi-card kpi-clickable" onclick="window.irATab('reportes')">
+            <div class="kpi-label">Posición Neta</div>
+            <div class="kpi-value" id="kpi-posicion-neta" style="color:var(--color-success);">S/ 0.00</div>
+            <div class="kpi-sub">CxC − CxP</div>
+          </div>
+        </div>
+
+        <!-- ================= TAB: CxC ================= -->
+        <div id="tab-cxc" class="tab-content active">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Cuentas por Cobrar</h3>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button class="btn btn-secondary btn-small" onclick="window.exportarCxC()">⬇ CSV</button>
+                <button class="btn btn-secondary btn-small" onclick="window.cargarCxC()">↺ Actualizar</button>
+              </div>
+            </div>
+            <div class="reporte-filtros">
+              <div class="reporte-filtro">
+                <label>Buscar</label>
+                <input type="text" id="cxc-buscar" placeholder="Cliente o comprobante..." oninput="window.cargarCxC()">
+              </div>
+              <div class="reporte-filtro">
+                <label>Estado</label>
+                <select id="cxc-filtro-estado" onchange="window.cargarCxC()">
+                  <option value="">Todos</option>
+                  <option value="pendiente" selected>Pendiente</option>
+                  <option value="parcial">Parcial</option>
+                  <option value="cobrado">Cobrado</option>
+                </select>
+              </div>
+              <div class="reporte-filtro">
+                <label>Vencimiento</label>
+                <select id="cxc-filtro-venc" onchange="window.cargarCxC()">
+                  <option value="">Todos</option>
+                  <option value="vencido">Solo vencidos</option>
+                  <option value="porvencer">Por vencer (según config)</option>
+                  <option value="alcorriente">Al corriente</option>
+                </select>
+              </div>
+              <div class="reporte-filtro">
+                <label>Moneda</label>
+                <select id="cxc-filtro-moneda" onchange="window.cargarCxC()">
+                  <option value="">Todas</option>
+                  <option value="PEN">PEN</option>
+                  <option value="USD">USD</option>
+                </select>
+              </div>
+              <div class="reporte-filtro">
+                <label>Emitidas desde</label>
+                <input type="date" id="cxc-filtro-desde" onchange="window.cargarCxC()">
+              </div>
+              <div class="reporte-filtro">
+                <label>Hasta</label>
+                <input type="date" id="cxc-filtro-hasta" onchange="window.cargarCxC()">
+              </div>
+            </div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Cliente</th><th>Comprobante</th><th>F. Emisión</th>
+                    <th>F. Vencimiento</th><th>Días</th><th>Moneda</th>
+                    <th style="text-align:right;">Total</th>
+                    <th style="text-align:right;">Cobrado</th>
+                    <th style="text-align:right;">Pendiente</th>
+                    <th>Estado</th><th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-cxc">
+                  <tr><td colspan="11" style="text-align:center;">Cargando...</td></tr>
+                </tbody>
+                <tfoot>
+                  <tr class="rp-total" id="tfoot-cxc"></tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================= TAB: Registrar Cobro ================= -->
+        <div id="tab-cobros" class="tab-content">
+          <div class="card" style="max-width:680px;">
+            <div class="card-header">
+              <h3 class="card-title">Registrar Cobro de Cliente</h3>
+            </div>
+            <div style="padding:20px; display:flex; flex-direction:column; gap:12px;">
+              <div class="form-group">
+                <label>Cuenta por Cobrar</label>
+                <select id="cobroSelectCxC" onchange="window.onSelectCxC()">
+                  <option value="">-- Seleccione CxC --</option>
+                </select>
+                <small id="cobro-cxc-info" style="color:var(--text-secondary);"></small>
+              </div>
+              <div id="cobro-retencion-block" style="display:none; padding:10px 12px; background:var(--bg-secondary); border-radius:var(--radius-md); border:1px solid var(--color-warning);">
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:0;">
+                  <input type="checkbox" id="cobroAplicarRetencion" checked onchange="window.onToggleRetencionCobro()">
+                  <span>Cliente sujeto a retención IGV — aplicar retención en este cobro</span>
+                </label>
+                <small id="cobro-retencion-info" style="display:block; margin-top:4px; color:var(--text-secondary);"></small>
+              </div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <div class="form-group">
+                  <label>Fecha de Cobro</label>
+                  <input type="date" id="cobroFecha">
+                </div>
+                <div class="form-group">
+                  <label>Importe a Cobrar</label>
+                  <input type="number" id="cobroMonto" step="0.01" min="0.01" placeholder="0.00">
+                </div>
+              </div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <div class="form-group">
+                  <label>Medio de Pago</label>
+                  <select id="cobroMedioPago">
+                    <option value="transferencia">Transferencia Bancaria</option>
+                    <option value="deposito">Depósito en Cuenta</option>
+                    <option value="efectivo">Efectivo</option>
+                    <option value="cheque">Cheque</option>
+                    <option value="detraccion">Detracción</option>
+                    <option value="otro">Otro</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Banco Destino</label>
+                  <select id="cobroBanco">
+                    <option value="">-- Seleccione banco --</option>
+                  </select>
+                  <small id="cobro-banco-aviso" style="color:var(--text-secondary);"></small>
+                </div>
+              </div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <div class="form-group">
+                  <label>N° Operación / Referencia</label>
+                  <input type="text" id="cobroReferencia" placeholder="N° transferencia o cheque">
+                </div>
+                <div class="form-group">
+                  <label>Tipo de Cambio (si USD)</label>
+                  <input type="number" id="cobroTipoCambio" step="0.001" placeholder="3.750" value="3.750">
+                </div>
+              </div>
+              <button class="btn btn-primary" onclick="window.registrarCobro()" style="width:100%;">
+                ✅ Registrar Cobro y Generar Asiento
+              </button>
+            </div>
+          </div>
+          <div class="card" style="margin-top:20px;">
+            <div class="card-header">
+              <h3 class="card-title">Cobros Recientes</h3>
+              <input type="text" id="buscarCobro" placeholder="Buscar cliente o referencia..." style="max-width:280px;" oninput="window.filtrarCobrosRecientes()">
+            </div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr><th>Fecha</th><th>Cliente</th><th style="text-align:right;">Monto</th><th style="text-align:right;">Retención</th><th>Medio</th><th>Banco</th><th>Referencia</th><th>Asiento</th><th></th></tr>
+                </thead>
+                <tbody id="tbody-cobros-recientes">
+                  <tr><td colspan="9" style="text-align:center;">Cargando...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================= TAB: CxP ================= -->
+        <div id="tab-cxp" class="tab-content">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Cuentas por Pagar (Proveedores)</h3>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button class="btn btn-secondary btn-small" onclick="window.exportarCxP()">⬇ CSV</button>
+                <button class="btn btn-secondary btn-small" onclick="window.cargarCxP()">↺ Actualizar</button>
+              </div>
+            </div>
+            <div class="reporte-filtros">
+              <div class="reporte-filtro">
+                <label>Buscar</label>
+                <input type="text" id="cxp-buscar" placeholder="Proveedor o comprobante..." oninput="window.cargarCxP()">
+              </div>
+              <div class="reporte-filtro">
+                <label>Estado</label>
+                <select id="cxp-filtro-estado" onchange="window.cargarCxP()">
+                  <option value="">Todos menos pagados</option>
+                  <option value="pendiente">Pendiente</option>
+                  <option value="parcial">Parcial</option>
+                  <option value="pagado">Pagado</option>
+                  <option value="_todos">Absolutamente todos</option>
+                </select>
+              </div>
+              <div class="reporte-filtro">
+                <label>Moneda</label>
+                <select id="cxp-filtro-moneda" onchange="window.cargarCxP()">
+                  <option value="">Todas</option>
+                  <option value="PEN">PEN</option>
+                  <option value="USD">USD</option>
+                </select>
+              </div>
+              <div class="reporte-filtro">
+                <label>Emitidas desde</label>
+                <input type="date" id="cxp-filtro-desde" onchange="window.cargarCxP()">
+              </div>
+              <div class="reporte-filtro">
+                <label>Hasta</label>
+                <input type="date" id="cxp-filtro-hasta" onchange="window.cargarCxP()">
+              </div>
+            </div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Proveedor</th><th>Comprobante</th><th>F. Emisión</th>
+                    <th>F. Vencimiento</th>
+                    <th>Días</th><th>Moneda</th>
+                    <th style="text-align:right;">Total</th>
+                    <th style="text-align:right;">Pagado</th>
+                    <th style="text-align:right;">Pendiente</th>
+                    <th>Estado</th><th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-cxp">
+                  <tr><td colspan="11" style="text-align:center;">Cargando...</td></tr>
+                </tbody>
+                <tfoot>
+                  <tr class="rp-total" id="tfoot-cxp"></tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================= TAB: Pagos a proveedores ================= -->
+        <div id="tab-pagos-prov" class="tab-content">
+          <div class="card" style="max-width:680px;">
+            <div class="card-header">
+              <h3 class="card-title">Registrar Pago a Proveedor</h3>
+            </div>
+            <div style="padding:20px; display:flex; flex-direction:column; gap:12px;">
+              <div class="form-group">
+                <label>Cuenta por Pagar</label>
+                <select id="pagoSelectCompra" onchange="window.onSelectCompra()">
+                  <option value="">-- Seleccione Compra --</option>
+                </select>
+                <small id="pago-compra-info" style="color:var(--text-secondary);"></small>
+              </div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <div class="form-group">
+                  <label>Fecha de Pago</label>
+                  <input type="date" id="pagoFecha">
+                </div>
+                <div class="form-group">
+                  <label>Monto a Pagar</label>
+                  <input type="number" id="pagoMonto" step="0.01" min="0.01" placeholder="0.00">
+                </div>
+              </div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <div class="form-group">
+                  <label>Moneda</label>
+                  <select id="pagoMoneda">
+                    <option value="PEN">PEN - Soles</option>
+                    <option value="USD">USD - Dólares</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Tipo de Cambio</label>
+                  <input type="number" id="pagoTipoCambio" step="0.001" placeholder="3.750" value="3.750">
+                </div>
+              </div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <div class="form-group">
+                  <label>Medio de Pago</label>
+                  <select id="pagoMedioPago">
+                    <option value="transferencia">Transferencia</option>
+                    <option value="cheque">Cheque</option>
+                    <option value="efectivo">Efectivo</option>
+                    <option value="deposito">Depósito</option>
+                    <option value="detraccion">Detracción</option>
+                    <option value="otro">Otro</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Banco Origen</label>
+                  <select id="pagoBanco">
+                    <option value="">-- Seleccione banco --</option>
+                  </select>
+                  <small id="pago-banco-aviso" style="color:var(--text-secondary);"></small>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>N° Operación / Referencia</label>
+                <input type="text" id="pagoReferencia" placeholder="N° transferencia">
+              </div>
+              <button class="btn btn-primary" onclick="window.registrarPagoProveedor()" style="width:100%;">
+                ✅ Registrar Pago y Generar Asiento
+              </button>
+            </div>
+          </div>
+          <div class="card" style="margin-top:20px;">
+            <div class="card-header">
+              <h3 class="card-title">Pagos Recientes</h3>
+              <input type="text" id="buscarPago" placeholder="Buscar proveedor o referencia..." style="max-width:280px;" oninput="window.filtrarPagosRecientes()">
+            </div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr><th>Fecha</th><th>Proveedor</th><th style="text-align:right;">Monto</th><th>Moneda</th><th>Medio</th><th>Banco</th><th>Referencia</th><th></th></tr>
+                </thead>
+                <tbody id="tbody-pagos-recientes">
+                  <tr><td colspan="8" style="text-align:center;">Cargando...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================= TAB: Retenciones ================= -->
+        <div id="tab-retenciones" class="tab-content">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Comprobantes de Retención IGV recibidos</h3>
+              <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                <input type="month" id="retencionesPeriodo" onchange="window.cargarRetenciones()">
+                <button class="btn btn-secondary btn-small" onclick="window.cargarRetenciones()">↺ Actualizar</button>
+              </div>
+            </div>
+            <p style="padding:0 16px; color:var(--text-secondary); font-size:0.85rem;">
+              Cada fila es un cobro donde se aplicó retención de IGV. Completa el N° de Comprobante de Retención
+              cuando el cliente te lo entregue — es la base para deducirlo de tu IGV por pagar del periodo.
+            </p>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Fecha Cobro</th><th>Cliente</th><th>Comprobante</th>
+                    <th style="text-align:right;">Monto Retenido</th>
+                    <th>N° Comprobante Retención</th><th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-retenciones">
+                  <tr><td colspan="6" style="text-align:center;">Cargando...</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div style="padding:16px; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; border-top:1px solid var(--border-color);">
+              <strong>Total retenido del periodo: <span id="retenciones-total">S/ 0.00</span></strong>
+              <div style="display:flex; gap:8px;">
+                <button class="btn btn-secondary btn-small" onclick="window.exportarRetenciones()">⬇ CSV</button>
+                <button class="btn btn-primary btn-small" onclick="window.aplicarDeduccionRetenciones()">Aplicar deducción a IGV del periodo</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================= TAB: TÉRMINOS DE PAGO ================= -->
+        <div id="tab-terminos" class="tab-content">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Términos de Pago</h3>
+              <button class="btn btn-primary btn-small" onclick="window.abrirModalTerminoPago()">+ Nuevo Término</button>
+            </div>
+            <p style="padding:0 16px; color:var(--text-secondary); font-size:0.85rem;">
+              Define cómo se fracciona un total: porcentajes y días. Las fechas se calculan al aplicarlo sobre cada venta o compra.
+              Si en una operación puntual se negocia algo distinto (ej. 37/64/83 días), <strong>no crees un término nuevo</strong>:
+              usa la opción <em>Personalizado</em> en el cronograma de esa venta.
+            </p>
+            <div id="tabla-terminos" class="table-container">
+              <p class="reporte-vacio">Cargando...</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================= TAB: LETRAS ================= -->
+        <div id="tab-letras" class="tab-content">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Letras de Cambio</h3>
+              <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevaLetra()">+ Nueva Letra</button>
+            </div>
+            <p style="padding:0 16px; color:var(--text-secondary); font-size:0.85rem;">
+              Una letra canjea el saldo de UNA cuota (de Cuentas por Cobrar o por Pagar) por un documento de crédito físico.
+              Emitida = de un cliente (tu CxC). Recibida = a un proveedor (tu CxP). El estado sigue el flujo contable:
+              <strong>cartera</strong> (en tu poder) → <strong>banco</strong> (en descuento/custodia) → <strong>cobrada</strong>, o <strong>protestada</strong> si no paga.
+            </p>
+            <div style="display:flex; flex-wrap:wrap; gap:12px; padding:0 16px 12px;">
+              <div class="reporte-filtro">
+                <label>Tipo</label>
+                <select id="let-filtro-tipo" onchange="window.cargarLetras()">
+                  <option value="">Todas</option>
+                  <option value="emitida">Emitidas (CxC)</option>
+                  <option value="recibida">Recibidas (CxP)</option>
+                </select>
+              </div>
+              <div class="reporte-filtro">
+                <label>Estado</label>
+                <select id="let-filtro-estado" onchange="window.cargarLetras()">
+                  <option value="">Todos</option>
+                  <option value="cartera">Cartera</option>
+                  <option value="banco">En banco</option>
+                  <option value="cobranza">En cobranza</option>
+                  <option value="cobrada">Cobrada</option>
+                  <option value="protestada">Protestada</option>
+                  <option value="refinanciada">Refinanciada</option>
+                  <option value="anulada">Anulada</option>
+                </select>
+              </div>
+            </div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>N° Letra</th><th>Tipo</th><th>Contacto</th><th>Comprobante / Cuota</th>
+                    <th>F. Emisión</th><th>F. Vencimiento</th>
+                    <th style="text-align:right;">Monto</th><th>Banco</th><th>Estado</th><th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-letras">
+                  <tr><td colspan="10" style="text-align:center;">Cargando...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================= TAB: REPORTES ================= -->
+        <div id="tab-reportes" class="tab-content">
+          <div class="subtab-bar" id="cob-subtabs-reportes">
+            <button class="subtab active" data-sub="rep-antiguedad-cxc">Antigüedad CxC</button>
+            <button class="subtab" data-sub="rep-antiguedad-cxp">Antigüedad CxP</button>
+            <button class="subtab" data-sub="rep-cobros">Cobranza</button>
+            <button class="subtab" data-sub="rep-pagos">Pagos</button>
+            <button class="subtab" data-sub="rep-retenciones">Retenciones</button>
+            <button class="subtab" data-sub="rep-flujo">Flujo proyectado</button>
+          </div>
+          <div id="rep-antiguedad-cxc" class="subtab-panel active"></div>
+          <div id="rep-antiguedad-cxp" class="subtab-panel"></div>
+          <div id="rep-cobros"         class="subtab-panel"></div>
+          <div id="rep-pagos"          class="subtab-panel"></div>
+          <div id="rep-retenciones"    class="subtab-panel"></div>
+          <div id="rep-flujo"          class="subtab-panel"></div>
+        </div>
+
+        <!-- ================= TAB: CONFIGURACIÓN ================= -->
+        <div id="tab-configuracion" class="tab-content">
+          <div id="cob-config-container"></div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- MODAL: Nuevo / Editar Término de Pago -->
+  <div id="modal-termino-pago" class="modal">
+    <div class="modal-content" style="max-width: 640px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="tp-titulo">Nuevo Término de Pago</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-termino-pago')">✕</button>
+      </div>
+      <div style="padding:20px; display:flex; flex-direction:column; gap:14px;">
+        <input type="hidden" id="tpId">
+        <div style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:12px;">
+          <div class="form-group">
+            <label>Nombre *</label>
+            <input type="text" id="tpNombre" placeholder="Ej: Crédito 90 días">
+          </div>
+          <div class="form-group">
+            <label>Tipo</label>
+            <select id="tpTipo">
+              <option value="credito">Crédito (días desde la emisión)</option>
+              <option value="contado">Contado</option>
+              <option value="hito">Por hito / evento</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Aplica a</label>
+            <select id="tpAplicaA">
+              <option value="ambos">Ventas y compras</option>
+              <option value="venta">Solo ventas</option>
+              <option value="compra">Solo compras</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Descripción</label>
+          <input type="text" id="tpDescripcion" placeholder="Opcional: cuándo se usa este término">
+        </div>
+
+        <div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <strong style="font-size:0.9rem;">Cuotas del término</strong>
+            <button type="button" class="btn btn-small btn-secondary" onclick="window.agregarCuotaTermino()">+ Agregar cuota</button>
+          </div>
+          <div class="table-container">
+            <table class="cronograma-tabla">
+              <thead>
+                <tr><th style="width:50px;">#</th><th style="width:110px;">% del total</th><th style="width:110px;">Días</th><th>Hito (solo tipo hito)</th><th style="width:40px;"></th></tr>
+              </thead>
+              <tbody id="tp-cuotas-body"></tbody>
+              <tfoot>
+                <tr class="rp-total">
+                  <td><strong>Total</strong></td>
+                  <td><strong id="tp-suma-pct">0</strong> %</td>
+                  <td colspan="3"><span id="tp-aviso-pct" style="font-size:0.82rem;"></span></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-termino-pago')">Cancelar</button>
+        <button class="btn btn-primary" onclick="window.guardarTerminoPago()">💾 Guardar Término</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Nueva Letra (canjea el saldo de UNA cuota) -->
+  <div id="modal-nueva-letra" class="modal">
+    <div class="modal-content" style="max-width: 640px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Nueva Letra de Cambio</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-nueva-letra')">✕</button>
+      </div>
+      <div style="padding:20px; display:flex; flex-direction:column; gap:14px;">
+        <div class="form-group">
+          <label>Tipo *</label>
+          <select id="letTipo" onchange="window.onCambiarTipoLetra()">
+            <option value="emitida">Emitida — de un cliente (canjea una cuota de CxC)</option>
+            <option value="recibida">Recibida — a un proveedor (canjea una cuota de CxP)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Cuota pendiente a canjear *</label>
+          <select id="letCuota" onchange="window.onCambiarCuotaLetra()">
+            <option value="">-- Selecciona --</option>
+          </select>
+          <small id="letCuotaAviso" style="color:var(--text-secondary); font-size:0.78rem;"></small>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div class="form-group">
+            <label>N° de Letra *</label>
+            <input type="text" id="letNumero" placeholder="Ej: LT.187-01">
+          </div>
+          <div class="form-group">
+            <label>Monto a canjear *</label>
+            <input type="number" id="letMonto" step="0.01" min="0.01" placeholder="0.00">
+            <small style="color:var(--text-secondary); font-size:0.72rem;">Puede ser menor al saldo de la cuota (canje parcial).</small>
+          </div>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div class="form-group">
+            <label>Fecha de Emisión *</label>
+            <input type="date" id="letFechaEmision">
+          </div>
+          <div class="form-group">
+            <label>Fecha de Vencimiento *</label>
+            <input type="date" id="letFechaVencimiento">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Observaciones</label>
+          <input type="text" id="letObservaciones" placeholder="Opcional">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-nueva-letra')">Cancelar</button>
+        <button class="btn btn-primary" onclick="window.guardarLetra()">💾 Guardar Letra</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Llevar Letra a Banco (descuento / custodia / cobranza) -->
+  <div id="modal-letra-banco" class="modal">
+    <div class="modal-content" style="max-width: 480px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Llevar Letra a Banco</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-letra-banco')">✕</button>
+      </div>
+      <div style="padding:20px; display:flex; flex-direction:column; gap:14px;">
+        <input type="hidden" id="letBancoLetraId">
+        <div class="form-group">
+          <label>Banco *</label>
+          <select id="letBancoSelect">
+            <option value="">-- Selecciona --</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>N° de Operación</label>
+          <input type="text" id="letBancoNumOp" placeholder="Opcional">
+        </div>
+        <hr style="border-color:var(--border-color); margin:2px 0;">
+        <div class="form-group">
+          <label>Comisión bancaria (opcional)</label>
+          <input type="number" id="letBancoComision" step="0.01" min="0" placeholder="0.00" oninput="window.onCambiarComisionLetra()">
+          <small style="color:var(--text-secondary); font-size:0.72rem;">
+            Si el banco cobra una comisión por esta letra, se registra como Compra de Servicio (gasto real) vinculada a la letra.
+          </small>
+        </div>
+        <div class="form-group" id="letBancoComisionProvGroup" style="display:none;">
+          <label>Proveedor (banco) *</label>
+          <select id="letBancoComisionProv">
+            <option value="">-- Selecciona --</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-letra-banco')">Cancelar</button>
+        <button class="btn btn-primary" onclick="window.confirmarLetraABanco()">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="assets/js/config.js"></script>
+  <script type="module" src="assets/js/supabase-client.js"></script>
+  <script type="module" src="assets/js/auth-supabase.js"></script>
+  <script type="module" src="assets/js/auth-init.js"></script>
+  <script type="module" src="assets/js/supabase-data.js"></script>
+  <script type="module" src="assets/js/helpers.js"></script>
+  <script type="module" src="assets/js/main.js"></script>
+  <script type="module" src="assets/js/cobranzas.js"></script>
+</body>
+</html>

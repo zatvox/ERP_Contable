@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+  <link rel="icon" href="data:,">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>JHIRO ERP - Ventas</title>
@@ -12,11 +13,17 @@
       <div class="sidebar-logo">JHIRO</div>
       <ul class="sidebar-menu">
         <li><a href="dashboard.html" data-page="dashboard">📊 Dashboard</a></li>
-        <li><a href="inventario.html" class="active" data-page="inventario">📦 Inventario</a></li>
+        <li><a href="inventario.html" data-page="inventario">📦 Inventario</a></li>
         <li><a href="compras.html" data-page="compras">🛒 Compras</a></li>
-        <li><a href="ventas.html" class="active" data-page="ventas">💰 Ventas</a></li>
+        <li><a href="ventas.html" class="active" data-page="ventas">📈 Ventas</a></li>
+        <li><a href="cobranzas.html" data-page="cobranzas">💰 Cuentas x Cobrar/Pagar</a></li>
+        <li><a href="bancos.html" data-page="bancos">🏦 Bancos</a></li>
         <li><a href="contabilidad.html" data-page="contabilidad">📑 Contabilidad</a></li>
-        <li><a href="costeo-importaciones.html" class="active" data-page="costeo">📈 Costeo Import.</a></li>
+        <li data-solo-admin><a href="usuarios.html" data-page="usuarios">👤 Usuarios</a></li>
+        <li><a href="perfil.html" data-page="perfil">🙍 Perfil</a></li>
+        <!-- En standby hasta la v3: módulo de importaciones.
+        <li><a href="costeo-importaciones.html" data-page="costeo">🚢 Costeo Importaciones</a></li>
+        -->
       </ul>
       <div class="sidebar-user">
         <strong id="userDisplay">Admin</strong>
@@ -30,6 +37,18 @@
           <button class="menu-toggle" id="menuToggle">☰</button>
           <h2 class="header-title">Ventas</h2>
         </div>
+
+        <nav class="module-nav" id="ventasTabs">
+          <button type="button" class="tab-btn active" data-tab="ventas">Ventas (CPE)</button>
+          <button type="button" class="tab-btn" data-tab="guias-despacho">Guías de Despacho</button>
+          <!-- Cotizaciones en standby: quitar este comentario para reactivar el tab.
+          <button class="tab-btn" data-tab="cotizaciones">Cotizaciones</button>
+          -->
+          <button type="button" class="tab-btn" data-tab="clientes">Clientes</button>
+          <button type="button" class="tab-btn" data-tab="reportes">📊 Reportes</button>
+          <button type="button" class="tab-btn module-nav-config" data-tab="configuracion">⚙️ Configuración</button>
+        </nav>
+
         <div class="header-controls">
           <button class="theme-toggle" id="themeToggle">🌙 Oscuro</button>
         </div>
@@ -38,12 +57,33 @@
       <main class="content">
         <h1 class="page-title">Módulo Ventas</h1>
 
-        <div class="tab-buttons" id="ventasTabs">
-          <button class="tab-btn active" data-tab="cotizaciones">Cotizaciones</button>
-          <button class="tab-btn" data-tab="clientes">Clientes</button>
+        <!-- TAB: VENTAS con CPE -->
+        <div id="tab-ventas" class="tab-content active">
+          <div id="content-ventas" class="card">Cargando...</div>
         </div>
 
-        <div id="tab-cotizaciones" class="tab-content active">
+        <!-- TAB: GUÍAS DE DESPACHO DE VENTA -->
+        <div id="tab-guias-despacho" class="tab-content">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Guías de Despacho de Venta</h3>
+              <div style="display:flex; gap:10px;">
+                <button id="btnEliminarGuiasDespachoSel" class="btn btn-danger btn-small" style="display:none;" onclick="window.eliminarGuiasDespachoSeleccionadas()">🗑 Eliminar seleccionadas (0)</button>
+                <button class="btn btn-secondary btn-small" onclick="window.abrirModalImportarGuiasDespacho()">📥 Importar</button>
+                <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevaGuiaDespacho()">+ Nueva Guía de Despacho</button>
+              </div>
+            </div>
+            <div style="padding:12px 16px; border-bottom:1px solid var(--border-color, #e0e0e0);">
+              <input type="text" id="buscarGuiaDespacho" placeholder="Buscar por N° guía, cliente o N° de venta..." style="width:100%; max-width:420px;" oninput="window.filtrarGuiasDespacho()">
+            </div>
+            <div id="tabla-guias-despacho" class="table-container">
+              <p style="text-align: center; color: var(--text-secondary);">Cargando...</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Cotizaciones en standby: quitar este comentario para reactivar el tab.
+        <div id="tab-cotizaciones" class="tab-content">
           <div class="card">
             <div class="card-header">
               <h3 class="card-title">Cotizaciones de Venta</h3>
@@ -54,19 +94,534 @@
             </div>
           </div>
         </div>
+        -->
 
         <div id="tab-clientes" class="tab-content">
           <div class="card">
             <div class="card-header">
               <h3 class="card-title">Clientes</h3>
-              <button class="btn btn-primary btn-small" onclick="openModal('modal-nuevo-cliente')">+ Nuevo</button>
+              <button class="btn btn-primary btn-small" onclick="window.abrirFormularioCliente()">+ Nuevo</button>
+            </div>
+            <div style="padding:12px 16px; border-bottom:1px solid var(--border-color, #e0e0e0);">
+              <input type="text" id="buscarCliente" placeholder="Buscar por nombre o N° documento..." style="width:100%; max-width:360px;" oninput="window.filtrarClientes()">
             </div>
             <div id="tabla-clientes" class="table-container">
               <p style="text-align: center; color: var(--text-secondary);">Cargando...</p>
             </div>
           </div>
         </div>
+
+        <!-- TAB REPORTES -->
+        <div id="tab-reportes" class="tab-content">
+          <div class="subtab-bar" id="ven-subtabs-reportes">
+            <button class="subtab active" data-sub="repv-evolucion">Evolución de ventas</button>
+            <button class="subtab" data-sub="repv-clientes">Por cliente</button>
+            <button class="subtab" data-sub="repv-productos">Por producto</button>
+            <button class="subtab" data-sub="repv-margen">Margen bruto</button>
+            <button class="subtab" data-sub="repv-despacho">Estado de despacho</button>
+          </div>
+          <div id="repv-evolucion" class="subtab-panel active"></div>
+          <div id="repv-clientes"  class="subtab-panel"></div>
+          <div id="repv-productos" class="subtab-panel"></div>
+          <div id="repv-margen"    class="subtab-panel"></div>
+          <div id="repv-despacho"  class="subtab-panel"></div>
+        </div>
+
+        <!-- TAB CONFIGURACIÓN -->
+        <div id="tab-configuracion" class="tab-content">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Configuración — Ventas</h3>
+            </div>
+            <p style="text-align:center; color:var(--text-secondary); padding:30px;">Cargando...</p>
+          </div>
+        </div>
       </main>
+    </div>
+  </div>
+
+  <!-- MODAL: Importar Guías de Despacho masivas (desde Excel/CSV) -->
+  <div id="modal-importar-guias-despacho" class="modal">
+    <div class="modal-content" style="max-width: 780px; max-height: 90vh; overflow-y: auto;">
+      <div class="modal-header">
+        <h3 class="modal-title">Importar Guías de Despacho (masivo)</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-importar-guias-despacho')">✕</button>
+      </div>
+      <div style="padding: 20px;">
+        <p style="color: var(--text-secondary); margin-bottom: 12px;">
+          Sube un archivo Excel (.xlsx) o CSV con estas columnas:
+          <code>numero_guia, fecha_guia, venta_numero, sku, cantidad, numero_unidades, numero_lote, almacen, zona, observaciones</code>.
+        </p>
+        <ul style="color: var(--text-secondary); font-size: 0.85rem; margin: 0 0 12px 18px; line-height: 1.6;">
+          <li>Varias filas con el mismo <code>numero_guia</code> forman una sola guía con varias líneas.</li>
+          <li><code>venta_numero</code> es el comprobante de la venta (ej. <code>F001-00000123</code>).</li>
+          <li>Esta importación <strong>SÍ descuenta stock</strong>: valida el lote y la zona indicados, escribe kardex y actualiza el estado de despacho de la venta.</li>
+          <li>Una línea de venta se puede despachar desde varios lotes: repite la fila con el mismo <code>sku</code> y distinto <code>numero_lote</code>.</li>
+        </ul>
+        <p style="margin-bottom: 16px;">
+          <a href="#" onclick="event.preventDefault(); window.descargarPlantillaGuiasDespacho()" style="color: var(--color-info);">📄 Descargar plantilla de ejemplo</a>
+        </p>
+        <div class="form-group">
+          <label>Archivo (.xlsx / .csv) *</label>
+          <input type="file" id="fileImportarGuiasDespacho" accept=".xlsx,.xls,.csv">
+        </div>
+        <label style="display:flex; align-items:center; gap:8px; margin-top:10px; font-weight:normal; cursor:pointer;">
+          <input type="checkbox" id="chkSimularGuiasDespacho" checked>
+          <span>Simular primero (valida stock y muestra el resultado <strong>sin grabar nada</strong>)</span>
+        </label>
+        <div id="importar-guias-despacho-resumen" style="margin-top: 16px;"></div>
+        <div id="importar-guias-despacho-log" style="margin-top: 12px; max-height: 300px; overflow-y: auto; font-size: 13px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-importar-guias-despacho')">Cerrar</button>
+        <button class="btn btn-primary" id="btnProcesarImportarGuiasDespacho" onclick="window.procesarImportacionGuiasDespacho()">Procesar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Importar Ventas Masivas (desde Excel/CSV) -->
+  <div id="modal-importar-ventas" class="modal">
+    <div class="modal-content" style="max-width: 720px; max-height: 90vh; overflow-y: auto;">
+      <div class="modal-header">
+        <h3 class="modal-title">Importar Ventas (masivo)</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-importar-ventas')">✕</button>
+      </div>
+      <div style="padding: 20px;">
+        <p style="color: var(--text-secondary); margin-bottom: 12px;">
+          Sube un archivo Excel (.xlsx) o CSV con las columnas:
+          <code>cliente_ruc, numero_documento, tipo_comprobante, fecha_emision, moneda, tipo_cambio, sku, numero_lote, zona_origen, cantidad, precio_unitario, igv_porcentaje, termino_pago</code>.
+          Varias filas con el mismo <code>numero_documento</code> forman una sola venta con varias líneas.
+          Cada línea se valida contra el stock EXACTO del lote y zona indicados (falla si no alcanza), igual que un traslado —
+          pero esta importación SOLO crea la venta y su detalle (el comprobante): NO descuenta stock ni genera kardex.
+          El despacho real (que sí mueve stock) se hace después, manual, en <strong>Guías de Despacho</strong>, una venta a la vez.
+          Se crea también la Cuenta por Cobrar (con su cronograma de cuotas) si el tipo de comprobante es Factura (01).
+          <code>termino_pago</code> es opcional y texto libre — tal cual venga de tu ERP anterior (ej. <code>CONTADO</code>, <code>45 DIAS</code>, <code>60-75-90 DIAS</code>);
+          si viene vacío o no se reconoce, se usa el término habitual del cliente o Contado.
+        </p>
+        <p style="margin-bottom: 16px;">
+          <a href="assets/sql/plantilla_importar_ventas.xlsx" download style="color: var(--color-info);">📄 Descargar plantilla de ejemplo</a>
+        </p>
+        <div class="form-group">
+          <label>Archivo (.xlsx / .csv) *</label>
+          <input type="file" id="fileImportarVentas" accept=".xlsx,.xls,.csv">
+        </div>
+        <div id="importar-ventas-resumen" style="margin-top: 16px;"></div>
+        <div id="importar-ventas-log" style="margin-top: 12px; max-height: 260px; overflow-y: auto; font-size: 13px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-importar-ventas')">Cerrar</button>
+        <button class="btn btn-primary" id="btnProcesarImportarVentas" onclick="window.procesarImportacionVentas()">Procesar Importación</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Nueva Guía de Despacho de Venta (espejo de Nueva Guía de Remisión en Compras) -->
+  <div id="modal-nueva-guia-despacho" class="modal">
+    <div class="modal-content" style="max-width: 1200px; max-height: 90vh; overflow-y: auto; overflow-x: hidden;">
+      <div class="modal-header">
+        <h3 class="modal-title">Nueva Guía de Despacho de Venta</h3>
+        <button class="modal-close" onclick="window.cerrarModalNuevaGuiaDespacho()">✕</button>
+      </div>
+      <form id="formNuevaGuiaDespacho" onsubmit="return false;">
+        <div style="padding: 20px; border-bottom: 1px solid var(--border-color);">
+          <div class="form-group">
+            <label>Venta *</label>
+            <select id="gdVenta" required onchange="window.onSeleccionarVentaGuiaDespacho()">
+              <option value="">-- Selecciona una venta pendiente/parcial --</option>
+            </select>
+          </div>
+
+          <div id="gdInfoVenta" style="display:none; padding:10px 12px; background:var(--bg-secondary); border-radius:var(--radius-md); margin-bottom:12px; font-size:0.9rem;">
+          </div>
+
+          <div class="grid grid-3">
+            <div class="form-group">
+              <label>N° de Guía *</label>
+              <input type="text" id="gdNumeroGuia" placeholder="Ej: T001-00001" required>
+            </div>
+            <div class="form-group">
+              <label>Fecha de Guía *</label>
+              <input type="date" id="gdFechaGuia" required>
+            </div>
+            <div class="form-group">
+              <label>Observaciones</label>
+              <input type="text" id="gdObservaciones" placeholder="Opcional">
+            </div>
+          </div>
+        </div>
+
+        <div style="padding: 20px;">
+          <h4 style="margin-bottom: 15px;">Detalle de Productos a Despachar</h4>
+          <div id="tabla-detalle-guia-despacho">
+            <p style="text-align:center; color:var(--text-secondary); padding:20px;">Selecciona una venta para ver sus productos pendientes.</p>
+          </div>
+        </div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.cerrarModalNuevaGuiaDespacho()">Cancelar</button>
+        <button class="btn btn-primary" id="btnGuardarGuiaDespachoVenta" onclick="window.guardarGuiaDespachoVenta()">Guardar Guía (descuenta stock)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL NUEVA VENTA (Factura / Boleta + CPE) -->
+  <div id="modal-nueva-venta" class="modal">
+    <div class="modal-content" style="max-width:1240px; width:96%; max-height:calc(100vh - 48px); overflow-y:auto;">
+      <div class="modal-header">
+        <h3>Nueva Venta — Comprobante Electrónico</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-nueva-venta')">&times;</button>
+      </div>
+
+      <div style="padding:16px 20px 0;">
+        <strong style="display:block; margin-bottom:10px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Datos del comprobante</strong>
+        <div style="display:grid; grid-template-columns:1fr 0.8fr 1fr 1fr 1.2fr; gap:12px;">
+          <div class="form-group">
+            <label>Tipo Comprobante</label>
+            <select id="ventaTipoComp" onchange="window.onCambiarTipoCompVenta()">
+              <option value="01">01 - Factura</option>
+              <option value="03">03 - Boleta</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Serie</label>
+            <input type="text" id="ventaSerie" placeholder="F001 / B001" maxlength="4" oninput="window.onCambiarSerieVenta()">
+          </div>
+          <div class="form-group">
+            <label>N° Comprobante</label>
+            <div class="input-con-candado">
+              <input type="text" id="ventaCorrelativo" placeholder="00000001" readonly title="Correlativo sugerido automáticamente">
+              <button type="button" class="btn-candado" id="btnCandadoCorrelativo" onclick="window.toggleCandado('ventaCorrelativo','btnCandadoCorrelativo','aviso-correlativo')" title="Editar el número manualmente">🔒</button>
+            </div>
+            <small id="aviso-correlativo" class="campo-editable-aviso">Número manual: verifica que no rompa la correlatividad.</small>
+          </div>
+          <div class="form-group">
+            <label>Período Contable</label>
+            <div class="input-con-candado">
+              <input type="text" id="ventaPeriodo" placeholder="YYYY-MM" readonly maxlength="7">
+              <button type="button" class="btn-candado" id="btnCandadoPeriodo" onclick="window.toggleCandado('ventaPeriodo','btnCandadoPeriodo','aviso-periodo')" title="Editar el período contable">🔒</button>
+            </div>
+            <small id="aviso-periodo" class="campo-editable-aviso">Período manual: se pedirá confirmación al guardar.</small>
+          </div>
+          <div class="form-group">
+            <label>Vendedor</label>
+            <select id="ventaVendedor">
+              <option value="">-- Sin asignar --</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:2fr 1fr 1fr 1fr 1fr; gap:12px; margin-top:4px;">
+          <div class="form-group">
+            <label>Cliente</label>
+            <select id="ventaContactId" onchange="window.onCambiarClienteVenta()">
+              <option value="">-- Selecciona cliente --</option>
+            </select>
+            <small id="ventaClienteRetencionAviso" style="display:none; color:var(--color-warning);"></small>
+          </div>
+          <div class="form-group">
+            <label>Fecha Emisión</label>
+            <input type="date" id="ventaFechaEmision" onchange="window.onCambiarFechaEmisionVenta()">
+          </div>
+          <div class="form-group">
+            <label>Fecha Vencimiento</label>
+            <input type="date" id="ventaFechaVencimiento" readonly title="La calcula el cronograma de pago: es el vencimiento de la última cuota">
+            <small style="color:var(--text-secondary); font-size:0.72rem;">La define el cronograma de abajo.</small>
+          </div>
+          <div class="form-group">
+            <label>Moneda</label>
+            <select id="ventaMoneda" onchange="document.getElementById('ventaTipoCambioGroup').style.display = this.value === 'USD' ? 'block' : 'none'; if (this.value !== 'USD') document.getElementById('ventaTipoCambio').value = '1.000'">
+              <option value="PEN">PEN - Soles</option>
+              <option value="USD">USD - Dólares</option>
+            </select>
+          </div>
+          <div class="form-group" id="ventaTipoCambioGroup" style="display:none;">
+            <label>
+              T.C. <span id="ventaTCTipo" style="font-size:0.75rem; font-weight:600; color:var(--color-info);">VENTA SBS</span>
+              <button type="button" id="btnAutoTC" onclick="window.autoFetchTCVenta()" title="Obtener TC VENTA del día (SBS)" style="margin-left:4px; background:none; border:1px solid var(--border-color); border-radius:4px; padding:1px 6px; font-size:0.72rem; cursor:pointer; color:var(--color-info);">↻ Auto</button>
+            </label>
+            <input type="number" id="ventaTipoCambio" step="0.001" value="1.000">
+            <small id="ventaTCAviso" style="color:var(--color-muted); font-size:0.72rem;"></small>
+          </div>
+        </div>
+
+        <!-- CRONOGRAMA DE PAGO + CAMPOS OPCIONALES
+             El cronograma necesita ancho (fechas + importes + hito), así que
+             se lleva 2/3 y los campos opcionales van apilados a la derecha. -->
+        <div style="display:grid; grid-template-columns:minmax(0, 2fr) minmax(240px, 1fr); gap:20px; margin-top:14px; padding-top:12px; border-top:1px solid var(--border-color);">
+          <div>
+            <strong style="display:block; margin-bottom:6px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">
+              Condición y cronograma de pago
+            </strong>
+            <div id="venta-cronograma"></div>
+          </div>
+
+          <div>
+            <strong style="display:block; margin-bottom:6px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">
+              Datos adicionales
+            </strong>
+            <div style="display:flex; flex-direction:column; gap:10px;">
+              <div class="campo-opcional" id="grupo-venta-descripcion">
+                <label class="campo-opcional-cabecera">
+                  <input type="checkbox" id="chkVentaDescripcion" onchange="window.toggleCampoOpcional('grupo-venta-descripcion', this, 'ventaDescripcion')">
+                  <span>Descripción</span>
+                </label>
+                <div class="campo-opcional-cuerpo">
+                  <input type="text" id="ventaDescripcion" placeholder="Aparece en el comprobante">
+                </div>
+              </div>
+              <div class="campo-opcional" id="grupo-venta-observaciones">
+                <label class="campo-opcional-cabecera">
+                  <input type="checkbox" id="chkVentaObservaciones" onchange="window.toggleCampoOpcional('grupo-venta-observaciones', this, 'ventaObservaciones')">
+                  <span>Observaciones</span>
+                </label>
+                <div class="campo-opcional-cuerpo">
+                  <input type="text" id="ventaObservaciones" placeholder="Notas internas">
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <hr style="margin:12px 20px; border-color:var(--border-color);">
+
+      <!-- Tabla de líneas -->
+      <div style="padding:0 20px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <strong style="color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Productos</strong>
+          <button type="button" class="btn btn-primary btn-small" onclick="window.abrirModalLineaVenta()">+ Agregar Producto</button>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Descripción</th><th>Lote</th>
+                <th style="text-align:right;">Cant.</th><th>Unidad</th>
+                <th style="text-align:right;">N° Unid.</th>
+                <th style="text-align:right;">Precio</th><th>Tipo</th><th>Zona</th>
+                <th style="text-align:right;">IGV</th><th style="text-align:right;">Total</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="ventaLineas">
+              <tr><td colspan="11" style="text-align:center; color:var(--text-secondary); padding:20px;">Sin productos agregados</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Totales -->
+      <div style="margin:0 20px 15px; padding: 15px; background-color: var(--bg-secondary); border-radius: var(--radius-md); display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px;">
+        <div style="text-align: center;">
+          <div style="font-size: 12px; color: var(--text-secondary);">Cantidad Total</div>
+          <div style="font-size: 18px; font-weight: 600; color: var(--text-primary);" id="ventaTotalCantidad">0</div>
+        </div>
+        <div style="text-align: center;">
+          <div style="font-size: 12px; color: var(--text-secondary);">Base Imponible</div>
+          <div style="font-size: 18px; font-weight: 600; color: var(--text-primary);" id="ventaTotalBase">0.00</div>
+        </div>
+        <div style="text-align: center;">
+          <div style="font-size: 12px; color: var(--text-secondary);">IGV 18%</div>
+          <div style="font-size: 18px; font-weight: 600; color: var(--text-primary);" id="ventaTotalIGV">0.00</div>
+        </div>
+        <div style="text-align: center;">
+          <div style="font-size: 12px; color: var(--text-secondary);">Total</div>
+          <div style="font-size: 18px; font-weight: 600; color: var(--color-success);" id="ventaTotalFinal">0.00</div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn" onclick="window.closeModal('modal-nueva-venta')">Cancelar</button>
+        <button class="btn btn-primary" id="btnGuardarNuevaVenta" onclick="window.guardarNuevaVenta()">💾 Guardar Venta</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL AGREGAR PRODUCTO A LA VENTA (espejo de modal-nuevo-detalle-compra) -->
+  <div id="modal-agregar-linea-venta" class="modal">
+    <div class="modal-content" style="max-width: 900px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Agregar Producto a la Venta</h3>
+        <button class="modal-close" onclick="window.cerrarModalLineaVenta()">✕</button>
+      </div>
+
+      <div style="padding: 20px;">
+        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end;">
+          <div style="flex:1.6 1 200px;">
+            <label style="font-size:0.8rem;">Producto <small style="color:var(--text-secondary);">(con stock)</small></label>
+            <select id="ventaItemSelect" onchange="window.onCambiarItemLineaVenta()">
+              <option value="">-- Selecciona producto --</option>
+            </select>
+          </div>
+          <div style="flex:1.2 1 160px;">
+            <label style="font-size:0.8rem;">Almacén / Zona *</label>
+            <select id="ventaLineaZona" onchange="window.onCambiarZonaLineaVenta()" disabled>
+              <option value="">-- Elige un producto --</option>
+            </select>
+          </div>
+          <div style="flex:1.4 1 200px;">
+            <label style="font-size:0.8rem;">Lote *</label>
+            <select id="ventaLineaLote" onchange="window.onCambiarLoteLineaVenta()" disabled>
+              <option value="">-- Elige zona --</option>
+            </select>
+          </div>
+          <div style="flex:1.4 1 160px;">
+            <label style="font-size:0.8rem;">Descripción</label>
+            <input type="text" id="ventaLineaDesc" placeholder="Opcional">
+          </div>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; margin-top:8px;">
+          <div style="flex:0.8 1 100px;">
+            <label style="font-size:0.8rem;">Cantidad (kg)</label>
+            <input type="number" id="ventaLineaCantidad" value="1" min="0.001" step="0.001" onchange="window.onCambiarCantidadLineaVenta()">
+          </div>
+          <div style="flex:0 0 auto;">
+            <label style="font-size:0.8rem;">Unidad</label>
+            <input type="text" id="ventaLineaUnidad" readonly size="4" style="width:auto; max-width:60px; background:var(--bg-primary); color:var(--text-secondary);">
+          </div>
+          <div style="flex:0 0 auto;">
+            <label style="font-size:0.8rem;" title="Peso por unidad calculado del lote elegido (cantidad / N° de unidades del lote).">Peso x Unid.</label>
+            <input type="text" id="ventaLineaPesoUnidad" readonly size="6" style="width:auto; max-width:80px; background:var(--bg-primary); color:var(--text-secondary);">
+          </div>
+          <div style="flex:0.9 1 130px;">
+            <label style="font-size:0.8rem;" title="Bultos/conos/cajas que salen. Se sugiere automáticamente según el peso por unidad del lote elegido — editable.">N° Unidades</label>
+            <input type="number" id="ventaLineaCantUnidades" min="0" step="0.01" placeholder="—">
+          </div>
+          <div style="flex:0.9 1 120px;">
+            <label style="font-size:0.8rem;">Precio Unit.</label>
+            <input type="number" id="ventaLineaPrecio" step="0.01" placeholder="0.00">
+          </div>
+          <div style="flex:1 1 140px;">
+            <label style="font-size:0.8rem;">Tipo IGV</label>
+            <select id="ventaLineTipoBase">
+              <option value="gravada">Gravada 18%</option>
+              <option value="gravada_incluido">Gravada 18% (incluido)</option>
+              <option value="exonerada">Exonerada</option>
+              <option value="inafecta">Inafecta</option>
+            </select>
+          </div>
+        </div>
+        <small id="ventaLineaStockAviso" style="display:block; margin-top:8px; color:var(--text-secondary); font-size:0.8rem;">Selecciona un producto para ver sus zonas y lotes con stock.</small>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn" onclick="window.cerrarModalLineaVenta()">Cancelar</button>
+        <button class="btn btn-primary" onclick="window.agregarLineaVenta()">+ Agregar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL EDITAR VENTA (solo cabecera; líneas/stock no se editan aquí) -->
+  <div id="modal-editar-venta" class="modal">
+    <div class="modal-content" style="max-width:1100px; width:96%;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="ev-titulo">Editar Venta</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-editar-venta')">✕</button>
+      </div>
+      <form id="formEditarVenta" onsubmit="return false;">
+        <input type="hidden" id="evId">
+
+        <!-- Estado del documento y qué se puede tocar -->
+        <div id="ev-avisos" style="margin-bottom:14px;"></div>
+
+        <!-- COMPROBANTE -->
+        <strong style="display:block; margin-bottom:8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:.03em;">Comprobante</strong>
+        <div style="display:grid; grid-template-columns:1fr .8fr 1fr 1fr; gap:12px;">
+          <div class="form-group">
+            <label>Tipo</label>
+            <input type="text" id="evTipoComp" readonly title="El tipo de comprobante no se cambia: define la serie y la numeración">
+          </div>
+          <div class="form-group">
+            <label>Serie</label>
+            <div class="input-con-candado">
+              <input type="text" id="evSerie" readonly maxlength="4">
+              <button type="button" class="btn-candado" id="btnCandadoEvSerie" onclick="window.toggleCandado('evSerie','btnCandadoEvSerie','aviso-ev-serie')" title="Editar la serie">🔒</button>
+            </div>
+            <small id="aviso-ev-serie" class="campo-editable-aviso">Cambiar la serie altera la correlatividad.</small>
+          </div>
+          <div class="form-group">
+            <label>N° Comprobante</label>
+            <div class="input-con-candado">
+              <input type="text" id="evCorrelativo" readonly>
+              <button type="button" class="btn-candado" id="btnCandadoEvCorr" onclick="window.toggleCandado('evCorrelativo','btnCandadoEvCorr','aviso-ev-corr')" title="Editar el número">🔒</button>
+            </div>
+            <small id="aviso-ev-corr" class="campo-editable-aviso">Verifica que el número no esté duplicado.</small>
+          </div>
+          <div class="form-group">
+            <label>Período Contable</label>
+            <div class="input-con-candado">
+              <input type="text" id="evPeriodo" readonly maxlength="7" placeholder="AAAA-MM">
+              <button type="button" class="btn-candado" id="btnCandadoEvPeriodo" onclick="window.toggleCandado('evPeriodo','btnCandadoEvPeriodo','aviso-ev-periodo')" title="Editar el período">🔒</button>
+            </div>
+            <small id="aviso-ev-periodo" class="campo-editable-aviso">Define en qué mes declara esta venta.</small>
+          </div>
+        </div>
+
+        <!-- CLIENTE Y COMERCIAL -->
+        <strong style="display:block; margin:14px 0 8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:.03em;">Cliente y datos comerciales</strong>
+        <div style="display:grid; grid-template-columns:2fr 1.2fr 1fr .8fr 1fr; gap:12px;">
+          <div class="form-group">
+            <label>Cliente</label>
+            <select id="evContactId"><option value="">-- Selecciona --</option></select>
+            <small id="ev-cliente-aviso" style="color:var(--text-secondary); font-size:0.72rem;"></small>
+          </div>
+          <div class="form-group">
+            <label>Vendedor</label>
+            <select id="evVendedor"><option value="">-- Sin asignar --</option></select>
+          </div>
+          <div class="form-group">
+            <label>Fecha Emisión</label>
+            <input type="date" id="evFechaEmision" onchange="window.onCambiarFechaEmisionEdicion()">
+          </div>
+          <div class="form-group">
+            <label>Moneda</label>
+            <select id="evMoneda" onchange="window.onCambiarMonedaEdicion()">
+              <option value="PEN">PEN</option>
+              <option value="USD">USD</option>
+            </select>
+          </div>
+          <div class="form-group" id="evTipoCambioGroup">
+            <label>Tipo de Cambio</label>
+            <input type="number" id="evTipoCambio" step="0.001" min="0.001">
+          </div>
+        </div>
+
+        <!-- IMPORTES (solo lectura: se cambian con Nota de Crédito/Débito) -->
+        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:6px; padding:10px 12px; background:var(--bg-secondary); border-radius:var(--radius-md);">
+          <div><div style="font-size:.72rem; color:var(--text-secondary);">Base imponible</div><div id="evBase" style="font-weight:600;">0.00</div></div>
+          <div><div style="font-size:.72rem; color:var(--text-secondary);">IGV</div><div id="evIgv" style="font-weight:600;">0.00</div></div>
+          <div><div style="font-size:.72rem; color:var(--text-secondary);">Total</div><div id="evTotal" style="font-weight:700; color:var(--color-success);">0.00</div></div>
+          <div><div style="font-size:.72rem; color:var(--text-secondary);">Estado de pago</div><div id="evEstadoPagoTexto" style="font-weight:600;">—</div></div>
+        </div>
+        <small style="display:block; margin-top:4px; color:var(--text-secondary); font-size:0.75rem;">
+          Los importes y las líneas no se editan aquí: una vez emitido el comprobante se corrigen con Nota de Crédito o Débito.
+          El estado de pago lo calculan los cobros registrados, no se digita.
+        </small>
+
+        <!-- CRONOGRAMA -->
+        <strong style="display:block; margin:14px 0 8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:.03em;">Condición y cronograma de pago</strong>
+        <div id="ev-cronograma"></div>
+
+        <!-- ADICIONALES -->
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:14px;">
+          <div class="form-group">
+            <label>Descripción</label>
+            <input type="text" id="evDescripcion" placeholder="Aparece en el comprobante">
+          </div>
+          <div class="form-group">
+            <label>Observaciones</label>
+            <input type="text" id="evObservaciones" placeholder="Notas internas">
+          </div>
+        </div>
+
+        <!-- VINCULADOS -->
+        <strong style="display:block; margin:14px 0 8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:.03em;">Documentos vinculados</strong>
+        <div id="ev-vinculados"></div>
+      </form>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-editar-venta')">Cancelar</button>
+        <button class="btn btn-primary" id="btnGuardarEdicionVenta" onclick="window.guardarEdicionVenta()">Guardar y propagar cambios</button>
+      </div>
     </div>
   </div>
 
@@ -79,17 +634,55 @@
       </div>
       <form id="formNewCot">
         <div class="form-group">
-          <label>Cliente *</label>
-          <select id="cotCliente" required>
-            <option value="">-- Selecciona --</option>
+          <div style="display: flex; gap: 10px; align-items: flex-end;">
+            <div style="flex: 1;">
+              <label>Cliente *</label>
+              <select id="cotCliente" required>
+                <option value="">-- Selecciona --</option>
+              </select>
+            </div>
+            <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioCliente()" style="margin-bottom: 0;">+ Nuevo</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Moneda</label>
+          <select id="cotMoneda">
+            <option value="USD" selected>USD</option>
+            <option value="PEN">PEN</option>
           </select>
         </div>
 
         <div class="form-group">
-          <label>Lote *</label>
-          <select id="cotLote" required>
-            <option value="">-- Selecciona --</option>
+          <label>Tipo de Pago</label>
+          <select id="cotTipoPago">
+            <option value="credito" selected>Crédito</option>
+            <option value="contado">Contado</option>
           </select>
+        </div>
+
+        <div class="form-group">
+          <div style="display: flex; gap: 10px; align-items: flex-end;">
+            <div style="flex: 1;">
+              <label>Producto *</label>
+              <select id="cotProducto" required>
+                <option value="">-- Selecciona --</option>
+              </select>
+            </div>
+            <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioProducto()" style="margin-bottom: 0;">+ Nuevo</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div style="display: flex; gap: 10px; align-items: flex-end;">
+            <div style="flex: 1;">
+              <label>Lote *</label>
+              <select id="cotLote" required>
+                <option value="">-- Selecciona --</option>
+              </select>
+            </div>
+            <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioLote()" style="margin-bottom: 0;">+ Nuevo</button>
+          </div>
         </div>
 
         <div class="form-group">
@@ -122,7 +715,7 @@
   <div id="modal-nuevo-cliente" class="modal">
     <div class="modal-content">
       <div class="modal-header">
-        <h3 class="modal-title">Nuevo Cliente</h3>
+        <h3 class="modal-title" id="modalClienteTitle">Nuevo Cliente</h3>
         <button class="modal-close" onclick="closeModal('modal-nuevo-cliente')">✕</button>
       </div>
       <form id="formNewCliente">
@@ -149,10 +742,111 @@
             <option value="USD">USD</option>
           </select>
         </div>
+        <div class="form-group">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="checkbox" id="cliSujetoRetencion">
+            <span>Sujeto a retención IGV (agente de retención SUNAT)</span>
+          </label>
+        </div>
       </form>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeModal('modal-nuevo-cliente')">Cancelar</button>
         <button class="btn btn-primary" onclick="guardarCliente()">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL NUEVO PRODUCTO -->
+  <div id="modal-nuevo-producto" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Nuevo Producto</h3>
+        <button class="modal-close" onclick="closeModal('modal-nuevo-producto')">✕</button>
+      </div>
+      <form id="formNewProducto">
+        <div class="form-group">
+          <label>Nombre *</label>
+          <input type="text" id="prodNombre" placeholder="Ej: Laptop HP 15.6" required>
+        </div>
+        
+        <div class="form-group">
+          <label>SKU *</label>
+          <input type="text" id="prodSKU" placeholder="Ej: LP-HP-001" required>
+        </div>
+
+        <div class="form-group">
+          <label>Descripción</label>
+          <textarea id="prodDescripcion" placeholder="Detalles del producto" style="min-height: 80px;"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Categoría</label>
+          <input type="text" id="prodCategoria" placeholder="Ej: Electrónica">
+        </div>
+
+        <div class="form-group">
+          <label>Activo</label>
+          <select id="prodActivo">
+            <option value="true" selected>Sí</option>
+            <option value="false">No</option>
+          </select>
+        </div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-nuevo-producto')">Cancelar</button>
+        <button class="btn btn-primary" onclick="guardarProducto()">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL NUEVO LOTE -->
+  <div id="modal-nuevo-lote" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Nuevo Lote</h3>
+        <button class="modal-close" onclick="closeModal('modal-nuevo-lote')">✕</button>
+      </div>
+      <form id="formNewLote">
+        <div class="form-group">
+          <label>Producto *</label>
+          <select id="loteProducto" required>
+            <option value="">-- Selecciona --</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Número de Lote *</label>
+          <input type="text" id="loteNumero" placeholder="Ej: LOTE-001-2025" required>
+        </div>
+
+        <div class="form-group">
+          <label>Cantidad Inicial</label>
+          <input type="number" id="loteStock" placeholder="0" min="1" required>
+        </div>
+
+        <div class="form-group">
+          <label>Costo Unitario</label>
+          <input type="number" id="loteCosto" placeholder="0.00" step="0.01" required>
+        </div>
+
+        <div class="form-group">
+          <label>Costo de Destino (Flete, Impuestos)</label>
+          <input type="number" id="loteDestino" placeholder="0.00" step="0.01" value="0">
+        </div>
+
+        <div class="form-group">
+          <label>Fecha de Vencimiento *</label>
+          <input type="date" id="loteVencimiento" required>
+        </div>
+
+        <div class="form-group">
+          <label>Usuario Ingreso</label>
+          <input type="text" id="loteUsuario" disabled>
+        </div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-nuevo-lote')">Cancelar</button>
+        <button class="btn btn-primary" onclick="guardarLote()">Guardar</button>
       </div>
     </div>
   </div>
@@ -163,6 +857,7 @@
   <script type="module" src="assets/js/supabase-data.js"></script>
   <script type="module" src="assets/js/helpers.js"></script>
   <script type="module" src="assets/js/main.js"></script>
+  <script type="module" src="assets/js/sunat-api.js"></script>
   <script type="module" src="assets/js/ventas.js"></script>
 </body>
 </html>

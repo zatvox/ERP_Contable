@@ -1,99 +1,62 @@
 // ============================================================================
-// AUTH-INIT.JS - Inicialización de autenticación global
+// AUTH-INIT.JS - Inicialización global de autenticación
 // ============================================================================
-// Este archivo se carga en TODAS las páginas y maneja:
-// - Validación de sesión
-// - Redirección automática si no está autenticado
-// - Expone funciones globales (logout, getCurrentUser)
-// ============================================================================
-
-import { login as supabaseLogin, logout as supabaseLogout, getCurrentUser as getSupabaseUser, isAuthenticated } from './auth-supabase.js'
-
-const AUTH_KEY = 'erp_user_session'
-
-// ============================================================================
-// FUNCIONES GLOBALES - Disponibles en window para ser usadas desde HTML
+// Se carga en TODAS las páginas. Usa top-level await para restaurar la
+// sesión de Supabase Auth (localStorage) ANTES de que DOMContentLoaded
+// dispare, garantizando que getCurrentUser() ya funciona sincrónicamente
+// en los módulos de cada página.
 // ============================================================================
 
-/**
- * Login global - wrapper de auth-supabase
- */
-window.login = async function(username, password) {
-  try {
-    const result = await supabaseLogin(username, password)
-    return result
-  } catch (error) {
-    console.error('Error en login global:', error)
-    return false
-  }
+import {
+  initAuthState,
+  login      as supabaseLogin,
+  logout     as supabaseLogout,
+  getCurrentUser,
+  isAuthenticated
+} from './auth-supabase.js'
+
+// Top-level await — restaura sesión antes de que el DOM esté listo
+await initAuthState()
+
+// ── Funciones globales ────────────────────────────────────────────────────────
+
+/** Login global — retorna { success, message } */
+window.login = async function(email, password) {
+  return await supabaseLogin(email, password)
 }
 
-/**
- * Logout global - wrapper de auth-supabase
- */
 window.logout = function() {
   supabaseLogout()
 }
 
-/**
- * Obtener usuario actual
- */
 window.getCurrentUser = function() {
-  return getSupabaseUser()
+  return getCurrentUser()
 }
 
-/**
- * Verificar autenticación
- */
 window.isUserAuthenticated = function() {
   return isAuthenticated()
 }
 
-// ============================================================================
-// VALIDACIÓN AUTOMÁTICA DE SESIÓN
-// ============================================================================
+// ── Validar sesión al cargar la página ───────────────────────────────────────
 
-function validateSessionAndRedirect() {
-  const currentPage = window.location.pathname.split('/').pop() || 'dashboard.html'
-  const isLoginPage = currentPage === 'login.html' || currentPage === ''
-  
-  // Si es la página de login, no hacer validación
-  if (isLoginPage) {
-    return
-  }
-  
-  // Si no está autenticado y no es login, redirigir
+document.addEventListener('DOMContentLoaded', () => {
+  const pagina = window.location.pathname.split('/').pop() || 'dashboard.html'
+  const esLogin = pagina === 'login.html' || pagina === ''
+
+  if (esLogin) return
+
   if (!isAuthenticated()) {
-    console.warn('Sesión no válida, redirigiendo a login...')
+    console.warn('Sin sesión activa — redirigiendo a login...')
     window.location.href = 'login.html'
     return
   }
-  
-  // Si está autenticado, cargar datos del usuario en la UI
-  const user = getSupabaseUser()
+
+  // Mostrar nombre del usuario en el header
+  const user = getCurrentUser()
   if (user) {
-    const userDisplay = document.getElementById('userDisplay')
-    if (userDisplay) {
-      userDisplay.textContent = user.nombre || user.username || 'Usuario'
-    }
+    const el = document.getElementById('userDisplay')
+    if (el) el.textContent = user.nombre || user.email || 'Usuario'
   }
-}
-
-// ============================================================================
-// INICIALIZACIÓN
-// ============================================================================
-
-// Validar sesión cuando el DOM esté listo
-document.addEventListener('DOMContentLoaded', () => {
-  validateSessionAndRedirect()
 })
 
-// También validar inmediatamente si el DOM ya está listo
-if (document.readyState === 'loading') {
-  // DOM aún cargando, esperar DOMContentLoaded
-} else {
-  // DOM ya está listo
-  validateSessionAndRedirect()
-}
-
-console.log('✅ Auth-init cargado correctamente')
+console.log('✅ Auth-init cargado')

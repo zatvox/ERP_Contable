@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <link rel="icon" href="data:,">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JHIRO ERP - Usuarios</title>
+  <link rel="stylesheet" href="assets/css/styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <aside class="sidebar">
+      <div class="sidebar-logo">JHIRO</div>
+      <ul class="sidebar-menu">
+        <li><a href="dashboard.html" data-page="dashboard">📊 Dashboard</a></li>
+        <li><a href="inventario.html" data-page="inventario">📦 Inventario</a></li>
+        <li><a href="compras.html" data-page="compras">🛒 Compras</a></li>
+        <li><a href="ventas.html" data-page="ventas">📈 Ventas</a></li>
+        <li><a href="cobranzas.html" data-page="cobranzas">💰 Cuentas x Cobrar/Pagar</a></li>
+        <li><a href="bancos.html" data-page="bancos">🏦 Bancos</a></li>
+        <li><a href="contabilidad.html" data-page="contabilidad">📑 Contabilidad</a></li>
+        <li data-solo-admin><a href="usuarios.html" class="active" data-page="usuarios">👤 Usuarios</a></li>
+        <li><a href="perfil.html" data-page="perfil">🙍 Perfil</a></li>
+        <!-- En standby hasta la v3: módulo de importaciones.
+        <li><a href="costeo-importaciones.html" data-page="costeo">🚢 Costeo Importaciones</a></li>
+        -->
+      </ul>
+      <div class="sidebar-user">
+        <strong id="userDisplay">Admin</strong>
+        <button class="btn-logout" onclick="logout()">Cerrar Sesión</button>
+      </div>
+    </aside>
+
+    <div class="main-content">
+      <header class="header">
+        <div class="header-left">
+          <button class="menu-toggle" id="menuToggle">☰</button>
+          <h2 class="header-title">Gestión de Usuarios</h2>
+        </div>
+        <div class="header-controls">
+          <button class="theme-toggle" id="themeToggle">🌙 Oscuro</button>
+        </div>
+      </header>
+
+      <main class="content">
+        <h1 class="page-title">Usuarios del Sistema</h1>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; align-items:start;">
+
+          <!-- COLUMNA IZQUIERDA: Lista de usuarios + Cambiar contraseña -->
+          <div style="display:flex; flex-direction:column; gap:20px;">
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Usuarios Registrados</h3>
+                <button class="btn btn-secondary btn-small" onclick="window.cargarUsuarios()">↺ Actualizar</button>
+              </div>
+              <div id="tabla-usuarios" style="padding:10px;">
+                <p style="text-align:center; color:var(--text-secondary);">Cargando...</p>
+              </div>
+            </div>
+
+            <!-- PANEL: Cambiar contraseña propia -->
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Cambiar Mi Contraseña</h3>
+              </div>
+              <div style="padding:20px; display:flex; flex-direction:column; gap:12px;">
+                <div class="form-group">
+                  <label>Nueva Contraseña</label>
+                  <input type="password" id="nuevaPasswordPropia" placeholder="Mínimo 8 caracteres">
+                </div>
+                <div class="form-group">
+                  <label>Confirmar Contraseña</label>
+                  <input type="password" id="confirmarPasswordPropia" placeholder="Repite la contraseña">
+                </div>
+                <button class="btn btn-warning" onclick="window.cambiarPasswordPropia()">
+                  🔒 Actualizar Contraseña
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- PANEL DERECHO: Crear nuevo usuario -->
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Crear Nuevo Usuario</h3>
+            </div>
+            <div style="padding:20px; display:flex; flex-direction:column; gap:14px;">
+
+              <div class="form-group">
+                <label>Nombre Completo *</label>
+                <input type="text" id="nuevoNombre" placeholder="Ej: María García López">
+              </div>
+
+              <div class="form-group">
+                <label>Correo Electrónico *</label>
+                <input type="email" id="nuevoEmail" placeholder="usuario@empresa.com">
+                <small style="color:var(--text-secondary);">
+                  Se enviará un correo de confirmación a esta dirección.
+                </small>
+              </div>
+
+              <div class="form-group">
+                <label>Contraseña inicial *</label>
+                <div style="position:relative;">
+                  <input type="password" id="nuevoPassword" placeholder="Mínimo 8 caracteres"
+                         style="padding-right:40px;">
+                  <button type="button" onclick="window.togglePassword()"
+                          style="position:absolute; right:8px; top:50%; transform:translateY(-50%);
+                                 background:none; border:none; cursor:pointer; color:var(--text-secondary);">
+                    👁
+                  </button>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label>Rol</label>
+                <select id="nuevoRole">
+                  <option value="user">Usuario (lectura y registro)</option>
+                  <option value="contador">Contador (sin cerrar períodos)</option>
+                  <option value="admin">Administrador (acceso total)</option>
+                </select>
+              </div>
+
+              <div id="crear-usuario-error"
+                   style="display:none; padding:10px; border-radius:6px;
+                          background:rgba(220,53,69,.1); color:var(--color-danger);
+                          font-size:0.9rem;"></div>
+
+              <div id="crear-usuario-ok"
+                   style="display:none; padding:10px; border-radius:6px;
+                          background:rgba(40,167,69,.1); color:var(--color-success);
+                          font-size:0.9rem;"></div>
+
+              <button class="btn btn-primary" onclick="window.crearUsuario()" id="btnCrearUsuario">
+                ✉️ Crear Usuario y Enviar Invitación
+              </button>
+
+              <div style="padding:12px; background:var(--bg-secondary); border-radius:8px;
+                          font-size:0.82rem; color:var(--text-secondary); line-height:1.5;">
+                <strong>¿Cómo funciona?</strong><br>
+                1. Se crea el usuario en Supabase Auth.<br>
+                2. El usuario recibe un correo con enlace de confirmación.<br>
+                3. Al confirmar su correo, puede iniciar sesión.<br>
+                <br>
+                <strong>¿No llega el correo?</strong><br>
+                En Supabase → Authentication → Settings → desactivar
+                "Enable email confirmations" para omitir la validación en desarrollo.
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+
+  <script type="module" src="assets/js/config.js"></script>
+  <script type="module" src="assets/js/supabase-client.js"></script>
+  <script type="module" src="assets/js/auth-supabase.js"></script>
+  <script type="module" src="assets/js/auth-init.js"></script>
+  <script type="module" src="assets/js/supabase-data.js"></script>
+  <script type="module" src="assets/js/helpers.js"></script>
+  <script type="module" src="assets/js/main.js"></script>
+  <script type="module" src="assets/js/usuarios.js"></script>
+</body>
+</html>

@@ -5,8 +5,8 @@
 
 :root {
   /* Colores */
-  --color-primary: #312e81;
-  --color-primary-light: #00214f;
+  --color-primary: #14213d;
+  --color-primary-light: #0a0f24;
   --color-secondary: #f5e6d3;
   --color-success: #10b981;
   --color-danger: #ef4444;
@@ -207,13 +207,14 @@ body {
   color: white;
   padding: var(--spacing-lg);
   overflow-y: auto;
+  overflow-x: hidden;
   position: fixed;
   height: 100vh;
   left: 0;
   top: 0;
   z-index: 1000;
   box-shadow: var(--shadow-lg);
-  transition: transform 0.3s ease;
+  transition: transform 0.3s ease, width 0.3s ease, padding 0.3s ease;
 }
 
 .sidebar.hidden {
@@ -226,6 +227,124 @@ body {
   margin-bottom: var(--spacing-xl);
   color: var(--color-secondary);
   text-align: center;
+}
+
+/* Botón para colapsar/expandir el sidebar a una barra de solo íconos */
+.sidebar-toggle-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.sidebar-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Ícono + label de cada link, reestructurados por JS (initSidebarCollapse)
+   en <span class="sidebar-icon"> + <span class="sidebar-label"> para poder
+   ocultar el texto por completo (no solo recortarlo) al colapsar. */
+.sidebar-icon {
+  font-size: 19px;
+  line-height: 1;
+  flex-shrink: 0;
+  width: 24px;
+  text-align: center;
+  transition: font-size 0.2s ease;
+}
+
+.sidebar-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.btn-logout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+}
+
+.btn-logout-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* ---- Estado colapsado ---- */
+
+body.sidebar-collapsed .sidebar {
+  width: 72px;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+body.sidebar-collapsed .sidebar-logo {
+  display: none;
+}
+
+body.sidebar-collapsed .sidebar-toggle-btn {
+  position: static;
+  display: flex;
+  margin: 0 auto var(--spacing-lg);
+}
+
+body.sidebar-collapsed .sidebar-menu a {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+body.sidebar-collapsed .sidebar-menu a:hover,
+body.sidebar-collapsed .sidebar-menu a.active {
+  transform: none;
+}
+
+body.sidebar-collapsed .sidebar-icon {
+  font-size: 26px;
+  width: auto;
+}
+
+body.sidebar-collapsed .sidebar-label {
+  display: none;
+}
+
+body.sidebar-collapsed .sidebar-user strong {
+  display: none;
+}
+
+body.sidebar-collapsed .btn-logout {
+  padding: var(--spacing-sm) 0;
+}
+
+body.sidebar-collapsed .btn-logout-icon {
+  font-size: 20px;
+}
+
+body.sidebar-collapsed .btn-logout-label {
+  display: none;
+}
+
+body.sidebar-collapsed .main-content {
+  margin-left: 72px;
+}
+
+@media (max-width: 768px) {
+  .sidebar-toggle-btn {
+    display: none;
+  }
 }
 
 .sidebar-menu {
@@ -299,6 +418,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  transition: margin-left 0.3s ease;
 }
 
 /* HEADER */
@@ -412,6 +532,18 @@ body {
   border-radius: var(--radius-lg);
 }
 
+/* Trunca celdas de texto largo (ej. lista de productos/lotes) a un máximo
+   de líneas, con "..." al final. El texto completo queda disponible al
+   pasar el mouse (title en el div). */
+.clamp-lineas {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 420px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -444,6 +576,13 @@ tbody tr:hover {
 
 tbody tr:nth-child(even) {
   background-color: var(--bg-secondary);
+}
+
+/* Modo "tabla compacta" (preferencia de vista en Configuración por módulo) */
+body.tabla-compacta th,
+body.tabla-compacta td {
+  padding: 6px 10px;
+  font-size: 12.5px;
 }
 
 /* FORMULARIOS */
@@ -561,10 +700,16 @@ input::placeholder {
   overflow-y: auto;
 }
 
+/* `align-items: center` centraba el modal pero, cuando su contenido es más
+   alto que la ventana, el sobrante se sale por ARRIBA y queda inalcanzable:
+   el scroll del contenedor solo baja desde su origen, nunca sube por encima.
+   La solución estándar es alinear al inicio y centrar con `margin: auto` en
+   el hijo — así se centra cuando cabe y se puede scrollear cuando no. */
 .modal.show {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
+  padding: 24px 12px;
 }
 
 .modal-content {
@@ -575,6 +720,13 @@ input::placeholder {
   width: 90%;
   box-shadow: var(--shadow-lg);
   animation: slideIn 0.3s;
+  /* Centra verticalmente cuando sobra espacio, sin recortar cuando no. */
+  margin: auto;
+  /* Los modales largos scrollean por dentro y así el encabezado y los
+     botones de acción siguen a la vista. Los que ya traen su propio
+     max-height inline lo sobrescriben sin problema. */
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
 }
 
 .modal-header {
@@ -610,6 +762,22 @@ input::placeholder {
   margin-top: var(--spacing-lg);
   padding-top: var(--spacing-md);
   border-top: 1px solid var(--border-color);
+}
+
+.modal[data-level="2"] {
+  z-index: 3000;
+}
+
+.modal[data-level="2"]::before {
+  z-index: 2999;
+}
+
+.modal[data-level="3"] {
+  z-index: 4000;
+}
+
+.modal[data-level="3"]::before {
+  z-index: 3999;
 }
 
 /* TOAST */
@@ -748,6 +916,136 @@ input::placeholder {
   display: block;
 }
 
+/* ============================================================================
+   MODULE NAV — submenú desplegable estilo Odoo en el header de cada módulo.
+   Los .tab-btn de adentro son los MISMOS botones que antes vivían en
+   .tab-buttons: conservan data-tab y la clase .tab-btn/.active, así que la
+   lógica de cada módulo (ej. initTabsInventario) no necesita cambiar, solo
+   ahora viven agrupados dentro de dropdowns en vez de una fila plana.
+   ============================================================================ */
+.module-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  flex: 1;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.module-nav-group {
+  position: relative;
+}
+
+.module-nav-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s;
+}
+
+.module-nav-group-toggle::after {
+  content: '▾';
+  font-size: 0.65em;
+}
+
+.module-nav-group-toggle:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.module-nav-group.open .module-nav-group-toggle {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.module-nav-group.group-active .module-nav-group-toggle {
+  /* var(--color-info) en vez de --color-primary: --color-primary ahora es
+     un azul índigo muy oscuro y quedaría casi invisible como texto sobre
+     el header oscuro en modo Oscuro. --color-info (celeste) sí mantiene
+     buen contraste en ambos temas. */
+  color: var(--color-info);
+  font-weight: 600;
+  -webkit-text-stroke: 0.4px var(--color-info);
+
+}
+
+.module-nav-dropdown {
+  display: none;
+  flex-direction: column;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(0,0,0,0.15));
+  min-width: 200px;
+  padding: 4px;
+  z-index: 200;
+}
+
+.module-nav-group.open .module-nav-dropdown {
+  display: flex;
+}
+
+.module-nav-dropdown .tab-btn {
+  text-align: left;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: none;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.module-nav-dropdown .tab-btn:hover {
+  background-color: var(--bg-tertiary);
+}
+
+.module-nav-dropdown .tab-btn.active {
+  background-color: var(--color-primary);
+  color: #fff;
+}
+
+.module-nav-config {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-weight: 500;
+  border-bottom: none;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s;
+}
+
+.module-nav-config:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.module-nav-config.active {
+  background-color: var(--color-primary);
+  color: #fff;
+}
+
+/* El borde blanco delgado en las letras del submenú solo se aplica en modo
+   Oscuro: ahí el header es oscuro y un trazo claro ayuda a definir el texto.
+   En modo Claro el header es blanco, así que ese mismo trazo blanco no
+   aporta contraste (el texto ya es oscuro sobre fondo claro) y se omite. */
+body.dark-mode .module-nav-group-toggle,
+body.dark-mode .module-nav-dropdown .tab-btn,
+body.dark-mode .module-nav-config {
+  -webkit-text-stroke: 0.4px #ffffff;
+  text-shadow: 0 0 0.4px #ffffff;
+}
+
 /* KPI CARD */
 .kpi-card {
   background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
@@ -875,5 +1173,665 @@ input::placeholder {
     right: var(--spacing-sm);
     left: var(--spacing-sm);
     max-width: none;
+  }
+}
+
+
+/* ============================================================================
+   FASE 2 — MOTOR DE REPORTES, CONFIGURACIÓN Y PREFERENCIAS DE APARIENCIA
+   ============================================================================ */
+
+/* --- Escala de fuente configurable (Configuración → Apariencia) --- */
+:root { --font-scale: 1; }
+body { font-size: calc(16px * var(--font-scale)); }
+
+/* --- Densidad de tablas --- */
+body.densidad-compacta th, body.densidad-compacta td { padding: 5px 8px;  font-size: 0.82rem; }
+body.densidad-normal   th, body.densidad-normal   td { padding: 10px 12px; }
+body.densidad-comoda   th, body.densidad-comoda   td { padding: 15px 16px; }
+
+body.tabla-rayada tbody tr:nth-child(even) { background-color: var(--bg-secondary); }
+body.tabla-sin-bordes table th,
+body.tabla-sin-bordes table td { border-bottom: none; }
+body.sin-animaciones *,
+body.sin-animaciones *::before,
+body.sin-animaciones *::after { transition: none !important; animation: none !important; }
+body.ocultar-kpis .kpi-card,
+body.ocultar-kpis .reporte-kpis { display: none !important; }
+
+/* ============================================================================
+   REPORTES / TABLA DINÁMICA
+   ============================================================================ */
+
+.reporte-card { margin-bottom: 20px; }
+
+.reporte-desc {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  font-weight: normal;
+}
+
+.reporte-filtros {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-end;
+  padding: 14px 16px;
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.reporte-filtro { display: flex; flex-direction: column; gap: 4px; min-width: 150px; }
+.reporte-filtro > label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-secondary);
+}
+.reporte-filtro input,
+.reporte-filtro select {
+  padding: 6px 8px;
+  font-size: 0.85rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.reporte-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.reporte-chip {
+  padding: 5px 11px;
+  font-size: 0.78rem;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background-color: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.reporte-chip:hover { border-color: var(--color-info); color: var(--text-primary); }
+.reporte-chip.on {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+  font-weight: 600;
+}
+body.dark-mode .reporte-chip.on { background-color: var(--color-info); border-color: var(--color-info); }
+
+/* --- KPIs del reporte --- */
+.reporte-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  padding: 14px 16px 0;
+}
+.reporte-kpis:empty { display: none; }
+.reporte-kpi {
+  padding: 12px 14px;
+  background-color: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--color-info);
+}
+.reporte-kpi-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-secondary);
+  margin-bottom: 3px;
+}
+.reporte-kpi-valor { font-size: 1.3rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.reporte-kpi-sub { font-size: 0.72rem; color: var(--text-secondary); margin-top: 2px; }
+
+/* --- Tabla del reporte --- */
+.reporte-tabla { padding-top: 8px; }
+.reporte-tabla table td,
+.reporte-tabla table th { font-variant-numeric: tabular-nums; }
+.reporte-tabla th.rp-th-orden { cursor: pointer; user-select: none; white-space: nowrap; }
+.reporte-tabla th.rp-th-orden:hover { color: var(--color-info); }
+.rp-orden-hint { opacity: 0.3; font-size: 0.75em; }
+.reporte-tabla tfoot .rp-total td {
+  border-top: 2px solid var(--border-color);
+  background-color: var(--bg-secondary);
+}
+.reporte-vacio { text-align: center; padding: 36px; color: var(--text-secondary); }
+
+/* --- Gráfico de barras (HTML puro, sin librerías externas) --- */
+.reporte-grafico { padding: 6px 16px 18px; }
+.reporte-grafico:empty { display: none; }
+.reporte-grafico-titulo {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-secondary);
+  margin: 10px 0 8px;
+}
+.reporte-barra-fila {
+  display: grid;
+  grid-template-columns: minmax(110px, 1.4fr) 3fr minmax(90px, auto);
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 5px;
+  font-size: 0.8rem;
+}
+.reporte-barra-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+.reporte-barra-track {
+  height: 16px;
+  background-color: var(--bg-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.reporte-barra-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-info), var(--color-primary));
+  border-radius: 3px;
+  transition: width 0.35s ease;
+}
+.reporte-barra-fill.neg { background: linear-gradient(90deg, var(--color-danger), #991b1b); }
+.reporte-barra-valor { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* ============================================================================
+   CONFIGURACIÓN
+   ============================================================================ */
+
+.cfg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.cfg-body { padding: 16px 20px 20px; }
+.cfg-separador {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 5px;
+  margin: 18px 0 12px;
+}
+.cfg-separador:first-child { margin-top: 0; }
+.cfg-fila {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 7px 0;
+}
+.cfg-fila-texto label { margin-bottom: 0; font-size: 0.88rem; font-weight: 500; }
+.cfg-hint { font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px; line-height: 1.35; }
+.cfg-acciones { margin-top: 20px; display: flex; align-items: center; gap: 10px; }
+.cfg-ok { color: var(--color-success); font-size: 0.82rem; display: none; }
+
+/* --- Switch bonito para checkboxes de configuración --- */
+.switch { position: relative; display: inline-block; width: 42px; height: 23px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch-slider {
+  position: absolute; cursor: pointer; inset: 0;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  transition: 0.25s;
+}
+.switch-slider::before {
+  content: "";
+  position: absolute;
+  height: 17px; width: 17px;
+  left: 2px; bottom: 2px;
+  background-color: #fff;
+  border-radius: 50%;
+  transition: 0.25s;
+  box-shadow: 0 1px 3px rgba(0,0,0,.25);
+}
+.switch input:checked + .switch-slider { background-color: var(--color-success); border-color: var(--color-success); }
+.switch input:checked + .switch-slider::before { transform: translateX(19px); }
+
+/* ============================================================================
+   BADGES / UTILIDADES FASE 2
+   ============================================================================ */
+
+.badge-vencido  { background-color: rgba(239, 68, 68, 0.15);  color: var(--color-danger); }
+.badge-porvencer{ background-color: rgba(245, 158, 11, 0.15); color: var(--color-warning); }
+.badge-alcorriente { background-color: rgba(16, 185, 129, 0.15); color: var(--color-success); }
+
+.kpi-clickable { cursor: pointer; transition: transform 0.15s, box-shadow 0.15s; }
+.kpi-clickable:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+
+.dash-vista-switch { display: flex; gap: 6px; }
+.dash-vista-switch .tab-btn { border-radius: var(--radius-md); }
+
+.subtab-bar {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border-color);
+  padding: 0 16px;
+  margin-bottom: 14px;
+}
+.subtab-bar .subtab {
+  padding: 8px 14px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.86rem;
+  border-bottom: 2px solid transparent;
+}
+.subtab-bar .subtab:hover { color: var(--text-primary); }
+.subtab-bar .subtab.active {
+  color: var(--color-info);
+  border-bottom-color: var(--color-info);
+  font-weight: 600;
+}
+.subtab-panel { display: none; }
+.subtab-panel.active { display: block; }
+
+@media (max-width: 768px) {
+  .reporte-filtros { flex-direction: column; align-items: stretch; }
+  .reporte-filtro { min-width: 0; }
+  .reporte-barra-fila { grid-template-columns: 1fr 2fr auto; font-size: 0.72rem; }
+  .cfg-grid { grid-template-columns: 1fr; }
+}
+
+/* Sub-texto de las tarjetas KPI (Fase 2) */
+.kpi-sub { font-size: 0.72rem; color: var(--text-secondary); margin-top: 3px; }
+.badge-secondary { background-color: rgba(107, 114, 128, 0.18); color: var(--text-secondary); }
+.badge-success { background-color: rgba(16, 185, 129, 0.18); color: var(--color-success); }
+.badge-warning { background-color: rgba(245, 158, 11, 0.18); color: var(--color-warning); }
+.badge-danger  { background-color: rgba(239, 68, 68, 0.18);  color: var(--color-danger); }
+.badge-info    { background-color: rgba(59, 130, 246, 0.18); color: var(--color-info); }
+
+/* ============================================================================
+   FASE 2 — AJUSTES DE TEMA OSCURO PARA LOS COMPONENTES NUEVOS
+   ============================================================================
+   Los componentes nuevos usan variables (--bg-*, --text-*, --border-color) que
+   ya cambian solas con .dark-mode. Aquí solo van los casos donde hace falta un
+   contraste distinto al claro. */
+
+body.dark-mode .reporte-filtros,
+body.dark-mode .reporte-kpi { background-color: var(--bg-tertiary); }
+
+body.dark-mode .reporte-barra-track { background-color: rgba(255, 255, 255, 0.08); }
+
+body.dark-mode .reporte-barra-fill {
+  background: linear-gradient(90deg, var(--color-info), #1d4ed8);
+}
+
+body.dark-mode .reporte-tabla tfoot .rp-total td { background-color: var(--bg-tertiary); }
+
+body.dark-mode .cfg-separador { border-bottom-color: var(--border-color); }
+
+body.dark-mode .switch-slider { background-color: rgba(255, 255, 255, 0.12); }
+
+body.dark-mode .subtab-bar { border-bottom-color: var(--border-color); }
+
+body.dark-mode input[type="color"] { background-color: var(--bg-tertiary); border: 1px solid var(--border-color); }
+
+/* En claro, el acento configurable puede ser muy oscuro; en oscuro usamos el
+   azul informativo para que los chips activos no se pierdan contra el fondo. */
+body.dark-mode .reporte-chip { background-color: var(--bg-tertiary); }
+
+/* Las tarjetas KPI clicables necesitan un hover visible en ambos temas. */
+body.dark-mode .kpi-clickable:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); }
+
+/* ============================================================================
+   MENÚ DE ACCIONES POR FILA (botón ⋮)
+   ============================================================================ */
+
+.acciones-celda { position: relative; display: inline-block; }
+
+.acciones-kebab {
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 1.15rem;
+  line-height: 1;
+  padding: 0;
+  transition: background-color .15s, color .15s, border-color .15s;
+}
+.acciones-kebab:hover,
+.acciones-kebab.abierto {
+  background-color: var(--bg-tertiary);
+  border-color: var(--border-color);
+  color: var(--text-primary);
+}
+
+/* El HTML original de las acciones vive oculto en la celda y se clona al abrir. */
+.acciones-menu-datos { display: none; }
+
+.acciones-menu {
+  position: fixed;
+  z-index: 10500;
+  min-width: 190px;
+  max-width: 280px;
+  padding: 5px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity .12s ease, transform .12s ease;
+}
+.acciones-menu.visible { opacity: 1; transform: translateY(0); }
+body.dark-mode .acciones-menu { box-shadow: 0 8px 26px rgba(0, 0, 0, .55); }
+
+.acciones-menu .acciones-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 11px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-primary);
+  font-size: 0.86rem;
+  font-family: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color .12s;
+}
+.acciones-menu .acciones-item:hover { background-color: var(--bg-tertiary); }
+.acciones-menu .acciones-item.peligro { color: var(--color-danger); }
+.acciones-menu .acciones-item.peligro:hover { background-color: rgba(239, 68, 68, .12); }
+.acciones-menu .acciones-icono {
+  width: 17px;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 0.9rem;
+}
+.acciones-menu .acciones-separador {
+  height: 1px;
+  margin: 4px 6px;
+  background-color: var(--border-color);
+}
+
+/* La celda de acciones ya no necesita ancho: un solo botón centrado. */
+td.col-acciones { width: 46px; text-align: center; white-space: nowrap; }
+
+/* ============================================================================
+   SELECT CON BÚSQUEDA EN VIVO (buscador-select.js)
+   ============================================================================ */
+
+.bsq-caja { position: relative; display: block; width: 100%; }
+
+.bsq-select-oculto {
+  position: absolute !important;
+  opacity: 0;
+  pointer-events: none;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.bsq-input {
+  width: 100%;
+  padding-right: 28px !important;
+}
+
+.bsq-caja.abierta .bsq-input {
+  border-color: var(--color-info);
+  outline: none;
+}
+
+.bsq-limpiar {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.bsq-limpiar:hover { background-color: var(--bg-tertiary); color: var(--color-danger); }
+
+.bsq-lista {
+  position: fixed;
+  z-index: 10600;
+  max-height: 260px;
+  overflow-y: auto;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
+  display: none;
+  padding: 4px;
+}
+.bsq-caja.abierta .bsq-lista { display: block; }
+body.dark-mode .bsq-lista { box-shadow: 0 8px 26px rgba(0, 0, 0, .55); }
+
+.bsq-item {
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bsq-item.activo { background-color: var(--bg-tertiary); }
+.bsq-item.elegido { font-weight: 600; color: var(--color-info); }
+.bsq-item mark {
+  background-color: rgba(59, 130, 246, .28);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.bsq-item.bsq-nuevo {
+  border-top: 1px solid var(--border-color);
+  margin-top: 4px;
+  padding-top: 9px;
+  color: var(--color-info);
+  font-weight: 500;
+}
+.bsq-nuevo-icono { font-weight: bold; margin-right: 4px; }
+.bsq-vacio {
+  padding: 14px 10px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.83rem;
+}
+
+/* ============================================================================
+   CAMPOS OPCIONALES CON INTERRUPTOR (Descripción / Observaciones)
+   ============================================================================ */
+
+.campo-opcional { display: flex; flex-direction: column; gap: 6px; }
+
+.campo-opcional-cabecera {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.88rem;
+  color: var(--text-primary);
+  margin: 0;
+}
+.campo-opcional-cabecera input[type="checkbox"] { cursor: pointer; margin: 0; }
+.campo-opcional-cuerpo { display: none; }
+.campo-opcional.abierto .campo-opcional-cuerpo { display: block; }
+
+.campo-editable-aviso {
+  font-size: 0.72rem;
+  color: var(--color-warning);
+  margin-top: 3px;
+  display: none;
+}
+.campo-editable-aviso.visible { display: block; }
+
+/* Un input "desbloqueable": empieza readonly con un candado al lado. */
+.input-con-candado { display: flex; gap: 6px; align-items: center; }
+.input-con-candado input { flex: 1; }
+.btn-candado {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-secondary);
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0;
+  color: var(--text-secondary);
+}
+.btn-candado:hover { background-color: var(--bg-tertiary); color: var(--text-primary); }
+.btn-candado.abierto { border-color: var(--color-warning); color: var(--color-warning); }
+
+/* Aviso bajo el campo "N° de Lote" en la Guía de Ingreso */
+.lote-aviso {
+  font-size: 0.7rem;
+  line-height: 1.3;
+  margin-top: 3px;
+  max-width: 210px;
+  color: var(--text-secondary);
+}
+.lote-aviso.ok     { color: var(--color-info); }
+.lote-aviso.alerta { color: var(--color-warning); }
+
+/* ============================================================================
+   CRONOGRAMA DE CUOTAS (cronograma.js)
+   ============================================================================ */
+
+.cronograma { margin-top: 10px; }
+
+.cronograma-cabecera {
+  display: flex;
+  gap: 14px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.cronograma-aviso-personalizado {
+  flex: 1;
+  min-width: 240px;
+  padding: 8px 11px;
+  border-radius: var(--radius-md);
+  background-color: rgba(245, 158, 11, .12);
+  color: var(--color-warning);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.cronograma-tabla th,
+.cronograma-tabla td { padding: 6px 8px; font-size: 0.84rem; }
+.cronograma-tabla input { padding: 5px 7px; font-size: 0.84rem; width: 100%; }
+.cronograma-tabla tfoot .rp-total td { background-color: var(--bg-secondary); }
+
+/* Badges de cuota en los listados de CxC/CxP */
+.badge-cuota {
+  background-color: rgba(59, 130, 246, .15);
+  color: var(--color-info);
+  font-size: 0.72rem;
+}
+.cuota-hito {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* ============================================================================
+   MODALES LARGOS — encabezado y acciones siempre visibles
+   ============================================================================
+   Con modales altos (Nueva Venta, Guías, Importadores) el usuario scrollea
+   dentro del contenido y perdía de vista tanto el título como los botones
+   Guardar/Cancelar. Al fijarlos, el cierre y el guardado quedan a un clic
+   sin importar dónde esté el scroll. */
+
+/* En muchos modales el encabezado y el pie están envueltos en un <form>, así
+   que se contemplan los dos niveles. Más profundo no se toca: los márgenes
+   negativos solo cuadran si el ancestro no aporta padding propio. */
+.modal-content > .modal-header,
+.modal-content > form > .modal-header {
+  position: sticky;
+  /* El offset es NEGATIVO y del tamaño del padding del modal a propósito.
+     Con `top: 0` el header se pega en el borde del CONTENT box, dejando
+     visible la franja de padding-top por la que el contenido seguía pasando
+     al hacer scroll (se veía la fila de campos por encima del título).
+     Con -32px se pega en el borde del PADDING box y tapa esa franja. */
+  top: calc(var(--spacing-xl) * -1);
+  z-index: 5;
+  background-color: var(--bg-primary);
+  /* Los márgenes negativos hacen que el fondo cubra todo el ancho del modal
+     (si no, el contenido se ve pasar por detrás en los bordes laterales). */
+  margin-left: calc(var(--spacing-xl) * -1);
+  margin-right: calc(var(--spacing-xl) * -1);
+  padding: var(--spacing-md) var(--spacing-xl);
+}
+
+.modal-content > .modal-footer,
+.modal-content > form > .modal-footer {
+  position: sticky;
+  bottom: calc(var(--spacing-xl) * -1);   /* mismo motivo que el header */
+  z-index: 5;
+  background-color: var(--bg-primary);
+  margin-left: calc(var(--spacing-xl) * -1);
+  margin-right: calc(var(--spacing-xl) * -1);
+  margin-bottom: calc(var(--spacing-xl) * -1);
+  padding: var(--spacing-md) var(--spacing-xl);
+}
+
+@media (max-width: 768px) {
+  .modal.show { padding: 10px 6px; }
+  .modal-content {
+    padding: var(--spacing-md);
+    max-height: calc(100vh - 20px);
+  }
+  .modal-content > .modal-header,
+  .modal-content > form > .modal-header,
+  .modal-content > .modal-footer,
+  .modal-content > form > .modal-footer {
+    margin-left: calc(var(--spacing-md) * -1);
+    margin-right: calc(var(--spacing-md) * -1);
+    padding-left: var(--spacing-md);
+    padding-right: var(--spacing-md);
+  }
+  .modal-content > .modal-header,
+  .modal-content > form > .modal-header { top: calc(var(--spacing-md) * -1); }
+  .modal-content > .modal-footer,
+  .modal-content > form > .modal-footer {
+    bottom: calc(var(--spacing-md) * -1);
+    margin-bottom: calc(var(--spacing-md) * -1);
+  }
+}
+
+/* El cronograma dentro del modal de venta comparte fila con los campos
+   opcionales: se compacta para que las 4 columnas quepan sin scroll lateral. */
+#venta-cronograma .cronograma-tabla th,
+#venta-cronograma .cronograma-tabla td { padding: 5px 6px; font-size: 0.8rem; }
+#venta-cronograma .cronograma-cabecera { margin-bottom: 8px; }
+#venta-cronograma .cronograma-cabecera .form-group { min-width: 180px; }
+
+/* En pantallas angostas la fila se apila: el cronograma arriba, a todo el
+   ancho, y los campos opcionales debajo. */
+@media (max-width: 1100px) {
+  #modal-nueva-venta .modal-content > div > div[style*="minmax(0, 2fr)"] {
+    grid-template-columns: 1fr !important;
   }
 }
