@@ -51,8 +51,14 @@ const DEFAULTS = {
     monedaDefault:      'PEN',
     serieFactura:       'F001',
     serieBoleta:        'B001',
-    serieNotaCredito:   'FC01',
-    serieNotaDebito:    'FD01',
+    // Series de Notas de Crédito/Débito: SUNAT (RS 097-2012) exige que la
+    // serie inicie con la misma letra que el comprobante que modifican — 'F'
+    // si afectan una Factura, 'B' si afectan una Boleta. Se mantienen
+    // separadas para poder elegir la correcta según venta.tipo_comprobante.
+    serieNotaCredito:       'FC01', // NC sobre Factura
+    serieNotaDebito:        'FD01', // ND sobre Factura
+    serieNotaCreditoBoleta: 'BC01', // NC sobre Boleta
+    serieNotaDebitoBoleta:  'BD01', // ND sobre Boleta
     itemsPorPagina:     50,
     tablaCompacta:      false,
     igvDefault:         18,
@@ -367,6 +373,19 @@ export function renderConfiguracionTab(modulo, containerId, opciones = {}) {
     </div>
 
     <div class="card" style="margin-top:16px;">
+      <div class="card-header"><h3 class="card-title">🔌 APIs externas (todo el sistema)</h3></div>
+      <div class="cfg-body">
+        <div class="cfg-fila">
+          <div class="cfg-fila-texto">
+            <label>Consultas RUC/DNI este mes (Decolecta)</label>
+            <div class="cfg-hint">Decolecta es la fuente principal; si falla o se acaba la cuota, cae automáticamente a APIs.pe. Decolecta no expone un endpoint de cuota oficial — este conteo lo lleva el ERP.</div>
+          </div>
+          <div id="decolecta-usage-${modulo}" style="min-width:180px; text-align:right; color:var(--text-secondary);">Cargando…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
       <div class="card-header"><h3 class="card-title">🧹 Datos y caché</h3></div>
       <div class="cfg-body">
         <div class="cfg-fila">
@@ -404,6 +423,17 @@ export function renderConfiguracionTab(modulo, containerId, opciones = {}) {
       el.textContent = `${s.enMemoria} datasets en memoria · ${s.ratio}% de aciertos (${s.hits} hits / ${s.miss} consultas)`
     }
   }).catch(() => {})
+
+  import('./supabase-data.js').then(({ getDecolectaUsoMesActual }) => getDecolectaUsoMesActual()).then(u => {
+    const el = document.getElementById(`decolecta-usage-${modulo}`)
+    if (!el) return
+    const color = u.porcentaje >= 90 ? 'var(--color-danger)' : (u.porcentaje >= 70 ? 'var(--color-warning)' : 'var(--color-success)')
+    el.innerHTML = `<strong style="color:${color};">${u.usadas} / ${u.limite}</strong> usadas · ${u.restantes} restantes (${u.periodo})`
+  }).catch(e => {
+    const el = document.getElementById(`decolecta-usage-${modulo}`)
+    if (el) el.textContent = 'No se pudo cargar el consumo.'
+    console.warn('getDecolectaUsoMesActual:', e)
+  })
 }
 
 function _bindConfig(modulo, campos, onGuardar) {

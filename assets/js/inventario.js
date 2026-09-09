@@ -3,8 +3,57 @@
 // ============================================================================
 
 import { getCurrentUser } from './auth-supabase.js'
+import { registrarColumnas, colStyle } from './col-menu.js'
+
+registrarColumnas('lotes', [
+  { key: 'numero_lote',    label: 'Lote' },
+  { key: 'partida',        label: 'Partida' },
+  { key: 'codigo',         label: 'Código' },
+  { key: 'producto',       label: 'Producto' },
+  { key: 'stock',          label: 'Stock' },
+  { key: 'unidad',         label: 'Unidad' },
+  { key: 'unidades',       label: 'N° Unidades' },
+  { key: 'peso_unidad',    label: 'Peso/Unidad' },
+  { key: 'costo_unit',     label: 'Costo Unit.' },
+  { key: 'costo_total',    label: 'Costo Total Lote' },
+  { key: 'vencimiento',    label: 'Vencimiento' },
+  { key: 'dias_restantes', label: 'Días Restantes' }
+])
+
+registrarColumnas('resumen-stock', [
+  { key: 'sku',             label: 'SKU' },
+  { key: 'producto',        label: 'Producto' },
+  { key: 'stock_total',     label: 'Stock Total' },
+  { key: 'total_unidades',  label: 'Total Unidades' },
+  { key: 'cantidad_lotes',  label: 'Cantidad Lotes' },
+  { key: 'costo_promedio',  label: 'Costo Promedio Unit.' },
+  { key: 'valor_total',     label: 'Valor Total Inventario' },
+  { key: 'stock_critico',   label: 'Stock Crítico' }
+])
+
+registrarColumnas('stock-zonas', [
+  { key: 'codigo',    label: 'Código' },
+  { key: 'producto',  label: 'Producto' },
+  { key: 'lote',      label: 'N° Lote' },
+  { key: 'marca',     label: 'Marca' },
+  { key: 'zona',      label: 'Almacén — Zona' },
+  { key: 'cantidad',  label: 'Cantidad' },
+  { key: 'unidades',  label: 'Unidades' },
+  { key: 'acciones',  label: 'Acciones' }
+])
+
+registrarColumnas('stock-partida', [
+  { key: 'partida',       label: 'Partida' },
+  { key: 'sku',           label: 'SKU' },
+  { key: 'producto',      label: 'Producto' },
+  { key: 'lotes',         label: 'N° Lotes' },
+  { key: 'cantidad',      label: 'Cantidad Total' },
+  { key: 'costo_prom',    label: 'Costo Promedio' },
+  { key: 'valor',         label: 'Valor Total' },
+  { key: 'zonas',         label: 'Zona(s)' }
+])
 import { getItems, addItem, updateItem, deleteItem, getItemById,
-        getLotes, getLoteById, addLote, updateLote, deleteLote,
+        getLotes, getLoteById, getLotesByItemId, addLote, updateLote, deleteLote,
         getCategorias, getCategoriaById, addCategoria, updateCategoria, deleteCategoria,
         getPartidaById, getPartidas, addPartida, deletePartida,
         getMarcas, getMarcaById, addMarca, updateMarca, deleteMarca,
@@ -12,13 +61,15 @@ import { getItems, addItem, updateItem, deleteItem, getItemById,
         getUbicaciones, getUbicacionesByAlmacen, getUbicacionById, addUbicacion, updateUbicacion, deleteUbicacion,
         getStockUbicaciones, getStockUbicacionesByLote, getStockUbicacionesByUbicacion,
         addStockUbicacion, updateStockUbicacion, deleteStockUbicacion,
-        getKardex, getKardexByItem, getKardexById, addKardexMovimiento, deleteKardexMovimiento } from './supabase-data.js'
-import { showToast } from './helpers.js'
+        getLoteBultosDisponiblesZona, updateLoteBulto,
+        getKardex, getKardexByItem, getKardexById, addKardexMovimiento, deleteKardexMovimiento,
+        ultimoErrorDelete, getVentas, getCompras, getContacts } from './supabase-data.js'
+import { showToast, formatQty } from './helpers.js'
 import { initModuleNavDropdowns, initSubtabs } from './main.js'
 import { getModuloConfig, renderConfiguracionTab, aplicarPreferenciasVista } from './config-modulo.js'
 import { cacheado } from './data-cache.js'
 import { crearReporte, nombreMes } from './reportes.js'
-import { convertirVarios } from './buscador-select.js'
+import { convertirVarios, convertirEnBuscador, refrescarBuscador } from './buscador-select.js'
 
 document.addEventListener('DOMContentLoaded', async () => {
   try {
@@ -75,22 +126,48 @@ function initTabsInventario() {
 
       if (tab === 'productos')  await renderProductos()
       if (tab === 'lotes')      await renderLotes()
-      if (tab === 'resumen')    await renderResumenStock()
+      if (tab === 'resumen') {
+        // Resumen Stock tiene sus propios subtabs (General / Por Zona) — se
+        // carga el que esté activo en ese momento, igual que Configuración.
+        const activo = document.querySelector('#inv-subtabs-resumen .subtab.active')?.getAttribute('data-sub') || 'res-general'
+        if (activo === 'res-general') await renderResumenStock()
+        if (activo === 'res-porzona') await renderStockZonas()
+      }
       if (tab === 'categorias') await renderCategorias()
       if (tab === 'marcas')     await renderMarcas()
       if (tab === 'partidas')   await renderPartidas()
-      if (tab === 'almacenes')  await renderAlmacenes()
       if (tab === 'kardex')     await renderKardex()
       if (tab === 'reportes')   await renderReportePartidas()
       if (tab === 'reportes-gerenciales') {
         const activo = document.querySelector('#inv-subtabs-reportes .subtab.active')?.getAttribute('data-sub') || 'repi-valorizacion'
         await construirReporteInv(activo)
       }
-      if (tab === 'configuracion') renderConfiguracionTab('inventario', 'tab-configuracion')
+      if (tab === 'configuracion') {
+        // Configuración tiene sus propios subtabs (General / Almacenes) —
+        // se carga el que esté activo en ese momento.
+        const activo = document.querySelector('#inv-subtabs-config .subtab.active')?.getAttribute('data-sub') || 'cfg-general'
+        if (activo === 'cfg-general') renderConfiguracionTab('inventario', 'cfg-general')
+        if (activo === 'cfg-almacenes') await renderAlmacenes()
+      }
     })
   })
 
   initSubtabs('#inv-subtabs-reportes', (panel) => construirReporteInv(panel))
+
+  // Subtabs de Resumen Stock: General (agregado por producto) y Por Zona
+  // (detalle por lote/zona, con su propio filtro).
+  initSubtabs('#inv-subtabs-resumen', async (panel) => {
+    if (panel === 'res-general') await renderResumenStock()
+    if (panel === 'res-porzona') await renderStockZonas()
+  })
+
+  // Subtabs de Configuración: General (parámetros del módulo) y Almacenes
+  // (estructura física de almacenes/zonas — antes vivía como tab aparte del
+  // menú principal, se movió aquí por ser configuración, no operación diaria).
+  initSubtabs('#inv-subtabs-config', async (panel) => {
+    if (panel === 'cfg-general') renderConfiguracionTab('inventario', 'cfg-general')
+    if (panel === 'cfg-almacenes') await renderAlmacenes()
+  })
 
   // Convierte la fila de tabs (ahora agrupada en dropdowns dentro del header)
   // en un submenú desplegable estilo Odoo. No reemplaza el listener de arriba,
@@ -104,7 +181,6 @@ function initTabsInventario() {
 
 // Cache para filtros (se llena una sola vez por carga, sin N+1)
 let _prodCache = null
-let _kardexItemsByLabel = {} // buscador de Kardex Valorizado: label -> item_id
 
 async function _cargarDatosProductos(forzar = false) {
   if (_prodCache && !forzar) return _prodCache
@@ -368,18 +444,18 @@ async function renderLotes(forzar = false) {
       <table>
         <thead>
           <tr>
-            <th>Lote</th>
-            <th>Partida</th>
-            <th>Producto</th>
-            <th>Stock</th>
-            <th>Unidad</th>
-            <th>N° Unidades</th>
-            <th>Peso/Unidad</th>
-            <th>Costo Unit.</th>
-            <th>Costo Total Lote</th>
-            <th>Vencimiento</th>
-            <th>Días Restantes</th>
-            <th>Acciones</th>
+            <th data-col-tabla="lotes" data-col="numero_lote"${colStyle('lotes','numero_lote')}>Lote</th>
+            <th data-col-tabla="lotes" data-col="partida"${colStyle('lotes','partida')}>Partida</th>
+            <th data-col-tabla="lotes" data-col="codigo"${colStyle('lotes','codigo')}>Código</th>
+            <th data-col-tabla="lotes" data-col="producto"${colStyle('lotes','producto')}>Producto</th>
+            <th data-col-tabla="lotes" data-col="stock"${colStyle('lotes','stock')}>Stock</th>
+            <th data-col-tabla="lotes" data-col="unidad"${colStyle('lotes','unidad')}>Unidad</th>
+            <th data-col-tabla="lotes" data-col="unidades"${colStyle('lotes','unidades')}>N° Unidades</th>
+            <th data-col-tabla="lotes" data-col="peso_unidad"${colStyle('lotes','peso_unidad')}>Peso/Unidad</th>
+            <th data-col-tabla="lotes" data-col="costo_unit"${colStyle('lotes','costo_unit')}>Costo Unit.</th>
+            <th data-col-tabla="lotes" data-col="costo_total"${colStyle('lotes','costo_total')}>Costo Total Lote</th>
+            <th data-col-tabla="lotes" data-col="vencimiento"${colStyle('lotes','vencimiento')}>Vencimiento</th>
+            <th data-col-tabla="lotes" data-col="dias_restantes"${colStyle('lotes','dias_restantes')}>Días Restantes</th>
           </tr>
         </thead>
         <tbody>
@@ -409,21 +485,18 @@ async function renderLotes(forzar = false) {
 
       html += `
         <tr>
-          <td><strong>${lote.numero_lote || '-'}</strong></td>
-          <td>${lote.codigo_partida || '-'}</td>
-          <td>${prod?.nombre || '-'}</td>
-          <td style="text-align: center; font-weight: bold;">${cantidad.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td style="text-align: center;">${lote.unidad_medida || '-'}</td>
-          <td style="text-align: center;">${lote.cantidad_unidades != null ? parseFloat(lote.cantidad_unidades).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '-'}</td>
-          <td style="text-align: center;">${pesoPorUnidad != null ? pesoPorUnidad.toLocaleString('en-US', { maximumFractionDigits: 4 }) : '-'}</td>
-          <td>S/. ${costoUnit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td>S/. ${costoTotalLote.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td>${vencCell}</td>
-          <td>${diasCell}</td>
-          <td>
-            <button class="btn btn-small btn-secondary" onclick="window.editarLote(${lote.id})">Editar</button>
-            <button class="btn btn-small btn-danger" onclick="window.eliminarLote(${lote.id})">Eliminar</button>
-          </td>
+          <td data-col-tabla="lotes" data-col="numero_lote"${colStyle('lotes','numero_lote')}><strong>${lote.numero_lote || '-'}</strong></td>
+          <td data-col-tabla="lotes" data-col="partida"${colStyle('lotes','partida')}>${lote.codigo_partida || '-'}</td>
+          <td data-col-tabla="lotes" data-col="codigo"${colStyle('lotes','codigo')}>${prod?.sku || '-'}</td>
+          <td data-col-tabla="lotes" data-col="producto"${colStyle('lotes','producto')}>${prod?.nombre || '-'}</td>
+          <td data-col-tabla="lotes" data-col="stock" style="text-align: center; font-weight: bold;${colStyle('lotes','stock') ? ' display:none;' : ''}">${cantidad.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td data-col-tabla="lotes" data-col="unidad" style="text-align: center;${colStyle('lotes','unidad') ? ' display:none;' : ''}">${lote.unidad_medida || '-'}</td>
+          <td data-col-tabla="lotes" data-col="unidades" style="text-align: center;${colStyle('lotes','unidades') ? ' display:none;' : ''}">${lote.cantidad_unidades != null ? parseFloat(lote.cantidad_unidades).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '-'}</td>
+          <td data-col-tabla="lotes" data-col="peso_unidad" style="text-align: center;${colStyle('lotes','peso_unidad') ? ' display:none;' : ''}">${pesoPorUnidad != null ? pesoPorUnidad.toLocaleString('en-US', { maximumFractionDigits: 4 }) : '-'}</td>
+          <td data-col-tabla="lotes" data-col="costo_unit"${colStyle('lotes','costo_unit')}>S/. ${costoUnit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td data-col-tabla="lotes" data-col="costo_total"${colStyle('lotes','costo_total')}>S/. ${costoTotalLote.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td data-col-tabla="lotes" data-col="vencimiento"${colStyle('lotes','vencimiento')}>${vencCell}</td>
+          <td data-col-tabla="lotes" data-col="dias_restantes"${colStyle('lotes','dias_restantes')}>${diasCell}</td>
         </tr>
       `
     }
@@ -500,6 +573,15 @@ window.guardarLote = async function () {
   }
 }
 
+// ⚠️ 2026-09-05: los botones "Editar"/"Eliminar" de la tabla de Lotes se
+// quitaron de la UI a propósito (ver memoria
+// project_desincronizacion_lotes_stock_kardex). Esta pantalla escribía
+// lotes.cantidad/cantidad_unidades directo con updateLote(), sin crear fila
+// de kardex ni tocar stock_ubicaciones — eso dejaba "lotes fantasma" con
+// stock sin ningún rastro auditable. Las funciones se dejan aquí por si
+// algo interno todavía las referencia, pero NO deben volver a exponerse
+// desde un botón sin antes hacerlas pasar por kardex + stock_ubicaciones
+// (ver manual project_manual_integridad_crud_stock).
 window.editarLote = async function (loteId) {
   try {
     const lote = await getLoteById(loteId)
@@ -636,14 +718,14 @@ async function renderResumenStock() {
       <table>
         <thead>
           <tr>
-            <th>SKU</th>
-            <th>Producto</th>
-            <th>Stock Total</th>
-            <th>Total Unidades</th>
-            <th>Cantidad Lotes</th>
-            <th>Costo Promedio Unit.</th>
-            <th>Valor Total Inventario</th>
-            <th>Stock Crítico (&lt;${umbralCritico})</th>
+            <th data-col-tabla="resumen-stock" data-col="sku"${colStyle('resumen-stock','sku')}>SKU</th>
+            <th data-col-tabla="resumen-stock" data-col="producto"${colStyle('resumen-stock','producto')}>Producto</th>
+            <th data-col-tabla="resumen-stock" data-col="stock_total"${colStyle('resumen-stock','stock_total')}>Stock Total</th>
+            <th data-col-tabla="resumen-stock" data-col="total_unidades"${colStyle('resumen-stock','total_unidades')}>Total Unidades</th>
+            <th data-col-tabla="resumen-stock" data-col="cantidad_lotes"${colStyle('resumen-stock','cantidad_lotes')}>Cantidad Lotes</th>
+            <th data-col-tabla="resumen-stock" data-col="costo_promedio"${colStyle('resumen-stock','costo_promedio')}>Costo Promedio Unit.</th>
+            <th data-col-tabla="resumen-stock" data-col="valor_total"${colStyle('resumen-stock','valor_total')}>Valor Total Inventario</th>
+            <th data-col-tabla="resumen-stock" data-col="stock_critico"${colStyle('resumen-stock','stock_critico')}>Stock Crítico (&lt;${umbralCritico})</th>
           </tr>
         </thead>
         <tbody>
@@ -670,14 +752,14 @@ async function renderResumenStock() {
 
       html += `
         <tr style="${colorCritico}">
-          <td><strong>${prod.sku}</strong></td>
-          <td>${prod.nombre}</td>
-          <td style="text-align: center; font-weight: bold;">${stockTotal.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
-          <td style="text-align: center;">${totalUnidades.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
-          <td style="text-align: center;">${cantidadLotes.toLocaleString('en-US')}</td>
-          <td>S/. ${costoPromedio.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td>S/. ${valorTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td style="text-align: center;">${critico ? '⚠️ SÍ' : 'NO'}</td>
+          <td data-col-tabla="resumen-stock" data-col="sku"${colStyle('resumen-stock','sku')}><strong>${prod.sku}</strong></td>
+          <td data-col-tabla="resumen-stock" data-col="producto"${colStyle('resumen-stock','producto')}>${prod.nombre}</td>
+          <td data-col-tabla="resumen-stock" data-col="stock_total" style="text-align: center; font-weight: bold;${colStyle('resumen-stock','stock_total') ? ' display:none;' : ''}">${stockTotal.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+          <td data-col-tabla="resumen-stock" data-col="total_unidades" style="text-align: center;${colStyle('resumen-stock','total_unidades') ? ' display:none;' : ''}">${totalUnidades.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+          <td data-col-tabla="resumen-stock" data-col="cantidad_lotes" style="text-align: center;${colStyle('resumen-stock','cantidad_lotes') ? ' display:none;' : ''}">${cantidadLotes.toLocaleString('en-US')}</td>
+          <td data-col-tabla="resumen-stock" data-col="costo_promedio"${colStyle('resumen-stock','costo_promedio')}>S/. ${costoPromedio.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td data-col-tabla="resumen-stock" data-col="valor_total"${colStyle('resumen-stock','valor_total')}>S/. ${valorTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td data-col-tabla="resumen-stock" data-col="stock_critico" style="text-align: center;${colStyle('resumen-stock','stock_critico') ? ' display:none;' : ''}">${critico ? '⚠️ SÍ' : 'NO'}</td>
         </tr>
       `
     }
@@ -686,12 +768,14 @@ async function renderResumenStock() {
         </tbody>
         <tfoot>
           <tr style="border-top: 2px solid var(--border-color); font-weight: bold;">
-            <td colspan="2">TOTAL INVENTARIO</td>
-            <td style="text-align: center;">${totalStockGeneral.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
-            <td style="text-align: center;">${totalUnidadesGeneral.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
-            <td></td>
-            <td>S/. ${totalInventario.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-            <td></td>
+            <td data-col-tabla="resumen-stock" data-col="sku"${colStyle('resumen-stock','sku')}></td>
+            <td data-col-tabla="resumen-stock" data-col="producto"${colStyle('resumen-stock','producto')}>TOTAL INVENTARIO</td>
+            <td data-col-tabla="resumen-stock" data-col="stock_total" style="text-align: center;${colStyle('resumen-stock','stock_total') ? ' display:none;' : ''}">${totalStockGeneral.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+            <td data-col-tabla="resumen-stock" data-col="total_unidades" style="text-align: center;${colStyle('resumen-stock','total_unidades') ? ' display:none;' : ''}">${totalUnidadesGeneral.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+            <td data-col-tabla="resumen-stock" data-col="cantidad_lotes"${colStyle('resumen-stock','cantidad_lotes')}></td>
+            <td data-col-tabla="resumen-stock" data-col="costo_promedio"${colStyle('resumen-stock','costo_promedio')}></td>
+            <td data-col-tabla="resumen-stock" data-col="valor_total"${colStyle('resumen-stock','valor_total')}>S/. ${totalInventario.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            <td data-col-tabla="resumen-stock" data-col="stock_critico"${colStyle('resumen-stock','stock_critico')}></td>
           </tr>
         </tfoot>
       </table>
@@ -797,14 +881,14 @@ async function renderReportePartidas() {
       <table>
         <thead>
           <tr>
-            <th>Partida</th>
-            <th>SKU</th>
-            <th>Producto</th>
-            <th style="text-align:center;">N° Lotes</th>
-            <th style="text-align:right;">Cantidad Total</th>
-            <th style="text-align:right;">Costo Promedio</th>
-            <th style="text-align:right;">Valor Total</th>
-            <th>Zona(s)</th>
+            <th data-col-tabla="stock-partida" data-col="partida"${colStyle('stock-partida','partida')}>Partida</th>
+            <th data-col-tabla="stock-partida" data-col="sku"${colStyle('stock-partida','sku')}>SKU</th>
+            <th data-col-tabla="stock-partida" data-col="producto"${colStyle('stock-partida','producto')}>Producto</th>
+            <th data-col-tabla="stock-partida" data-col="lotes" style="text-align:center;${colStyle('stock-partida','lotes') ? ' display:none;' : ''}">N° Lotes</th>
+            <th data-col-tabla="stock-partida" data-col="cantidad" style="text-align:right;${colStyle('stock-partida','cantidad') ? ' display:none;' : ''}">Cantidad Total</th>
+            <th data-col-tabla="stock-partida" data-col="costo_prom" style="text-align:right;${colStyle('stock-partida','costo_prom') ? ' display:none;' : ''}">Costo Promedio</th>
+            <th data-col-tabla="stock-partida" data-col="valor" style="text-align:right;${colStyle('stock-partida','valor') ? ' display:none;' : ''}">Valor Total</th>
+            <th data-col-tabla="stock-partida" data-col="zonas"${colStyle('stock-partida','zonas')}>Zona(s)</th>
           </tr>
         </thead>
         <tbody>
@@ -818,14 +902,14 @@ async function renderReportePartidas() {
 
       html += `
         <tr>
-          <td><strong>${g.partida || '-'}</strong></td>
-          <td>${item?.sku || '-'}</td>
-          <td>${item?.nombre || `Item #${g.item_id}`}</td>
-          <td style="text-align:center;">${g.lotes}</td>
-          <td style="text-align:right; font-weight:bold;">${g.cantidad.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td style="text-align:right;">S/. ${costoProm.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td style="text-align:right;">S/. ${g.valor.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td style="font-size:0.82rem;">${[...g.zonas].join(', ') || '-'}</td>
+          <td data-col-tabla="stock-partida" data-col="partida"${colStyle('stock-partida','partida')}><strong>${g.partida || '-'}</strong></td>
+          <td data-col-tabla="stock-partida" data-col="sku"${colStyle('stock-partida','sku')}>${item?.sku || '-'}</td>
+          <td data-col-tabla="stock-partida" data-col="producto"${colStyle('stock-partida','producto')}>${item?.nombre || `Item #${g.item_id}`}</td>
+          <td data-col-tabla="stock-partida" data-col="lotes" style="text-align:center;${colStyle('stock-partida','lotes') ? ' display:none;' : ''}">${g.lotes}</td>
+          <td data-col-tabla="stock-partida" data-col="cantidad" style="text-align:right; font-weight:bold;${colStyle('stock-partida','cantidad') ? ' display:none;' : ''}">${g.cantidad.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td data-col-tabla="stock-partida" data-col="costo_prom" style="text-align:right;${colStyle('stock-partida','costo_prom') ? ' display:none;' : ''}">S/. ${costoProm.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td data-col-tabla="stock-partida" data-col="valor" style="text-align:right;${colStyle('stock-partida','valor') ? ' display:none;' : ''}">S/. ${g.valor.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td data-col-tabla="stock-partida" data-col="zonas" style="font-size:0.82rem;${colStyle('stock-partida','zonas') ? ' display:none;' : ''}">${[...g.zonas].join(', ') || '-'}</td>
         </tr>
       `
     }
@@ -834,8 +918,14 @@ async function renderReportePartidas() {
         </tbody>
         <tfoot>
           <tr style="border-top: 2px solid var(--border-color); font-weight: bold;">
-            <td colspan="6">TOTAL</td>
-            <td colspan="2" style="text-align: right;">S/. ${valorGranTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            <td data-col-tabla="stock-partida" data-col="partida"${colStyle('stock-partida','partida')}></td>
+            <td data-col-tabla="stock-partida" data-col="sku"${colStyle('stock-partida','sku')}></td>
+            <td data-col-tabla="stock-partida" data-col="producto"${colStyle('stock-partida','producto')}>TOTAL</td>
+            <td data-col-tabla="stock-partida" data-col="lotes"${colStyle('stock-partida','lotes')}></td>
+            <td data-col-tabla="stock-partida" data-col="cantidad"${colStyle('stock-partida','cantidad')}></td>
+            <td data-col-tabla="stock-partida" data-col="costo_prom"${colStyle('stock-partida','costo_prom')}></td>
+            <td data-col-tabla="stock-partida" data-col="valor" style="text-align: right;${colStyle('stock-partida','valor') ? ' display:none;' : ''}">S/. ${valorGranTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            <td data-col-tabla="stock-partida" data-col="zonas"${colStyle('stock-partida','zonas')}></td>
           </tr>
         </tfoot>
       </table>
@@ -1202,63 +1292,401 @@ window.eliminarMarca = async function (marId) {
 
 async function renderKardex() {
   try {
-    const items     = await getItems()
+    // Items en vivo (no de una foto vieja) — mismo estándar que el resto del
+    // sistema: refrescar la fuente de datos justo antes de poblar el select.
+    const [items, zonas, almacenes] = await Promise.all([getItems(true), getUbicaciones(), getAlmacenes()])
     const container = document.getElementById('content-kardex')
     if (!container) return
 
-    // Buscador con filtro en vivo (datalist nativo del navegador: filtra a
-    // cada letra sin JS extra) en vez de un <select> plano donde había que
-    // scrollear toda la lista de productos.
+    // Select real convertido a buscador (convertirEnBuscador), mismo
+    // componente que Ventas/Compras — reemplaza el datalist nativo que tenía
+    // antes (funcionaba, pero sin resaltado de coincidencias, sin botón de
+    // limpiar y con estilo inconsistente entre navegadores).
     const itemsOrdenados = items
       .slice()
       .sort((a, b) => (a.nombre || a.name || '').localeCompare(b.nombre || b.name || ''))
-    _kardexItemsByLabel = {}
-    const datalistHtml = itemsOrdenados.map(i => {
+    const opcionesHtml = itemsOrdenados.map(i => {
       const label = `${i.nombre || i.name} (${i.codigo || i.sku || 'sin código'})`
-      _kardexItemsByLabel[label] = i.id
-      return `<option value="${label}">`
+      return `<option value="${i.id}">${label}</option>`
     }).join('')
 
+    // Opciones de zona (Almacén — Zona) para los filtros "Desde"/"A" —
+    // incluye las zonas virtuales Partners/Customers y Partners/Vendors, que
+    // ya son filas normales de `ubicaciones` (así el filtro también sirve
+    // para ver solo las entradas/salidas hacia/desde afuera del almacén).
+    const almacenMapTmp = {}
+    for (const a of (almacenes || [])) almacenMapTmp[a.id] = a
+    const opcionesZonaHtml = (zonas || [])
+      .slice()
+      .sort((a, b) => (almacenMapTmp[a.almacen_id]?.nombre || '').localeCompare(almacenMapTmp[b.almacen_id]?.nombre || '') || (a.nombre || '').localeCompare(b.nombre || ''))
+      .map(z => `<option value="${z.id}">${almacenMapTmp[z.almacen_id]?.nombre || '?'} — ${z.nombre}</option>`)
+      .join('')
+
+    // Header en dos filas: título + acciones arriba (space-between), y
+    // filtros abajo en un grid auto-fit — antes los filtros vivían en el
+    // mismo <div> flex que el título, así que en pantallas angostas cada
+    // <select> quedaba apretado en una columna estrecha y se apilaba uno por
+    // fila (ancho desperdiciado). El grid usa todo el ancho de la tarjeta.
     container.innerHTML = `
-      <div class="card-header">
-        <h3 class="card-title">Kardex Valorizado — Promedio Ponderado</h3>
-        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-          <input type="text" id="kardexItemSelect" list="kardexItemsList" placeholder="Escribe para buscar producto..." style="min-width:280px;" autocomplete="off">
-          <datalist id="kardexItemsList">${datalistHtml}</datalist>
-          <input type="month" id="kardexFiltroMes" title="Filtrar por mes">
-          <button class="btn btn-primary btn-small" onclick="window.cargarKardex()">Ver Kardex</button>
-          <button class="btn btn-secondary btn-small" onclick="window.abrirModalAjusteKardex()">+ Ajuste Inventario</button>
+      <div class="col-menu card-corner-menu" id="kardexColMenu">
+        <button type="button" class="card-menu-btn" onclick="window.toggleMenuColumnasKardex(event)" title="Elegir qué columnas mostrar">⋮</button>
+        <div class="col-menu-dropdown" id="kardexColMenuDropdown"></div>
+      </div>
+      <div class="card-header" style="flex-direction:column; align-items:stretch; gap:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; padding-right:34px;">
+          <h3 class="card-title">Kardex Valorizado — Promedio Ponderado</h3>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn btn-primary btn-small" onclick="window.cargarKardex()">Ver Kardex</button>
+            <button class="btn btn-secondary btn-small" onclick="window.abrirModalAjusteKardex()">+ Ajuste Inventario</button>
+            <button class="btn btn-secondary btn-small" onclick="window.exportarKardexExcel()" title="Exporta las filas seleccionadas (o todas si no marcas ninguna) con las columnas actualmente visibles">📊 Exportar Excel</button>
+          </div>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:8px;">
+          <select id="kardexItemSelect" style="grid-column:span 2; min-width:0;" onchange="window._poblarLoteFiltroKardex()">
+            <option value="">-- Selecciona un producto --</option>${opcionesHtml}
+          </select>
+          <div class="col-menu" id="kardexFiltroLoteMenu" style="min-width:0;">
+            <button type="button" class="btn btn-secondary btn-small" style="width:100%; text-align:left; min-width:0;" onclick="window.toggleFiltroLoteKardex(event)" title="Filtrar por lote (varios a la vez)">
+              <span id="kardexFiltroLoteLabel">Todos los lotes</span>
+            </button>
+            <div class="col-menu-dropdown" id="kardexFiltroLoteDropdown"></div>
+          </div>
+          <div class="col-menu" id="kardexFiltroTipoMenu" style="min-width:0;">
+            <button type="button" class="btn btn-secondary btn-small" style="width:100%; text-align:left; min-width:0;" onclick="window.toggleFiltroTipoKardex(event)" title="Filtrar por tipo de movimiento (varios a la vez)">
+              <span id="kardexFiltroTipoLabel">Todos los tipos</span>
+            </button>
+            <div class="col-menu-dropdown" id="kardexFiltroTipoDropdown"></div>
+          </div>
+          <select id="kardexFiltroDesde" title="Filtrar por zona de origen (Desde)" style="min-width:0;">
+            <option value="">Desde: todas</option>${opcionesZonaHtml}
+          </select>
+          <select id="kardexFiltroA" title="Filtrar por zona de destino (A)" style="min-width:0;">
+            <option value="">A: todas</option>${opcionesZonaHtml}
+          </select>
+          <input type="month" id="kardexFiltroMes" title="Filtrar por mes" style="min-width:0;">
         </div>
       </div>
       <div id="kardex-body" style="padding:10px;">
         <p style="text-align:center; color:var(--text-secondary);">Escribe o selecciona un producto para ver su kardex.</p>
       </div>
     `
+    convertirEnBuscador('kardexItemSelect', { placeholder: 'Escribe para buscar producto...', sinResultados: 'Sin productos' })
+    _kardexLotesDisponibles = []
+    _kardexLotesSeleccionados.clear()
+    _kardexTiposSeleccionados.clear()
+    _pintarMenuFiltroLoteKardex()
+    _pintarMenuFiltroTipoKardex()
+    _actualizarLabelFiltroLoteKardex()
+    _actualizarLabelFiltroTipoKardex()
   } catch (e) {
     console.error('renderKardex:', e)
     showToast('Error al cargar kardex', 'danger')
   }
 }
 
+// ============================================================================
+// KARDEX — Filtros de Lote y Tipo de Movimiento como MULTISELECT (checklist
+// en dropdown, mismo patrón visual que el menú "⚙️ Columnas"). Selección
+// vacía = "todos" (no filtra), igual que antes con el <select> en blanco.
+// ============================================================================
+let _kardexLotesDisponibles = [] // [{id, numero_lote}] del producto elegido
+const _kardexLotesSeleccionados = new Set()
+const _kardexTiposSeleccionados = new Set()
+
+const KARDEX_TIPOS_MOV = [
+  { value: 'entrada', label: 'Entrada (compra)' },
+  { value: 'salida', label: 'Salida (venta)' },
+  { value: 'traslado_interno', label: 'Traslado interno' },
+  { value: 'ajuste_entrada', label: 'Ajuste — entrada' },
+  { value: 'ajuste_salida', label: 'Ajuste — salida' }
+]
+
+// Puebla el filtro de Lote con los lotes DEL PRODUCTO elegido (no todos los
+// lotes del sistema) — se llama al cambiar de producto en el buscador.
+window._poblarLoteFiltroKardex = async function () {
+  const itemId = parseInt(document.getElementById('kardexItemSelect')?.value || 0)
+  _kardexLotesSeleccionados.clear()
+  if (!itemId) {
+    _kardexLotesDisponibles = []
+  } else {
+    const lotes = await getLotesByItemId(itemId)
+    _kardexLotesDisponibles = (lotes || [])
+      .slice()
+      .sort((a, b) => (a.numero_lote || '').localeCompare(b.numero_lote || '', 'es', { numeric: true }))
+  }
+  _pintarMenuFiltroLoteKardex()
+  _actualizarLabelFiltroLoteKardex()
+}
+
+function _pintarMenuFiltroLoteKardex() {
+  const dd = document.getElementById('kardexFiltroLoteDropdown')
+  if (!dd) return
+  if (_kardexLotesDisponibles.length === 0) {
+    dd.innerHTML = '<span style="padding:4px 6px; font-size:0.85rem; color:var(--text-secondary);">Elige un producto primero</span>'
+    return
+  }
+  dd.innerHTML = _kardexLotesDisponibles.map(l => `
+    <label><input type="checkbox" data-lote-id="${l.id}" ${_kardexLotesSeleccionados.has(l.id) ? 'checked' : ''} onchange="window._toggleFiltroLoteKardex(${l.id}, this.checked)"> ${_escInv(l.numero_lote || ('#' + l.id))}</label>
+  `).join('')
+}
+
+function _pintarMenuFiltroTipoKardex() {
+  const dd = document.getElementById('kardexFiltroTipoDropdown')
+  if (!dd) return
+  dd.innerHTML = KARDEX_TIPOS_MOV.map(t => `
+    <label><input type="checkbox" data-tipo="${t.value}" ${_kardexTiposSeleccionados.has(t.value) ? 'checked' : ''} onchange="window._toggleFiltroTipoKardex('${t.value}', this.checked)"> ${t.label}</label>
+  `).join('')
+}
+
+function _actualizarLabelFiltroLoteKardex() {
+  const label = document.getElementById('kardexFiltroLoteLabel')
+  if (!label) return
+  const n = _kardexLotesSeleccionados.size
+  label.textContent = n === 0 ? 'Todos los lotes' : n === 1
+    ? (_kardexLotesDisponibles.find(l => _kardexLotesSeleccionados.has(l.id))?.numero_lote || '1 lote')
+    : `${n} lotes seleccionados`
+}
+
+function _actualizarLabelFiltroTipoKardex() {
+  const label = document.getElementById('kardexFiltroTipoLabel')
+  if (!label) return
+  const n = _kardexTiposSeleccionados.size
+  label.textContent = n === 0 ? 'Todos los tipos' : n === 1
+    ? (KARDEX_TIPOS_MOV.find(t => _kardexTiposSeleccionados.has(t.value))?.label || '1 tipo')
+    : `${n} tipos seleccionados`
+}
+
+window._toggleFiltroLoteKardex = function (loteId, checked) {
+  if (checked) _kardexLotesSeleccionados.add(loteId); else _kardexLotesSeleccionados.delete(loteId)
+  _actualizarLabelFiltroLoteKardex()
+}
+
+window._toggleFiltroTipoKardex = function (tipo, checked) {
+  if (checked) _kardexTiposSeleccionados.add(tipo); else _kardexTiposSeleccionados.delete(tipo)
+  _actualizarLabelFiltroTipoKardex()
+}
+
+window.toggleFiltroLoteKardex = function (ev) {
+  ev?.stopPropagation()
+  const menu = document.getElementById('kardexFiltroLoteMenu')
+  if (!menu) return
+  const abriendo = !menu.classList.contains('open')
+  document.getElementById('kardexFiltroTipoMenu')?.classList.remove('open')
+  if (abriendo) _pintarMenuFiltroLoteKardex()
+  menu.classList.toggle('open', abriendo)
+}
+
+window.toggleFiltroTipoKardex = function (ev) {
+  ev?.stopPropagation()
+  const menu = document.getElementById('kardexFiltroTipoMenu')
+  if (!menu) return
+  const abriendo = !menu.classList.contains('open')
+  document.getElementById('kardexFiltroLoteMenu')?.classList.remove('open')
+  if (abriendo) _pintarMenuFiltroTipoKardex()
+  menu.classList.toggle('open', abriendo)
+}
+
+// Cierra cualquier menú .col-menu abierto (Columnas, Lote, Tipo) al hacer
+// click fuera — un solo listener global para los 3, registrado una vez.
+if (!window._kardexMenusListener) {
+  window._kardexMenusListener = true
+  document.addEventListener('click', (ev) => {
+    document.querySelectorAll('.col-menu.open').forEach(menu => {
+      if (!menu.contains(ev.target)) menu.classList.remove('open')
+    })
+  })
+}
+
+let _kardexOrdenFecha = 'asc' // 'asc' | 'desc' — se conserva entre recargas hasta que el usuario haga click en el header
+
+// Ojo: NO se usa `new Date(fecha).toLocaleDateString()` acá — `fecha` viene
+// como 'AAAA-MM-DD' (fecha sin hora) de Supabase, y JS la interpreta como
+// medianoche UTC; en un huso horario negativo (Perú, UTC-5) eso muestra el
+// día ANTERIOR al convertir a hora local (23/08 se veía como 22/08). Se
+// parsea el string directo, sin pasar por Date, para evitar ese corrimiento.
+function _fechaDDMMAAAA(fechaISO) {
+  if (!fechaISO) return '-'
+  const m = String(fechaISO).match(/^(\d{4})-(\d{2})-(\d{2})/)
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : fechaISO
+}
+
+/** Invierte el orden de la tabla por fecha y vuelve a pintar (sin re-pedir datos, ya están cargados en pantalla). */
+window.ordenarKardexPorFecha = function () {
+  _kardexOrdenFecha = _kardexOrdenFecha === 'asc' ? 'desc' : 'asc'
+  window.cargarKardex()
+}
+
+// ============================================================================
+// KARDEX — Menú de columnas mostrar/ocultar (persistido en localStorage)
+// ============================================================================
+// Cada <th>/<td> de la tabla lleva un atributo data-col="clave" — ocultar una
+// columna solo pone display:none en esas celdas (la tabla no usa
+// table-layout:fixed, así que el resto se reacomoda solo, sin huecos ni
+// desbordes). El estado se guarda por navegador, no por usuario del sistema.
+const KARDEX_COLS_KEY = 'kardexColumnasVisibles'
+
+function _kardexColDefs() {
+  return [
+    { key: 'sel',        label: 'Seleccionar' },
+    { key: 'id',         label: 'ID' },
+    { key: 'fecha',      label: 'Fecha' },
+    { key: 'tipo',       label: 'Tipo Movimiento' },
+    { key: 'concepto',   label: 'Concepto' },
+    { key: 'contacto',   label: 'Contacto' },
+    { key: 'docref',     label: 'Doc. Referencia' },
+    { key: 'lote',       label: 'Lote' },
+    { key: 'desde',      label: 'Desde' },
+    { key: 'a',          label: 'A' },
+    { key: 'entrada',    label: 'Entrada' },
+    { key: 'salida',     label: 'Salida' },
+    { key: 'costounit',  label: 'Costo Unit.' },
+    { key: 'costototal', label: 'Costo Total' },
+    { key: 'saldocant',  label: 'Saldo Cant.' },
+    { key: 'saldovalor', label: 'Saldo Valor' },
+    { key: 'tc',         label: 'T.C.' },
+    { key: 'acciones',   label: 'Acciones' }
+  ]
+}
+
+function _kardexColsVisibles() {
+  let guardado = {}
+  try { guardado = JSON.parse(localStorage.getItem(KARDEX_COLS_KEY) || '{}') } catch { guardado = {} }
+  const cols = {}
+  for (const c of _kardexColDefs()) cols[c.key] = guardado[c.key] !== false // todas visibles por defecto
+  return cols
+}
+
+function _kardexColStyle(cols, key) {
+  return cols[key] ? '' : ' style="display:none;"'
+}
+
+// Pinta los checkboxes del menú desplegable (una sola vez; los toggles luego
+// solo tocan display, no vuelven a pintar la tabla).
+function _pintarMenuColumnasKardex() {
+  const dd = document.getElementById('kardexColMenuDropdown')
+  if (!dd) return
+  const cols = _kardexColsVisibles()
+  dd.innerHTML = _kardexColDefs().map(c => `
+    <label><input type="checkbox" data-colkey="${c.key}" ${cols[c.key] ? 'checked' : ''} onchange="window._toggleColumnaKardex('${c.key}', this.checked)"> ${c.label}</label>
+  `).join('')
+}
+
+window.toggleMenuColumnasKardex = function (ev) {
+  ev?.stopPropagation()
+  const menu = document.getElementById('kardexColMenu')
+  if (!menu) return
+  const abriendo = !menu.classList.contains('open')
+  if (abriendo) _pintarMenuColumnasKardex()
+  menu.classList.toggle('open', abriendo)
+}
+
+// Cierra el menú al hacer click fuera — se registra una sola vez por carga
+// de página (el listener vive en window, no en el menú que se re-pinta).
+if (!window._kardexColMenuListener) {
+  window._kardexColMenuListener = true
+  document.addEventListener('click', (ev) => {
+    const menu = document.getElementById('kardexColMenu')
+    if (menu && !menu.contains(ev.target)) menu.classList.remove('open')
+  })
+}
+
+window._toggleColumnaKardex = function (key, visible) {
+  const cols = _kardexColsVisibles()
+  cols[key] = visible
+  localStorage.setItem(KARDEX_COLS_KEY, JSON.stringify(cols))
+  document.querySelectorAll(`#kardex-body [data-col="${key}"]`).forEach(el => {
+    el.style.display = visible ? '' : 'none'
+  })
+}
+
+// Checkbox "seleccionar todo" del header — marca/desmarca todas las filas de
+// datos (la fila de totales no tiene checkbox).
+window._kardexToggleSelTodo = function (checked) {
+  document.querySelectorAll('#kardex-body .kardex-sel').forEach(chk => { chk.checked = checked })
+}
+
+// ============================================================================
+// KARDEX — Exportar a Excel (respeta filas marcadas y columnas visibles)
+// ============================================================================
+// Lee directamente del DOM ya renderizado (no vuelve a pedir datos ni
+// recalcula nada): así lo que se exporta es exactamente "lo que se ve" en
+// pantalla — mismas columnas mostradas/ocultas del menú ⚙️ Columnas, mismo
+// orden, mismo filtro aplicado. Si el usuario marcó checkboxes, exporta solo
+// esas filas; si no marcó ninguna, exporta todas las filas visibles.
+window.exportarKardexExcel = async function () {
+  const tabla = document.querySelector('#kardex-body table')
+  if (!tabla) { showToast('Primero carga un Kardex para poder exportarlo', 'warning'); return }
+
+  // Columnas a exportar: las visibles del thead, sin el checkbox ni Acciones
+  // (no son datos exportables).
+  const thsExcluidos = new Set(['sel', 'acciones'])
+  const ths = Array.from(tabla.querySelectorAll('thead th'))
+    .filter(th => th.style.display !== 'none' && !thsExcluidos.has(th.dataset.col))
+
+  if (ths.length === 0) { showToast('No hay columnas visibles para exportar', 'warning'); return }
+
+  const filasDatos = Array.from(tabla.querySelectorAll('tbody tr'))
+    .filter(tr => !tr.classList.contains('kardex-fila-totales') && tr.dataset.movId)
+
+  const marcadas = filasDatos.filter(tr => tr.querySelector('.kardex-sel')?.checked)
+  const filasAExportar = marcadas.length > 0 ? marcadas : filasDatos
+
+  if (filasAExportar.length === 0) { showToast('No hay movimientos para exportar', 'warning'); return }
+
+  const filasJson = filasAExportar.map(tr => {
+    const fila = {}
+    for (const th of ths) {
+      const key = th.dataset.col
+      const label = th.textContent.trim().replace(/[▲▼]/g, '').trim()
+      const celda = tr.querySelector(`[data-col="${key}"]`)
+      fila[label] = celda ? celda.textContent.trim().replace(/\s+/g, ' ') : ''
+    }
+    return fila
+  })
+
+  try {
+    const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm')
+    const ws = XLSX.utils.json_to_sheet(filasJson)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Kardex')
+
+    const nombreProducto = document.getElementById('kardexItemSelect')?.selectedOptions?.[0]?.textContent?.trim() || 'Producto'
+    const fechaHoy = new Date().toISOString().slice(0, 10)
+    XLSX.writeFile(wb, `Kardex_${nombreProducto.replace(/[^\w\-]+/g, '_')}_${fechaHoy}.xlsx`)
+
+    showToast(`Excel exportado: ${filasAExportar.length} fila(s), ${ths.length} columna(s) ✅`, 'success')
+  } catch (e) {
+    console.error('exportarKardexExcel:', e)
+    showToast('Error al generar el Excel: ' + e.message, 'danger')
+  }
+}
+
 window.cargarKardex = async function() {
-  const textoBuscado = document.getElementById('kardexItemSelect')?.value?.trim() || ''
-  const itemId  = _kardexItemsByLabel[textoBuscado] || 0
-  const filtroMes = document.getElementById('kardexFiltroMes')?.value
+  const itemId  = parseInt(document.getElementById('kardexItemSelect')?.value || 0)
+  const filtroMes   = document.getElementById('kardexFiltroMes')?.value
+  const filtroLotes = _kardexLotesSeleccionados // Set<number>, vacío = todos
+  const filtroTipos = _kardexTiposSeleccionados // Set<string>, vacío = todos
+  const filtroDesde = parseInt(document.getElementById('kardexFiltroDesde')?.value || 0) || null
+  const filtroA     = parseInt(document.getElementById('kardexFiltroA')?.value || 0) || null
   const body    = document.getElementById('kardex-body')
 
   if (!itemId) { showToast('Escribe y selecciona un producto de la lista', 'warning'); return }
   if (body) body.innerHTML = '<p style="padding:20px;">Cargando...</p>'
 
   try {
-    const [items, zonas, almacenes, lotes] = await Promise.all([getItems(), getUbicaciones(), getAlmacenes(), getLotes()])
+    const [items, zonas, almacenes, lotes, ventas, compras, contacts] = await Promise.all([
+      getItems(), getUbicaciones(), getAlmacenes(), getLotes(), getVentas(), getCompras(), getContacts()
+    ])
     const item  = items.find(i => i.id === itemId)
     let movs    = await getKardexByItem(itemId)
 
-    if (filtroMes) {
-      movs = movs.filter(m => (m.fecha || '').startsWith(filtroMes))
-    }
+    if (filtroMes)   movs = movs.filter(m => (m.fecha || '').startsWith(filtroMes))
+    if (filtroLotes.size) movs = movs.filter(m => filtroLotes.has(m.lote_id))
+    if (filtroTipos.size) movs = movs.filter(m => filtroTipos.has(m.tipo_movimiento))
+    if (filtroDesde) movs = movs.filter(m => m.ubicacion_origen_id === filtroDesde)
+    if (filtroA)     movs = movs.filter(m => m.ubicacion_destino_id === filtroA)
 
-    movs = movs.sort((a, b) => new Date(a.fecha) - new Date(b.fecha) || a.id - b.id)
+    movs = movs.sort((a, b) => (new Date(a.fecha) - new Date(b.fecha) || a.id - b.id) * (_kardexOrdenFecha === 'desc' ? -1 : 1))
 
     // "Desde" / "A": Almacén/Zona real, o Partners/Vendors — Partners/Customers
     // para el lado externo (proveedor/cliente), estilo Odoo.
@@ -1285,6 +1713,32 @@ window.cargarKardex = async function() {
       if (!l) return `<span style="color:var(--color-warning);" title="El lote ya no existe">#${loteId}</span>`
       return `<span title="Lote ${l.numero_lote} · costo unit. ${(parseFloat(l.costo_unitario) || 0).toFixed(4)}">${_escInv(l.numero_lote || ('#' + loteId))}</span>`
     }
+
+    // Contacto (cliente si el movimiento viene de una venta, proveedor si
+    // viene de una compra) — un traslado interno o un ajuste de inventario
+    // no tiene contraparte externa, se muestra un guión.
+    const ventaMap = {}
+    for (const v of (ventas || [])) ventaMap[v.id] = v
+    const compraMap = {}
+    for (const c of (compras || [])) compraMap[c.id] = c
+    const contactMap = {}
+    for (const c of (contacts || [])) contactMap[c.id] = c
+    const contactoEtiqueta = (m) => {
+      const guion = '<span style="color:var(--text-secondary);">—</span>'
+      if (m.venta_id) {
+        const v = ventaMap[m.venta_id]
+        const nombre = v ? contactMap[v.contact_id]?.nombre : null
+        return nombre ? _escInv(nombre) : (v ? guion : `<span style="color:var(--color-warning);" title="La venta ya no existe">#${m.venta_id}</span>`)
+      }
+      if (m.compra_id) {
+        const c = compraMap[m.compra_id]
+        const nombre = c ? (contactMap[c.contact_id]?.nombre || c.proveedor_nombre) : null
+        return nombre ? _escInv(nombre) : (c ? guion : `<span style="color:var(--color-warning);" title="La compra ya no existe">#${m.compra_id}</span>`)
+      }
+      return guion
+    }
+
+    const cols = _kardexColsVisibles()
 
     const totalEntradas = movs.filter(m => m.cantidad_entrada > 0).reduce((s, m) => s + parseFloat(m.cantidad_entrada || 0), 0)
     const totalSalidas  = movs.filter(m => m.cantidad_salida  > 0).reduce((s, m) => s + parseFloat(m.cantidad_salida  || 0), 0)
@@ -1326,24 +1780,27 @@ window.cargarKardex = async function() {
         <table>
           <thead>
             <tr>
-              <th>ID</th>
-              <th>Fecha</th><th>Tipo Movimiento</th><th>Concepto</th>
-              <th>Doc. Ref.</th><th>Lote</th><th>Desde</th><th>A</th>
-              <th style="text-align:right;">Entrada</th>
-              <th style="text-align:right;">Salida</th>
-              <th style="text-align:right;">Costo Unit.</th>
-              <th style="text-align:right;">Costo Total</th>
-              <th style="text-align:right;">Saldo Cant.</th>
-              <th style="text-align:right;">Saldo Valor</th>
-              <th style="text-align:right;">T.C.</th>
-              <th>Acciones</th>
+              <th data-col="sel"${_kardexColStyle(cols, 'sel')}><input type="checkbox" id="kardexSelAll" title="Seleccionar todo" onchange="window._kardexToggleSelTodo(this.checked)"></th>
+              <th data-col="id"${_kardexColStyle(cols, 'id')}>ID</th>
+              <th data-col="fecha" style="cursor:pointer; user-select:none; white-space:nowrap; min-width:110px;${cols.fecha ? '' : ' display:none;'}" onclick="window.ordenarKardexPorFecha()" title="Ordenar por fecha">Fecha ${_kardexOrdenFecha === 'asc' ? '▲' : '▼'}</th><th data-col="tipo"${_kardexColStyle(cols, 'tipo')}>Tipo Movimiento</th><th data-col="concepto"${_kardexColStyle(cols, 'concepto')}>Concepto</th>
+              <th data-col="contacto"${_kardexColStyle(cols, 'contacto')}>Contacto</th>
+              <th data-col="docref"${_kardexColStyle(cols, 'docref')}>Doc. Ref.</th><th data-col="lote"${_kardexColStyle(cols, 'lote')}>Lote</th><th data-col="desde"${_kardexColStyle(cols, 'desde')}>Desde</th><th data-col="a"${_kardexColStyle(cols, 'a')}>A</th>
+              <th data-col="entrada" style="text-align:right;${cols.entrada ? '' : ' display:none;'}">Entrada</th>
+              <th data-col="salida" style="text-align:right;${cols.salida ? '' : ' display:none;'}">Salida</th>
+              <th data-col="costounit" style="text-align:right;${cols.costounit ? '' : ' display:none;'}">Costo Unit.</th>
+              <th data-col="costototal" style="text-align:right;${cols.costototal ? '' : ' display:none;'}">Costo Total</th>
+              <th data-col="saldocant" style="text-align:right;${cols.saldocant ? '' : ' display:none;'}">Saldo Cant.</th>
+              <th data-col="saldovalor" style="text-align:right;${cols.saldovalor ? '' : ' display:none;'}">Saldo Valor</th>
+              <th data-col="tc" style="text-align:right;${cols.tc ? '' : ' display:none;'}">T.C.</th>
+              <th data-col="acciones"${_kardexColStyle(cols, 'acciones')}>Acciones</th>
             </tr>
           </thead>
           <tbody>
     `
 
     if (movs.length === 0) {
-      html += '<tr><td colspan="16" style="text-align:center;">Sin movimientos en este período.</td></tr>'
+      const colsVisibles = Object.values(cols).filter(Boolean).length
+      html += `<tr><td colspan="${colsVisibles}" style="text-align:center;">Sin movimientos en este período.</td></tr>`
     } else {
       let totEntrada = 0, totSalida = 0, totValorEntrada = 0, totValorSalida = 0
       movs.forEach(m => {
@@ -1370,42 +1827,57 @@ window.cargarKardex = async function() {
         totValorEntrada += valorEntradaMov
         totValorSalida  += valorSalidaMov
 
-        html += `<tr>
-          <td style="font-size:0.82rem; color:var(--text-secondary);">${m.id}</td>
-          <td>${m.fecha || '-'}</td>
-          <td><span style="${tipoColor}; font-weight:bold;">${m.tipo_movimiento || '-'}</span></td>
-          <td>${m.concepto || '-'}</td>
-          <td style="font-size:0.82rem;">${m.documento_referencia || '-'}</td>
-          <td style="font-size:0.82rem; font-weight:600;">${loteEtiqueta(m.lote_id)}</td>
-          <td style="font-size:0.82rem;">${zonaNombre(m.ubicacion_origen_id)}</td>
-          <td style="font-size:0.82rem;">${zonaNombre(m.ubicacion_destino_id)}</td>
-          <td style="text-align:right; color:var(--color-success);">${entrada > 0 ? entrada.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}</td>
-          <td style="text-align:right; color:var(--color-danger);">${salida > 0 ? salida.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}</td>
-          <td style="text-align:right;">${costoUnit.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
-          <td style="text-align:right;">${costoTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td style="text-align:right; font-weight:bold;">${saldoCant.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td style="text-align:right; font-weight:bold;">${saldoValor.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td style="text-align:right;">${tipoCambioMov.toFixed(3)}</td>
-          <td>${m.tipo_movimiento === 'traslado_interno' ? `
+        html += `<tr data-mov-id="${m.id}">
+          <td data-col="sel"${_kardexColStyle(cols, 'sel')}><input type="checkbox" class="kardex-sel" value="${m.id}"></td>
+          <td data-col="id" style="font-size:0.82rem; color:var(--text-secondary);${cols.id ? '' : ' display:none;'}">${m.id}</td>
+          <td data-col="fecha" style="white-space:nowrap;${cols.fecha ? '' : ' display:none;'}">${_fechaDDMMAAAA(m.fecha)}</td>
+          <td data-col="tipo"${_kardexColStyle(cols, 'tipo')}><span style="${tipoColor}; font-weight:bold;">${m.tipo_movimiento || '-'}</span></td>
+          <td data-col="concepto"${_kardexColStyle(cols, 'concepto')}>${m.concepto || '-'}</td>
+          <td data-col="contacto" style="font-size:0.82rem;${cols.contacto ? '' : ' display:none;'}">${contactoEtiqueta(m)}</td>
+          <td data-col="docref" style="font-size:0.82rem;${cols.docref ? '' : ' display:none;'}">${m.documento_referencia || '-'}</td>
+          <td data-col="lote" style="font-size:0.82rem; font-weight:600;${cols.lote ? '' : ' display:none;'}">${loteEtiqueta(m.lote_id)}</td>
+          <td data-col="desde" style="font-size:0.82rem;${cols.desde ? '' : ' display:none;'}">${zonaNombre(m.ubicacion_origen_id)}</td>
+          <td data-col="a" style="font-size:0.82rem;${cols.a ? '' : ' display:none;'}">${zonaNombre(m.ubicacion_destino_id)}</td>
+          <td data-col="entrada" style="text-align:right; color:var(--color-success);${cols.entrada ? '' : ' display:none;'}">${entrada > 0 ? entrada.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}</td>
+          <td data-col="salida" style="text-align:right; color:var(--color-danger);${cols.salida ? '' : ' display:none;'}">${salida > 0 ? salida.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}</td>
+          <td data-col="costounit" style="text-align:right;${cols.costounit ? '' : ' display:none;'}">${costoUnit.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+          <td data-col="costototal" style="text-align:right;${cols.costototal ? '' : ' display:none;'}">${costoTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td data-col="saldocant" style="text-align:right; font-weight:bold;${cols.saldocant ? '' : ' display:none;'}">${saldoCant.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td data-col="saldovalor" style="text-align:right; font-weight:bold;${cols.saldovalor ? '' : ' display:none;'}">${saldoValor.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td data-col="tc" style="text-align:right;${cols.tc ? '' : ' display:none;'}">${tipoCambioMov.toFixed(3)}</td>
+          <td data-col="acciones"${_kardexColStyle(cols, 'acciones')}>${m.tipo_movimiento === 'traslado_interno' ? `
             <button class="btn btn-small btn-secondary" onclick="window.editarTrasladoInterno(${m.id})">Editar</button>
             <button class="btn btn-small btn-danger" onclick="window.eliminarTrasladoInterno(${m.id})">Eliminar</button>
           ` : ''}</td>
         </tr>`
       })
 
-      html += `<tr style="border-top:2px solid var(--border-color); font-weight:bold;">
-        <td colspan="8" style="text-align:right;">Totales del período:</td>
-        <td style="text-align:right; color:var(--color-success);">${totEntrada.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-        <td style="text-align:right; color:var(--color-danger);">${totSalida.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-        <td></td>
-        <td style="text-align:right; font-size:0.82rem;">
+      // Fila de totales: un <td data-col> por columna (sin colspan) para que
+      // cada columna se pueda ocultar de forma independiente sin descuadrar
+      // el resto — "Totales del período:" se ancla en la última columna de
+      // texto ("A") en vez de un colspan fijo sobre las primeras N columnas.
+      html += `<tr class="kardex-fila-totales" style="border-top:2px solid var(--border-color); font-weight:bold;">
+        <td data-col="sel"${_kardexColStyle(cols, 'sel')}></td>
+        <td data-col="id"${_kardexColStyle(cols, 'id')}></td>
+        <td data-col="fecha"${_kardexColStyle(cols, 'fecha')}></td>
+        <td data-col="tipo"${_kardexColStyle(cols, 'tipo')}></td>
+        <td data-col="concepto"${_kardexColStyle(cols, 'concepto')}></td>
+        <td data-col="contacto"${_kardexColStyle(cols, 'contacto')}></td>
+        <td data-col="docref"${_kardexColStyle(cols, 'docref')}></td>
+        <td data-col="lote"${_kardexColStyle(cols, 'lote')}></td>
+        <td data-col="desde"${_kardexColStyle(cols, 'desde')}></td>
+        <td data-col="a" style="text-align:right;${cols.a ? '' : ' display:none;'}">Totales del período:</td>
+        <td data-col="entrada" style="text-align:right; color:var(--color-success);${cols.entrada ? '' : ' display:none;'}">${totEntrada.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+        <td data-col="salida" style="text-align:right; color:var(--color-danger);${cols.salida ? '' : ' display:none;'}">${totSalida.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+        <td data-col="costounit"${_kardexColStyle(cols, 'costounit')}></td>
+        <td data-col="costototal" style="text-align:right; font-size:0.82rem;${cols.costototal ? '' : ' display:none;'}">
           ${totValorEntrada > 0 ? `<div style="color:var(--color-success);">+${totValorEntrada.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>` : ''}
           ${totValorSalida > 0 ? `<div style="color:var(--color-danger);">-${totValorSalida.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>` : ''}
         </td>
-        <td></td>
-        <td></td>
-        <td></td>
-        <td></td>
+        <td data-col="saldocant"${_kardexColStyle(cols, 'saldocant')}></td>
+        <td data-col="saldovalor"${_kardexColStyle(cols, 'saldovalor')}></td>
+        <td data-col="tc"${_kardexColStyle(cols, 'tc')}></td>
+        <td data-col="acciones"${_kardexColStyle(cols, 'acciones')}></td>
       </tr>`
     }
 
@@ -1428,7 +1900,7 @@ async function renderPartidas() {
 
     const [partidas, productos] = await Promise.all([getPartidas(), getItems()])
     const prodMap = {}
-    productos.forEach(p => { prodMap[p.id] = p.nombre })
+    productos.forEach(p => { prodMap[p.id] = { nombre: p.nombre, sku: p.sku } })
 
     // Poblar el select de producto del modal "Nueva Partida"
     const selProd = document.getElementById('partProducto')
@@ -1446,7 +1918,7 @@ async function renderPartidas() {
       <table>
         <thead>
           <tr>
-            <th>N° Partida</th><th>Producto</th><th>Descripción</th>
+            <th>N° Partida</th><th>Código</th><th>Producto</th><th>Descripción</th>
             <th>Fecha Inicio</th><th>Fecha Fin</th><th>Estado</th><th>Acciones</th>
           </tr>
         </thead>
@@ -1457,7 +1929,8 @@ async function renderPartidas() {
       const badgeColor = p.status === 'activa' ? 'success' : p.status === 'cerrada' ? 'secondary' : 'danger'
       html += `<tr>
         <td><strong>${p.numero_partida}</strong></td>
-        <td>${prodMap[p.product_id] || '-'}</td>
+        <td>${prodMap[p.product_id]?.sku || '-'}</td>
+        <td>${prodMap[p.product_id]?.nombre || '-'}</td>
         <td style="font-size:0.85rem;">${p.descripcion || '-'}</td>
         <td>${p.fecha_inicio || '-'}</td>
         <td>${p.fecha_fin || '-'}</td>
@@ -1587,7 +2060,8 @@ async function renderAlmacenes() {
     }
 
     await window.renderZonas()
-    await renderStockZonas()
+    // Stock por Zona ya no vive dentro de esta card (se movió al tab Resumen
+    // Stock, con su propio filtro) — se renderiza solo, no en cascada aquí.
   } catch (error) {
     console.error('Error en renderAlmacenes:', error)
     showToast('Error al cargar los almacenes', 'danger')
@@ -1850,49 +2324,113 @@ async function renderStockZonas() {
       getAlmacenes()
     ])
 
-    const stockConCantidad = (stock || []).filter(s => (parseFloat(s.cantidad) || 0) > 0)
-    if (stockConCantidad.length === 0) {
-      container.innerHTML = '<p style="text-align:center; color:var(--text-secondary); padding:20px;">Sin stock registrado por zona todavía (se genera al recibir una Guía de Remisión).</p>'
-      return
-    }
-
+    const almacenMap = {}
+    for (const a of (almacenes || [])) almacenMap[a.id] = a
+    const zonaMap = {}
+    for (const z of (zonas || [])) zonaMap[z.id] = z
     const loteMap = {}
     for (const l of (lotes || [])) loteMap[l.id] = l
     const itemMap = {}
     for (const it of (items || [])) itemMap[it.id] = it
     const marcaMap = {}
     for (const m of (marcas || [])) marcaMap[m.id] = m
-    const almacenMap = {}
-    for (const a of (almacenes || [])) almacenMap[a.id] = a
-    const zonaMap = {}
-    for (const z of (zonas || [])) zonaMap[z.id] = z
+
+    // Poblar el filtro de zona (Almacén — Zona), preservando la selección
+    // actual si sigue siendo válida — mismo patrón que filtroZonaAlmacen.
+    const selFiltro = document.getElementById('filtroZonaStock')
+    const valorPrevio = selFiltro?.value || ''
+    if (selFiltro) {
+      const opcionesZona = (zonas || [])
+        .slice()
+        .sort((a, b) => (almacenMap[a.almacen_id]?.nombre || '').localeCompare(almacenMap[b.almacen_id]?.nombre || '') || (a.nombre || '').localeCompare(b.nombre || ''))
+        .map(z => `<option value="${z.id}">${almacenMap[z.almacen_id]?.nombre || '?'} — ${z.nombre}</option>`)
+        .join('')
+      selFiltro.innerHTML = '<option value="">-- Todas las zonas --</option>' + opcionesZona
+      selFiltro.value = valorPrevio
+    }
+    const fZona = parseInt(selFiltro?.value || 0) || ''
+
+    // Buscador global libre — actualiza en vivo con cada tecla (oninput,
+    // mismo patrón que "buscarResumenStock" en el tab General), y busca en
+    // producto, SKU, lote, marca y zona a la vez (antes solo dejaba elegir
+    // un producto de una lista, uno por uno).
+    const fBusqueda = (document.getElementById('buscarStockZonas')?.value || '').trim().toLowerCase()
+
+    let stockConCantidad = (stock || []).filter(s => (parseFloat(s.cantidad) || 0) > 0)
+    if (fZona) stockConCantidad = stockConCantidad.filter(s => s.ubicacion_id === fZona)
+    if (fBusqueda) {
+      stockConCantidad = stockConCantidad.filter(s => {
+        const lote = loteMap[s.lote_id]
+        const item = lote ? itemMap[lote.item_id] : null
+        const marca = lote?.marca_id ? marcaMap[lote.marca_id] : null
+        const z = zonaMap[s.ubicacion_id]
+        const almacen = z ? almacenMap[z.almacen_id] : null
+        const texto = [
+          item?.nombre, item?.sku, item?.codigo,
+          lote?.numero_lote, marca?.nombre,
+          z?.nombre, almacen?.nombre
+        ].filter(Boolean).join(' ').toLowerCase()
+        return texto.includes(fBusqueda)
+      })
+    }
+
+    if (stockConCantidad.length === 0) {
+      container.innerHTML = (fZona || fBusqueda)
+        ? '<p style="text-align:center; color:var(--text-secondary); padding:20px;">Sin stock con ese filtro.</p>'
+        : '<p style="text-align:center; color:var(--text-secondary); padding:20px;">Sin stock registrado por zona todavía (se genera al recibir una Guía de Remisión).</p>'
+      return
+    }
+
+    // Sin filtro de zona: se agrupa visualmente por Almacén—Zona (ordenando
+    // por ahí primero) para que "agrupar" y "filtrar" sean la misma lista,
+    // solo que sin filtro se ven todas las zonas juntas por bloques.
+    const nombreZona = (s) => {
+      const z = zonaMap[s.ubicacion_id]
+      const a = z ? almacenMap[z.almacen_id] : null
+      return `${a?.nombre || '?'} — ${z?.nombre || 'Zona #' + s.ubicacion_id}`
+    }
+    stockConCantidad.sort((a, b) => nombreZona(a).localeCompare(nombreZona(b)) || a.id - b.id)
 
     let html = `
       <table>
         <thead>
           <tr>
-            <th>Producto</th><th>N° Lote</th><th>Marca</th><th>Almacén — Zona</th>
-            <th style="text-align:right;">Cantidad</th><th style="text-align:right;">Unidades</th><th>Acciones</th>
+            <th data-col-tabla="stock-zonas" data-col="codigo"${colStyle('stock-zonas','codigo')}>Código</th>
+            <th data-col-tabla="stock-zonas" data-col="producto"${colStyle('stock-zonas','producto')}>Producto</th>
+            <th data-col-tabla="stock-zonas" data-col="lote"${colStyle('stock-zonas','lote')}>N° Lote</th>
+            <th data-col-tabla="stock-zonas" data-col="marca"${colStyle('stock-zonas','marca')}>Marca</th>
+            <th data-col-tabla="stock-zonas" data-col="zona"${colStyle('stock-zonas','zona')}>Almacén — Zona</th>
+            <th data-col-tabla="stock-zonas" data-col="cantidad" style="text-align:right;${colStyle('stock-zonas','cantidad') ? ' display:none;' : ''}">Cantidad</th>
+            <th data-col-tabla="stock-zonas" data-col="unidades" style="text-align:right;${colStyle('stock-zonas','unidades') ? ' display:none;' : ''}">Unidades</th>
+            <th data-col-tabla="stock-zonas" data-col="acciones"${colStyle('stock-zonas','acciones')}>Acciones</th>
           </tr>
         </thead>
         <tbody>
     `
-    for (const s of stockConCantidad.sort((a, b) => a.id - b.id)) {
+    let zonaAnterior = null
+    for (const s of stockConCantidad) {
       const lote = loteMap[s.lote_id]
       const item = lote ? itemMap[lote.item_id] : null
       const marca = lote?.marca_id ? marcaMap[lote.marca_id] : null
-      const zona = zonaMap[s.ubicacion_id]
-      const almacen = zona ? almacenMap[zona.almacen_id] : null
+      const etiquetaZona = nombreZona(s)
+
+      // Fila separadora por zona, solo cuando se ven todas juntas (sin
+      // filtro) — puramente visual, no cambia los datos.
+      if (!fZona && etiquetaZona !== zonaAnterior) {
+        html += `<tr><td colspan="8" style="background:var(--bg-secondary); font-weight:bold; padding:6px 10px;">${etiquetaZona}</td></tr>`
+        zonaAnterior = etiquetaZona
+      }
 
       html += `
         <tr>
-          <td>${item?.nombre || 'Item #' + (lote?.item_id ?? '?')}</td>
-          <td>${lote?.numero_lote || '-'}</td>
-          <td>${marca?.nombre || '-'}</td>
-          <td>${almacen?.nombre || '?'} — ${zona?.nombre || 'Zona #' + s.ubicacion_id}</td>
-          <td style="text-align:right; font-weight:bold;">${(parseFloat(s.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
-          <td style="text-align:right;">${(parseFloat(s.cantidad_unidades) || 0) > 0 ? (parseFloat(s.cantidad_unidades) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '-'}</td>
-          <td><button class="btn btn-small btn-secondary" onclick="window.abrirModalTraslado(${s.id})">Trasladar</button></td>
+          <td data-col-tabla="stock-zonas" data-col="codigo"${colStyle('stock-zonas','codigo')}>${item?.sku || '-'}</td>
+          <td data-col-tabla="stock-zonas" data-col="producto"${colStyle('stock-zonas','producto')}>${item?.nombre || 'Item #' + (lote?.item_id ?? '?')}</td>
+          <td data-col-tabla="stock-zonas" data-col="lote"${colStyle('stock-zonas','lote')}>${lote?.numero_lote || '-'}</td>
+          <td data-col-tabla="stock-zonas" data-col="marca"${colStyle('stock-zonas','marca')}>${marca?.nombre || '-'}</td>
+          <td data-col-tabla="stock-zonas" data-col="zona"${colStyle('stock-zonas','zona')}>${etiquetaZona}</td>
+          <td data-col-tabla="stock-zonas" data-col="cantidad" style="text-align:right; font-weight:bold;${colStyle('stock-zonas','cantidad') ? ' display:none;' : ''}">${(parseFloat(s.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+          <td data-col-tabla="stock-zonas" data-col="unidades" style="text-align:right;${colStyle('stock-zonas','unidades') ? ' display:none;' : ''}">${(parseFloat(s.cantidad_unidades) || 0) > 0 ? (parseFloat(s.cantidad_unidades) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '-'}</td>
+          <td data-col-tabla="stock-zonas" data-col="acciones"${colStyle('stock-zonas','acciones')}><button class="btn btn-small btn-secondary" onclick="window.abrirModalTraslado(${s.id})">Trasladar</button></td>
         </tr>
       `
     }
@@ -1903,6 +2441,7 @@ async function renderStockZonas() {
     showToast('Error al cargar el stock por zona', 'danger')
   }
 }
+window.renderStockZonas = renderStockZonas
 
 // ============================================================================
 // TRASLADO INTERNO — MULTI-LÍNEA
@@ -1915,6 +2454,14 @@ async function renderStockZonas() {
 // (que operan sobre UNA fila de kardex) no necesitan cambios.
 
 let _detallesTrasladoEnCreacion = []
+
+// Estado transitorio del sub-modal "Agregar Producto al Traslado" cuando el
+// lote elegido es de peso variable (bultos): cada bulto pesa distinto, así
+// que en vez de teclear la cantidad se marcan bultos concretos (mismo patrón
+// que Guía de Despacho en Ventas) y la cantidad se deriva de la selección.
+let _tdEsPesoVariable = false
+let _tdBultosDisponibles = []
+let _tdBultosSeleccionados = []
 
 async function _poblarZonasTraslado(zonaOrigenSeleccionada = null) {
   const [zonas, almacenes] = await Promise.all([getUbicaciones(), getAlmacenes()])
@@ -1973,8 +2520,11 @@ window.abrirModalTraslado = async function (stockId) {
     await window.onCambiarProductoDetalleTraslado()
     const selLote = document.getElementById('tdLote')
     selLote.value = registro.lote_id
-    window.onCambiarLoteDetalleTraslado()
-    document.getElementById('tdCantidad').value = registro.cantidad
+    await window.onCambiarLoteDetalleTraslado()
+    // Si el lote es de peso variable, la cantidad se deriva de los bultos
+    // que el usuario marque (no se prellena a mano: no hay forma de saber
+    // de antemano CUÁLES bultos concretos suman ese kg).
+    if (!_tdEsPesoVariable) document.getElementById('tdCantidad').value = registro.cantidad
   } catch (error) {
     console.error('Error en abrirModalTraslado:', error)
     showToast('Error al abrir el traslado', 'danger')
@@ -2035,15 +2585,33 @@ window.abrirModalDetalleTraslado = async function () {
     showToast('No hay productos con stock en la zona origen seleccionada', 'warning')
   } else {
     selProducto.innerHTML = '<option value="">-- Selecciona --</option>' +
-      ids.map(id => `<option value="${id}">${porItem[id].item?.nombre || 'Item #' + id}</option>`).join('')
+      ids.map(id => {
+        const it = porItem[id].item
+        const nombre = it?.nombre || 'Item #' + id
+        return `<option value="${id}">${nombre}${it?.sku ? ' (' + it.sku + ')' : ''}</option>`
+      }).join('')
   }
   document.getElementById('tdLote').innerHTML = '<option value="">-- Selecciona un producto primero --</option>'
   document.getElementById('tdCantidad').value = ''
   document.getElementById('tdDisponible').textContent = ''
   const inpUnid = document.getElementById('tdCantUnidades')
   if (inpUnid) inpUnid.value = ''
+  _ocultarBultosTraslado()
 
   window.openModal('modal-detalle-traslado')
+}
+
+/** Vuelve el sub-modal al modo normal (cantidad tecleada a mano) — se llama al cambiar de producto/lote o al reabrir el modal. */
+function _ocultarBultosTraslado() {
+  _tdEsPesoVariable = false
+  _tdBultosDisponibles = []
+  _tdBultosSeleccionados = []
+  const grupo = document.getElementById('tdBultosGroup')
+  if (grupo) grupo.style.display = 'none'
+  const cant = document.getElementById('tdCantidad')
+  const unid = document.getElementById('tdCantUnidades')
+  if (cant) cant.readOnly = false
+  if (unid) unid.readOnly = false
 }
 
 window.onCambiarProductoDetalleTraslado = async function () {
@@ -2076,18 +2644,102 @@ window.onCambiarProductoDetalleTraslado = async function () {
   document.getElementById('tdDisponible').textContent = ''
   const inpUnid = document.getElementById('tdCantUnidades')
   if (inpUnid) inpUnid.value = ''
+  _ocultarBultosTraslado()
 }
 
-window.onCambiarLoteDetalleTraslado = function () {
+/**
+ * Al elegir lote: si es de peso variable, carga la lista de bultos
+ * disponibles de ESE lote en la zona origen (misma zona todo el traslado)
+ * para que el usuario los marque uno por uno — Cantidad/N° Unidades pasan a
+ * ser de solo lectura, derivadas de la selección. Si no, mantiene el
+ * comportamiento anterior (cantidad tecleada a mano).
+ */
+window.onCambiarLoteDetalleTraslado = async function () {
   const selLote = document.getElementById('tdLote')
   const opt = selLote?.options[selLote.selectedIndex]
   const disponible = parseFloat(opt?.getAttribute('data-disponible') || 0)
   const disponibleUnid = parseFloat(opt?.getAttribute('data-disponible-unid') || 0)
+  const esPesoVariable = opt?.getAttribute('data-peso-variable') === '1'
   const cantInput = document.getElementById('tdCantidad')
   cantInput.max = disponible
   document.getElementById('tdDisponible').textContent = `Disponible: ${disponible.toLocaleString('en-US', { maximumFractionDigits: 2 })} kg` +
     (disponibleUnid > 0 ? ` / ${disponibleUnid.toLocaleString('en-US', { maximumFractionDigits: 2 })} und` : '')
-  window.onCambiarCantidadDetalleTraslado()
+
+  const loteId = parseInt(selLote?.value || 0)
+  const zonaOrigenId = parseInt(document.getElementById('tiZonaOrigen')?.value || 0)
+
+  if (esPesoVariable && loteId && zonaOrigenId) {
+    _tdEsPesoVariable = true
+    _tdBultosSeleccionados = []
+    _tdBultosDisponibles = await getLoteBultosDisponiblesZona(loteId, zonaOrigenId)
+    cantInput.value = 0
+    cantInput.readOnly = true
+    const unid = document.getElementById('tdCantUnidades')
+    if (unid) { unid.value = 0; unid.readOnly = true }
+    const grupo = document.getElementById('tdBultosGroup')
+    if (grupo) grupo.style.display = 'block'
+    _renderBultosTraslado()
+  } else {
+    _ocultarBultosTraslado()
+    window.onCambiarCantidadDetalleTraslado()
+  }
+}
+
+/** Marca/desmarca un bulto en el sub-modal y recalcula Cantidad/N° Unidades como suma/cuenta de lo seleccionado. */
+window.toggleBultoTraslado = function (bultoId) {
+  const yaMarcado = _tdBultosSeleccionados.includes(bultoId)
+  _tdBultosSeleccionados = yaMarcado
+    ? _tdBultosSeleccionados.filter(id => id !== bultoId)
+    : [..._tdBultosSeleccionados, bultoId]
+
+  const seleccionados = _tdBultosDisponibles.filter(b => _tdBultosSeleccionados.includes(b.id))
+  const cantidad = parseFloat(seleccionados.reduce((s, b) => s + (parseFloat(b.peso) || 0), 0).toFixed(4))
+  const cantInput = document.getElementById('tdCantidad')
+  const unidInput = document.getElementById('tdCantUnidades')
+  if (cantInput) cantInput.value = cantidad
+  if (unidInput) unidInput.value = seleccionados.length
+
+  _renderBultosTraslado()
+}
+
+/**
+ * Pinta el checklist de bultos del sub-modal. Los bultos ya elegidos en OTRA
+ * línea de este mismo traslado (mismo lote, línea distinta) quedan
+ * deshabilitados — evita trasladar el mismo bulto físico dos veces en un
+ * solo documento.
+ */
+function _renderBultosTraslado() {
+  const cont = document.getElementById('tdBultosLista')
+  const resumen = document.getElementById('tdBultosResumen')
+  if (!cont) return
+
+  const loteId = parseInt(document.getElementById('tdLote')?.value || 0)
+  const usadosEnOtrasLineas = new Set()
+  for (const d of _detallesTrasladoEnCreacion) {
+    if (d.lote_id === loteId) for (const id of (d.bultos_seleccionados || [])) usadosEnOtrasLineas.add(id)
+  }
+
+  if (_tdBultosDisponibles.length === 0) {
+    cont.innerHTML = '<span style="color:var(--text-secondary); font-size:0.85rem;">No hay bultos disponibles de este lote en la zona origen.</span>'
+  } else {
+    cont.innerHTML = _tdBultosDisponibles.map(b => {
+      const marcado = _tdBultosSeleccionados.includes(b.id)
+      const usadoEnOtraLinea = usadosEnOtrasLineas.has(b.id)
+      return `
+        <label style="display:inline-flex; align-items:center; gap:4px; margin:2px 10px 2px 0; ${usadoEnOtraLinea ? 'opacity:0.4;' : ''}">
+          <input type="checkbox" ${marcado ? 'checked' : ''} ${usadoEnOtraLinea ? 'disabled' : ''}
+            onchange="window.toggleBultoTraslado(${b.id})">
+          ${b.codigo_bulto || ('Bulto #' + b.id)} — ${formatQty(b.peso)} kg${usadoEnOtraLinea ? ' (usado en otra línea)' : ''}
+        </label>`
+    }).join('')
+  }
+
+  const seleccionados = _tdBultosDisponibles.filter(b => _tdBultosSeleccionados.includes(b.id))
+  if (resumen) {
+    resumen.textContent = seleccionados.length > 0
+      ? `${seleccionados.length} bulto(s) seleccionado(s) — ${formatQty(seleccionados.reduce((s, b) => s + (parseFloat(b.peso) || 0), 0))} kg en total`
+      : 'Marca al menos un bulto para trasladar.'
+  }
 }
 
 // Sugiere N° de Unidades a partir del peso_por_unidad del lote elegido,
@@ -2120,12 +2772,21 @@ window.agregarLineaTraslado = function () {
   const disponibleUnid = parseFloat(opt?.getAttribute('data-disponible-unid') || 0)
 
   if (!itemId || !loteId) { showToast('Selecciona producto y lote', 'warning'); return }
+
+  // Peso variable: la cantidad SIEMPRE sale de los bultos marcados
+  // (toggleBultoTraslado ya la deriva ahí) — si llegó en 0 sin bultos
+  // marcados, se bloquea en vez de "trasladar" cantidad sin bultos reales.
+  if (_tdEsPesoVariable && _tdBultosSeleccionados.length === 0) {
+    showToast('Marca al menos un bulto para trasladar (lote de peso variable)', 'warning')
+    return
+  }
+
   if (!cantidad || cantidad <= 0) { showToast('Ingresa una cantidad válida', 'warning'); return }
-  if (cantidad > disponible) {
+  if (!_tdEsPesoVariable && cantidad > disponible) {
     showToast(`No hay stock suficiente: disponible ${disponible.toLocaleString('en-US', { maximumFractionDigits: 2 })} kg`, 'danger')
     return
   }
-  if (cantidadUnidades > 0 && cantidadUnidades > disponibleUnid) {
+  if (!_tdEsPesoVariable && cantidadUnidades > 0 && cantidadUnidades > disponibleUnid) {
     showToast(`No hay unidades suficientes: disponible ${disponibleUnid.toLocaleString('en-US', { maximumFractionDigits: 2 })} und`, 'danger')
     return
   }
@@ -2136,10 +2797,13 @@ window.agregarLineaTraslado = function () {
   _detallesTrasladoEnCreacion.push({
     item_id: itemId,
     item_nombre: item?.nombre || `Item #${itemId}`,
+    item_sku: item?.sku || '-',
     lote_id: loteId,
     numero_lote: opt.textContent.split(' (disp.')[0],
     cantidad,
-    cantidad_unidades: cantidadUnidades
+    cantidad_unidades: cantidadUnidades,
+    es_peso_variable: _tdEsPesoVariable,
+    bultos_seleccionados: _tdEsPesoVariable ? [..._tdBultosSeleccionados] : null
   })
 
   window.closeModal('modal-detalle-traslado')
@@ -2158,10 +2822,11 @@ function _renderTablaDetalleTraslado() {
       container.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 20px;">Sin productos agregados</p>'
     } else {
       let html = `<table>
-        <thead><tr><th>Producto</th><th>Lote</th><th style="text-align:right;">Cantidad (kg)</th><th style="text-align:right;">N° Unid.</th><th></th></tr></thead>
+        <thead><tr><th>Código</th><th>Producto</th><th>Lote</th><th style="text-align:right;">Cantidad (kg)</th><th style="text-align:right;">N° Unid.</th><th></th></tr></thead>
         <tbody>`
       _detallesTrasladoEnCreacion.forEach((d, idx) => {
         html += `<tr>
+          <td>${d.item_sku || '-'}</td>
           <td>${d.item_nombre}</td>
           <td>${d.numero_lote}</td>
           <td style="text-align:right; font-weight:bold;">${(parseFloat(d.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
@@ -2259,9 +2924,16 @@ window.guardarTrasladoInterno = async function () {
         concepto:             'Traslado interno entre zonas',
         descripcion,
         documento_referencia: documentoReferencia,
+        // Traslado interno: la MISMA cantidad sale de origen y entra a
+        // destino en esta única fila (antes se guardaba cantidad_entrada=0,
+        // lo que hacía que cualquier cálculo por zona basado en
+        // sum(entrada)-sum(salida) — reportes, vista stock_ubicaciones —
+        // contara el traslado como una fuga real de inventario en vez de
+        // un simple cambio de zona). saldo_cantidad/saldo_unidades siguen
+        // representando el saldo de la ZONA ORIGEN, no cambian.
         cantidad_salida:      linea.cantidad,
-        cantidad_entrada:     0,
-        cantidad_unidades_entrada: 0,
+        cantidad_entrada:     linea.cantidad,
+        cantidad_unidades_entrada: unidades,
         cantidad_unidades_salida:  unidades,
         costo_unitario:       costoUnitario,
         valor_entrada:        0,
@@ -2274,6 +2946,19 @@ window.guardarTrasladoInterno = async function () {
         saldo_unidades:       restanteUnid,
         created_by:           user.db_id
       })
+
+      // 4) Peso variable: mover los bultos CONCRETOS a la zona destino.
+      // stock_ubicaciones ya quedó correcto arriba (agregado en kg), pero
+      // lote_bultos es la fuente de verdad real para estos productos —
+      // Compras/Ventas la usan directo (getLoteBultosDisponiblesZona) para
+      // saber qué bultos hay en cada zona. No se toca lotes.cantidad ni se
+      // recalcula el lote: un traslado no cambia el total del lote, solo
+      // dónde están físicamente sus bultos.
+      if (linea.es_peso_variable && linea.bultos_seleccionados?.length) {
+        for (const bultoId of linea.bultos_seleccionados) {
+          await updateLoteBulto(bultoId, { ubicacion_id: zonaDestinoId })
+        }
+      }
     }
 
     showToast('Traslado registrado', 'success')
@@ -2471,9 +3156,12 @@ window.procesarImportacionTraslados = async function () {
           concepto:             'Traslado interno entre zonas (importación masiva)',
           descripcion,
           documento_referencia: documentoReferencia,
+          // Ver comentario equivalente en guardarTrasladoInterno: entrada =
+          // salida en la misma fila, para que un traslado no se cuente como
+          // pérdida de inventario en cálculos/vistas por zona.
           cantidad_salida:      cantidad,
-          cantidad_entrada:     0,
-          cantidad_unidades_entrada: 0,
+          cantidad_entrada:     cantidad,
+          cantidad_unidades_entrada: unidades,
           cantidad_unidades_salida:  unidades,
           costo_unitario:       costoUnitario,
           valor_entrada:        0,
@@ -2578,7 +3266,11 @@ async function _revertirTrasladoInterno(mov) {
     origenStockId = nuevo.id
   }
 
-  await deleteKardexMovimiento(mov.id)
+  const okKardex = await deleteKardexMovimiento(mov.id)
+  if (!okKardex) {
+    const motivo = ultimoErrorDelete()
+    throw new Error(`No se pudo eliminar el movimiento de Kardex #${mov.id} del traslado interno: ${motivo?.mensaje || 'motivo desconocido'}. Se detiene la reversión para no dejar el Kardex descuadrado.`)
+  }
   return { origenStockId }
 }
 
@@ -2839,8 +3531,12 @@ async function construirReporteInv(panelId) {
       if (panelId === 'repi-rotacion') {
         // Rotación: compara lo que salió en el período contra el stock actual.
         // Un índice bajo con mucho stock = capital inmovilizado.
+        // Solo cuenta como "salida" la venta real (tipo_movimiento='salida');
+        // un traslado_interno no saca nada de la empresa, solo cambia de zona
+        // — contarlo aquí inflaba "Salidas históricas" y podía marcar como
+        // "con rotación" un producto que en realidad nunca se vendió.
         const salidaPorProducto = {}
-        filasK.forEach(k => {
+        filasK.filter(k => k.tipo === 'salida').forEach(k => {
           salidaPorProducto[k.producto] = (salidaPorProducto[k.producto] || 0) + k.salida
         })
         const stockPorProducto = {}
@@ -2850,7 +3546,7 @@ async function construirReporteInv(panelId) {
           stockPorProducto[l.producto] = (stockPorProducto[l.producto] || 0) + l.cantidad
           valorPorProducto[l.producto] = (valorPorProducto[l.producto] || 0) + l.valor
         })
-        filasK.filter(k => k.salida > 0).forEach(k => {
+        filasK.filter(k => k.tipo === 'salida' && k.salida > 0).forEach(k => {
           if (!ultimaSalida[k.producto] || k.fecha > ultimaSalida[k.producto]) ultimaSalida[k.producto] = k.fecha
         })
 
@@ -2924,9 +3620,11 @@ async function construirReporteInv(panelId) {
 
 window.abrirModalAjusteKardex = async function () {
   try {
-    const [lotes, items] = await Promise.all([getLotes(), getItems()])
+    const [lotes, items, zonas, almacenes] = await Promise.all([getLotes(), getItems(), getUbicaciones(), getAlmacenes()])
     const itemMap = {}
     items.forEach(i => { itemMap[i.id] = i })
+    const almacenMap = {}
+    ;(almacenes || []).forEach(a => { almacenMap[a.id] = a })
 
     const sel = document.getElementById('ajusteKardexItem')
     if (sel) {
@@ -2947,9 +3645,24 @@ window.abrirModalAjusteKardex = async function () {
       }
     }
 
+    // Zona real (almacén no virtual) donde vive físicamente el ajuste. Desde
+    // 50_stock_ubicaciones_vista_kardex.sql, "Por Zona" es una VISTA calculada
+    // desde kardex.ubicacion_origen_id/ubicacion_destino_id — sin zona aquí,
+    // el ajuste movería lotes.cantidad pero jamás aparecería en ninguna zona
+    // (ver memoria project_desincronizacion_lotes_stock_kardex).
+    const selZona = document.getElementById('ajusteKardexZona')
+    if (selZona) {
+      const zonasReales = (zonas || []).filter(z => !almacenMap[z.almacen_id]?.es_virtual)
+      selZona.innerHTML = '<option value="">-- Selecciona zona --</option>' +
+        zonasReales
+          .sort((a, b) => (almacenMap[a.almacen_id]?.nombre || '').localeCompare(almacenMap[b.almacen_id]?.nombre || '') || (a.nombre || '').localeCompare(b.nombre || ''))
+          .map(z => `<option value="${z.id}">${almacenMap[z.almacen_id]?.nombre || '?'} — ${z.nombre}</option>`)
+          .join('')
+    }
+
     const fecha = document.getElementById('ajusteKardexFecha')
     if (fecha) fecha.value = new Date().toISOString().split('T')[0]
-    ;['ajusteKardexCant', 'ajusteKardexConcepto'].forEach(id => {
+    ;['ajusteKardexCant', 'ajusteKardexUnidades', 'ajusteKardexConcepto'].forEach(id => {
       const el = document.getElementById(id); if (el) el.value = ''
     })
 
@@ -2962,14 +3675,17 @@ window.abrirModalAjusteKardex = async function () {
 
 window.guardarAjusteKardex = async function () {
   try {
-    const loteId   = parseInt(document.getElementById('ajusteKardexItem')?.value || 0)
-    const tipo     = document.getElementById('ajusteKardexTipo')?.value
-    const fecha    = document.getElementById('ajusteKardexFecha')?.value
-    const cantidad = parseFloat(document.getElementById('ajusteKardexCant')?.value || 0)
-    const costo    = parseFloat(document.getElementById('ajusteKardexCosto')?.value || 0)
-    const concepto = document.getElementById('ajusteKardexConcepto')?.value?.trim()
+    const loteId    = parseInt(document.getElementById('ajusteKardexItem')?.value || 0)
+    const zonaId    = parseInt(document.getElementById('ajusteKardexZona')?.value || 0)
+    const tipo      = document.getElementById('ajusteKardexTipo')?.value
+    const fecha     = document.getElementById('ajusteKardexFecha')?.value
+    const cantidad  = parseFloat(document.getElementById('ajusteKardexCant')?.value || 0)
+    const unidades  = parseFloat(document.getElementById('ajusteKardexUnidades')?.value || 0) || 0
+    const costo     = parseFloat(document.getElementById('ajusteKardexCosto')?.value || 0)
+    const concepto  = document.getElementById('ajusteKardexConcepto')?.value?.trim()
 
     if (!loteId)       { showToast('Selecciona el lote a ajustar', 'warning'); return }
+    if (!zonaId)       { showToast('Selecciona el almacén/zona del ajuste', 'warning'); return }
     if (!fecha)        { showToast('Ingresa la fecha del ajuste', 'warning'); return }
     if (cantidad <= 0) { showToast('La cantidad debe ser mayor a 0', 'warning'); return }
     if (!concepto)     { showToast('Indica el motivo del ajuste (queda registrado en el kardex)', 'warning'); return }
@@ -2985,6 +3701,20 @@ window.guardarAjusteKardex = async function () {
       return
     }
 
+    // stock_ubicaciones es una VISTA calculada desde kardex (ver
+    // 50_stock_ubicaciones_vista_kardex.sql) — validamos contra lo que esa
+    // zona tiene realmente, no solo contra el total del lote, para no dejar
+    // una zona en negativo aunque el lote en general sí tenga stock.
+    if (!esEntrada) {
+      const filasZona = await getStockUbicacionesByLote(loteId)
+      const filaZona = (filasZona || []).find(f => f.ubicacion_id === zonaId)
+      const disponibleZona = parseFloat(filaZona?.cantidad || 0)
+      if (cantidad > disponibleZona + 0.0001) {
+        showToast(`Esa zona solo tiene ${disponibleZona} de este lote (el lote en total tiene ${stockActual}). Elige la zona correcta o ajusta primero un traslado.`, 'warning')
+        return
+      }
+    }
+
     const nuevaCantidad = parseFloat((esEntrada ? stockActual + cantidad : stockActual - cantidad).toFixed(4))
     const costoUnitario = costo > 0 ? costo : (parseFloat(lote.costo_unitario) || 0)
     const valor = parseFloat((cantidad * costoUnitario).toFixed(2))
@@ -2994,6 +3724,10 @@ window.guardarAjusteKardex = async function () {
     await addKardexMovimiento({
       item_id:              lote.item_id,
       lote_id:              lote.id,
+      // Fuente de verdad de "Por Zona" desde 50_stock_ubicaciones_vista_kardex.sql:
+      // sin esto el ajuste mueve lotes.cantidad pero no aparece en ninguna zona.
+      ubicacion_origen_id:  esEntrada ? null : zonaId,
+      ubicacion_destino_id: esEntrada ? zonaId : null,
       fecha,
       tipo_movimiento:      tipo,
       concepto,
@@ -3001,6 +3735,8 @@ window.guardarAjusteKardex = async function () {
       documento_referencia: `AJUSTE-${new Date().toISOString().slice(0, 10)}`,
       cantidad_entrada:     esEntrada ? cantidad : 0,
       cantidad_salida:      esEntrada ? 0 : cantidad,
+      cantidad_unidades_entrada: esEntrada ? unidades : 0,
+      cantidad_unidades_salida:  esEntrada ? 0 : unidades,
       costo_unitario:       costoUnitario,
       valor_entrada:        esEntrada ? valor : 0,
       valor_salida:         esEntrada ? 0 : valor,

@@ -1,18 +1,131 @@
 // ============================================================================
-// SUNAT-API.JS — Integración SUNAT: NUBEFACT (CPE) + APIs.pe (RUC/DNI)
+// SUNAT-API.JS — Integración SUNAT: NUBEFACT (CPE) + Decolecta/APIs.pe (RUC/DNI)
 // ============================================================================
 // Proveedores:
-//   CPE (facturas/boletas electrónicas): NUBEFACT - https://nubefact.com
-//   Consulta RUC/DNI:                    APIs.pe   - https://apis.pe
+//   CPE (facturas/boletas electrónicas): NUBEFACT   - https://nubefact.com
+//   Consulta RUC/DNI (PRINCIPAL):        Decolecta   - https://decolecta.com
+//   Consulta RUC/DNI (RESPALDO):         APIs.pe     - https://apis.pe
+//
+// Decolecta es la fuente principal (100 consultas/mes en el plan gratuito).
+// Se llama a través de la Edge Function propia `decolecta-proxy` (carpeta
+// supabase/functions/decolecta-proxy/) en vez de pegarle directo desde el
+// navegador: Decolecta no devuelve cabecera CORS a llamadas de navegador
+// (falla siempre, sin importar el dominio — localhost o producción), y
+// además el token no debe viajar en código de frontend (config.js se sirve
+// tal cual al navegador; cualquiera podría copiárselo y gastar la cuota).
+// El token real vive como secreto de Supabase (`DECOLECTA_TOKEN`), nunca en
+// config.js. Ver instrucciones de deploy al final de index.ts del proxy.
+//
+// Si el proxy no está desplegado, o la llamada falla (red, cuota agotada,
+// error del servicio), se cae automáticamente a APIs.pe sin que el usuario
+// note la diferencia. Cada llamada que SÍ llega a pegarle a Decolecta se
+// registra en decolecta_consultas_log (consume cuota, haya encontrado el
+// documento o no) para poder mostrar "cuántas consultas quedan este mes" en
+// Configuración → APIs externas (no hay endpoint oficial de cuota).
 //
 // Configuración en config.js → SUNAT_CONFIG:
 //   NUBEFACT_TOKEN   → token de la empresa en NUBEFACT
 //   NUBEFACT_RUC     → RUC de la empresa emisora
-//   APIS_PE_TOKEN    → token de APIs.pe para consulta RUC/DNI
+//   APIS_PE_TOKEN    → token de APIs.pe para consulta RUC/DNI (respaldo)
 //   AMBIENTE         → 'demo' | 'produccion'
+// (DECOLECTA_TOKEN ya NO va aquí — es un secreto de Supabase, ver arriba)
 // ============================================================================
 
 import { SUNAT_CONFIG } from './config.js'
+import { supabase } from './supabase-client.js'
+import { addDecolectaConsultaLog } from './supabase-data.js'
+import { getCurrentUser } from './auth-supabase.js'
+import { showToast } from './helpers.js'
+
+async function _logDecolecta(tipo, numero, exitosa, mensajeError) {
+  try {
+    const user = await getCurrentUser()
+    await addDecolectaConsultaLog(tipo, numero, exitosa, mensajeError, null, user?.db_id || null)
+  } catch (e) {
+    // El log es informativo — si falla, no debe romper la consulta real.
+    console.warn('No se pudo registrar consumo de Decolecta:', e)
+  }
+}
+
+/** Llama a la Edge Function decolecta-proxy. Lanza si la función no responde (red/no desplegada). */
+async function _invocarDecolectaProxy(tipo, numero) {
+  const { data, error } = await supabase.functions.invoke('decolecta-proxy', { body: { tipo, numero } })
+  if (error) {
+    // FunctionsHttpError trae la Response real en error.context — la leemos
+    // para ver el status/body exactos en consola en vez de un mensaje genérico.
+    try {
+      const status = error?.context?.status
+      const bodyTexto = error?.context ? await error.context.clone().text() : null
+      console.error(`decolecta-proxy respondió ${status ?? '?'}:`, bodyTexto)
+    } catch (e) { /* no se pudo leer el detalle, se sigue con el error original */ }
+    throw error
+  }
+  return data
+}
+
+/**
+ * Consulta RUC vía Decolecta (fuente principal, a través del proxy). Retorna
+ * el mismo shape que la consulta por APIs.pe para que ambas sean intercambiables.
+ */
+async function _consultarRUCDecolecta(ruc) {
+  try {
+    const data = await _invocarDecolectaProxy('ruc', ruc)
+
+    if (data?.error) {
+      await _logDecolecta('ruc', ruc, true, data.error)
+      return { error: data.error }
+    }
+    await _logDecolecta('ruc', ruc, true, null)
+
+    return {
+      ruc:              data.numero_documento || ruc,
+      razonSocial:      data.razon_social || '',
+      nombreComercial:  '',
+      tipo:             '',
+      estado:           data.estado    || '',
+      condicion:        data.condicion || '',
+      ubigeo:           data.ubigeo    || '',
+      direccion:        data.direccion || '',
+      departamento:     data.departamento || '',
+      provincia:        data.provincia    || '',
+      distrito:         data.distrito     || '',
+      actividadEconomica: '',
+      // Solo Decolecta trae estos dos — APIs.pe (respaldo) no los tiene, por
+      // eso quedan undefined en ese caso (la UI muestra '—' si no llegan).
+      esAgenteRetencion:   typeof data.es_agente_retencion === 'boolean' ? data.es_agente_retencion : undefined,
+      esBuenContribuyente: typeof data.es_buen_contribuyente === 'boolean' ? data.es_buen_contribuyente : undefined
+    }
+  } catch (err) {
+    // El proxy no respondió (no desplegado aún, sin red, etc.) — no se loguea
+    // porque no hay certeza de que haya llegado a consumir cuota de Decolecta.
+    console.warn('decolecta-proxy no disponible para RUC, se usará respaldo:', err)
+    return { error: 'Proxy de Decolecta no disponible' }
+  }
+}
+
+/** Consulta DNI vía Decolecta (fuente principal, a través del proxy). */
+async function _consultarDNIDecolecta(dni) {
+  try {
+    const data = await _invocarDecolectaProxy('dni', dni)
+
+    if (data?.error) {
+      await _logDecolecta('dni', dni, true, data.error)
+      return { error: data.error }
+    }
+    await _logDecolecta('dni', dni, true, null)
+
+    return {
+      dni:             data.document_number || dni,
+      nombres:         data.first_name || '',
+      apellidoPaterno: data.first_last_name || '',
+      apellidoMaterno: data.second_last_name || '',
+      nombreCompleto:  data.full_name || `${data.first_name || ''} ${data.first_last_name || ''} ${data.second_last_name || ''}`.trim()
+    }
+  } catch (err) {
+    console.warn('decolecta-proxy no disponible para DNI, se usará respaldo:', err)
+    return { error: 'Proxy de Decolecta no disponible' }
+  }
+}
 
 // ============================================================================
 // HELPERS INTERNOS
@@ -48,15 +161,28 @@ function apispeHeaders() {
 // ============================================================================
 
 /**
- * Consulta datos de una empresa por RUC vía APIs.pe.
- * Retorna { ruc, razonSocial, nombreComercial, direccion, estado, condicion }
- * o null si no se encuentra.
+ * Consulta RUC: Decolecta primero (fuente principal), APIs.pe como respaldo
+ * automático si Decolecta no está configurado o falla (red, cuota agotada,
+ * error del servicio). Transparente para quien llama — mismo shape siempre.
  */
 export async function consultarRUC(ruc) {
   if (!ruc || String(ruc).length !== 11) {
     return { error: 'El RUC debe tener 11 dígitos' }
   }
 
+  const porDecolecta = await _consultarRUCDecolecta(ruc)
+  if (!porDecolecta.error) return porDecolecta
+
+  console.warn('Decolecta falló para RUC, cayendo a APIs.pe:', porDecolecta.error)
+  return await _consultarRUCApisPe(ruc)
+}
+
+/**
+ * Consulta datos de una empresa por RUC vía APIs.pe (respaldo).
+ * Retorna { ruc, razonSocial, nombreComercial, direccion, estado, condicion }
+ * o null si no se encuentra.
+ */
+async function _consultarRUCApisPe(ruc) {
   const token = SUNAT_CONFIG?.APIS_PE_TOKEN
   if (!token) {
     console.warn('APIs.pe: no hay token configurado en SUNAT_CONFIG.APIS_PE_TOKEN')
@@ -95,14 +221,26 @@ export async function consultarRUC(ruc) {
 }
 
 /**
- * Consulta datos de una persona por DNI vía APIs.pe.
- * Retorna { dni, nombres, apellidoPaterno, apellidoMaterno, nombreCompleto }
+ * Consulta DNI: Decolecta primero (fuente principal), APIs.pe como respaldo
+ * automático si Decolecta no está configurado o falla.
  */
 export async function consultarDNI(dni) {
   if (!dni || String(dni).length !== 8) {
     return { error: 'El DNI debe tener 8 dígitos' }
   }
 
+  const porDecolecta = await _consultarDNIDecolecta(dni)
+  if (!porDecolecta.error) return porDecolecta
+
+  console.warn('Decolecta falló para DNI, cayendo a APIs.pe:', porDecolecta.error)
+  return await _consultarDNIApisPe(dni)
+}
+
+/**
+ * Consulta datos de una persona por DNI vía APIs.pe (respaldo).
+ * Retorna { dni, nombres, apellidoPaterno, apellidoMaterno, nombreCompleto }
+ */
+async function _consultarDNIApisPe(dni) {
   const token = SUNAT_CONFIG?.APIS_PE_TOKEN
   if (!token) {
     return { error: 'API no configurada. Ver SETUP.md para obtener token.' }
@@ -367,15 +505,23 @@ export async function consultarEstadoCPE(tipoComprobante, serie, numero) {
 
 /**
  * Genera una Nota de Crédito/Débito electrónica en NUBEFACT.
- * @param {Object} nota - { tipo_comprobante: '07'|'08', motivo, ... }
- * @param {Object} docRef - { tipo, serie, numero } documento de referencia
+ * @param {Object} nota - { tipo_comprobante: '07'|'08', motivo_nota_codigo, motivo_nota_texto, ... }
+ * @param {Object} docRef - { tipo, serie, numero } documento de referencia (el que se modifica)
  */
 export async function emitirNota(nota, lineas, docRef, empresa) {
   const payload = buildPayloadNubefact(nota, lineas, empresa)
 
-  // Campos adicionales para nota
-  payload.tipo_de_nota_de_credito = nota.tipo_nota || 1  // 1=Anulación
-  payload.motivo_o_sustento_de_la_nota = nota.motivo || ''
+  // NUBEFACT usa un campo distinto según sea Nota de Crédito (07, Catálogo 09
+  // SUNAT) o Nota de Débito (08, Catálogo 10 SUNAT) — antes se enviaba
+  // siempre "tipo_de_nota_de_credito", incluso para notas de débito.
+  const esND = String(nota.tipo_comprobante) === '08'
+  const codigoMotivo = parseInt(nota.motivo_nota_codigo ?? nota.motivo, 10) || 1
+  if (esND) {
+    payload.tipo_de_nota_de_debito = codigoMotivo
+  } else {
+    payload.tipo_de_nota_de_credito = codigoMotivo  // Catálogo 09: 1=Anulación de la operación, etc.
+  }
+  payload.motivo_o_sustento_de_la_nota = nota.motivo_nota_texto || nota.motivo || ''
   payload.documento_que_se_modifica_tipo = parseInt(docRef.tipo, 10)
   payload.documento_que_se_modifica_serie = docRef.serie
   payload.documento_que_se_modifica_numero = parseInt(docRef.numero, 10)
@@ -455,5 +601,145 @@ export function attachRucAutocomplete(rucInputId, nombreId, direccionId = null, 
         }
       }
     }, 600)
+  })
+}
+
+/**
+ * Wirea un botón "Consultar" (RUC/DNI) para los modales de creación de
+ * contacto (Nuevo Cliente en Ventas, Nuevo Proveedor en Compras, y cualquier
+ * otro modal con la misma estructura Tipo Documento + Nro Documento).
+ * A diferencia de attachRucAutocomplete (autocompleta al escribir 11 dígitos,
+ * pensado para el RUC del cliente en una venta rápida), esta es una acción
+ * explícita del usuario que respeta el selector "Tipo Documento" (RUC/DNI/VAT)
+ * y llena más campos del formulario de contacto.
+ *
+ * @param {Object} o
+ * @param {string} o.btnId        - id del botón "Consultar"
+ * @param {string} o.tipoDocId    - id del <select> Tipo Documento (RUC/DNI/VAT)
+ * @param {string} o.numeroId     - id del input de Nro Documento
+ * @param {string} o.nombreId     - id del input de Nombre/Razón Social a llenar
+ * @param {string} [o.direccionId] - id del input de Dirección
+ * @param {string} [o.distritoId] - id del input de Distrito
+ * @param {string} [o.paisId]     - id del input de País (se fuerza a "Perú" si RUC/DNI)
+ * @param {string} [o.sunatSectionId]     - id del contenedor "Datos SUNAT" (solo RUC) — se muestra/oculta según Tipo Documento
+ * @param {string} [o.estadoId]           - id del span/badge de Estado SUNAT (ACTIVO / BAJA DE OFICIO...)
+ * @param {string} [o.condicionId]        - id del span/badge de Condición SUNAT (HABIDO / NO HABIDO)
+ * @param {string} [o.buenContribuyenteId] - id del span/badge "Buen Contribuyente" (Sí/No)
+ * @param {string} [o.agenteRetencionId]  - id del checkbox "Agente de Retención IGV" a marcar según SUNAT (campo operativo, editable)
+ * @param {string} [o.agenteRetencionBadgeId] - id del span/badge de solo lectura que muestra EXACTAMENTE lo que devolvió SUNAT (Sí/No/—), para no confundirlo con el estado del checkbox (que puede haber sido tocado a mano)
+ */
+/**
+ * Pinta un span.badge de "Datos SUNAT" (estado/condición/buen contribuyente)
+ * con el color semántico correcto, reemplazando la clase badge-* anterior.
+ * Se exporta porque ventas.js/compras.js también la usan al recargar un
+ * contacto ya guardado en editarCliente/editarProveedor.
+ */
+export function pintarBadgeSunat(el, texto, tono) {
+  if (!el) return
+  el.textContent = texto
+  el.classList.remove('badge-secondary', 'badge-success', 'badge-danger')
+  el.classList.add(tono === 'success' ? 'badge-success' : tono === 'danger' ? 'badge-danger' : 'badge-secondary')
+}
+
+export function attachConsultaDocumento(o) {
+  const btn = document.getElementById(o.btnId)
+  const tipoDocSelect = document.getElementById(o.tipoDocId)
+  if (!btn) return
+
+  // Muestra el bloque "Datos SUNAT" solo cuando Tipo Documento = RUC (DNI/VAT
+  // no tienen esos datos: estado/condición/buen contribuyente son propios de
+  // empresas con RUC en SUNAT, no de personas naturales por DNI).
+  function actualizarVisibilidadSunat() {
+    const tipoDoc = tipoDocSelect?.value || ''
+    if (o.sunatSectionId) {
+      const sec = document.getElementById(o.sunatSectionId)
+      if (sec) sec.style.display = (tipoDoc === 'RUC') ? '' : 'none'
+    }
+  }
+  if (tipoDocSelect) {
+    tipoDocSelect.addEventListener('change', actualizarVisibilidadSunat)
+    actualizarVisibilidadSunat()
+  }
+
+  btn.addEventListener('click', async () => {
+    const tipoDoc = document.getElementById(o.tipoDocId)?.value || ''
+    const numero  = (document.getElementById(o.numeroId)?.value || '').trim()
+
+    if (tipoDoc === 'VAT') {
+      showToast('VAT es un documento extranjero: Decolecta/APIs.pe solo consultan RUC y DNI peruanos. Completa los datos a mano.', 'warning')
+      return
+    }
+    if (!tipoDoc) { showToast('Selecciona primero el Tipo de Documento', 'warning'); return }
+    if (tipoDoc === 'RUC' && numero.length !== 11) { showToast('El RUC debe tener 11 dígitos', 'warning'); return }
+    if (tipoDoc === 'DNI' && numero.length !== 8) { showToast('El DNI debe tener 8 dígitos', 'warning'); return }
+
+    const textoOriginal = btn.textContent
+    btn.disabled = true
+    btn.textContent = 'Consultando...'
+
+    try {
+      const datos = tipoDoc === 'RUC' ? await consultarRUC(numero) : await consultarDNI(numero)
+
+      if (datos.error) {
+        showToast(`No se pudo consultar: ${datos.error}`, 'danger')
+        return
+      }
+
+      const nombreEl = document.getElementById(o.nombreId)
+      if (nombreEl) nombreEl.value = tipoDoc === 'RUC' ? (datos.razonSocial || '') : (datos.nombreCompleto || '')
+
+      if (o.direccionId) {
+        const dirEl = document.getElementById(o.direccionId)
+        // RENIEC (DNI) no devuelve dirección — solo aplica para RUC.
+        if (dirEl && tipoDoc === 'RUC') dirEl.value = datos.direccion || dirEl.value
+      }
+      if (o.distritoId) {
+        const distEl = document.getElementById(o.distritoId)
+        if (distEl && tipoDoc === 'RUC' && datos.distrito) distEl.value = datos.distrito
+      }
+      if (o.paisId) {
+        const paisEl = document.getElementById(o.paisId)
+        if (paisEl && !paisEl.value) paisEl.value = 'Perú'
+      }
+
+      // Datos SUNAT (solo RUC — DNI/RENIEC no trae nada de esto).
+      if (tipoDoc === 'RUC') {
+        if (o.estadoId) {
+          pintarBadgeSunat(document.getElementById(o.estadoId), datos.estado || '—', datos.estado === 'ACTIVO' ? 'success' : 'danger')
+        }
+        if (o.condicionId) {
+          pintarBadgeSunat(document.getElementById(o.condicionId), datos.condicion || '—', datos.condicion === 'HABIDO' ? 'success' : 'danger')
+        }
+        if (o.buenContribuyenteId) {
+          const el = document.getElementById(o.buenContribuyenteId)
+          if (el) {
+            const texto = datos.esBuenContribuyente === undefined ? '—' : (datos.esBuenContribuyente ? 'Sí' : 'No')
+            pintarBadgeSunat(el, texto, datos.esBuenContribuyente === true ? 'success' : (datos.esBuenContribuyente === false ? 'secondary' : 'secondary'))
+            // dataset.value guarda el booleano real (el texto "Sí"/"No" es solo
+            // para mostrar) — así el formulario puede leerlo al guardar el contacto.
+            el.dataset.value = datos.esBuenContribuyente === undefined ? '' : String(datos.esBuenContribuyente)
+          }
+        }
+        if (o.agenteRetencionId) {
+          const chk = document.getElementById(o.agenteRetencionId)
+          if (chk && typeof datos.esAgenteRetencion === 'boolean') chk.checked = datos.esAgenteRetencion
+        }
+        if (o.agenteRetencionBadgeId) {
+          const el = document.getElementById(o.agenteRetencionBadgeId)
+          if (el) {
+            const texto = datos.esAgenteRetencion === undefined ? '—' : (datos.esAgenteRetencion ? 'Sí' : 'No')
+            pintarBadgeSunat(el, texto, datos.esAgenteRetencion === true ? 'success' : 'secondary')
+            // dataset.value guarda el booleano exacto que devolvió SUNAT (el
+            // texto "Sí"/"No" es solo para mostrar) — se persiste al guardar.
+            el.dataset.value = datos.esAgenteRetencion === undefined ? '' : String(datos.esAgenteRetencion)
+          }
+        }
+      }
+
+      showToast('Datos encontrados y autocompletados.', 'success')
+    } finally {
+      btn.disabled = false
+      btn.textContent = textoOriginal
+    }
   })
 }

@@ -83,12 +83,16 @@
         <!-- TAB COMPRAS -->
         <div id="tab-compras" class="tab-content active">
           <div class="card">
-            <div class="card-header">
+            <div class="col-menu card-corner-menu" id="comprasColMenu">
+              <button type="button" class="card-menu-btn" onclick="window._colMenuToggle('compras', 'comprasColMenu', 'comprasColMenuDropdown')" title="Elegir qué columnas mostrar">⋮</button>
+              <div class="col-menu-dropdown" id="comprasColMenuDropdown"></div>
+            </div>
+            <div class="card-header" style="padding-right:34px;">
               <h3 class="card-title">Compras</h3>
               <div style="display:flex; gap: 10px;">
+                <button id="btnEliminarComprasSeleccionadas" class="btn btn-danger btn-small" style="display:none;" onclick="window.eliminarComprasSeleccionadas()">🗑 Eliminar seleccionadas (0)</button>
                 <button class="btn btn-secondary btn-small" onclick="window.abrirModalImportarCompras()">📥 Importar</button>
-                <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevaCompraMercaderia()">+ Nueva Compra (Mercadería)</button>
-                <button class="btn btn-secondary btn-small" onclick="window.abrirModalCompraServicio()">+ Compra Servicio/Gasto</button>
+                <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevaCompra()">+ Nueva Compra</button>
               </div>
             </div>
             <div style="padding:12px 16px; border-bottom:1px solid var(--border-color, #e0e0e0); display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
@@ -107,8 +111,22 @@
 
         <!-- TAB GUÍA DE REMISIÓN -->
         <div id="tab-guias" class="tab-content">
-          <div class="card">
+          <div class="card" id="card-devoluciones-pendientes" style="display:none; margin-bottom:16px;">
             <div class="card-header">
+              <h3 class="card-title">↩️ Devoluciones a Proveedor pendientes</h3>
+            </div>
+            <div style="padding:0 16px 4px; font-size:0.82rem; color:var(--text-secondary);">
+              Notas de Crédito recibidas con detalle de devolución (motivo 06/07) que aún no tienen — o no completaron — su Guía de Devolución. La mercadería sigue en Inventario hasta que emitas la guía.
+            </div>
+            <div id="tabla-devoluciones-pendientes" class="table-container"></div>
+            <div id="tabla-guias-devolucion-emitidas" class="table-container" style="margin-top:10px;"></div>
+          </div>
+          <div class="card">
+            <div class="col-menu card-corner-menu" id="guiasIngresoColMenu">
+              <button type="button" class="card-menu-btn" onclick="window._colMenuToggle('guias-ingreso', 'guiasIngresoColMenu', 'guiasIngresoColMenuDropdown')" title="Elegir qué columnas mostrar">⋮</button>
+              <div class="col-menu-dropdown" id="guiasIngresoColMenuDropdown"></div>
+            </div>
+            <div class="card-header" style="padding-right:34px;">
               <h3 class="card-title">Guías de Remisión</h3>
               <div style="display:flex; gap:10px;">
                 <button id="btnEliminarGuiasSel" class="btn btn-danger btn-small" style="display:none;" onclick="window.eliminarGuiasSeleccionadas()">🗑 Eliminar seleccionadas (0)</button>
@@ -324,20 +342,33 @@
     </div>
   </div>
 
-  <!-- MODAL NUEVA COMPRA (MERCADERÍA) — registro directo, sin Orden de Compra -->
+  <!-- MODAL NUEVA COMPRA — unificado: Mercadería / Servicio-Gasto / Anticipo a
+       Proveedor. Un solo punto de entrada con selector de Tipo arriba, que
+       muestra la sección de detalle correspondiente (nunca se mezclan tipos
+       en un mismo comprobante). Decisión confirmada con Luis 2026-09-07. -->
   <div id="modal-nueva-compra-mercaderia" class="modal">
     <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
       <div class="modal-header">
-        <h3 class="modal-title">Nueva Compra (Mercadería)</h3>
+        <h3 class="modal-title" id="ncTituloModal">Nueva Compra</h3>
         <button class="modal-close" onclick="closeModal('modal-nueva-compra-mercaderia')">✕</button>
       </div>
       <form id="formNewCompraMercaderia">
         <div style="padding: 20px; border-bottom: 1px solid var(--border-color);">
+
+          <div class="form-group">
+            <label>Tipo de Compra</label>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button type="button" class="reporte-chip on" id="tcBtnMercaderia" onclick="window.cambiarTipoCompra('mercaderia')">📦 Mercadería</button>
+              <button type="button" class="reporte-chip" id="tcBtnServicio" onclick="window.cambiarTipoCompra('servicio')">🧾 Servicio/Gasto</button>
+              <button type="button" class="reporte-chip" id="tcBtnAnticipo" onclick="window.cambiarTipoCompra('anticipo')">💰 Anticipo a Proveedor</button>
+            </div>
+          </div>
+
           <div class="form-group">
             <div style="display: flex; gap: 10px; align-items: flex-end;">
               <div style="flex: 1;">
                 <label>Proveedor *</label>
-                <select id="cmProveedor" required onchange="window.onCambiarProveedorCompra()">
+                <select id="nqProveedor" required onchange="window.onCambiarProveedorCompra()">
                   <option value="">-- Selecciona --</option>
                 </select>
               </div>
@@ -348,39 +379,52 @@
           <div class="grid grid-3">
             <div class="form-group">
               <label>Moneda</label>
-              <select id="cmMoneda" onchange="window.onCambiarMonedaCompra()">
+              <select id="nqMoneda" onchange="window.onCambiarMonedaCompra()">
                 <option value="USD" selected>USD</option>
                 <option value="PEN">PEN</option>
               </select>
             </div>
             <div class="form-group">
               <label>Fecha *</label>
-              <input type="date" id="cmFecha" required onchange="window.onCambiarFechaCompra()">
+              <input type="date" id="nqFecha" required onchange="window.onCambiarFechaCompra()">
             </div>
-            <div class="form-group">
+            <div class="form-group" id="nqFechaVencimientoGroup">
               <label>Fecha Vencimiento</label>
-              <input type="date" id="cmFechaVencimiento" readonly title="La calcula el cronograma de pago: es el vencimiento de la última cuota">
+              <input type="date" id="nqFechaVencimiento" readonly title="La calcula el cronograma de pago: es el vencimiento de la última cuota">
               <small style="color:var(--text-secondary); font-size:0.72rem;">La define el cronograma de abajo.</small>
             </div>
           </div>
-          <div class="grid grid-2">
+          <div class="grid grid-3">
+            <div class="form-group">
+              <label>Tipo de Comprobante</label>
+              <select id="nqTipoComprobante">
+                <option value="01" selected>Factura (01)</option>
+                <option value="91">Invoice — No Domiciliado (91)</option>
+              </select>
+              <small style="color:var(--text-secondary); font-size:0.72rem;">Boleta no se acepta en Compras: no da derecho a crédito fiscal de IGV.</small>
+            </div>
             <div class="form-group">
               <label>N° Comprobante (Factura del Proveedor)</label>
-              <input type="text" id="cmNumeroComprobante" placeholder="Ej: F001-00012345">
+              <input type="text" id="nqNumeroComprobante" placeholder="Ej: F001-00012345">
             </div>
-            <div class="form-group" id="cmTipoCambioGroup">
+            <div class="form-group" id="nqTipoCambioGroup">
               <label>
                 Tipo de Cambio (USD → PEN)
                 <span style="font-size:0.75rem; font-weight:600; color:var(--color-info);">COMPRA SBS</span>
-                <button type="button" id="btnAutoTCMercaderia" onclick="window.autoFetchTCMercaderia()" title="Obtener el TC COMPRA del día (SBS)"
+                <button type="button" id="btnAutoTCNuevaCompra" onclick="window.autoFetchTCCompra()" title="Obtener el TC COMPRA del día (SBS)"
                         style="margin-left:4px; background:none; border:1px solid var(--border-color); border-radius:4px; padding:1px 6px; font-size:0.72rem; cursor:pointer; color:var(--color-info);">↻ Auto</button>
               </label>
-              <input type="number" step="0.001" id="cmTipoCambio" placeholder="Ej: 3.750" value="1">
-              <small id="cmTCAviso" style="color:var(--text-secondary); font-size:0.72rem;">Art. 61° LIR: las compras en USD se registran al T.C. COMPRA del día.</small>
+              <input type="number" step="0.001" id="nqTipoCambio" placeholder="Ej: 3.750" value="1">
+              <small id="nqTCAviso" style="color:var(--text-secondary); font-size:0.72rem;">Art. 61° LIR: las compras en USD se registran al T.C. COMPRA del día.</small>
             </div>
           </div>
 
-          <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border-color);">
+          <div id="nqAnticiposDisponibles" style="display:none; margin-top:14px; padding:12px 14px; background:var(--bg-secondary); border-radius:var(--radius-md); border-left:3px solid var(--color-info);">
+            <strong style="display:block; margin-bottom:8px; font-size:0.85rem;">💰 Anticipos disponibles de este proveedor</strong>
+            <div id="nqAnticiposLista" style="display:flex; flex-direction:column; gap:8px;"></div>
+          </div>
+
+          <div id="nqCronogramaWrap" style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border-color);">
             <strong style="display:block; margin-bottom:6px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">
               Condición y cronograma de pago
             </strong>
@@ -388,7 +432,8 @@
           </div>
         </div>
 
-        <div style="padding: 20px;">
+        <!-- BODY: Mercadería -->
+        <div class="tc-body" id="tcBodyMercaderia" style="padding: 20px;">
           <h4 style="margin-bottom: 15px; color: var(--text-primary); display: flex; justify-content: space-between; align-items: center;">
             <span>Detalles de Productos</span>
             <button type="button" class="btn btn-primary btn-small" onclick="window.abrirModalDetalleCompraMercaderia()">+ Agregar Producto</button>
@@ -417,10 +462,103 @@
             </div>
           </div>
         </div>
+
+        <!-- BODY: Servicio/Gasto -->
+        <div class="tc-body" id="tcBodyServicio" style="padding: 20px; display:none;">
+          <div class="form-group">
+            <label>Descripción *</label>
+            <input type="text" id="csDescripcion" placeholder="Ej: Servicio de transporte">
+          </div>
+          <div class="form-group">
+            <label>Cuenta de Gasto *</label>
+            <select id="csCuentaGasto">
+              <option value="">-- Selecciona --</option>
+            </select>
+          </div>
+          <div class="grid grid-2">
+            <div class="form-group">
+              <label>Tipo de Pago</label>
+              <select id="csTipoPago">
+                <option value="credito" selected>Crédito</option>
+                <option value="contado">Contado</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>IGV (%)</label>
+              <select id="csIGV" onchange="window.calcularCompraServicio()">
+                <option value="18" selected>18%</option>
+                <option value="10">10%</option>
+                <option value="0">Exonerado</option>
+              </select>
+            </div>
+          </div>
+          <div class="grid grid-3">
+            <div class="form-group">
+              <label>Subtotal *</label>
+              <input type="number" id="csSubtotal" placeholder="0.00" step="0.01" min="0" onchange="window.calcularCompraServicio()">
+            </div>
+            <div class="form-group">
+              <label>IGV</label>
+              <input type="number" id="csIGVMonto" readonly disabled placeholder="0.00">
+            </div>
+            <div class="form-group">
+              <label>Total</label>
+              <input type="number" id="csTotal" readonly disabled placeholder="0.00">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Documento (opcional — PDF, JPEG o PNG)</label>
+            <input type="file" id="csAdjunto" accept="application/pdf,image/jpeg,image/png">
+            <small style="color:var(--text-secondary);">Si aún no te llega la factura (ej. comisión bancaria), déjalo vacío y súbelo después desde el kebab de la tabla.</small>
+          </div>
+        </div>
+
+        <!-- BODY: Anticipo a Proveedor -->
+        <div class="tc-body" id="tcBodyAnticipo" style="padding: 20px; display:none;">
+          <div style="margin-bottom:14px; padding:10px 14px; background:var(--bg-secondary); border-left:3px solid var(--color-warning); border-radius:var(--radius-md); font-size:0.85rem; color:var(--text-secondary);">
+            Úsalo cuando el proveedor factura un anticipo (100% o parcial) antes de que llegue la mercadería — típico en importaciones. Esta factura NO pide N° de Lote ni mueve stock. Cuando registres la factura real con los productos, podrás referenciar este anticipo ahí para descontarlo.
+          </div>
+          <div class="form-group">
+            <label>Descripción *</label>
+            <input type="text" id="atDescripcion" placeholder="Ej: Anticipo 100% - Pedido P00396" value="ANTICIPO">
+          </div>
+          <div class="grid grid-2">
+            <div class="form-group">
+              <label>Referencia Pedido/OC (opcional)</label>
+              <input type="text" id="atReferenciaPedido" placeholder="Ej: P00396">
+            </div>
+            <div class="form-group">
+              <label>IGV (%)</label>
+              <select id="atIGV" onchange="window.calcularCompraAnticipo()">
+                <option value="18" selected>18%</option>
+                <option value="10">10%</option>
+                <option value="0">Exonerado</option>
+              </select>
+            </div>
+          </div>
+          <div class="grid grid-3">
+            <div class="form-group">
+              <label>Subtotal *</label>
+              <input type="number" id="atSubtotal" placeholder="0.00" step="0.01" min="0" onchange="window.calcularCompraAnticipo()">
+            </div>
+            <div class="form-group">
+              <label>IGV</label>
+              <input type="number" id="atIGVMonto" readonly disabled placeholder="0.00">
+            </div>
+            <div class="form-group">
+              <label>Total</label>
+              <input type="number" id="atTotal" readonly disabled placeholder="0.00">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Documento (opcional — PDF, JPEG o PNG)</label>
+            <input type="file" id="atAdjunto" accept="application/pdf,image/jpeg,image/png">
+          </div>
+        </div>
       </form>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeModal('modal-nueva-compra-mercaderia')">Cancelar</button>
-        <button class="btn btn-primary" id="btnGuardarCompraMercaderia" onclick="window.guardarCompraMercaderia()">Guardar Compra</button>
+        <button class="btn btn-primary" id="btnGuardarCompraMercaderia" onclick="window.guardarCompraUnificada()">Guardar Compra</button>
       </div>
     </div>
   </div>
@@ -477,6 +615,7 @@
           <li><code>compra_numero</code> es el N° de comprobante de la compra (o su referencia) a la que pertenece la guía.</li>
           <li>Esta importación <strong>SÍ mueve stock</strong>: crea/suma lotes, escribe stock por zona y genera kardex — igual que registrar la guía a mano.</li>
           <li>Si el <code>numero_lote</code> ya existe para ese producto, la cantidad <strong>se suma</strong> a ese lote (no se duplica).</li>
+          <li><code>numero_unidades</code> es <strong>obligatorio</strong> (N° de bultos/cajas, mayor a 0): sin esto el lote no puede calcular su peso por unidad y no se podrá sugerir unidades al vender.</li>
         </ul>
         <p style="margin-bottom: 16px;">
           <a href="#" onclick="event.preventDefault(); window.descargarPlantillaGuiasCompra()" style="color: var(--color-info);">📄 Descargar plantilla de ejemplo</a>
@@ -524,6 +663,7 @@
             <label>IGV (%)</label>
             <select id="newDetalleCompraIGV" onchange="window.calcularDetalleCompraMercaderia()">
               <option value="18" selected>18%</option>
+              <option value="18-inc" title="El Precio Unitario ya incluye el IGV: se extrae en vez de sumarse encima.">18% (incluido)</option>
               <option value="10">10%</option>
               <option value="0">Importacion</option>
             </select>
@@ -589,11 +729,12 @@
   <div id="modal-nueva-guia" class="modal">
     <div class="modal-content" style="max-width: 1200px; max-height: 90vh; overflow-y: auto; overflow-x: hidden;">
       <div class="modal-header">
-        <h3 class="modal-title">Nueva Guía de Remisión</h3>
+        <h3 class="modal-title" id="ng-titulo-modal">Nueva Guía de Remisión</h3>
         <button class="modal-close" onclick="window.cerrarModalNuevaGuia()">✕</button>
       </div>
       <form id="formNuevaGuia" onsubmit="return false;">
         <div style="padding: 20px; border-bottom: 1px solid var(--border-color);">
+          <small id="ng-edicion-aviso" style="display:none; margin-bottom:10px; color:var(--color-warning); font-size:0.82rem;"></small>
           <div class="form-group">
             <label>Compra *</label>
             <select id="ngCompra" required onchange="window.onSeleccionarCompraGuia()">
@@ -667,6 +808,81 @@
     </div>
   </div>
 
+  <!-- MODAL EMITIR GUÍA DE DEVOLUCIÓN A PROVEEDOR -->
+  <div id="modal-guia-devolucion" class="modal">
+    <div class="modal-content" style="width:min(94vw, 980px); max-width:min(94vw, 980px); max-height: 90vh; overflow-y: auto; overflow-x: hidden;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="gdv-titulo-modal">↩️ Emitir Guía de Devolución</h3>
+        <button class="modal-close" onclick="window.cerrarModalGuiaDevolucion()">✕</button>
+      </div>
+      <form id="formGuiaDevolucion" onsubmit="return false;">
+        <div style="padding: 20px; display:flex; flex-direction:column; gap:14px;">
+          <div id="gdvInfoNota" style="padding:12px 14px; background:var(--bg-secondary); border-radius:var(--radius-md); border-left:3px solid var(--color-info); font-size:0.88rem; line-height:1.6;"></div>
+          <div class="grid grid-3">
+            <div class="form-group" style="margin:0;">
+              <label>N° de Guía *</label>
+              <input type="text" id="gdvNumeroGuia" placeholder="Ej: T001-00001" required>
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label>Fecha de Guía *</label>
+              <input type="date" id="gdvFechaGuia" required>
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label>Observaciones</label>
+              <input type="text" id="gdvObservaciones" placeholder="Opcional">
+            </div>
+          </div>
+        </div>
+        <div style="padding: 0 20px 20px;">
+          <strong style="display:block; margin-bottom:4px; font-size:0.9rem;">📦 ¿Qué se devuelve al proveedor?</strong>
+          <small style="display:block; margin-bottom:10px; color:var(--text-secondary); line-height:1.4;">
+            Esto es lo que de verdad sale del almacén: descuenta stock y registra Kardex hacia el proveedor.
+          </small>
+          <div id="tabla-detalle-guia-devolucion">
+            <p style="text-align:center; color:var(--text-secondary); padding:20px;">Cargando...</p>
+          </div>
+        </div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.cerrarModalGuiaDevolucion()">Cancelar</button>
+        <button class="btn btn-primary" id="btnGuardarGuiaDevolucion" onclick="window.guardarGuiaDevolucionCompra()">Guardar Guía (retira stock)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL EDITAR GUÍA DE DEVOLUCIÓN (solo cabecera; lote/cantidad no se editan aquí) -->
+  <div id="modal-editar-guia-devolucion" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Editar Guía de Devolución</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-editar-guia-devolucion')">✕</button>
+      </div>
+      <form id="formEditarGuiaDevolucion" onsubmit="return false;">
+        <input type="hidden" id="egdId">
+        <div class="form-group">
+          <label>N° de Guía *</label>
+          <input type="text" id="egdNumeroGuia" class="form-control" required>
+        </div>
+        <div class="form-group">
+          <label>Fecha de Guía *</label>
+          <input type="date" id="egdFechaGuia" class="form-control" required>
+        </div>
+        <div class="form-group">
+          <label>Observaciones</label>
+          <input type="text" id="egdObservaciones" class="form-control">
+        </div>
+        <p style="color:var(--text-secondary); font-size:0.85rem;">
+          Nota: los lotes y cantidades devueltas no se editan aquí (ya retiraron stock de Inventario).
+          Si necesitas corregir cantidades, elimina la guía y regístrala de nuevo.
+        </p>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-editar-guia-devolucion')">Cancelar</button>
+        <button class="btn btn-primary" onclick="window.guardarEdicionGuiaDevolucion()">Guardar Cambios</button>
+      </div>
+    </div>
+  </div>
+
   <!-- MODAL EDITAR COMPRA (solo cabecera; cantidades/lotes no se editan aquí) -->
   <div id="modal-editar-compra" class="modal">
     <div class="modal-content">
@@ -715,9 +931,41 @@
             <option value="pagado">Pagado</option>
           </select>
         </div>
-        <p style="color:var(--text-secondary); font-size:0.85rem;">
-          Nota: los productos, cantidades y lotes de esta compra no se editan aquí (ya afectaron el stock).
-          Si necesitas corregir cantidades, elimina la compra (si no tiene ventas asociadas) y regístrala de nuevo.
+
+        <!-- LÍNEAS Y PRECIOS: precio_unitario y tipo de IGV editables por
+             fila. Bloqueado si la compra ya tiene Guía de Ingreso procesada
+             (el costo ya quedó grabado en el lote/kardex) o si ya hay pagos
+             o notas asociadas. -->
+        <strong style="display:block; margin:14px 0 8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:.03em;">Líneas y precios</strong>
+        <small id="ec-precios-aviso" style="display:block; margin-bottom:6px; color:var(--text-secondary); font-size:0.78rem;"></small>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Descripción</th>
+                <th style="text-align:right;">Cant.</th>
+                <th>Unidad</th>
+                <th style="text-align:right;">Precio Unit.</th>
+                <th>Tipo IGV</th>
+                <th style="text-align:right;">Subtotal</th>
+                <th style="text-align:right;">IGV</th>
+                <th style="text-align:right;">Total</th>
+              </tr>
+            </thead>
+            <tbody id="ec-lineas">
+              <tr><td colspan="8" style="text-align:center; color:var(--text-secondary); padding:14px;">Cargando líneas...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:6px; padding:10px 12px; background:var(--bg-secondary); border-radius:var(--radius-md);">
+          <div><div style="font-size:.72rem; color:var(--text-secondary);">Subtotal</div><div id="ecSubtotal" style="font-weight:600;">0.00</div></div>
+          <div><div style="font-size:.72rem; color:var(--text-secondary);">IGV</div><div id="ecIgv" style="font-weight:600;">0.00</div></div>
+          <div><div style="font-size:.72rem; color:var(--text-secondary);">Total</div><div id="ecTotal" style="font-weight:700; color:var(--color-success);">0.00</div></div>
+        </div>
+
+        <p style="color:var(--text-secondary); font-size:0.85rem; margin-top:10px;">
+          La cantidad de cada línea no se edita aquí (ya afectó el stock). Si necesitas corregir cantidades/lotes,
+          usa "Editar Guía de Ingreso" (si aún no hay ventas de ese lote) o elimina la compra y regístrala de nuevo.
         </p>
       </form>
       <div class="modal-footer">
@@ -751,7 +999,10 @@
           </div>
           <div class="form-group">
             <label>Nro Documento</label>
-            <input type="text" id="provRUC" placeholder="11 dígitos" required>
+            <div style="display:flex; gap:6px;">
+              <input type="text" id="provRUC" placeholder="11 dígitos" required style="flex:1;">
+              <button type="button" class="btn btn-secondary btn-small" id="btnConsultarProvRUC">🔍 Consultar</button>
+            </div>
           </div>
         </div>
         <div class="form-group">
@@ -775,6 +1026,33 @@
             <label>Pais *</label>
             <input type="text" id="provPais" value="" required>
           </div>
+        </div>
+        <div id="provDatosSunat" class="sunat-datos-box" style="display:none;">
+          <div class="sunat-datos-title">📋 Datos SUNAT</div>
+          <div class="sunat-datos-grid">
+            <div class="sunat-dato">
+              <span class="sunat-dato-label">Estado</span>
+              <span class="sunat-dato-valor badge badge-secondary" id="provEstadoSunat">—</span>
+            </div>
+            <div class="sunat-dato">
+              <span class="sunat-dato-label">Condición</span>
+              <span class="sunat-dato-valor badge badge-secondary" id="provCondicionSunat">—</span>
+            </div>
+            <div class="sunat-dato">
+              <span class="sunat-dato-label">Buen Contribuyente</span>
+              <span class="sunat-dato-valor badge badge-secondary" id="provBuenContribuyenteSunat">—</span>
+            </div>
+            <div class="sunat-dato">
+              <span class="sunat-dato-label">Agente Retención</span>
+              <span class="sunat-dato-valor badge badge-secondary" id="provAgenteRetencionSunat">—</span>
+            </div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="checkbox" id="provSujetoRetencion">
+            <span>Sujeto a retención IGV (agente de retención SUNAT)</span>
+          </label>
         </div>
       </form>
       <div class="modal-footer">
@@ -878,95 +1156,9 @@
       </div>
     </div>
   </div>
-  <!-- MODAL NUEVA COMPRA DE SERVICIO/GASTO -->
-  <div id="modal-nueva-compra-servicio" class="modal">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3 class="modal-title">Nueva Compra de Servicio/Gasto</h3>
-        <button class="modal-close" onclick="closeModal('modal-nueva-compra-servicio')">✕</button>
-      </div>
-      <form id="formNewCompraServicio">
-        <div class="form-group">
-          <label>Proveedor *</label>
-          <select id="csProveedor" required>
-            <option value="">-- Selecciona --</option>
-          </select>
-        </div>
-        <div class="grid grid-3">
-          <div class="form-group">
-            <label>Moneda</label>
-            <select id="csMoneda" onchange="window.onCambiarMonedaServicio()">
-              <option value="USD" selected>USD</option>
-              <option value="PEN">PEN</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Fecha *</label>
-            <input type="date" id="csFecha" required>
-          </div>
-          <div class="form-group" id="csTipoCambioGroup">
-            <label>
-              Tipo de Cambio (USD → PEN)
-              <button type="button" id="btnAutoTCServicio" onclick="window.autoFetchTCServicio()" title="Obtener el TC COMPRA del día (SBS)"
-                      style="margin-left:4px; background:none; border:1px solid var(--border-color); border-radius:4px; padding:1px 6px; font-size:0.72rem; cursor:pointer; color:var(--color-info);">↻ Auto</button>
-            </label>
-            <input type="number" step="0.001" id="csTipoCambio" placeholder="Ej: 3.750" value="1">
-            <small id="csTCAviso" style="color:var(--text-secondary); font-size:0.72rem;"></small>
-          </div>
-        </div>
-        <div class="form-group">
-          <label>Descripción *</label>
-          <input type="text" id="csDescripcion" placeholder="Ej: Servicio de transporte" required>
-        </div>
-        <div class="form-group">
-          <label>Cuenta de Gasto *</label>
-          <select id="csCuentaGasto" required>
-            <option value="">-- Selecciona --</option>
-          </select>
-        </div>
-        <div class="grid grid-2">
-          <div class="form-group">
-            <label>Tipo de Pago</label>
-            <select id="csTipoPago">
-              <option value="credito" selected>Crédito</option>
-              <option value="contado">Contado</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>IGV (%)</label>
-            <select id="csIGV" onchange="window.calcularCompraServicio()">
-              <option value="18" selected>18%</option>
-              <option value="10">10%</option>
-              <option value="0">Exonerado</option>
-            </select>
-          </div>
-        </div>
-        <div class="grid grid-3">
-          <div class="form-group">
-            <label>Subtotal *</label>
-            <input type="number" id="csSubtotal" placeholder="0.00" step="0.01" min="0" required onchange="window.calcularCompraServicio()">
-          </div>
-          <div class="form-group">
-            <label>IGV</label>
-            <input type="number" id="csIGVMonto" readonly disabled placeholder="0.00">
-          </div>
-          <div class="form-group">
-            <label>Total</label>
-            <input type="number" id="csTotal" readonly disabled placeholder="0.00">
-          </div>
-        </div>
-        <div class="form-group">
-          <label>Documento (opcional — PDF, JPEG o PNG)</label>
-          <input type="file" id="csAdjunto" accept="application/pdf,image/jpeg,image/png">
-          <small style="color:var(--text-secondary);">Si aún no te llega la factura (ej. comisión bancaria), déjalo vacío y súbelo después desde el kebab de la tabla.</small>
-        </div>
-      </form>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeModal('modal-nueva-compra-servicio')">Cancelar</button>
-        <button class="btn btn-primary" onclick="window.guardarCompraServicio()">Guardar</button>
-      </div>
-    </div>
-  </div>
+  <!-- Compra de Servicio/Gasto y Anticipo a Proveedor ahora viven dentro del
+       modal unificado "modal-nueva-compra-mercaderia" de arriba (selector de
+       Tipo). Este modal separado se eliminó el 2026-09-07. -->
 
   <!-- MODAL ADJUNTO DE COMPRA (1 archivo por compra: PDF/JPEG/PNG) -->
   <div id="modal-adjunto-compra" class="modal">

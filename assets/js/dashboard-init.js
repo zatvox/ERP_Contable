@@ -197,11 +197,12 @@ window.refrescarDashboard = function() {
 function _saldoCxC(c) {
   return parseFloat(c.monto_total || 0) + parseFloat(c.monto_notas_debito || 0)
        - parseFloat(c.monto_notas_credito || 0) - parseFloat(c.monto_cobrado || 0)
-       - parseFloat(c.monto_retenido || 0)
+       - parseFloat(c.monto_retenido || 0) - parseFloat(c.monto_anticipo_aplicado || 0)
 }
 function _saldoCxP(c) {
   return parseFloat(c.monto_total || 0) + parseFloat(c.monto_notas_debito || 0)
        - parseFloat(c.monto_notas_credito || 0) - parseFloat(c.monto_pagado || 0)
+       - parseFloat(c.monto_anticipo_aplicado || 0)
 }
 
 function pintarFinanciero(r) {

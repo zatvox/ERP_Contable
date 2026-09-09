@@ -187,9 +187,18 @@ function closeModal(id) {
 // Hacer disponible globalmente
 window.closeModal = closeModal;
 
-// Cerrar modal al hacer click fuera
+// Cerrar modal al hacer click fuera. Algunos modales (ej. Nueva Guía en
+// Compras) definen su propio window.cerrarXxx() que pregunta antes de
+// cerrar si hay campos editados sin guardar — para esos, se delega ahí en
+// vez de cerrar directo, así el click-fuera no evita esa confirmación.
+const CIERRES_CON_CONFIRMACION = {
+  'modal-nueva-guia': () => window.cerrarModalNuevaGuia && window.cerrarModalNuevaGuia()
+};
+
 document.addEventListener('click', (e) => {
   if (e.target.classList.contains('modal')) {
+    const cierrePersonalizado = CIERRES_CON_CONFIRMACION[e.target.id];
+    if (cierrePersonalizado) { cierrePersonalizado(); return; }
     e.target.classList.remove('show');
     document.body.style.overflow = 'auto';
   }

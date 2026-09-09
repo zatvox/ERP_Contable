@@ -83,6 +83,153 @@ export async function deleteLote(id) {
 }
 
 // ============================================================================
+// LOTE_BULTOS — detalle de peso individual por bulto (productos con
+// es_peso_variable=true). Ver 43_lote_bultos.sql.
+// ============================================================================
+
+export async function getLoteBultosByLote(loteId) {
+  return await query('lote_bultos', { lote_id: loteId })
+}
+
+export async function getLoteBultoById(id) {
+  return await getById('lote_bultos', id)
+}
+
+export async function addLoteBulto(bulto) {
+  return await insert('lote_bultos', bulto)
+}
+
+export async function updateLoteBulto(id, data) {
+  return await update('lote_bultos', id, data)
+}
+
+export async function deleteLoteBulto(id) {
+  return await deleteRecord('lote_bultos', id)
+}
+
+/**
+ * Bultos disponibles (estado='disponible') de un lote, para elegir cuáles
+ * mover/vender/despachar. Más livianos primero no importa — se ordena por
+ * fecha de ingreso (los más antiguos primero) solo para que la lista sea
+ * predecible en pantalla.
+ */
+export async function getLoteBultosDisponibles(loteId) {
+  const bultos = await getLoteBultosByLote(loteId)
+  return (bultos || [])
+    .filter(b => b.estado === 'disponible')
+    .sort((a, b) => (a.id || 0) - (b.id || 0))
+}
+
+/**
+ * Recalcula lotes.cantidad y cantidad_unidades sumando/contando los bultos
+ * disponibles de ese lote. Para lotes con es_peso_variable=true estos dos
+ * campos dejan de escribirse a mano — siempre reflejan el detalle real.
+ */
+export async function recalcularLoteDesdeBultos(loteId) {
+  const disponibles = await getLoteBultosDisponibles(loteId)
+  const cantidad = parseFloat(disponibles.reduce((s, b) => s + (parseFloat(b.peso) || 0), 0).toFixed(4))
+  const cantidad_unidades = disponibles.length
+  await updateLote(loteId, { cantidad, cantidad_unidades })
+  return { cantidad, cantidad_unidades }
+}
+
+/** Stock disponible por zona para lotes con bultos (lee la vista v_stock_bultos_zona). */
+export async function getStockBultosZona() {
+  return await getAll('v_stock_bultos_zona')
+}
+
+export async function getStockBultosZonaByLote(loteId) {
+  const filas = await getStockBultosZona()
+  return (filas || []).filter(f => f.lote_id === loteId)
+}
+
+/**
+ * Bultos disponibles de un lote, filtrados a UNA zona — es lo que se ofrece
+ * para marcar/seleccionar en la Guía de Despacho (Fase 2): el usuario pide
+ * un peso aproximado y arma la selección con estos bultos hasta acercarse.
+ */
+export async function getLoteBultosDisponiblesZona(loteId, ubicacionId) {
+  const disponibles = await getLoteBultosDisponibles(loteId)
+  return (disponibles || []).filter(b => b.ubicacion_id === ubicacionId)
+}
+
+/**
+ * Bultos ligados a una línea de guía de despacho (detalle_guias_despacho_
+ * venta.id) — para poder revertirlos si se elimina la guía.
+ */
+export async function getLoteBultosPorDetalleGuiaDespacho(detalleGuiaDespachoId) {
+  return await query('lote_bultos', { detalle_guia_despacho_id: detalleGuiaDespachoId })
+}
+
+/**
+ * Revierte a 'disponible' todos los bultos que una línea de guía de
+ * despacho había marcado como vendidos, y limpia sus referencias. NO
+ * recalcula el lote (para no recalcularlo varias veces si una guía tocó el
+ * mismo lote en más de una línea) — el llamador debe llamar
+ * recalcularLoteDesdeBultos(loteId) por cada id devuelto, una sola vez.
+ */
+export async function revertirBultosDeDetalleGuiaDespacho(detalleGuiaDespachoId) {
+  const bultos = await getLoteBultosPorDetalleGuiaDespacho(detalleGuiaDespachoId)
+  const loteIds = new Set()
+  for (const b of (bultos || [])) {
+    await updateLoteBulto(b.id, { estado: 'disponible', detalle_venta_id: null, detalle_guia_despacho_id: null })
+    loteIds.add(b.lote_id)
+  }
+  return Array.from(loteIds)
+}
+
+/**
+ * Reingresa a Inventario los bultos que el cliente devuelve por una Nota de
+ * Crédito. A diferencia de revertirBultosDeDetalleGuiaDespacho (que DESHACE
+ * la guía completa, como si nunca hubiera pasado), aquí la venta original
+ * SIGUE siendo válida — solo una NC la corrige parcialmente — así que no se
+ * puede "resucitar" el bulto vendido tal cual: ese registro es el historial
+ * de esa venta. Se sigue el patrón ya previsto en 43_lote_bultos.sql:
+ *   1) El bulto vendido pasa a estado='devuelto_cliente' (cierra su ciclo,
+ *      conserva detalle_venta_id/detalle_guia_despacho_id como historial) y
+ *      se le anota nota_credito_venta_id.
+ *   2) Se crea un BULTO NUEVO en estado='disponible', con bulto_origen_id
+ *      apuntando al vendido, en la zona de recepción indicada — con el peso
+ *      que el usuario ingresó en la devolución (casi nunca es idéntico al
+ *      peso de venta: se repesa en almacén).
+ * NO recalcula el lote ni inserta Kardex — el llamador (ventas.js) hace eso
+ * una vez por lote, después de reingresar todos los bultos de la NC, y
+ * decide el costo/concepto del movimiento de Kardex.
+ *
+ * @param {Array<{bultoVendidoId:number, pesoDevuelto:number, ubicacionId:number}>} devoluciones
+ * @param {number} notaCreditoVentaId  id de la fila de NC (ventas.id, tipo_comprobante='07')
+ * @param {number|null} createdBy
+ * @returns {Array<{loteId:number, bultoNuevo:object}>}
+ */
+export async function reingresarBultosPorNotaCredito(devoluciones, notaCreditoVentaId, createdBy = null) {
+  const resultado = []
+  for (const dev of (devoluciones || [])) {
+    const original = await getLoteBultoById(dev.bultoVendidoId)
+    if (!original) continue
+
+    await updateLoteBulto(original.id, {
+      estado: 'devuelto_cliente',
+      nota_credito_venta_id: notaCreditoVentaId
+    })
+
+    const bultoNuevo = await addLoteBulto({
+      lote_id:         original.lote_id,
+      peso:            dev.pesoDevuelto,
+      unidad_medida:   original.unidad_medida,
+      ubicacion_id:    dev.ubicacionId || original.ubicacion_id,
+      estado:          'disponible',
+      bulto_origen_id: original.id,
+      nota_credito_venta_id: notaCreditoVentaId,
+      fecha_ingreso:   new Date().toISOString().split('T')[0],
+      created_by:      createdBy
+    })
+
+    resultado.push({ loteId: original.lote_id, bultoNuevo })
+  }
+  return resultado
+}
+
+// ============================================================================
 // ALMACENES Y ZONAS (ubicaciones)
 // ============================================================================
 
@@ -181,16 +328,24 @@ export async function getStockUbicacionesByUbicacion(ubicacionId) {
   return await query('stock_ubicaciones', { ubicacion_id: ubicacionId })
 }
 
+// ── Escritura: NO-OPS desde 50_stock_ubicaciones_vista_kardex.sql ──────────
+// stock_ubicaciones pasó de ser una tabla escrita a mano a una VISTA
+// calculada en vivo desde kardex (misma idea que v_stock_bultos_zona). El
+// stock ya queda correcto en cuanto compras.js/ventas.js/inventario.js
+// insertan el movimiento en kardex — estas 3 funciones no tienen nada que
+// escribir. Se mantienen (en vez de borrar las ~26 llamadas en los 3
+// archivos) para no tocar lógica de negocio ya probada; ninguna de esas
+// llamadas depende del id que devolvían (verificado call por call).
 export async function addStockUbicacion(registro) {
-  return await insert('stock_ubicaciones', registro)
+  return { id: null, ...registro }
 }
 
-export async function updateStockUbicacion(id, data) {
-  return await update('stock_ubicaciones', id, data)
+export async function updateStockUbicacion(_id, _data) {
+  return true
 }
 
-export async function deleteStockUbicacion(id) {
-  return await deleteRecord('stock_ubicaciones', id)
+export async function deleteStockUbicacion(_id) {
+  return true
 }
 
 // ============================================================================
@@ -663,6 +818,13 @@ export async function getCompraDetalles(compraId) {
   return await query('detalle_compras', { compra_id: compraId })
 }
 
+// Todas las líneas de todas las compras de un jalón: usado para calcular,
+// compra por compra, cuánto queda pendiente de recibir sin hacer N+1
+// consultas (ver _cargarComprasSelectGuia en compras.js).
+export async function getTodosDetalleCompras() {
+  return await getAll('detalle_compras')
+}
+
 export async function getCompraDetalleById(id) {
   return await getById('detalle_compras', id)
 }
@@ -721,8 +883,135 @@ export async function getDetalleGuiasIngresoCompra(guiaId) {
   return await query('detalle_guias_ingreso_compra', { guia_id: guiaId })
 }
 
+// Todas las líneas de todas las guías de ingreso: usado para sumar, línea de
+// compra por línea de compra, cuánto se ha recibido ya en TODAS sus guías
+// (una compra puede recibirse en varias guías parciales).
+export async function getTodosDetalleGuiasIngresoCompra() {
+  return await getAll('detalle_guias_ingreso_compra')
+}
+
 export async function addDetalleGuiaIngresoCompra(detalle) {
   return await insert('detalle_guias_ingreso_compra', detalle)
+}
+
+export async function deleteDetalleGuiaIngresoCompra(id) {
+  return await deleteRecord('detalle_guias_ingreso_compra', id)
+}
+
+// ============================================================================
+// NOTA_CREDITO_COMPRA_DETALLE — declara qué ítem/lote se devuelve al
+// proveedor en una NC RECIBIDA (tipo_comprobante='07' en compras). Ver
+// 53_devolucion_compra.sql. Solo declarativo: no mueve stock por sí solo,
+// eso lo hace guias_devolucion_compra cuando se emite la guía.
+// ============================================================================
+
+export async function getNotaCreditoCompraDetalleByNota(notaCompraId) {
+  return await query('nota_credito_compra_detalle', { nota_compra_id: notaCompraId })
+}
+
+export async function getNotaCreditoCompraDetalleByCompraOrigen(compraOrigenId) {
+  return await query('nota_credito_compra_detalle', { compra_origen_id: compraOrigenId })
+}
+
+export async function addNotaCreditoCompraDetalle(d) {
+  return await insert('nota_credito_compra_detalle', d)
+}
+
+export async function deleteNotaCreditoCompraDetalle(id) {
+  return await deleteRecord('nota_credito_compra_detalle', id)
+}
+
+// ============================================================================
+// GUÍAS DE DEVOLUCIÓN A PROVEEDOR — espejo de guías de ingreso/despacho: la
+// NC solo declara qué se debe devolver, esta guía es la que de verdad saca
+// la mercadería (descuenta lotes.cantidad + Kardex salida hacia
+// Partners/Vendors). Ver 53_devolucion_compra.sql.
+// ============================================================================
+
+let _guiasDevolucionCompraPromise = null
+
+export function invalidateGuiasDevolucionCompraCache() {
+  _guiasDevolucionCompraPromise = null
+}
+
+export async function getGuiasDevolucionCompra(forzar = false) {
+  if (forzar || !_guiasDevolucionCompraPromise) {
+    _guiasDevolucionCompraPromise = getAll('guias_devolucion_compra')
+  }
+  return await _guiasDevolucionCompraPromise
+}
+
+export async function getGuiaDevolucionCompraById(id) {
+  return await getById('guias_devolucion_compra', id)
+}
+
+export async function addGuiaDevolucionCompra(guia) {
+  const r = await insert('guias_devolucion_compra', guia)
+  if (r) invalidateGuiasDevolucionCompraCache()
+  return r
+}
+
+export async function updateGuiaDevolucionCompra(id, data) {
+  const r = await update('guias_devolucion_compra', id, data)
+  if (r) invalidateGuiasDevolucionCompraCache()
+  return r
+}
+
+export async function deleteGuiaDevolucionCompra(id) {
+  const r = await deleteRecord('guias_devolucion_compra', id)
+  if (r) invalidateGuiasDevolucionCompraCache()
+  return r
+}
+
+export async function getDetalleGuiasDevolucionCompra(guiaId) {
+  return await query('detalle_guias_devolucion_compra', { guia_id: guiaId })
+}
+
+// Todas las líneas de TODAS las guías de devolución que cubren una línea de
+// NC en particular — para calcular cuánto ya se devolvió físicamente contra
+// lo declarado en nota_credito_compra_detalle.cantidad (pendiente/parcial/completa).
+export async function getDetalleGuiasDevolucionCompraByNotaDetalle(notaCreditoCompraDetalleId) {
+  return await query('detalle_guias_devolucion_compra', { nota_credito_compra_detalle_id: notaCreditoCompraDetalleId })
+}
+
+// Todas las líneas de todas las guías de devolución: usado para recalcular,
+// de una sola bajada, el estado_devolucion de todas las NC pendientes.
+export async function getTodosDetalleGuiasDevolucionCompra() {
+  return await getAll('detalle_guias_devolucion_compra')
+}
+
+export async function addDetalleGuiaDevolucionCompra(detalle) {
+  return await insert('detalle_guias_devolucion_compra', detalle)
+}
+
+export async function deleteDetalleGuiaDevolucionCompra(id) {
+  return await deleteRecord('detalle_guias_devolucion_compra', id)
+}
+
+/**
+ * Bultos ligados a una línea de guía de devolución (detalle_guias_devolucion_
+ * compra.id) — para poder revertirlos si se elimina/edita la guía.
+ */
+export async function getLoteBultosPorDetalleGuiaDevolucion(detalleGuiaDevolucionId) {
+  return await query('lote_bultos', { detalle_guia_devolucion_id: detalleGuiaDevolucionId })
+}
+
+/**
+ * Revierte a 'disponible' todos los bultos que una línea de guía de
+ * devolución había marcado como devuelto_proveedor, y limpia sus
+ * referencias. Mismo patrón que revertirBultosDeDetalleGuiaDespacho (ventas)
+ * pero en la dirección contraria (el bulto vuelve a existir en stock en vez
+ * de reingresar por NC). NO recalcula el lote — el llamador debe llamar
+ * recalcularLoteDesdeBultos(loteId) por cada id devuelto, una sola vez.
+ */
+export async function revertirBultosDeDetalleGuiaDevolucion(detalleGuiaDevolucionId) {
+  const bultos = await getLoteBultosPorDetalleGuiaDevolucion(detalleGuiaDevolucionId)
+  const loteIds = new Set()
+  for (const b of (bultos || [])) {
+    await updateLoteBulto(b.id, { estado: 'disponible', nota_credito_compra_id: null, detalle_guia_devolucion_id: null })
+    loteIds.add(b.lote_id)
+  }
+  return Array.from(loteIds)
 }
 
 export async function deleteCompraDetalle(id) {
@@ -1939,6 +2228,49 @@ export async function updateVenta(id, data) { return await update('ventas', id, 
 export async function deleteVenta(id) { return await deleteRecord('ventas', id) }
 
 export async function getDetalleVentas(ventaId) { return await query('detalle_ventas', { venta_id: ventaId }) }
+
+/** Todas las líneas de venta de TODAS las ventas (para reportes agregados, evita N+1). */
+export async function getTodosDetalleVentas() { return await query('detalle_ventas', {}) }
+
+// ============================================================================
+// DECOLECTA — Contador de consultas RUC/DNI (cuota mensual del plan)
+// ============================================================================
+
+/** Registra una llamada real que sí llegó a pegarle a la API de Decolecta (consume cuota). */
+export async function addDecolectaConsultaLog(tipo, numero, exitosa = true, mensajeError = null, origenModulo = null, createdBy = null) {
+  return await insert('decolecta_consultas_log', {
+    tipo, numero, exitosa, mensaje_error: mensajeError, origen_modulo: origenModulo, created_by: createdBy
+  })
+}
+
+/**
+ * Consumo del mes en curso: ajuste_manual (semilla/corrección) + conteo real
+ * del log de este periodo, contra el límite mensual del plan.
+ * Retorna { periodo, usadas, limite, restantes, porcentaje }.
+ */
+export async function getDecolectaUsoMesActual() {
+  const hoy = new Date()
+  const periodo = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`
+  const desde = `${periodo}-01T00:00:00`
+
+  const [ajustes, logMes] = await Promise.all([
+    query('decolecta_uso_ajuste', { periodo }),
+    query('decolecta_consultas_log', {})
+  ])
+
+  const ajuste = ajustes?.[0] || { ajuste_manual: 0, limite_mensual: 100 }
+  const delMes = (logMes || []).filter(l => (l.created_at || '') >= desde)
+  const usadas = (ajuste.ajuste_manual || 0) + delMes.length
+  const limite = ajuste.limite_mensual || 100
+
+  return {
+    periodo,
+    usadas,
+    limite,
+    restantes: Math.max(0, limite - usadas),
+    porcentaje: limite > 0 ? Math.min(100, Math.round((usadas / limite) * 100)) : 0
+  }
+}
 export async function addDetalleVenta(d) { return await insert('detalle_ventas', d) }
 export async function updateDetalleVenta(id, data) { return await update('detalle_ventas', id, data) }
 export async function deleteDetalleVenta(id) { return await deleteRecord('detalle_ventas', id) }
@@ -2003,6 +2335,34 @@ export async function updateCuentaCobrar(id, data) { return await update('cuenta
 export async function deleteCuentaCobrar(id) { return await deleteRecord('cuentas_cobrar', id) }
 
 // ============================================================================
+// VENTAS_ANTICIPOS_APLICADOS — espejo de compras_anticipos_aplicados, para
+// anticipos de clientes. Ver 55_anticipos_proveedor_cliente.sql.
+// ============================================================================
+
+export async function getTodosVentasAnticiposAplicados() { return await getAll('ventas_anticipos_aplicados') }
+export async function getAnticiposAplicadosPorAnticipoVenta(ventaAnticipoId) {
+  return await query('ventas_anticipos_aplicados', { venta_anticipo_id: ventaAnticipoId })
+}
+export async function getAnticiposAplicadosPorDestinoVenta(ventaDestinoId) {
+  return await query('ventas_anticipos_aplicados', { venta_destino_id: ventaDestinoId })
+}
+export async function addVentaAnticipoAplicado(d) { return await insert('ventas_anticipos_aplicados', d) }
+
+// ============================================================================
+// NOTA_CREDITO_VENTA_DETALLE — devolución de mercadería por ítem/lote/bulto en
+// una NC EMITIDA al cliente. Ver 46_nota_credito_devolucion_stock.sql y el
+// rename a nota_credito_venta_detalle en 53_devolucion_compra.sql (antes se
+// llamaba nota_credito_detalle a secas — se renombró para ser simétrica con
+// nota_credito_compra_detalle, la tabla equivalente para devoluciones A
+// proveedor).
+// ============================================================================
+
+export async function getNotaCreditoVentaDetalleByNota(notaVentaId) { return await query('nota_credito_venta_detalle', { nota_venta_id: notaVentaId }) }
+export async function getNotaCreditoVentaDetalleByVentaOrigen(ventaOrigenId) { return await query('nota_credito_venta_detalle', { venta_origen_id: ventaOrigenId }) }
+export async function addNotaCreditoVentaDetalle(d) { return await insert('nota_credito_venta_detalle', d) }
+export async function deleteNotaCreditoVentaDetalle(id) { return await deleteRecord('nota_credito_venta_detalle', id) }
+
+// ============================================================================
 // CUENTAS POR PAGAR (CxP) — espejo exacto de Cuentas por Cobrar. Se crea al
 // registrar una COMPRA con comprobante '01' (factura), igual que ventas.js
 // crea la CxC al registrar la venta — nunca desde una Guía (de Remisión o
@@ -2016,6 +2376,21 @@ export async function getCuentasPagarByCompra(compraId) { return await query('cu
 export async function addCuentaPagar(cxp) { return await insert('cuentas_pagar', cxp) }
 export async function updateCuentaPagar(id, data) { return await update('cuentas_pagar', id, data) }
 export async function deleteCuentaPagar(id) { return await deleteRecord('cuentas_pagar', id) }
+
+// ============================================================================
+// COMPRAS_ANTICIPOS_APLICADOS — declara qué factura de anticipo (compras con
+// tipo_compra='anticipo') canceló qué monto de qué factura real. Ver
+// 55_anticipos_proveedor_cliente.sql.
+// ============================================================================
+
+export async function getTodosComprasAnticiposAplicados() { return await getAll('compras_anticipos_aplicados') }
+export async function getAnticiposAplicadosPorAnticipoCompra(compraAnticipoId) {
+  return await query('compras_anticipos_aplicados', { compra_anticipo_id: compraAnticipoId })
+}
+export async function getAnticiposAplicadosPorDestinoCompra(compraDestinoId) {
+  return await query('compras_anticipos_aplicados', { compra_destino_id: compraDestinoId })
+}
+export async function addCompraAnticipoAplicado(d) { return await insert('compras_anticipos_aplicados', d) }
 
 // ============================================================================
 // COBROS

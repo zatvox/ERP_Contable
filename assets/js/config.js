@@ -30,9 +30,20 @@ export const SUNAT_CONFIG = {
   // Ambiente: 'demo' para pruebas | 'produccion' para SUNAT real
   AMBIENTE:       'demo',
 
-  // ── APIS.PE (Consulta RUC/DNI sin SOAP) ──────────────────────────────────
+  // ── APIS.PE (Consulta RUC/DNI sin SOAP) — RESPALDO si Decolecta falla ────
   // Obtener en: https://apis.pe → Registrarse → Mi cuenta → Tokens
-  APIS_PE_TOKEN:  'REEMPLAZAR_CON_TU_TOKEN_APIS_PE'
+  APIS_PE_TOKEN:  'REEMPLAZAR_CON_TU_TOKEN_APIS_PE',
+
+  // ── DECOLECTA (Consulta RUC/DNI) — fuente PRINCIPAL ──────────────────────
+  // ⚠️ YA NO SE USA AQUÍ. Decolecta no acepta llamadas directas desde el
+  //    navegador (bloquea por CORS) y el token no debe viajar en código de
+  //    frontend (config.js se sirve tal cual al navegador — cualquiera podría
+  //    copiarlo y gastar tu cuota mensual). El token real va como SECRETO de
+  //    Supabase, consumido por la Edge Function supabase/functions/decolecta-proxy/:
+  //      supabase secrets set DECOLECTA_TOKEN=tu_token_real
+  //      supabase functions deploy decolecta-proxy
+  //    Este campo queda solo de referencia/histórico, sunat-api.js ya no lo lee.
+  DECOLECTA_TOKEN_NO_USAR_AQUI: 'mover a: supabase secrets set DECOLECTA_TOKEN=...'
 }
 
 if (!SUPABASE_CONFIG.URL || !SUPABASE_CONFIG.ANON_KEY) {

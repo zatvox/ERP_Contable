@@ -207,6 +207,7 @@ function _saldoCxC(c) {
        - parseFloat(c.monto_cobrado || 0)
        - parseFloat(c.monto_retenido || 0)
        - parseFloat(c.monto_canjeado || 0)
+       - parseFloat(c.monto_anticipo_aplicado || 0)
 }
 function _saldoCxP(c) {
   return parseFloat(c.monto_total || 0)
@@ -214,6 +215,7 @@ function _saldoCxP(c) {
        - parseFloat(c.monto_notas_credito || 0)
        - parseFloat(c.monto_pagado || 0)
        - parseFloat(c.monto_canjeado || 0)
+       - parseFloat(c.monto_anticipo_aplicado || 0)
 }
 
 // ============================================================================
@@ -257,6 +259,22 @@ window.cargarCxC = async function() {
     const lista = _filtrarCxC().sort((a, b) => (a.fecha_vencimiento || 'zzzz').localeCompare(b.fecha_vencimiento || 'zzzz'))
     const hoy = new Date().toISOString().split('T')[0]
 
+    // Retención pendiente de sustentar: mismo criterio que el reporte
+    // "Retenciones IGV" (monto_retencion > 0 y sin numero_comprobante_retencion
+    // todavía) — acá se agrupa por CxC para poder avisarlo también en el
+    // listado principal, no solo en el reporte aparte. Contablemente esa
+    // porción retenida ya "salda" la CxC en el sistema (ver monto_retenido),
+    // pero hasta que el cliente entregue su comprobante de retención, no hay
+    // sustento documentario formal ante SUNAT — de ahí el aviso.
+    const cobrosTodos = await cacheado('cobros', getCobros)
+    const retencionPendientePorCxc = {}
+    for (const co of (cobrosTodos || [])) {
+      const montoRet = parseFloat(co.monto_retencion) || 0
+      if (montoRet > 0 && !co.numero_comprobante_retencion) {
+        retencionPendientePorCxc[co.cxc_id] = (retencionPendientePorCxc[co.cxc_id] || 0) + montoRet
+      }
+    }
+
     const tbody = document.getElementById('tbody-cxc')
     const tfoot = document.getElementById('tfoot-cxc')
     if (!tbody) return
@@ -276,9 +294,11 @@ window.cargarCxC = async function() {
       const retenido  = parseFloat(cxc.monto_retenido || 0)
       const notasCr   = parseFloat(cxc.monto_notas_credito || 0)
       const notasDb   = parseFloat(cxc.monto_notas_debito || 0)
-      const pendiente = total + notasDb - notasCr - cobrado - retenido
+      const anticipoAp = parseFloat(cxc.monto_anticipo_aplicado || 0)
+      const pendiente = total + notasDb - notasCr - cobrado - retenido - anticipoAp
       const vencida   = cxc.estado !== 'cobrado' && cxc.fecha_vencimiento && cxc.fecha_vencimiento < hoy
       const dias      = cxc.fecha_vencimiento ? diasVencidos(cxc.fecha_vencimiento) : null
+      const retPendienteSustentar = retencionPendientePorCxc[cxc.id] || 0
       tTotal += total; tCobrado += cobrado + retenido; tPend += pendiente
 
       const badge = cxc.estado === 'cobrado' ? 'badge-success'
@@ -293,7 +313,7 @@ window.cargarCxC = async function() {
         <td>${dias === null ? '—' : (dias > 0 ? `<span class="badge badge-vencido">+${dias}</span>` : `<span class="badge badge-alcorriente">${dias}</span>`)}</td>
         <td>${cxc.moneda || 'PEN'}</td>
         <td style="text-align:right;">${formatNumber(total)}</td>
-        <td style="text-align:right;">${formatNumber(cobrado)}${retenido > 0 ? `<br><small style="color:var(--color-warning);">+ret. ${formatNumber(retenido)}</small>` : ''}${notasCr > 0 ? `<br><small style="color:var(--color-danger);">−NC ${formatNumber(notasCr)}</small>` : ''}${notasDb > 0 ? `<br><small style="color:var(--color-success);">+ND ${formatNumber(notasDb)}</small>` : ''}</td>
+        <td style="text-align:right;">${formatNumber(cobrado)}${retenido > 0 ? `<br><small style="color:var(--color-warning);">+ret. ${formatNumber(retenido)}</small>` : ''}${notasCr > 0 ? `<br><small style="color:var(--color-danger);">−NC ${formatNumber(notasCr)}</small>` : ''}${notasDb > 0 ? `<br><small style="color:var(--color-success);">+ND ${formatNumber(notasDb)}</small>` : ''}${retPendienteSustentar > 0 ? `<br><span class="badge badge-warning" title="Retención de ${formatNumber(retPendienteSustentar)} aplicada al cobrar, sin N° de comprobante de retención del cliente todavía">⚠ pendiente sustentar ret.</span>` : ''}</td>
         <td style="text-align:right; font-weight:bold;">${formatNumber(pendiente)}</td>
         <td><span class="badge ${badge}">${cxc.estado}</span></td>
         <td>${cxc.estado !== 'cobrado' ? `<button class="btn btn-small btn-primary" onclick="window.irARegistrarCobro(${cxc.id})">Cobrar</button>` : ''}</td>
@@ -518,7 +538,7 @@ window.registrarCobro = async function() {
       const nuevoRetenido = parseFloat((parseFloat(cxc.monto_retenido || 0) + montoRetencion).toFixed(2))
       const total = parseFloat(cxc.monto_total || 0)
         + parseFloat(cxc.monto_notas_debito || 0) - parseFloat(cxc.monto_notas_credito || 0)
-      const aplicado = nuevoCobrado + nuevoRetenido + parseFloat(cxc.monto_canjeado || 0)
+      const aplicado = nuevoCobrado + nuevoRetenido + parseFloat(cxc.monto_canjeado || 0) + parseFloat(cxc.monto_anticipo_aplicado || 0)
       const nuevoEstado = aplicado >= total - 0.01
         ? 'cobrado'
         : (aplicado > 0 ? 'parcial' : 'pendiente')
@@ -638,7 +658,8 @@ window.cargarCxP = async function() {
       const pagado = parseFloat(cxp.monto_pagado || 0)
       const nCr    = parseFloat(cxp.monto_notas_credito || 0)
       const nDb    = parseFloat(cxp.monto_notas_debito || 0)
-      const pend   = total + nDb - nCr - pagado
+      const antAp  = parseFloat(cxp.monto_anticipo_aplicado || 0)
+      const pend   = total + nDb - nCr - pagado - antAp
       const dias   = cxp.fecha_vencimiento ? diasVencidos(cxp.fecha_vencimiento) : null
       tTotal += total; tPagado += pagado; tPend += pend
 
@@ -779,7 +800,7 @@ window.registrarPagoProveedor = async function() {
       })
 
       const nuevoPagado = parseFloat((parseFloat(cxp.monto_pagado || 0) + monto).toFixed(2))
-      const nuevoEstado = nuevoPagado >= parseFloat(cxp.monto_total || 0) - 0.01
+      const nuevoEstado = nuevoPagado + parseFloat(cxp.monto_anticipo_aplicado || 0) >= parseFloat(cxp.monto_total || 0) - 0.01
         ? 'pagado' : (nuevoPagado > 0 ? 'parcial' : 'pendiente')
       await updateCuentaPagar(cxpId, { monto_pagado: nuevoPagado, estado: nuevoEstado })
     }

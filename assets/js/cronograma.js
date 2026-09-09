@@ -440,21 +440,23 @@ function _bind(containerId) {
     _pintar(containerId)
   })
 
-  // Ajusta los importes para que sumen el total, respetando las proporciones
-  // que el usuario ya definió. Resuelve el caso típico: editó las fechas y
-  // ahora los céntimos no cuadran.
+  // Reparte el total EN PARTES IGUALES entre todas las cuotas — no según lo
+  // que ya estaba escrito en cada una (antes escalaba proporcionalmente al
+  // monto tipeado, así que una cuota en 0.01 seguía quedando casi en 0.01
+  // después de "prorratear", en vez de recibir su parte real). El residuo
+  // de centavos por el redondeo se ajusta en la última cuota para que la
+  // suma cuadre exacto con el total.
   cont.querySelector('[data-crono="prorratear"]')?.addEventListener('click', () => {
-    const suma = e.cuotas.reduce((s, c) => s + (parseFloat(c.monto) || 0), 0)
-    if (suma <= 0) return
-    const factor = e.total / suma
+    const n = e.cuotas.length
+    if (n === 0) return
+    const montoBase = parseFloat((e.total / n).toFixed(2))
     let acumulado = 0
     e.cuotas.forEach((c, i) => {
-      const esUltima = i === e.cuotas.length - 1
-      c.monto = esUltima
-        ? parseFloat((e.total - acumulado).toFixed(2))
-        : parseFloat((c.monto * factor).toFixed(2))
+      const esUltima = i === n - 1
+      c.monto = esUltima ? parseFloat((e.total - acumulado).toFixed(2)) : montoBase
       acumulado = parseFloat((acumulado + c.monto).toFixed(2))
     })
+    e.personalizado = true
     _pintar(containerId)
   })
 }

@@ -3,9 +3,10 @@
 // ============================================================================
 
 import { getCurrentUser } from './auth-supabase.js'
+import { registrarColumnas, colStyle } from './col-menu.js'
 import {  getOrderCompras, getOrderComprasPage, getOrderCompraById, addOrderCompra, updateOrderCompra,
           getCompras, getComprasPage, getCompraById, addCompra, addCompraDetalle, updateCompra, deleteCompra,
-          getCompraDetalles, deleteCompraDetalle,
+          getCompraDetalles, updateCompraDetalle, deleteCompraDetalle,
           getOrderCompraDetalles, getOrderCompraDetalleById, addOrderCompraDetalle, updateOrderCompraDetalle, deleteOrderCompraDetalle,
           getLoteById, getLotesByItemId, getLotesByCompraId, getLotes, addLote, updateLote, deleteLote,
           getItems, getItemById, addItem, updateItem, deleteItem,
@@ -13,22 +14,30 @@ import {  getOrderCompras, getOrderComprasPage, getOrderCompraById, addOrderComp
           getCategorias, addCategoria, getMarcas, getPartidas, getCuentasGasto,
           getTipoDocumentos,
           getGuiasIngresoCompra, getGuiaIngresoCompraById, addGuiaIngresoCompra, updateGuiaIngresoCompra, deleteGuiaIngresoCompra,
-          getDetalleGuiasIngresoCompra, addDetalleGuiaIngresoCompra,
+          getDetalleGuiasIngresoCompra, addDetalleGuiaIngresoCompra, deleteDetalleGuiaIngresoCompra,
+          getTodosDetalleCompras, getTodosDetalleGuiasIngresoCompra,
           getAlmacenes, getUbicaciones, addStockUbicacion,
           getUbicacionVendors, addKardexMovimiento, getKardexByCompra, deleteKardexMovimiento,
           getTipoDocumentosMap, getNombreTipoDocumentoSync, cargarSelectTipoDocumentos,
           addCuentaPagar, getCuentasPagarByCompra, updateCuentaPagar, deleteCuentaPagar, addCuotaPagar,
+          getTodosComprasAnticiposAplicados, getAnticiposAplicadosPorAnticipoCompra, getAnticiposAplicadosPorDestinoCompra, addCompraAnticipoAplicado,
           getPagosProveedoresByCompra, getPagosProveedoresByCxP, deletePagoProveedor, ultimoErrorDelete,
           updateStockUbicacion, getStockUbicacionesByLote,
           reversarAsiento, generarAsientoCompra, generarAsientoGuiaRemision,
-          subirAdjuntoCompra, getUrlAdjuntoCompra, eliminarAdjuntoCompra} from './supabase-data.js'
+          subirAdjuntoCompra, getUrlAdjuntoCompra, eliminarAdjuntoCompra,
+          addLoteBulto, recalcularLoteDesdeBultos, getLoteBultosByLote, deleteLoteBulto,
+          updateLoteBulto, getLoteBultosDisponiblesZona, revertirBultosDeDetalleGuiaDevolucion, getLoteBultosPorDetalleGuiaDevolucion,
+          getNotaCreditoCompraDetalleByNota, getNotaCreditoCompraDetalleByCompraOrigen, addNotaCreditoCompraDetalle, deleteNotaCreditoCompraDetalle,
+          getGuiasDevolucionCompra, getGuiaDevolucionCompraById, addGuiaDevolucionCompra, updateGuiaDevolucionCompra, deleteGuiaDevolucionCompra,
+          getDetalleGuiasDevolucionCompra, getDetalleGuiasDevolucionCompraByNotaDetalle, getTodosDetalleGuiasDevolucionCompra,
+          addDetalleGuiaDevolucionCompra, deleteDetalleGuiaDevolucionCompra } from './supabase-data.js'
 import { ASIENTOS_AUTO_COMPRAS_ACTIVO } from './config-asientos-auto.js'
-import { getTCCompra } from './sunat-api.js'
+import { getTCCompra, attachConsultaDocumento, pintarBadgeSunat } from './sunat-api.js'
 import { showToast, formatNumber, formatQty } from './helpers.js'
 import { initModuleNavDropdowns, initSubtabs, menuAccionesFila } from './main.js'
 import { abrirModalAnulacion, camposAnulacion, estaAnulado, badgeAnulado, ESTILO_FILA_ANULADA } from './anulacion.js'
 import { abrirModalNota, TIPO_NC, TIPO_ND, esNota, signoDocumento, badgeTipoDocumento } from './notas.js'
-import { convertirVarios, refrescarBuscador } from './buscador-select.js'
+import { convertirVarios, convertirEnBuscador, refrescarBuscador } from './buscador-select.js'
 import { getModuloConfig, renderConfiguracionTab, aplicarPreferenciasVista } from './config-modulo.js'
 import { cacheado } from './data-cache.js'
 import { crearReporte, nombreMes } from './reportes.js'
@@ -97,6 +106,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Se convierten DESPUÉS de cargar las opciones, para que el buscador ya
     // tenga la lista completa desde el primer foco.
     _activarBuscadoresCompras()
+
+    // Botón "Consultar" en el modal Nuevo Proveedor (RUC o DNI, según Tipo Documento)
+    attachConsultaDocumento({
+      btnId: 'btnConsultarProvRUC', tipoDocId: 'provTipoDocumento', numeroId: 'provRUC',
+      nombreId: 'provNombre', direccionId: 'provDireccion', distritoId: 'provDistrito', paisId: 'provPais',
+      sunatSectionId: 'provDatosSunat', estadoId: 'provEstadoSunat', condicionId: 'provCondicionSunat',
+      buenContribuyenteId: 'provBuenContribuyenteSunat', agenteRetencionId: 'provSujetoRetencion',
+      agenteRetencionBadgeId: 'provAgenteRetencionSunat'
+    })
   } catch (error) {
     console.error('Error en DOMContentLoaded:', error)
     showToast('Error al cargar el módulo de compras', 'danger')
@@ -398,10 +416,16 @@ window.confirmarOC = async function (id) {
 
 /**
  * Crea la Cuenta por Pagar de una compra recién registrada — SOLO si es
- * comprobante '01' (factura), espejo exacto de lo que ventas.js hace con
- * cuentas_cobrar al facturar. Se llama justo después de addCompra() en los
- * 4 flujos que registran una compra. Las Guías (de Remisión) NUNCA llaman
- * esto — solo mueven stock, no generan ni tocan CxP.
+ * comprobante '01' (factura nacional) o '91' (Comprobante de Pago No
+ * Domiciliado — invoice de proveedor extranjero, usado en compras de
+ * importación registradas directamente en este módulo, no en costeo-
+ * importaciones.js). Boleta ('03') queda fuera a propósito: no da derecho a
+ * crédito fiscal de IGV (Art. 19° Ley IGV / Reglamento de Comprobantes de
+ * Pago), así que Compras no la acepta como comprobante de compra.
+ * Espejo exacto de lo que ventas.js hace con cuentas_cobrar al facturar. Se
+ * llama justo después de addCompra() en los 4 flujos que registran una
+ * compra. Las Guías (de Remisión) NUNCA llaman esto — solo mueven stock, no
+ * generan ni tocan CxP.
  * No lanza si falla: la compra ya quedó registrada, no tiene sentido
  * abortar todo el flujo por un problema en la CxP (se avisa y sigue).
  *
@@ -412,7 +436,7 @@ window.confirmarOC = async function (id) {
  *   no lo pasan y quedan igual que antes (fecha_vencimiento null).
  */
 async function _crearCuentaPagarSiFactura(compra, userId, crono = null) {
-  if (!compra?.id || compra.tipo_comprobante !== '01') return
+  if (!compra?.id || (compra.tipo_comprobante !== '01' && compra.tipo_comprobante !== '91')) return
   try {
     const fechaVenc = crono?.cuotas?.length
       ? crono.cuotas[crono.cuotas.length - 1].fecha_vencimiento
@@ -571,7 +595,8 @@ window.ejecutarConfirmarCompra = async function () {
 
       // Columnas reales de lotes: item_id, cantidad (no product_id/stock).
       // cantidad_unidades (N° de bultos/cajas) no se pide en este flujo
-      // (OC en standby), así que queda null en vez de igualarse a cantidad.
+      // (OC en standby). lotes.cantidad_unidades es NOT NULL DEFAULT 0: va 0,
+      // no null (null pisaría el DEFAULT y Postgres rechazaría el insert).
       // costo_unitario SIEMPRE va en soles (costo_unit_original x tipo_cambio);
       // si la compra fue en USD, precio_unitario venía en USD y aquí se convierte.
       const costoOriginal = parseFloat(d.precio_unitario) || 0
@@ -589,7 +614,7 @@ window.ejecutarConfirmarCompra = async function () {
         costo_unit_original: costoOriginal,
         costo_estado:    'definitivo',
         cantidad:        parseFloat(d.cantidad) || 0,
-        cantidad_unidades: null,
+        cantidad_unidades: 0,
         fecha_ingreso:   fecha,
         compra_id:       compra.id,
         created_by:      user.db_id
@@ -713,6 +738,37 @@ let _compPagina = 1
 let _compLista = null
 let _compSort = { col: null, dir: 'asc' } // orden por columna, tab Compras
 
+registrarColumnas('compras', [
+  { key: 'sel',          label: 'Seleccionar' },
+  { key: 'id',           label: 'Id' },
+  { key: 'proveedor',    label: 'Proveedor' },
+  { key: 'fecha',        label: 'Fecha Emisión' },
+  { key: 'comprobante',  label: 'Comprobante' },
+  { key: 'referencia',   label: 'Referencia' },
+  { key: 'descripcion',  label: 'Descripción' },
+  { key: 'periodo',      label: 'Periodo' },
+  { key: 'tipo',         label: 'Tipo Documento' },
+  { key: 'total',        label: 'Total' },
+  { key: 'estado_pago',  label: 'Estado Pago' },
+  { key: 'stock',        label: 'Stock' },
+  { key: 'acciones',     label: 'Acciones' }
+])
+
+registrarColumnas('guias-ingreso', [
+  { key: 'sel',          label: 'Seleccionar' },
+  { key: 'numero_guia',  label: 'N° Guía' },
+  { key: 'fecha',        label: 'Fecha' },
+  { key: 'referencia',   label: 'Compra (Referencia)' },
+  { key: 'proveedor',    label: 'Proveedor' },
+  { key: 'num_productos', label: '# Productos' },
+  { key: 'productos',    label: 'Producto(s) / Lote(s)' },
+  { key: 'marcas',       label: 'Marca(s)' },
+  { key: 'zonas',        label: 'Almacén / Zona(s)' },
+  { key: 'observaciones', label: 'Observaciones' },
+  { key: 'estado',       label: 'Estado' },
+  { key: 'acciones',     label: 'Acciones' }
+])
+
 // ─── Orden por columna (tabs Compras y Guías) ────────────────────────────────
 // Comparador genérico: números se comparan numéricamente, todo lo demás como
 // texto (localeCompare 'es' con soporte numérico para que "2" < "10").
@@ -731,8 +787,15 @@ function _flechaOrden(sortState, campo) {
   return sortState.dir === 'asc' ? ' ▲' : ' ▼'
 }
 
-function _thOrdenable(label, campo, sortState, funcOrdenar) {
-  return `<th style="cursor:pointer; user-select:none;" onclick="window.${funcOrdenar}('${campo}')" title="Ordenar por ${label}">${label}${_flechaOrden(sortState, campo)}</th>`
+// `tabla`/`colKey` son opcionales: si se pasan, el <th> queda enganchado al
+// menú "⋮" de columnas de esa tabla (ver col-menu.js) — colKey por defecto
+// es el mismo `campo` de orden, se puede pisar cuando difieren (ej. columna
+// de orden 'fecha_emision' pero clave de columna 'fecha').
+function _thOrdenable(label, campo, sortState, funcOrdenar, tabla, colKey) {
+  const oculta = tabla ? colStyle(tabla, colKey || campo) !== '' : false
+  const attrsCol = tabla ? ` data-col-tabla="${tabla}" data-col="${colKey || campo}"` : ''
+  const style = `cursor:pointer; user-select:none;${oculta ? ' display:none;' : ''}`
+  return `<th${attrsCol} style="${style}" onclick="window.${funcOrdenar}('${campo}')" title="Ordenar por ${label}">${label}${_flechaOrden(sortState, campo)}</th>`
 }
 
 function _valorOrdenCompra(c, campo) {
@@ -766,10 +829,17 @@ async function renderCompras(forzar = false) {
     const container = document.getElementById('tabla-compras')
     if (!container) return
 
-    const [, comprasConGuia] = await Promise.all([
+    const [, comprasConGuia, anticiposAplicadosTodos] = await Promise.all([
       getTipoDocumentosMap(),         // cacheado; garantiza nombres de tipo doc en carga lazy
-      _cargarComprasConGuia()
+      _cargarComprasConGuia(),
+      getTodosComprasAnticiposAplicados()
     ])
+    // Suma aplicada por cada compra tipo_compra='anticipo' — para el badge
+    // "Aplicado X de Y" en la columna Stock.
+    const aplicadoPorAnticipoCompra = new Map()
+    for (const a of (anticiposAplicadosTodos || [])) {
+      aplicadoPorAnticipoCompra.set(a.compra_anticipo_id, (aplicadoPorAnticipoCompra.get(a.compra_anticipo_id) || 0) + (parseFloat(a.monto_aplicado) || 0))
+    }
 
     if (!_compLista || forzar) {
       _compLista = await getCompras()
@@ -831,18 +901,19 @@ async function renderCompras(forzar = false) {
       <table>
         <thead>
           <tr>
-            ${_thOrdenable('Id', 'id', _compSort, 'ordenarCompras')}
-            ${_thOrdenable('Proveedor', 'proveedor', _compSort, 'ordenarCompras')}
-            ${_thOrdenable('Fecha Emisión', 'fecha_emision', _compSort, 'ordenarCompras')}
-            ${_thOrdenable('Comprobante', 'comprobante', _compSort, 'ordenarCompras')}
-            ${_thOrdenable('Referencia', 'referencia', _compSort, 'ordenarCompras')}
-            ${_thOrdenable('Descripcion', 'descripcion', _compSort, 'ordenarCompras')}
-            ${_thOrdenable('Periodo', 'periodo', _compSort, 'ordenarCompras')}
-            ${_thOrdenable('Tipo Documento', 'tipo_comprobante', _compSort, 'ordenarCompras')}
-            ${_thOrdenable('Total', 'total', _compSort, 'ordenarCompras')}
-            ${_thOrdenable('Estado Pago', 'estado_pago', _compSort, 'ordenarCompras')}
-            <th>Stock</th>
-            <th>Acciones</th>
+            <th data-col-tabla="compras" data-col="sel" style="width:32px;${colStyle('compras','sel') ? 'display:none;' : ''}"><input type="checkbox" id="selAllCompras" onchange="window.toggleSeleccionTodasCompras(this.checked)" title="Seleccionar todas"></th>
+            ${_thOrdenable('Id', 'id', _compSort, 'ordenarCompras', 'compras')}
+            ${_thOrdenable('Proveedor', 'proveedor', _compSort, 'ordenarCompras', 'compras')}
+            ${_thOrdenable('Fecha Emisión', 'fecha_emision', _compSort, 'ordenarCompras', 'compras', 'fecha')}
+            ${_thOrdenable('Comprobante', 'comprobante', _compSort, 'ordenarCompras', 'compras')}
+            ${_thOrdenable('Referencia', 'referencia', _compSort, 'ordenarCompras', 'compras')}
+            ${_thOrdenable('Descripcion', 'descripcion', _compSort, 'ordenarCompras', 'compras')}
+            ${_thOrdenable('Periodo', 'periodo', _compSort, 'ordenarCompras', 'compras')}
+            ${_thOrdenable('Tipo Documento', 'tipo_comprobante', _compSort, 'ordenarCompras', 'compras', 'tipo')}
+            ${_thOrdenable('Total', 'total', _compSort, 'ordenarCompras', 'compras')}
+            ${_thOrdenable('Estado Pago', 'estado_pago', _compSort, 'ordenarCompras', 'compras')}
+            <th data-col-tabla="compras" data-col="stock"${colStyle('compras','stock')}>Stock</th>
+            <th data-col-tabla="compras" data-col="acciones"${colStyle('compras','acciones')}>Acciones</th>
           </tr>
         </thead>
         <tbody>
@@ -854,7 +925,16 @@ async function renderCompras(forzar = false) {
       const periodo = `${c.periodo_ano}-${String(c.periodo_mes).padStart(2, '0')}`
       const badgePago = c.estado_pago === 'pagado' ? 'success' : (c.estado_pago === 'parcial' ? 'warning' : 'pending')
       const tieneGuia = c.tipo_compra !== 'mercaderia' || comprasConGuia.has(c.id)
-      const badgeStock = c.tipo_compra !== 'mercaderia'
+      const badgeStock = c.tipo_compra === 'anticipo'
+        ? (() => {
+            const aplicado = aplicadoPorAnticipoCompra.get(c.id) || 0
+            const total = parseFloat(c.total || 0)
+            const saldo = parseFloat((total - aplicado).toFixed(2))
+            return saldo <= 0.01
+              ? '<span class="badge badge-success">💰 Aplicado íntegramente</span>'
+              : `<span class="badge badge-warning" title="Aplicado ${aplicado.toFixed(2)} de ${total.toFixed(2)}">💰 Anticipo — saldo ${saldo.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>`
+          })()
+        : c.tipo_compra !== 'mercaderia'
         ? '<span class="badge badge-secondary">N/A (servicio)</span>'
         : (tieneGuia
             ? '<span class="badge badge-success">✓ Con Guía</span>'
@@ -864,20 +944,23 @@ async function renderCompras(forzar = false) {
 
       html += `
         <tr${anulada ? ` style="${ESTILO_FILA_ANULADA}"` : ''}>
-          <td><strong>${c.id}</strong></td>
-          <td>${c.proveedor_nombre || '-'}</td>
-          <td>${c.fecha_emision || '-'}</td>
-          <td>${comprobante}</td>
-          <td>${referencia || '-'}</td>
-          <td>${c.descripcion || '-'}</td>
-          <td>${periodo}</td>
-          <td>${esNota(c.tipo_comprobante)
+          <td data-col-tabla="compras" data-col="sel"${colStyle('compras','sel')}>${anulada
+            ? `<input type="checkbox" disabled title="Comprobante anulado">`
+            : `<input type="checkbox" class="compra-sel" value="${c.id}" onchange="window.actualizarBotonEliminarComprasSeleccionadas()">`}</td>
+          <td data-col-tabla="compras" data-col="id"${colStyle('compras','id')}><strong>${c.id}</strong></td>
+          <td data-col-tabla="compras" data-col="proveedor"${colStyle('compras','proveedor')}>${c.proveedor_nombre || '-'}</td>
+          <td data-col-tabla="compras" data-col="fecha"${colStyle('compras','fecha')}>${c.fecha_emision || '-'}</td>
+          <td data-col-tabla="compras" data-col="comprobante"${colStyle('compras','comprobante')}>${comprobante}</td>
+          <td data-col-tabla="compras" data-col="referencia"${colStyle('compras','referencia')}>${referencia || '-'}</td>
+          <td data-col-tabla="compras" data-col="descripcion"${colStyle('compras','descripcion')}>${c.descripcion || '-'}</td>
+          <td data-col-tabla="compras" data-col="periodo"${colStyle('compras','periodo')}>${periodo}</td>
+          <td data-col-tabla="compras" data-col="tipo"${colStyle('compras','tipo')}>${esNota(c.tipo_comprobante)
                 ? `${badgeTipoDocumento(c.tipo_comprobante)}${c.compra_referencia_id ? `<br><small style="color:var(--text-secondary);">ref. ${c.doc_referencia_serie || ''}-${c.doc_referencia_numero || ''}</small>` : ''}`
                 : (c.tipo_comprobante ? `${c.tipo_comprobante} - ${getNombreTipoDocumentoSync(c.tipo_comprobante)}` : '-')}</td>
-          <td><strong style="${signoDocumento(c.tipo_comprobante) < 0 ? 'color:var(--color-danger);' : ''}">${formatNumber((parseFloat(c.total) || 0) * signoDocumento(c.tipo_comprobante))} ${c.currency || 'PEN'}</strong></td>
-          <td>${anulada ? badgeAnulado(c) : `<span class="badge badge-${badgePago}">${c.estado_pago || 'pendiente'}</span>`}</td>
-          <td>${anulada ? '<span class="badge badge-secondary">—</span>' : badgeStock}${c.adjunto_url ? ' <span title="Tiene documento adjunto">📎</span>' : ''}</td>
-          <td class="col-acciones" style="text-decoration:none; opacity:1;">
+          <td data-col-tabla="compras" data-col="total"${colStyle('compras','total')}><strong style="${signoDocumento(c.tipo_comprobante) < 0 ? 'color:var(--color-danger);' : ''}">${formatNumber((parseFloat(c.total) || 0) * signoDocumento(c.tipo_comprobante))} ${c.currency || 'PEN'}</strong></td>
+          <td data-col-tabla="compras" data-col="estado_pago"${colStyle('compras','estado_pago')}>${anulada ? badgeAnulado(c) : `<span class="badge badge-${badgePago}">${c.estado_pago || 'pendiente'}</span>`}</td>
+          <td data-col-tabla="compras" data-col="stock"${colStyle('compras','stock')}>${anulada ? '<span class="badge badge-secondary">—</span>' : badgeStock}${c.adjunto_url ? ' <span title="Tiene documento adjunto">📎</span>' : ''}</td>
+          <td data-col-tabla="compras" data-col="acciones" class="col-acciones" style="text-decoration:none; opacity:1;${colStyle('compras','acciones') ? ' display:none;' : ''}">
             ${menuAccionesFila(anulada
               ? [{ label: 'Ver motivo de anulación', icono: 'ℹ️', onclick: `window.verMotivoAnulacionCompra('compra', ${c.id})` }]
               : [
@@ -897,6 +980,10 @@ async function renderCompras(forzar = false) {
 
     html += '</tbody></table>' + paginador
     container.innerHTML = html
+    // El tbody se reconstruye entero en cada render: la selección anterior
+    // ya no existe (checkboxes nuevos, todos sin marcar), así que el botón
+    // de acción masiva debe volver a su estado oculto.
+    window.actualizarBotonEliminarComprasSeleccionadas()
   } catch (error) {
     console.error('Error en renderCompras:', error)
     showToast('Error al cargar las compras', 'danger')
@@ -914,13 +1001,41 @@ window.filtrarCompras = async function () {
   await renderCompras()  // usa caché, solo re-filtra (sin red)
 }
 
-// ─── Editar Compra (solo cabecera: no se tocan cantidades/lotes ya ingresados) ──
+// ─── Editar Compra (cabecera + precio/IGV de línea si aún no hay guía procesada) ──
+//
+// Diferencia clave con "Editar Venta" en ventas.js: allá el precio se podía
+// dejar editable sin drama porque la VENTA nunca mueve stock (solo la Guía
+// de Despacho). Acá es al revés: es la GUÍA DE INGRESO la que crea el lote y
+// graba su costo_unitario, que además ya puede haber alimentado el Kardex y
+// mezclado costo con stock preexistente del mismo N° de lote (costeo
+// promedio ponderado). Por eso el candado de precio es "¿ya tiene guía
+// procesada?" en vez de "¿ya hay cobros/CPE aceptado?" — una vez que la
+// guía corrió, el precio de la compra queda bloqueado: corregirlo ahí no
+// movería el costo ya grabado en lotes/kardex.
+
+let _ecContexto = null   // { compra, detalles, cxp, guiasCompra, notas, bloqueos }
 
 window.editarCompra = async function (id) {
   try {
     const { getById } = await import('./supabase-client.js')
-    const c = await getById('compras', id)
+    const [c, detalles, cxps, guiasTodas, todasCompras] = await Promise.all([
+      getById('compras', id),
+      getCompraDetalles(id),
+      getCuentasPagarByCompra(id),
+      getGuiasIngresoCompra(),
+      getCompras()
+    ])
     if (!c) { showToast('No se encontró la compra', 'danger'); return }
+
+    const cxp = (cxps || [])[0] || null
+    const guiasCompra = (guiasTodas || []).filter(g => g.compra_id === id)
+    const notas = (todasCompras || []).filter(x => x.compra_referencia_id === id && !estaAnulado(x))
+    const aplicado = parseFloat(cxp?.monto_pagado || 0)
+
+    const bloqueos = {
+      precios: guiasCompra.length > 0 || aplicado > 0.01 || notas.length > 0
+    }
+    _ecContexto = { compra: c, detalles: detalles || [], cxp, guiasCompra, notas, aplicado, bloqueos }
 
     document.getElementById('ecId').value = c.id
     document.getElementById('ecReferencia').value = c.referencia || ''
@@ -931,6 +1046,8 @@ window.editarCompra = async function (id) {
     document.getElementById('ecMoneda').value = c.currency || 'PEN'
     document.getElementById('ecTipoCambio').value = c.tipo_cambio || 1
 
+    _pintarLineasEdicionCompra()
+
     window.openModal('modal-editar-compra')
   } catch (error) {
     console.error('Error en editarCompra:', error)
@@ -938,10 +1055,184 @@ window.editarCompra = async function (id) {
   }
 }
 
+/** Tabla de líneas del modal Editar Compra: precio_unitario y tipo de IGV editables si !bloqueos.precios. Mismo set de opciones que "Nueva Compra" (newDetalleCompraIGV: 18/18-inc/10/0). */
+function _pintarLineasEdicionCompra() {
+  const c = _ecContexto
+  const cont = document.getElementById('ec-lineas')
+  const aviso = document.getElementById('ec-precios-aviso')
+  if (!cont || !c) return
+
+  if (aviso) {
+    if (c.bloqueos.precios) {
+      const motivo = c.guiasCompra.length > 0
+        ? 'ya tiene Guía de Ingreso procesada (el costo ya se grabó en el lote/kardex)'
+        : (c.notas.length > 0 ? 'tiene notas de crédito/débito asociadas' : 'ya tiene pagos aplicados al proveedor')
+      aviso.textContent = `Precio y tipo de IGV bloqueados: ${motivo}.` +
+        (c.guiasCompra.length > 0 ? ' Moneda y Tipo de Cambio SÍ se pueden corregir: al guardar, el costo ya grabado en lote/Kardex se recalcula automáticamente con el TC nuevo (se bloquea solo si algún lote ya tuvo ventas).' : '')
+      aviso.style.color = 'var(--color-warning)'
+    } else {
+      aviso.textContent = 'Puedes corregir el precio unitario y el tipo de IGV de cada línea — la cantidad no se toca aquí.'
+      aviso.style.color = 'var(--text-secondary)'
+    }
+  }
+
+  if (c.detalles.length === 0) {
+    cont.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-secondary); padding:14px;">Esta compra no tiene líneas registradas.</td></tr>`
+    return
+  }
+
+  cont.innerHTML = c.detalles.map((d, idx) => `
+    <tr>
+      <td>${d.descripcion || ''}</td>
+      <td style="text-align:right;">${(parseFloat(d.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 3 })}</td>
+      <td>${d.unidad_medida || '-'}</td>
+      <td style="text-align:right;">
+        <input type="number" step="0.01" min="0.01" value="${parseFloat(d.precio_unitario || 0)}"
+          id="ecLineaPrecio-${idx}" style="width:100px; text-align:right;" ${c.bloqueos.precios ? 'disabled' : ''}
+          oninput="window.onCambiarLineaPrecioEdicionCompra(${idx})">
+      </td>
+      <td>
+        <select id="ecLineaTipo-${idx}" ${c.bloqueos.precios ? 'disabled' : ''} onchange="window.onCambiarLineaPrecioEdicionCompra(${idx})">
+          <option value="18"${(d.igv_porcentaje == 18) ? ' selected' : ''}>18%</option>
+          <option value="18-inc" title="El Precio Unitario ya incluye el IGV: se extrae en vez de sumarse encima.">18% (incluido)</option>
+          <option value="10"${(d.igv_porcentaje == 10) ? ' selected' : ''}>10%</option>
+          <option value="0"${(!d.igv_porcentaje || d.igv_porcentaje == 0) ? ' selected' : ''}>Exonerada / Importación</option>
+        </select>
+      </td>
+      <td style="text-align:right;" id="ecLineaSubtotal-${idx}">${parseFloat(d.subtotal || 0).toFixed(2)}</td>
+      <td style="text-align:right;" id="ecLineaIgv-${idx}">${parseFloat(d.igv_monto || 0).toFixed(2)}</td>
+      <td style="text-align:right; font-weight:600;" id="ecLineaTotal-${idx}">${parseFloat(d.total_linea || 0).toFixed(2)}</td>
+    </tr>
+  `).join('')
+
+  _recalcularTotalesEdicionCompra()
+}
+
+window.onCambiarLineaPrecioEdicionCompra = function (idx) {
+  const c = _ecContexto
+  const d = c?.detalles?.[idx]
+  if (!d) return
+
+  const precio = Math.max(0, parseFloat(document.getElementById(`ecLineaPrecio-${idx}`)?.value || 0))
+  const igvValor = document.getElementById(`ecLineaTipo-${idx}`)?.value || '18'
+  const cantidad = parseFloat(d.cantidad) || 0
+
+  const { subtotal, igvMonto, total, igvPct } = _calcularMontosDetalleCompra(cantidad, precio, 0, igvValor)
+
+  d._precioNuevo = precio
+  d._tipoBaseNuevo = igvPct > 0 ? 'gravada' : 'exonerada'
+  d._igvPorcentajeNuevo = igvPct
+  d._subtotalNuevo = parseFloat(subtotal.toFixed(2))
+  d._igvMontoNuevo = parseFloat(igvMonto.toFixed(2))
+  d._totalLineaNuevo = parseFloat(total.toFixed(2))
+
+  _setEc(`ecLineaSubtotal-${idx}`, d._subtotalNuevo.toFixed(2))
+  _setEc(`ecLineaIgv-${idx}`, d._igvMontoNuevo.toFixed(2))
+  _setEc(`ecLineaTotal-${idx}`, d._totalLineaNuevo.toFixed(2))
+
+  _recalcularTotalesEdicionCompra()
+}
+
+function _recalcularTotalesEdicionCompra() {
+  const c = _ecContexto
+  if (!c) return
+  let subtotal = 0, igv = 0, total = 0
+  for (const d of c.detalles) {
+    subtotal += d._subtotalNuevo   ?? parseFloat(d.subtotal || 0)
+    igv      += d._igvMontoNuevo   ?? parseFloat(d.igv_monto || 0)
+    total    += d._totalLineaNuevo ?? parseFloat(d.total_linea || 0)
+  }
+  _setEc('ecSubtotal', subtotal.toFixed(2))
+  _setEc('ecIgv', igv.toFixed(2))
+  _setEc('ecTotal', total.toFixed(2))
+}
+
+function _setEc(id, txt) { const el = document.getElementById(id); if (el) el.textContent = txt }
+
+// ── Recosteo de inventario al cambiar moneda/TC de una compra con guía ────
+// Antes, editar moneda/tipo_cambio de la cabecera de una compra NO tocaba
+// lotes.costo_unitario ni el Kardex ya grabado por su(s) Guía(s) de
+// Ingreso: quedaban congelados con el TC viejo mientras la compra en
+// pantalla mostraba el nuevo. Esto lo corrige revirtiendo el costo viejo y
+// reaplicándolo con el TC nuevo — mismo patrón/candados que "Editar Guía de
+// Ingreso" (_planRevertirGuiaIngreso ya bloquea si algún lote tuvo ventas).
+// Cantidad/lote/zona NO se tocan aquí (siguen bloqueados junto con el
+// precio mientras haya guía) — solo se recalcula el costo en soles.
+/**
+ * @param {number} compraId
+ * @param {object} compraParaCosteo  la compra YA con moneda/tipo_cambio nuevos
+ * @param {number} userId
+ * @returns {{guiasRecosteadas:number, lineasRecosteadas:number}}
+ */
+async function _recostearGuiasPorCambioTC(compraId, compraParaCosteo, userId) {
+  const guias = (await getGuiasIngresoCompra(true) || []).filter(g => g.compra_id === compraId)
+  if (guias.length === 0) return { guiasRecosteadas: 0, lineasRecosteadas: 0 }
+
+  // Todo-o-nada: se valida que NINGUNA guía esté bloqueada por ventas antes
+  // de escribir nada. Si una sola lo está, no se toca ninguna — el usuario
+  // tiene que resolver esa venta primero (mismo mensaje que al editar la
+  // guía directamente).
+  const planesPorGuia = new Map()
+  for (const g of guias) {
+    planesPorGuia.set(g.id, await _planRevertirGuiaIngreso(g.id))
+  }
+
+  const detallesCompra = await getCompraDetalles(compraId)
+  const detalleCompraMap = new Map((detallesCompra || []).map(d => [d.id, d]))
+
+  let lineasRecosteadas = 0
+  for (const g of guias) {
+    const plan = planesPorGuia.get(g.id)
+    const detallesGuia = await getDetalleGuiasIngresoCompra(g.id)
+
+    // Recepciones EXACTAMENTE como están hoy (mismo lote/marca/partida/zona/
+    // cantidad/bultos) — solo cambia el TC con el que se recalcula el costo.
+    const recepciones = []
+    for (const dg of (detallesGuia || [])) {
+      const dc = detalleCompraMap.get(dg.detalle_compra_id)
+      if (!dc) continue // línea de compra borrada: no hay con qué recostear esta línea
+      const lote = dg.lote_id ? await getLoteById(dg.lote_id) : null
+      const esPesoVariable = !!lote?.es_peso_variable
+      let bultos = null
+      if (esPesoVariable && lote) {
+        const bultosLote = await getLoteBultosByLote(lote.id)
+        bultos = (bultosLote || [])
+          .filter(b => b.guia_ingreso_id === g.id)
+          .map(b => ({ peso: parseFloat(b.peso) || null }))
+      }
+      recepciones.push({
+        detalle_compra_id: dg.detalle_compra_id, item_id: dg.item_id,
+        nombreProducto: dc.descripcion || `Item #${dg.item_id}`,
+        precio_unitario: parseFloat(dc.precio_unitario) || 0,
+        unidadMedida: dc.unidad_medida || 'KG',
+        cantidad: parseFloat(dg.cantidad) || 0,
+        cantidadUnidades: lote?.cantidad_unidades || null,
+        numeroLote: dg.numero_lote, marcaId: dg.marca_id,
+        codigoPartida: dg.codigo_partida || null, ubicacionId: dg.ubicacion_id,
+        esPesoVariable, bultos, loteExistenteId: null
+      })
+    }
+    if (recepciones.length === 0) continue
+
+    await _aplicarReversionGuiaIngreso(g.id, plan)
+    const idsLotesABorrarCompleto = [...plan.lotesABorrar, ...plan.lotesConBultosCompletos.map(l => l.lote.id)]
+    for (const loteId of idsLotesABorrarCompleto) await deleteLote(loteId)
+
+    const detallesViejos = await getDetalleGuiasIngresoCompra(g.id)
+    for (const dv of (detallesViejos || [])) await deleteDetalleGuiaIngresoCompra(dv.id)
+
+    await _aplicarRecepcionesAGuiaIngreso(g, compraParaCosteo, compraId, recepciones, { db_id: userId }, g.fecha_guia, g.numero_guia)
+    lineasRecosteadas += recepciones.length
+  }
+
+  return { guiasRecosteadas: guias.length, lineasRecosteadas }
+}
+
 window.guardarEdicionCompra = async function () {
   try {
+    const c = _ecContexto
     const id = parseInt(document.getElementById('ecId')?.value || 0)
-    if (!id) { showToast('Compra inválida', 'danger'); return }
+    if (!id || !c) { showToast('Compra inválida', 'danger'); return }
 
     const referencia = document.getElementById('ecReferencia')?.value?.trim()
     const fechaEmision = document.getElementById('ecFechaEmision')?.value
@@ -956,6 +1247,58 @@ window.guardarEdicionCompra = async function () {
       return
     }
 
+    // Precio/IGV de línea: si bloqueado, los totales quedan exactamente
+    // como estaban (ninguna línea se toca).
+    const detallesCambiados = []
+    let nuevoSubtotal = 0, nuevoIgv = 0, nuevoTotal = 0, nuevoBaseGravada = 0
+    if (c.bloqueos.precios) {
+      nuevoSubtotal = parseFloat(c.compra.subtotal) || 0
+      nuevoIgv      = parseFloat(c.compra.igv_gravado) || 0
+      nuevoTotal    = parseFloat(c.compra.total) || 0
+      nuevoBaseGravada = parseFloat(c.compra.base_imponible_gravada) || 0
+    } else {
+      for (const d of c.detalles) {
+        const precioOriginal = parseFloat(d.precio_unitario || 0)
+        const subtotal   = d._subtotalNuevo   ?? parseFloat(d.subtotal || 0)
+        const igvMonto   = d._igvMontoNuevo   ?? parseFloat(d.igv_monto || 0)
+        const totalLinea = d._totalLineaNuevo ?? parseFloat(d.total_linea || 0)
+        const tipoBase   = d._tipoBaseNuevo ?? d.tipo_base
+        nuevoSubtotal += subtotal; nuevoIgv += igvMonto; nuevoTotal += totalLinea
+        if (tipoBase === 'gravada') nuevoBaseGravada += subtotal
+
+        const precioCambio = d._precioNuevo != null && Math.abs(d._precioNuevo - precioOriginal) > 0.0001
+        const tipoCambio_ = d._tipoBaseNuevo != null && (d._tipoBaseNuevo !== d.tipo_base || d._igvPorcentajeNuevo !== d.igv_porcentaje)
+        if (precioCambio || tipoCambio_) {
+          detallesCambiados.push({
+            id: d.id,
+            precio_unitario: d._precioNuevo ?? precioOriginal,
+            tipo_base: tipoBase,
+            igv_porcentaje: d._igvPorcentajeNuevo ?? d.igv_porcentaje,
+            subtotal, igv_monto: igvMonto, total_linea: totalLinea
+          })
+        }
+      }
+      if (detallesCambiados.length > 0 && nuevoTotal <= 0) {
+        showToast('El total de la compra no puede quedar en 0 o negativo', 'warning')
+        return
+      }
+    }
+
+    // Detectar qué cambió, ANTES de escribir, para el resumen final y para
+    // decidir si hace falta recostear inventario.
+    const monedaOriginal = c.compra.currency || 'PEN'
+    const tcOriginal = parseFloat(c.compra.tipo_cambio) || 1
+    const monedaCambio = moneda !== monedaOriginal
+    const tcCambio = Math.abs(tipoCambio - tcOriginal) > 0.0001
+    const cambios = []
+    if (referencia !== (c.compra.referencia || ''))         cambios.push('referencia')
+    if (fechaEmision !== (c.compra.fecha_emision || ''))    cambios.push('fecha de emisión')
+    if (fechaRecepcion !== (c.compra.fecha_recepcion || '')) cambios.push('fecha de recepción')
+    if (numero !== (c.compra.numero || ''))                 cambios.push('N° de comprobante')
+    if (estadoPago !== (c.compra.estado_pago || ''))        cambios.push('estado de pago')
+    if (monedaCambio || tcCambio)                           cambios.push('moneda/tipo de cambio')
+    if (detallesCambiados.length > 0)                       cambios.push(`${detallesCambiados.length} línea(s) de precio/IGV`)
+
     const actualizado = await updateCompra(id, {
       referencia,
       fecha_emision: fechaEmision,
@@ -963,13 +1306,85 @@ window.guardarEdicionCompra = async function () {
       numero,
       estado_pago: estadoPago,
       currency: moneda,
-      tipo_cambio: tipoCambio
+      tipo_cambio: tipoCambio,
+      subtotal: parseFloat(nuevoSubtotal.toFixed(2)),
+      igv_gravado: parseFloat(nuevoIgv.toFixed(2)),
+      total: parseFloat(nuevoTotal.toFixed(2)),
+      base_imponible_gravada: parseFloat(nuevoBaseGravada.toFixed(2))
     })
 
     if (!actualizado) { showToast('No se pudo actualizar la compra', 'danger'); return }
 
-    showToast('Compra actualizada', 'success')
+    // Recosteo de inventario: si cambió moneda/TC y esta compra ya tiene
+    // Guía(s) de Ingreso, el costo grabado en lote/Kardex debe recalcularse
+    // con el TC nuevo — si no, queda desincronizado con la cabecera.
+    let recosteo = null
+    let recosteoError = null
+    if ((monedaCambio || tcCambio) && c.guiasCompra.length > 0) {
+      try {
+        const user = await getCurrentUser()
+        const compraParaCosteo = { ...c.compra, currency: moneda, tipo_cambio: tipoCambio }
+        recosteo = await _recostearGuiasPorCambioTC(id, compraParaCosteo, user?.db_id || null)
+      } catch (eRecosteo) {
+        console.error('Error recosteando guías tras cambio de TC:', eRecosteo)
+        recosteoError = eRecosteo.message
+      }
+    }
+
+    if (detallesCambiados.length > 0) {
+      for (const dc of detallesCambiados) {
+        try {
+          await updateCompraDetalle(dc.id, {
+            precio_unitario: dc.precio_unitario,
+            tipo_base: dc.tipo_base,
+            igv_porcentaje: dc.igv_porcentaje,
+            subtotal: dc.subtotal,
+            igv_monto: dc.igv_monto,
+            total_linea: dc.total_linea
+          })
+        } catch (e) {
+          console.warn(`Línea ${dc.id} no actualizada:`, e.message)
+          showToast(`⚠️ Una línea no se pudo actualizar: ${e.message}`, 'warning')
+        }
+      }
+    }
+
+    // CxP: se sincroniza monto_total siempre con el total recién calculado
+    // — si no hubo cambio de precio, es el mismo valor de antes.
+    let cxpSincronizada = false
+    if (c.cxp) {
+      try {
+        await updateCuentaPagar(c.cxp.id, {
+          numero_comprobante: numero,
+          fecha_emision: fechaEmision,
+          moneda, tipo_cambio: tipoCambio,
+          monto_total: parseFloat(nuevoTotal.toFixed(2))
+        })
+        cxpSincronizada = true
+      } catch (e) {
+        console.warn('CxP no actualizada:', e.message)
+        showToast('Compra guardada ⚠️ la Cuenta por Pagar no se actualizó: ' + e.message, 'warning')
+      }
+    }
+
+    // Mensaje final: conclusión de qué cambió y qué impactó, no un genérico
+    // "Compra actualizada" — hay demasiadas cosas relacionadas (inventario,
+    // CxP, contabilidad) como para no decir explícitamente qué se tocó.
+    const partes = []
+    partes.push(cambios.length > 0 ? `Se actualizó: ${cambios.join(', ')}.` : 'Compra guardada sin cambios de datos.')
+    if (recosteoError) {
+      partes.push(`⚠️ El TC cambió pero el recosteo de inventario FALLÓ (${recosteoError}) — los lotes/Kardex de esta compra siguen con el costo del TC anterior, corrígelo manualmente.`)
+    } else if (recosteo && recosteo.guiasRecosteadas > 0) {
+      partes.push(`Inventario recosteado con el TC nuevo: ${recosteo.guiasRecosteadas} guía(s), ${recosteo.lineasRecosteadas} línea(s) de lote/Kardex.`)
+    }
+    if (cxpSincronizada) partes.push('Cuenta por Pagar sincronizada.')
+    if (c.compra.asiento_id) {
+      partes.push('⚠️ Esta compra ya tiene asiento contable generado: los montos en Contabilidad NO se actualizaron automáticamente (pendiente hasta activar ese módulo).')
+    }
+
+    showToast(partes.join(' '), recosteoError ? 'warning' : 'success', recosteoError || c.compra.asiento_id ? 10000 : 5000)
     window.closeModal('modal-editar-compra')
+    _ecContexto = null
     await renderCompras(true)
   } catch (error) {
     console.error('Error en guardarEdicionCompra:', error)
@@ -1115,9 +1530,15 @@ window.eliminarCompra = async function (id) {
 
     // Kardex: se borran TODAS las filas de esta compra (aún en pruebas —
     // sin esto quedarían movimientos "entrada" de lotes que ya no existen).
+    // deleteRecord() puede devolver false sin lanzar excepción — si no se
+    // valida, el kardex queda huérfano y la compra se borra igual.
     const kardexCompra = await getKardexByCompra(id)
     for (const k of (kardexCompra || [])) {
-      await deleteKardexMovimiento(k.id)
+      const okKardex = await deleteKardexMovimiento(k.id)
+      if (!okKardex) {
+        const motivo = ultimoErrorDelete()
+        throw new Error(`No se pudo eliminar el movimiento de Kardex #${k.id}: ${motivo?.mensaje || 'motivo desconocido'}. Se detiene el borrado para no dejar el Kardex descuadrado.`)
+      }
     }
 
     for (const l of (lotes || [])) {
@@ -1160,6 +1581,43 @@ window.eliminarCompra = async function (id) {
 }
 
 // ============================================================================
+// SELECCIÓN MÚLTIPLE — checkbox por fila en la tabla de Compras (mismo
+// patrón que Ventas: window.eliminarVentasSeleccionadas en ventas.js).
+// ============================================================================
+
+window.toggleSeleccionTodasCompras = function (checked) {
+  document.querySelectorAll('.compra-sel:not(:disabled)').forEach(cb => { cb.checked = checked })
+  window.actualizarBotonEliminarComprasSeleccionadas()
+}
+
+window.actualizarBotonEliminarComprasSeleccionadas = function () {
+  const seleccionadas = document.querySelectorAll('.compra-sel:checked').length
+  const btn = document.getElementById('btnEliminarComprasSeleccionadas')
+  if (!btn) return
+  btn.style.display = seleccionadas > 0 ? 'inline-flex' : 'none'
+  btn.textContent = `🗑 Eliminar seleccionadas (${seleccionadas})`
+}
+
+// Reusa window.eliminarCompra por id — esa función YA trae sus propias
+// validaciones y confirm() por compra (ventas pendientes, pagos aplicados,
+// notas de crédito/débito, etc.), así que aquí solo se recorre la selección;
+// no se duplica esa lógica de bloqueo.
+window.eliminarComprasSeleccionadas = async function () {
+  const ids = Array.from(document.querySelectorAll('.compra-sel:checked')).map(cb => parseInt(cb.value))
+  if (ids.length === 0) { showToast('Selecciona al menos una compra', 'warning'); return }
+  if (!confirm(`Vas a eliminar ${ids.length} compra(s). Cada una se validará individualmente (ventas, pagos o notas vinculadas la bloquearán). ¿Continuar?`)) return
+
+  const btn = document.getElementById('btnEliminarComprasSeleccionadas')
+  if (btn) { btn.disabled = true; btn.textContent = 'Eliminando...' }
+
+  for (const id of ids) {
+    await window.eliminarCompra(id)
+  }
+
+  if (btn) btn.disabled = false
+}
+
+// ============================================================================
 // GUÍA DE REMISIÓN (recepción de mercadería de una compra ya registrada)
 // ============================================================================
 // Flujo: la Compra se registra sin lote (solo cantidad/precio/proveedor).
@@ -1171,6 +1629,10 @@ window.eliminarCompra = async function (id) {
 
 let _guiaLineas = []           // líneas de la compra seleccionada, con lote/marca/partida a rellenar
 let _guiaComprasCache = null   // cache de compras para el <select> del modal
+// Modo dual del modal-nueva-guia: null = creando una guía nueva; con un id =
+// editando esa guía existente (window.editarGuiaIngreso la puso ahí). El
+// mismo formulario/tabla se reusa para ambos casos — solo cambia el guardado.
+let _guiaIngresoEditId = null
 let _guiaComprasConGuiaSet = null // set de compra_id que YA tienen al menos 1 guía (para el badge en renderCompras)
 
 async function _cargarComprasConGuia(forzar = false) {
@@ -1212,6 +1674,8 @@ window.ordenarGuias = async function (campo) {
 
 async function renderGuias(forzar = false) {
   try {
+    renderDevolucionesPendientes(forzar).catch(e => console.warn('renderDevolucionesPendientes:', e.message))
+
     const container = document.getElementById('tabla-guias')
     if (!container) return
 
@@ -1303,17 +1767,18 @@ async function renderGuias(forzar = false) {
       <table>
         <thead>
           <tr>
-            <th style="width:32px;"><input type="checkbox" id="selAllGuias" onchange="window.toggleSeleccionTodasGuias(this.checked)" title="Seleccionar todas"></th>
-            ${_thOrdenable('N° Guía', 'numero_guia', _guiaSort, 'ordenarGuias')}
-            ${_thOrdenable('Fecha', 'fecha_guia', _guiaSort, 'ordenarGuias')}
-            ${_thOrdenable('Compra (Referencia)', 'referencia', _guiaSort, 'ordenarGuias')}
-            ${_thOrdenable('Proveedor', 'proveedor', _guiaSort, 'ordenarGuias')}
-            ${_thOrdenable('# Productos', 'num_productos', _guiaSort, 'ordenarGuias')}
-            <th>Producto(s) / Lote(s)</th>
-            <th>Marca(s)</th><th>Almacén / Zona(s)</th>
-            ${_thOrdenable('Observaciones', 'observaciones', _guiaSort, 'ordenarGuias')}
-            <th>Estado</th>
-            <th>Acciones</th>
+            <th data-col-tabla="guias-ingreso" data-col="sel" style="width:32px;${colStyle('guias-ingreso','sel') ? 'display:none;' : ''}"><input type="checkbox" id="selAllGuias" onchange="window.toggleSeleccionTodasGuias(this.checked)" title="Seleccionar todas"></th>
+            ${_thOrdenable('N° Guía', 'numero_guia', _guiaSort, 'ordenarGuias', 'guias-ingreso')}
+            ${_thOrdenable('Fecha', 'fecha_guia', _guiaSort, 'ordenarGuias', 'guias-ingreso', 'fecha')}
+            ${_thOrdenable('Compra (Referencia)', 'referencia', _guiaSort, 'ordenarGuias', 'guias-ingreso')}
+            ${_thOrdenable('Proveedor', 'proveedor', _guiaSort, 'ordenarGuias', 'guias-ingreso')}
+            ${_thOrdenable('# Productos', 'num_productos', _guiaSort, 'ordenarGuias', 'guias-ingreso')}
+            <th data-col-tabla="guias-ingreso" data-col="productos"${colStyle('guias-ingreso','productos')}>Producto(s) / Lote(s)</th>
+            <th data-col-tabla="guias-ingreso" data-col="marcas"${colStyle('guias-ingreso','marcas')}>Marca(s)</th>
+            <th data-col-tabla="guias-ingreso" data-col="zonas"${colStyle('guias-ingreso','zonas')}>Almacén / Zona(s)</th>
+            ${_thOrdenable('Observaciones', 'observaciones', _guiaSort, 'ordenarGuias', 'guias-ingreso')}
+            <th data-col-tabla="guias-ingreso" data-col="estado"${colStyle('guias-ingreso','estado')}>Estado</th>
+            <th data-col-tabla="guias-ingreso" data-col="acciones"${colStyle('guias-ingreso','acciones')}>Acciones</th>
           </tr>
         </thead>
         <tbody>
@@ -1323,24 +1788,25 @@ async function renderGuias(forzar = false) {
       const gAnulada = estaAnulado(g)
       html += `
         <tr${gAnulada ? ` style="${ESTILO_FILA_ANULADA}"` : ''}>
-          <td style="text-decoration:none; opacity:1;">${gAnulada
+          <td data-col-tabla="guias-ingreso" data-col="sel" style="text-decoration:none; opacity:1;${colStyle('guias-ingreso','sel') ? ' display:none;' : ''}">${gAnulada
             ? `<input type="checkbox" disabled title="Guía anulada: su stock ya fue retirado">`
             : `<input type="checkbox" class="gi-sel" value="${g.id}" onchange="window.actualizarBotonEliminarGuias()">`}</td>
-          <td><strong>${g.numero_guia}</strong></td>
-          <td>${g.fecha_guia || '-'}</td>
-          <td>${compra?.referencia || `Compra #${g.compra_id}`}</td>
-          <td>${compra?.proveedor_nombre || '-'}</td>
-          <td style="text-align:center;">${(detalles || []).length}</td>
-          <td><div class="clamp-lineas" title="${(productosLote || '').replace(/"/g, '&quot;')}">${productosLote}</div></td>
-          <td>${marcasTexto}</td>
-          <td>${zonasTexto}</td>
-          <td>${g.observaciones || '-'}</td>
-          <td>${gAnulada ? badgeAnulado(g) : '<span class="badge badge-success">Emitida</span>'}</td>
-          <td class="col-acciones" style="text-decoration:none; opacity:1;">
+          <td data-col-tabla="guias-ingreso" data-col="numero_guia"${colStyle('guias-ingreso','numero_guia')}><strong>${g.numero_guia}</strong></td>
+          <td data-col-tabla="guias-ingreso" data-col="fecha"${colStyle('guias-ingreso','fecha')}>${g.fecha_guia || '-'}</td>
+          <td data-col-tabla="guias-ingreso" data-col="referencia"${colStyle('guias-ingreso','referencia')}>${compra?.referencia || `Compra #${g.compra_id}`}</td>
+          <td data-col-tabla="guias-ingreso" data-col="proveedor"${colStyle('guias-ingreso','proveedor')}>${compra?.proveedor_nombre || '-'}</td>
+          <td data-col-tabla="guias-ingreso" data-col="num_productos" style="text-align:center;${colStyle('guias-ingreso','num_productos') ? ' display:none;' : ''}">${(detalles || []).length}</td>
+          <td data-col-tabla="guias-ingreso" data-col="productos"${colStyle('guias-ingreso','productos')}><div class="clamp-lineas" title="${(productosLote || '').replace(/"/g, '&quot;')}">${productosLote}</div></td>
+          <td data-col-tabla="guias-ingreso" data-col="marcas"${colStyle('guias-ingreso','marcas')}>${marcasTexto}</td>
+          <td data-col-tabla="guias-ingreso" data-col="zonas"${colStyle('guias-ingreso','zonas')}>${zonasTexto}</td>
+          <td data-col-tabla="guias-ingreso" data-col="observaciones"${colStyle('guias-ingreso','observaciones')}>${g.observaciones ? _escCompras(g.observaciones) : (gAnulada && g.motivo_anulacion ? `<em style="color:var(--text-secondary);">Anulado: ${_escCompras(g.motivo_anulacion)}</em>` : '-')}</td>
+          <td data-col-tabla="guias-ingreso" data-col="estado"${colStyle('guias-ingreso','estado')}>${gAnulada ? badgeAnulado(g) : '<span class="badge badge-success">Emitida</span>'}</td>
+          <td data-col-tabla="guias-ingreso" data-col="acciones" class="col-acciones" style="text-decoration:none; opacity:1;${colStyle('guias-ingreso','acciones') ? ' display:none;' : ''}">
             ${menuAccionesFila(gAnulada
               ? [{ label: 'Ver motivo de anulación', icono: 'ℹ️', onclick: `window.verMotivoAnulacionCompra('guia', ${g.id})` }]
               : [
-                  { label: 'Editar', icono: '✏️', onclick: `window.editarGuia(${g.id})` },
+                  { label: 'Editar cabecera', icono: '✏️', onclick: `window.editarGuia(${g.id})` },
+                  { label: 'Editar líneas (cantidad/lote/zona)', icono: '📦', onclick: `window.editarGuiaIngreso(${g.id})` },
                   { separador: true },
                   { label: 'Anular guía', icono: '🚫', onclick: `window.anularGuiaIngreso(${g.id})`, peligro: true },
                   { label: 'Eliminar', icono: '🗑️', onclick: `window.eliminarGuia(${g.id})`, peligro: true }
@@ -1435,98 +1901,199 @@ window.guardarEdicionGuia = async function () {
  *        se lanzan como Error para que el masivo siga con las demás guías y
  *        reporte al final cuáles no pudo.
  */
-async function _eliminarGuiaIngresoCore(id, pedirConfirmacion = true) {
-  {
-    const detalles = await getDetalleGuiasIngresoCompra(id)
+/**
+ * Calcula QUÉ habría que revertir para una guía de ingreso, sin escribir
+ * nada en la base todavía. Lanza Error si algún lote/bulto de esta guía ya
+ * tuvo consumo (venta, merma, etc.) — ni eliminar ni editar la guía es
+ * seguro en ese caso. Reusado por _eliminarGuiaIngresoCore (borra todo) y
+ * por window.guardarEdicionGuiaIngreso (revierte para reaplicar cambios).
+ */
+async function _planRevertirGuiaIngreso(id) {
+  const detalles = await getDetalleGuiasIngresoCompra(id)
 
-    const vendidos = []
-    const lotesABorrar = []     // lotes creados por ESTA guía: se eliminan enteros
-    const lotesADescontar = []  // lotes preexistentes a los que esta guía sumó: se restan
+  const vendidos = []
+  const lotesABorrar = []     // lotes que quedan en 0 tras la reversión: se eliminan enteros
+  const lotesADescontar = []  // lotes sin peso variable a los que esta guía sumó: se restan por aritmética
+  const lotesConBultos = []   // lotes con peso variable: se resuelve borrando SUS bultos, no por resta
 
-    for (const dg of (detalles || [])) {
-      if (!dg.lote_id) continue
-      const lote = await getLoteById(dg.lote_id)
-      if (!lote) continue // ya no existe: nada que revertir para esta línea
+  for (const dg of (detalles || [])) {
+    if (!dg.lote_id) continue
+    const lote = await getLoteById(dg.lote_id)
+    if (!lote) continue // ya no existe: nada que revertir para esta línea
 
-      const original = parseFloat(dg.cantidad) || 0
-      const actual = parseFloat(lote.cantidad) || 0
+    // ── Lotes con peso variable: lote_bultos es la fuente de verdad ────────
+    // No se puede restar dg.cantidad a mano porque cantidad/cantidad_unidades
+    // del lote se recalculan SIEMPRE desde la suma de sus bultos disponibles
+    // (recalcularLoteDesdeBultos) — cualquier resta manual que no borre
+    // también los bultos de esta guía queda pisada la próxima vez que algo
+    // dispare ese recálculo, resucitando la cantidad "eliminada".
+    if (lote.es_peso_variable) {
+      const bultosLote = await getLoteBultosByLote(lote.id)
+      const bultosDeEstaGuia = (bultosLote || []).filter(b => b.guia_ingreso_id === id)
+      if (bultosDeEstaGuia.length === 0) continue // esta guía no aportó bultos a este lote
 
-      // Un lote puede haber sido CREADO por esta guía (lote.guia_id === id) o
-      // ser un lote preexistente al que esta guía le sumó cantidad. En el
-      // segundo caso no se puede borrar: hay que restar solo lo que aportó.
-      const loCreoEstaGuia = lote.guia_id === id
+      const noDisponibles = bultosDeEstaGuia.filter(b => b.estado !== 'disponible')
+      if (noDisponibles.length > 0) {
+        const item = await getItemById(dg.item_id)
+        vendidos.push(`${item?.nombre || 'Item #' + dg.item_id} (lote ${lote.numero_lote}): ${noDisponibles.length} bulto(s) de esta guía ya no está(n) disponible(s) (vendido/devuelto/merma)`)
+        continue
+      }
 
-      if (loCreoEstaGuia) {
-        const vendido = parseFloat((original - actual).toFixed(4))
-        if (vendido > 0) {
-          const item = await getItemById(dg.item_id)
-          vendidos.push(`${item?.nombre || 'Item #' + dg.item_id} (lote ${lote.numero_lote}): ${vendido} vendido de ${original}`)
-        } else {
-          lotesABorrar.push(lote.id)
-        }
+      const pesoARevertir = bultosDeEstaGuia.reduce((s, b) => s + (parseFloat(b.peso) || 0), 0)
+      lotesConBultos.push({
+        lote, bultosDeEstaGuia, ubicacion_id: dg.ubicacion_id, pesoARevertir,
+        esTodoElLote: bultosDeEstaGuia.length === bultosLote.length
+      })
+      continue
+    }
+
+    // ── Lotes sin peso variable: heurística original por aritmética ────────
+    const original = parseFloat(dg.cantidad) || 0
+    const actual = parseFloat(lote.cantidad) || 0
+
+    // Un lote puede haber sido CREADO por esta guía (lote.guia_id === id) o
+    // ser un lote preexistente al que esta guía le sumó cantidad. En el
+    // segundo caso no se puede borrar: hay que restar solo lo que aportó.
+    const loCreoEstaGuia = lote.guia_id === id
+
+    if (loCreoEstaGuia) {
+      const vendido = parseFloat((original - actual).toFixed(4))
+      if (vendido > 0) {
+        const item = await getItemById(dg.item_id)
+        vendidos.push(`${item?.nombre || 'Item #' + dg.item_id} (lote ${lote.numero_lote}): ${vendido} vendido de ${original}`)
       } else {
-        if (actual + 0.0001 < original) {
-          const item = await getItemById(dg.item_id)
-          vendidos.push(`${item?.nombre || 'Item #' + dg.item_id} (lote ${lote.numero_lote}): quedan ${actual} pero esta guía aportó ${original}`)
-        } else {
-          lotesADescontar.push({ lote, cantidad: original, unidades: 0, ubicacion_id: dg.ubicacion_id })
+        lotesABorrar.push(lote.id)
+      }
+    } else {
+      if (actual + 0.0001 < original) {
+        const item = await getItemById(dg.item_id)
+        vendidos.push(`${item?.nombre || 'Item #' + dg.item_id} (lote ${lote.numero_lote}): quedan ${actual} pero esta guía aportó ${original}`)
+      } else {
+        lotesADescontar.push({ lote, cantidad: original, unidades: 0, ubicacion_id: dg.ubicacion_id })
+      }
+    }
+  }
+
+  if (vendidos.length > 0) {
+    throw new Error(
+      `ya hay ventas de esta guía (${vendidos.join(' | ')}). ` +
+      `Anula/ajusta esas ventas para devolver el stock antes de editarla/eliminarla`
+    )
+  }
+
+  const lotesConBultosCompletos = lotesConBultos.filter(l => l.esTodoElLote)
+  const lotesConBultosParciales = lotesConBultos.filter(l => !l.esTodoElLote)
+  return {
+    lotesABorrar, lotesADescontar, lotesConBultos, lotesConBultosCompletos, lotesConBultosParciales,
+    totalABorrar: lotesABorrar.length + lotesConBultosCompletos.length,
+    totalADescontar: lotesADescontar.length + lotesConBultosParciales.length
+  }
+}
+
+/**
+ * Ejecuta el plan de _planRevertirGuiaIngreso: descuenta kardex/lotes/
+ * stock_ubicaciones. NO borra la guía ni los lotes que quedan en 0 — eso lo
+ * decide el llamador (eliminar borra todo; editar los borra para recrearlos
+ * con los valores nuevos).
+ */
+async function _aplicarReversionGuiaIngreso(id, plan) {
+  // Kardex: se borran las filas de los lotes que se van a eliminar POR
+  // COMPLETO — sin esto quedarían movimientos "fantasma" de lotes que ya no
+  // existen. No se tocan lotes que solo se descuentan parcialmente: ese
+  // kardex sigue siendo válido para lo que queda.
+  const idsLotesABorrarCompleto = [...plan.lotesABorrar, ...plan.lotesConBultosCompletos.map(l => l.lote.id)]
+  const guiaActual = await getGuiaIngresoCompraById(id)
+  if (guiaActual?.compra_id && idsLotesABorrarCompleto.length > 0) {
+    const kardexCompra = await getKardexByCompra(guiaActual.compra_id)
+    for (const k of (kardexCompra || [])) {
+      if (idsLotesABorrarCompleto.includes(k.lote_id)) {
+        const okKardex = await deleteKardexMovimiento(k.id)
+        if (!okKardex) {
+          const motivo = ultimoErrorDelete()
+          throw new Error(`No se pudo eliminar el movimiento de Kardex #${k.id}: ${motivo?.mensaje || 'motivo desconocido'}. Se detiene la reversión para no dejar el Kardex descuadrado.`)
         }
       }
     }
+  }
 
-    if (vendidos.length > 0) {
-      throw new Error(
-        `ya hay ventas de esta guía (${vendidos.join(' | ')}). ` +
-        `Anula/ajusta esas ventas para devolver el stock antes de eliminarla`
+  // Lotes sin peso variable: se resta lo que esta guía aportó, a ellos y a
+  // su fila de stock_ubicaciones de la zona correspondiente.
+  for (const d of plan.lotesADescontar) {
+    const nuevaCant = parseFloat(Math.max(0, (parseFloat(d.lote.cantidad) || 0) - d.cantidad).toFixed(4))
+    await updateLote(d.lote.id, { cantidad: nuevaCant })
+    if (d.ubicacion_id) {
+      const filas = await getStockUbicacionesByLote(d.lote.id)
+      const fila = (filas || []).find(f => f.ubicacion_id === d.ubicacion_id)
+      if (fila) {
+        await updateStockUbicacion(fila.id, {
+          cantidad: parseFloat(Math.max(0, (parseFloat(fila.cantidad) || 0) - d.cantidad).toFixed(4))
+        })
+      }
+    }
+  }
+
+  // Lotes con peso variable: se borran SOLO los bultos que esta guía trajo
+  // y se recalcula el lote desde los que quedan (fuente de verdad real).
+  // stock_ubicaciones se descuenta aparte porque, en Fase 1, sigue
+  // escribiéndose en paralelo para compatibilidad con pantallas que aún no
+  // leen v_stock_bultos_zona.
+  for (const { lote, bultosDeEstaGuia, ubicacion_id, pesoARevertir, esTodoElLote } of plan.lotesConBultos) {
+    for (const b of bultosDeEstaGuia) await deleteLoteBulto(b.id)
+
+    if (!esTodoElLote) await recalcularLoteDesdeBultos(lote.id)
+    // si esTodoElLote, el lote entero se borra en idsLotesABorrarCompleto;
+    // recalcular no tiene sentido sobre un lote que va a desaparecer.
+
+    if (ubicacion_id) {
+      const filas = await getStockUbicacionesByLote(lote.id)
+      const fila = (filas || []).find(f => f.ubicacion_id === ubicacion_id)
+      if (fila) {
+        await updateStockUbicacion(fila.id, {
+          cantidad: parseFloat(Math.max(0, (parseFloat(fila.cantidad) || 0) - pesoARevertir).toFixed(4)),
+          cantidad_unidades: parseFloat(Math.max(0, (parseFloat(fila.cantidad_unidades) || 0) - bultosDeEstaGuia.length).toFixed(4))
+        })
+      }
+    }
+  }
+}
+
+async function _eliminarGuiaIngresoCore(id, pedirConfirmacion = true) {
+  const plan = await _planRevertirGuiaIngreso(id)
+
+  if (pedirConfirmacion && !confirm(
+    `Se eliminará la guía revirtiendo el stock ingresado:\n` +
+    `  • ${plan.totalABorrar} lote(s) creados por esta guía se eliminarán.\n` +
+    `  • ${plan.totalADescontar} lote(s) preexistentes solo se descontarán.\n\n¿Continuar?`
+  )) return { cancelado: true }
+
+  await _aplicarReversionGuiaIngreso(id, plan)
+
+  // La guía se borra ANTES que los lotes. detalle_guias_ingreso_compra.lote_id
+  // referencia a lotes SIN ON DELETE CASCADE: si se intentara borrar el lote
+  // primero, Postgres rechaza el DELETE (23503) porque la línea de esta
+  // misma guía todavía apunta a él — y como nadie revisaba el resultado de
+  // deleteLote(), el error se tragaba en silencio: la guía quedaba
+  // eliminada pero el lote sobrevivía intacto con la cantidad "revertida".
+  const ok = await deleteGuiaIngresoCompra(id) // cascada: borra detalle_guias_ingreso_compra
+  if (!ok) {
+    const motivo = ultimoErrorDelete()
+    throw new Error(motivo?.mensaje || 'no se pudo eliminar')
+  }
+
+  const idsLotesABorrarCompleto = [...plan.lotesABorrar, ...plan.lotesConBultosCompletos.map(l => l.lote.id)]
+  for (const loteId of idsLotesABorrarCompleto) {
+    const borrado = await deleteLote(loteId) // stock_ubicaciones y lote_bultos de ese lote se borran solos (ON DELETE CASCADE)
+    if (!borrado) {
+      const motivo = ultimoErrorDelete()
+      console.error(`No se pudo eliminar el lote ${loteId} tras borrar la guía:`, motivo)
+      showToast(
+        `La guía se eliminó, pero el lote #${loteId} no se pudo borrar (${motivo?.mensaje || 'motivo desconocido'}). Revísalo manualmente en Inventario.`,
+        'warning', 8000
       )
     }
-
-    if (pedirConfirmacion && !confirm(
-      `Se eliminará la guía revirtiendo el stock ingresado:\n` +
-      `  • ${lotesABorrar.length} lote(s) creados por esta guía se eliminarán.\n` +
-      `  • ${lotesADescontar.length} lote(s) preexistentes solo se descontarán.\n\n¿Continuar?`
-    )) return { cancelado: true }
-
-    // Kardex: se borran las filas de los lotes que se van a eliminar (aún
-    // en pruebas — sin esto quedarían movimientos "fantasma" de lotes que
-    // ya no existen). Se filtra por compra_id + lote_id para no tocar
-    // movimientos de OTRAS guías de la misma compra.
-    const guiaActual = await getGuiaIngresoCompraById(id)
-    if (guiaActual?.compra_id && lotesABorrar.length > 0) {
-      const kardexCompra = await getKardexByCompra(guiaActual.compra_id)
-      for (const k of (kardexCompra || [])) {
-        if (lotesABorrar.includes(k.lote_id)) await deleteKardexMovimiento(k.id)
-      }
-    }
-
-    // Lotes preexistentes: se resta lo que esta guía aportó, a ellos y a su
-    // fila de stock_ubicaciones de la zona correspondiente.
-    for (const d of lotesADescontar) {
-      const nuevaCant = parseFloat(Math.max(0, (parseFloat(d.lote.cantidad) || 0) - d.cantidad).toFixed(4))
-      await updateLote(d.lote.id, { cantidad: nuevaCant })
-      if (d.ubicacion_id) {
-        const filas = await getStockUbicacionesByLote(d.lote.id)
-        const fila = (filas || []).find(f => f.ubicacion_id === d.ubicacion_id)
-        if (fila) {
-          await updateStockUbicacion(fila.id, {
-            cantidad: parseFloat(Math.max(0, (parseFloat(fila.cantidad) || 0) - d.cantidad).toFixed(4))
-          })
-        }
-      }
-    }
-
-    for (const loteId of lotesABorrar) {
-      await deleteLote(loteId) // stock_ubicaciones de ese lote se borra solo (ON DELETE CASCADE)
-    }
-
-    const ok = await deleteGuiaIngresoCompra(id) // detalle_guias_ingreso_compra se borra solo (ON DELETE CASCADE)
-    if (!ok) {
-      const motivo = ultimoErrorDelete()
-      throw new Error(motivo?.mensaje || 'no se pudo eliminar')
-    }
-
-    return { cancelado: false, lotesBorrados: lotesABorrar.length, lotesDescontados: lotesADescontar.length }
   }
+
+  return { cancelado: false, lotesBorrados: plan.totalABorrar, lotesDescontados: plan.totalADescontar }
 }
 
 window.eliminarGuia = async function (id) {
@@ -1542,6 +2109,310 @@ window.eliminarGuia = async function (id) {
   } catch (error) {
     console.error('Error en eliminarGuia:', error)
     showToast('No se pudo eliminar la guía: ' + error.message, 'danger', 7000)
+  }
+}
+
+// ── Editar líneas de una Guía de Ingreso (cantidad/lote/marca/zona) ────────
+// Reusa TODO el formulario/tabla de "Nueva Guía" (modal-nueva-guia,
+// _guiaLineas, _renderTablaDetalleGuia, _sincronizarRecepcionesGuiaDesdeDOM)
+// en un "modo edición": se precarga con lo que esta guía ya recibió, el
+// usuario corrige cantidad/lote/marca/partida/zona (incluso packing list de
+// bultos si es peso variable), y al guardar se hace REVERTIR + REAPLICAR
+// sobre la MISMA guía — igual patrón que "Editar Guía de Despacho" en
+// Ventas. _planRevertirGuiaIngreso ya bloquea todo el intento si algún lote
+// de esta guía tuvo consumo (venta/merma) desde que se recibió: no se puede
+// editar con seguridad en ese caso.
+window.editarGuiaIngreso = async function (id) {
+  try {
+    // Verificación temprana: si algo de esta guía ya se vendió, no tiene
+    // caso abrir el formulario de edición — se bloquea antes de armarlo.
+    await _planRevertirGuiaIngreso(id)
+
+    const guia = await getGuiaIngresoCompraById(id)
+    if (!guia) { showToast('No se encontró la guía', 'danger'); return }
+
+    const [compra, detallesGuia, todosDetallesCompra, marcas, itemsList, almacenes, zonas] = await Promise.all([
+      getCompraById(guia.compra_id),
+      getDetalleGuiasIngresoCompra(id),
+      getCompraDetalles(guia.compra_id),
+      getMarcas(),
+      getItems(),
+      getAlmacenes(),
+      getUbicaciones()
+    ])
+
+    if (!detallesGuia || detallesGuia.length === 0) {
+      showToast('Esta guía no tiene líneas registradas para editar', 'warning')
+      return
+    }
+
+    const itemsMap = {}
+    for (const it of (itemsList || [])) itemsMap[it.id] = it
+    const almacenesMap = {}
+    for (const a of (almacenes || [])) almacenesMap[a.id] = a
+    const detalleCompraMap = {}
+    for (const d of (todosDetallesCompra || [])) detalleCompraMap[d.id] = d
+
+    _guiaMarcasCache = marcas || []
+    _guiaZonasCache = (zonas || [])
+      .filter(z => !almacenesMap[z.almacen_id]?.es_virtual)
+      .map(z => ({
+        id: z.id, nombre: z.nombre, almacen_id: z.almacen_id,
+        almacenNombre: almacenesMap[z.almacen_id]?.nombre || `Almacén #${z.almacen_id}`
+      }))
+    _guiaZonasNombre = {}
+    for (const z of _guiaZonasCache) _guiaZonasNombre[z.id] = `${z.almacenNombre} — ${z.nombre}`
+
+    _guiaCompraActual = compra
+    const lotesExistentes = await getLotes()
+    _guiaLotesPorItem = {}
+    for (const lo of (lotesExistentes || [])) {
+      if (!lo.item_id) continue
+      ;(_guiaLotesPorItem[lo.item_id] = _guiaLotesPorItem[lo.item_id] || []).push(lo)
+    }
+    Object.values(_guiaLotesPorItem).forEach(arr =>
+      arr.sort((a, b) => (b.fecha_ingreso || '').localeCompare(a.fecha_ingreso || '') || b.id - a.id))
+
+    // Lo recibido en OTRAS guías (no anuladas) de esta misma compra: sirve
+    // de referencia de "pendiente" — la propia contribución de ESTA guía no
+    // cuenta como "ya recibido" porque es justo lo que se está reeditando.
+    const recibidoTodas = await _getCantidadesRecibidasPorDetalle()
+    const recibidoEnEstaGuia = new Map()
+    for (const dg of detallesGuia) {
+      if (!dg.detalle_compra_id) continue
+      recibidoEnEstaGuia.set(dg.detalle_compra_id, (recibidoEnEstaGuia.get(dg.detalle_compra_id) || 0) + (parseFloat(dg.cantidad) || 0))
+    }
+
+    // Agrupa las líneas de esta guía por detalle_compra_id (una línea de
+    // compra pudo recibirse en 1 o más lotes/zonas dentro de esta MISMA
+    // guía) y arma cada recepción con los valores actuales, editables.
+    const porDetalleCompra = new Map()
+    for (const dg of detallesGuia) {
+      if (!porDetalleCompra.has(dg.detalle_compra_id)) porDetalleCompra.set(dg.detalle_compra_id, [])
+      porDetalleCompra.get(dg.detalle_compra_id).push(dg)
+    }
+
+    _guiaLineas = []
+    for (const [detalleCompraId, dgs] of porDetalleCompra) {
+      const d = detalleCompraMap[detalleCompraId]
+      if (!d) continue // línea de compra borrada: no hay nada que editar aquí
+
+      const comprado = parseFloat(d.cantidad) || 0
+      const recibidoOtras = parseFloat(((recibidoTodas.get(detalleCompraId) || 0) - (recibidoEnEstaGuia.get(detalleCompraId) || 0)).toFixed(4))
+      const yaRecibido = Math.max(0, recibidoOtras)
+
+      const recepciones = []
+      for (const dg of dgs) {
+        const lote = dg.lote_id ? await getLoteById(dg.lote_id) : null
+        const esPesoVariable = !!lote?.es_peso_variable
+        let bultos = []
+        if (esPesoVariable && lote) {
+          const bultosLote = await getLoteBultosByLote(lote.id)
+          bultos = (bultosLote || [])
+            .filter(b => b.guia_ingreso_id === id)
+            .map(b => ({ peso: parseFloat(b.peso) || null }))
+          if (bultos.length === 0) bultos = [{ peso: null }]
+        }
+        recepciones.push({
+          cantidad: parseFloat(dg.cantidad) || 0,
+          numero_lote: dg.numero_lote || '',
+          marca_id: dg.marca_id || null,
+          codigo_partida: dg.codigo_partida || '',
+          ubicacion_id: dg.ubicacion_id || '',
+          cantidad_unidades: lote?.cantidad_unidades || null,
+          es_peso_variable: esPesoVariable,
+          bultos
+        })
+      }
+
+      _guiaLineas.push({
+        detalle_compra_id: detalleCompraId,
+        item_id:            d.item_id,
+        nombre:              itemsMap[d.item_id]?.nombre || `Item #${d.item_id}`,
+        unidad_medida:       d.unidad_medida,
+        cantidad_comprada:   comprado,
+        ya_recibido:         yaRecibido,
+        unidades_compradas: parseFloat(d.unidades) || null,
+        precio_unitario:     parseFloat(d.precio_unitario) || 0,
+        marca_default_id:    itemsMap[d.item_id]?.marca_id || null,
+        recepciones
+      })
+    }
+
+    // Prepara el modal en modo edición (mismo formulario de "Nueva Guía").
+    const form = document.getElementById('formNuevaGuia')
+    if (form) { /* no .reset(): se prellena a mano abajo */ }
+    document.getElementById('ngNumeroGuia').value = guia.numero_guia || ''
+    document.getElementById('ngFechaGuia').value = guia.fecha_guia || ''
+    document.getElementById('ngObservaciones').value = guia.observaciones || ''
+
+    const selCompra = document.getElementById('ngCompra')
+    if (selCompra) {
+      selCompra.innerHTML = `<option value="${compra?.id}" selected>${compra?.referencia || 'Compra #' + compra?.id} — ${compra?.proveedor_nombre || ''}</option>`
+      selCompra.disabled = true
+    }
+    document.getElementById('ngInfoCompra').style.display = 'block'
+    document.getElementById('ngInfoCompra').innerHTML = `
+      <strong>Proveedor:</strong> ${compra?.proveedor_nombre || '-'} (${compra?.proveedor_ruc || '-'}) &nbsp;|&nbsp;
+      <strong>Comprobante:</strong> ${compra?.serie ? compra.serie + '-' + compra.numero : (compra?.numero || '-')} &nbsp;|&nbsp;
+      <strong>Fecha compra:</strong> ${compra?.fecha_emision || '-'}
+    `
+
+    const titulo = document.getElementById('ng-titulo-modal')
+    if (titulo) titulo.textContent = `Editar Guía ${guia.numero_guia || ''}`
+    const aviso = document.getElementById('ng-edicion-aviso')
+    if (aviso) {
+      aviso.style.display = 'block'
+      aviso.textContent = '⚠ Editando una guía ya procesada: al guardar se revierte el stock/kardex que generó y se vuelve a aplicar con los valores corregidos. Bloqueado si algún lote de esta guía ya tuvo ventas.'
+    }
+    const btnGuardar = document.getElementById('btnGuardarGuiaIngresoCompra')
+    if (btnGuardar) btnGuardar.textContent = 'Guardar Cambios (revierte y reaplica stock)'
+
+    _guiaIngresoEditId = id
+
+    _renderTablaDetalleGuia()
+    window.openModal('modal-nueva-guia')
+  } catch (error) {
+    console.error('Error en editarGuiaIngreso:', error)
+    showToast('No se puede editar esta guía: ' + error.message, 'danger', 7000)
+  }
+}
+
+/**
+ * Guarda la edición de líneas de una guía de ingreso ya existente:
+ * revierte el stock/kardex/lotes que generó (mismo plan que eliminarla),
+ * borra sus líneas viejas y las reaplica con los valores corregidos sobre
+ * el MISMO id de guía. Se vuelve a calcular el plan de reversión justo
+ * antes de escribir, por si algo cambió desde que se abrió el modal.
+ */
+async function _guardarEdicionGuiaIngreso() {
+  const btn = document.getElementById('btnGuardarGuiaIngresoCompra')
+  if (btn?.disabled) return
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando...' }
+  try {
+    const id = _guiaIngresoEditId
+    if (!id) { showToast('No hay ninguna guía en edición', 'danger'); return }
+
+    const user = await getCurrentUser()
+    if (!user) { showToast('Usuario no autenticado', 'danger'); return }
+
+    const numeroGuia = document.getElementById('ngNumeroGuia')?.value?.trim()
+    const fechaGuia = document.getElementById('ngFechaGuia')?.value
+    const observaciones = document.getElementById('ngObservaciones')?.value?.trim() || null
+
+    if (!numeroGuia) { showToast('Ingresa el N° de Guía', 'warning'); return }
+    if (!fechaGuia)  { showToast('Ingresa la fecha de la guía', 'warning'); return }
+    if (!_guiaLineas || _guiaLineas.length === 0) { showToast('No hay líneas para guardar', 'warning'); return }
+
+    _sincronizarRecepcionesGuiaDesdeDOM()
+
+    const guiaOriginal = await getGuiaIngresoCompraById(id)
+    if (!guiaOriginal) { showToast('La guía ya no existe', 'danger'); return }
+    const compraId = guiaOriginal.compra_id
+    const compra = await getCompraById(compraId)
+
+    const recepcionesValidadas = []
+    for (const l of _guiaLineas) {
+      for (const r of l.recepciones) {
+        // Entrega parcial: este producto de la factura simplemente no llegó
+        // en ESTA guía — se omite sin error (ver _esRecepcionVaciaGuia).
+        if (_esRecepcionVaciaGuia(r)) continue
+        if (!r.cantidad || r.cantidad <= 0) { showToast(`Cantidad recibida inválida para "${l.nombre}"`, 'warning'); return }
+        if (!r.numero_lote)                 { showToast(`Falta el N° de Lote de "${l.nombre}"`, 'warning'); return }
+        if (!r.marca_id)                    { showToast(`Falta la Marca de "${l.nombre}"`, 'warning'); return }
+        if (!r.ubicacion_id)                { showToast(`Falta el Almacén/Zona de "${l.nombre}"`, 'warning'); return }
+        // Ver misma validación (y su motivo) en window.guardarGuiaIngresoCompra.
+        if (!r.es_peso_variable && (!r.cantidad_unidades || r.cantidad_unidades <= 0)) {
+          showToast(`Falta el N° de Unidades (bultos/cajas) de "${l.nombre}"`, 'warning')
+          return
+        }
+
+        recepcionesValidadas.push({
+          detalle_compra_id: l.detalle_compra_id,
+          item_id:           l.item_id,
+          nombreProducto:    l.nombre,
+          precio_unitario:   l.precio_unitario,
+          unidadMedida:       l.unidad_medida || 'KG',
+          cantidad:           r.cantidad,
+          cantidadUnidades:   r.cantidad_unidades || null,
+          numeroLote:         r.numero_lote,
+          marcaId:            r.marca_id,
+          codigoPartida:      (r.codigo_partida || '').trim() || null,
+          ubicacionId:        r.ubicacion_id,
+          esPesoVariable:     !!r.es_peso_variable,
+          bultos:             r.es_peso_variable ? (r.bultos || []) : null,
+          loteExistenteId:    null
+        })
+      }
+    }
+
+    if (recepcionesValidadas.length === 0) {
+      showToast('Ingresa la cantidad recibida de al menos un producto', 'warning')
+      return
+    }
+
+    // Re-verificación justo antes de escribir: si algo cambió desde que se
+    // abrió el modal (ej. otra pestaña vendió stock de este mismo lote),
+    // se bloquea recién aquí en vez de dejar el revertir a medias.
+    const plan = await _planRevertirGuiaIngreso(id)
+
+    // ── Punto sin retorno: a partir de aquí se escribe en la base ──────────
+    await _aplicarReversionGuiaIngreso(id, plan)
+
+    const idsLotesABorrarCompleto = [...plan.lotesABorrar, ...plan.lotesConBultosCompletos.map(l => l.lote.id)]
+    for (const loteId of idsLotesABorrarCompleto) {
+      const borrado = await deleteLote(loteId)
+      if (!borrado) {
+        const motivo = ultimoErrorDelete()
+        console.error(`No se pudo eliminar el lote ${loteId} al editar la guía ${id}:`, motivo)
+      }
+    }
+
+    // Líneas viejas de esta guía: se borran para reemplazarlas por las
+    // reaplicadas abajo (a diferencia de eliminarGuia, aquí NO se borra la
+    // guía — sigue siendo el mismo id, mismo historial de auditoría).
+    const detallesViejos = await getDetalleGuiasIngresoCompra(id)
+    for (const dv of (detallesViejos || [])) await deleteDetalleGuiaIngresoCompra(dv.id)
+
+    const actualizadaCabecera = await updateGuiaIngresoCompra(id, {
+      numero_guia: numeroGuia,
+      fecha_guia: fechaGuia,
+      observaciones
+    })
+    if (!actualizadaCabecera) { showToast('No se pudo actualizar la cabecera de la guía', 'danger'); return }
+
+    const guia = { id, compra_id: compraId }
+    const totalValorGuia = await _aplicarRecepcionesAGuiaIngreso(guia, compra, compraId, recepcionesValidadas, user, fechaGuia, numeroGuia)
+
+    if (ASIENTOS_AUTO_COMPRAS_ACTIVO && totalValorGuia > 0.01) {
+      try {
+        await generarAsientoGuiaRemision({
+          monto: totalValorGuia,
+          documento_referencia: numeroGuia,
+          descripcion: `Guía de Remisión - Edición (${numeroGuia})`,
+          contact_id: compra?.contact_id || null,
+          fecha: fechaGuia,
+          userId: user?.id
+        })
+      } catch (errorAsiento) {
+        console.error('Error generando asiento tras editar guía de ingreso:', errorAsiento)
+        showToast(errorAsiento.message || 'Guía actualizada, pero no se pudo generar el asiento de valuación de inventario', 'warning')
+      }
+    }
+
+    showToast('Guía actualizada: stock/kardex revertido y reaplicado', 'success')
+    _guiaIngresoEditId = null
+    window.closeModal('modal-nueva-guia')
+    _guiaLineas = []
+    _invalidarCacheCompras()
+    await _cargarComprasConGuia(true)
+    await renderGuias(true)
+    await renderCompras(true)
+  } catch (error) {
+    console.error('Error en _guardarEdicionGuiaIngreso:', error)
+    showToast('Error al guardar la edición: ' + error.message, 'danger', 7000)
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = _guiaIngresoEditId ? 'Guardar Cambios (revierte y reaplica stock)' : 'Guardar Guía (ingresa stock)' }
   }
 }
 
@@ -1605,12 +2476,22 @@ window.eliminarGuiasSeleccionadas = async function () {
 window.abrirModalNuevaGuia = async function () {
   try {
     _guiaLineas = []
+    _guiaIngresoEditId = null
     const form = document.getElementById('formNuevaGuia')
     if (form) form.reset()
     document.getElementById('ngInfoCompra').style.display = 'none'
     document.getElementById('ngFechaGuia').value = new Date().toISOString().split('T')[0]
     document.getElementById('tabla-detalle-guia').innerHTML =
       '<p style="text-align:center; color:var(--text-secondary); padding:20px;">Selecciona una compra para ver sus productos.</p>'
+
+    const titulo = document.getElementById('ng-titulo-modal')
+    if (titulo) titulo.textContent = 'Nueva Guía de Remisión'
+    const aviso = document.getElementById('ng-edicion-aviso')
+    if (aviso) aviso.style.display = 'none'
+    const selCompra = document.getElementById('ngCompra')
+    if (selCompra) selCompra.disabled = false
+    const btnGuardar = document.getElementById('btnGuardarGuiaIngresoCompra')
+    if (btnGuardar) btnGuardar.textContent = 'Guardar Guía (ingresa stock)'
 
     await _cargarComprasSelectGuia()
     window.openModal('modal-nueva-guia')
@@ -1620,18 +2501,57 @@ window.abrirModalNuevaGuia = async function () {
   }
 }
 
+// Cuánto se ha recibido ya, por línea de compra (detalle_compra_id), sumando
+// TODAS las guías NO anuladas de esa línea (una compra puede recibirse en
+// varias guías parciales). Se usa tanto para decidir qué compras siguen
+// "pendientes de guía" como para prellenar cada recepción con lo que falta,
+// no con el total comprado de nuevo.
+async function _getCantidadesRecibidasPorDetalle() {
+  const [guias, detallesGuia] = await Promise.all([
+    getGuiasIngresoCompra(),
+    getTodosDetalleGuiasIngresoCompra()
+  ])
+  const guiaAnulada = new Map((guias || []).map(g => [g.id, g.estado === 'anulada']))
+  const acumulado = new Map() // detalle_compra_id -> cantidad recibida
+  for (const dg of (detallesGuia || [])) {
+    if (!dg.detalle_compra_id || guiaAnulada.get(dg.guia_id)) continue
+    acumulado.set(dg.detalle_compra_id, (acumulado.get(dg.detalle_compra_id) || 0) + (parseFloat(dg.cantidad) || 0))
+  }
+  return acumulado
+}
+
 async function _cargarComprasSelectGuia() {
   const select = document.getElementById('ngCompra')
   if (!select) return
 
-  // Solo compras de mercadería, y solo las que AÚN NO tienen guía
-  // registrada (forzar:true para no mostrar como "pendiente" una compra a
-  // la que se le acaba de crear/eliminar una guía en esta misma sesión).
-  const [{ data: compras }, comprasConGuia] = await Promise.all([
+  // Solo compras de mercadería con algo pendiente de recibir: se compara,
+  // línea por línea (detalle_compras.cantidad), lo comprado contra lo ya
+  // recibido en TODAS sus guías no anuladas. Antes se ocultaba la compra con
+  // la primera guía aunque fuera parcial — ahora sigue apareciendo hasta que
+  // TODAS sus líneas queden cubiertas.
+  const [{ data: compras }, todosDetalles, recibidoPorDetalle] = await Promise.all([
     getComprasPage({ pagina: 1, porPagina: 500 }),
-    _cargarComprasConGuia(true)
+    getTodosDetalleCompras(),
+    _getCantidadesRecibidasPorDetalle()
   ])
-  _guiaComprasCache = (compras || []).filter(c => c.tipo_compra === 'mercaderia' && !comprasConGuia.has(c.id))
+
+  const detallesPorCompra = new Map()
+  for (const d of (todosDetalles || [])) {
+    if (!detallesPorCompra.has(d.compra_id)) detallesPorCompra.set(d.compra_id, [])
+    detallesPorCompra.get(d.compra_id).push(d)
+  }
+
+  const tienePendiente = (compraId) => {
+    const detalles = detallesPorCompra.get(compraId) || []
+    if (detalles.length === 0) return true // sin líneas registradas: se muestra por seguridad
+    return detalles.some(d => {
+      const comprado = parseFloat(d.cantidad) || 0
+      const recibido = recibidoPorDetalle.get(d.id) || 0
+      return recibido + 0.0001 < comprado
+    })
+  }
+
+  _guiaComprasCache = (compras || []).filter(c => c.tipo_compra === 'mercaderia' && tienePendiente(c.id))
 
   select.innerHTML = '<option value="">-- Selecciona una compra registrada --</option>' +
     _guiaComprasCache.map(c =>
@@ -1694,10 +2614,10 @@ window.onSeleccionarCompraGuia = async function () {
       }))
 
     // Lotes YA existentes de cada producto: se ofrecen en el campo "N° de
-    // Lote" para poder recibir más mercadería sobre un lote abierto en vez de
-    // crear un duplicado con el mismo número (que era el bug: quedaban dos
-    // filas de `lotes` con el mismo numero_lote y el stock partido entre
-    // ambas, así que el kardex del lote no reflejaba la cantidad real).
+    // Lote" para poder recibir más mercadería sobre un lote abierto de ESTA
+    // MISMA compra. Si el texto coincide pero es de otra compra (factura
+    // distinta), no se ofrece para sumar — se crea aparte, a propósito:
+    // identificación específica por adquisición, no por texto de lote.
     _guiaCompraActual = await getCompraById(compraId)
     const lotesExistentes = await getLotes()
     _guiaLotesPorItem = {}
@@ -1712,30 +2632,42 @@ window.onSeleccionarCompraGuia = async function () {
     _guiaZonasNombre = {}
     for (const z of _guiaZonasCache) _guiaZonasNombre[z.id] = `${z.almacenNombre} — ${z.nombre}`
 
+    // Lo ya recibido en OTRAS guías (no anuladas) de esta misma compra: la
+    // recepción arranca prellenada con lo PENDIENTE, no con el total
+    // comprado de nuevo — si no, cada guía parcial adicional invitaría a
+    // recibir el pedido entero otra vez por error.
+    const recibidoPorDetalle = await _getCantidadesRecibidasPorDetalle()
+
     _guiaLineas = (detalles || []).map(d => {
       const marcaDefault = itemsMap[d.item_id]?.marca_id || null
+      const comprado = parseFloat(d.cantidad) || 0
+      const yaRecibido = parseFloat((recibidoPorDetalle.get(d.id) || 0).toFixed(4))
+      const pendiente = parseFloat(Math.max(0, comprado - yaRecibido).toFixed(4))
       return {
         detalle_compra_id: d.id,
         item_id:            d.item_id,
         nombre:              itemsMap[d.item_id]?.nombre || `Item #${d.item_id}`,
         unidad_medida:       d.unidad_medida,
-        cantidad_comprada:   parseFloat(d.cantidad) || 0,
+        cantidad_comprada:   comprado,
+        ya_recibido:         yaRecibido,
         unidades_compradas: parseFloat(d.unidades) || null,
         precio_unitario:     parseFloat(d.precio_unitario) || 0,
         marca_default_id:    marcaDefault,
         // Una línea comprada puede recibirse en 1 o más lotes/zonas distintos
-        // (ej: 1000kg llegan repartidos en 2 lotes). Se arranca con 1
-        // recepción precargada con la cantidad y N° de unidades comprados
-        // (si hay más de una recepción, el usuario debe repartir el N° de
-        // unidades entre ellas manualmente).
+        // (ej: 1000kg llegan repartidos en 2 lotes), y también en más de una
+        // guía si la entrega llega incompleta. Se arranca con 1 recepción
+        // precargada con lo PENDIENTE (si hay más de una recepción, el
+        // usuario debe repartir el N° de unidades entre ellas manualmente).
         recepciones: [
           {
-            cantidad: parseFloat(d.cantidad) || 0,
+            cantidad: pendiente,
             numero_lote: '',
             marca_id: marcaDefault,
             codigo_partida: '', // texto libre y opcional: agrupa lotes de esta misma guía (no es Partida Arancelaria)
             ubicacion_id: '',
-            cantidad_unidades: parseFloat(d.unidades) || null
+            cantidad_unidades: null,
+            es_peso_variable: false,
+            bultos: []   // packing list: peso individual por bulto cuando es_peso_variable=true
           }
         ]
       }
@@ -1768,15 +2700,37 @@ function _sincronizarRecepcionesGuiaDesdeDOM() {
       if (codigoPartida) r.codigo_partida = codigoPartida.value?.trim() || ''
       if (zona)    r.ubicacion_id = parseInt(zona.value || 0) || null
       if (pesoVar) r.es_peso_variable = !!pesoVar.checked
+      if (r.es_peso_variable && Array.isArray(r.bultos)) {
+        r.bultos.forEach((b, bIdx) => {
+          const inp = document.getElementById(`gc-${idx}-${subIdx}-bulto-${bIdx}`)
+          if (inp) b.peso = parseFloat(inp.value || 0) || null
+        })
+      }
     })
   })
+}
+
+/** Una recepción "vacía" = el usuario no la tocó (o borró lo que traía
+ * precargado) porque ese producto de la factura NO llegó en ESTA guía —
+ * normal en una importación/entrega parcial (ej. factura con 2 artículos,
+ * llega solo 1 primero). Se omite en silencio en vez de bloquear el guardado
+ * con "Cantidad recibida inválida": el producto queda pendiente para una
+ * guía posterior, igual que si nunca se hubiera agregado esa fila. Solo si
+ * el usuario alcanzó a llenar ALGÚN otro campo (lote, marca, zona, unidades)
+ * pero dejó la cantidad en 0 se sigue tratando como error real, para no
+ * tragarse un dato a medio llenar por accidente. */
+function _esRecepcionVaciaGuia(r) {
+  const cantidadVacia = !r.cantidad || r.cantidad <= 0
+  const restoVacio = !r.numero_lote && !r.marca_id && !r.ubicacion_id && !r.cantidad_unidades &&
+    !(Array.isArray(r.bultos) && r.bultos.some(b => (parseFloat(b.peso) || 0) > 0))
+  return cantidadVacia && restoVacio
 }
 
 window.agregarRecepcionGuia = function (idx) {
   _sincronizarRecepcionesGuiaDesdeDOM()
   const l = _guiaLineas[idx]
   if (!l) return
-  l.recepciones.push({ cantidad: 0, numero_lote: '', marca_id: l.marca_default_id, codigo_partida: '', ubicacion_id: '', cantidad_unidades: null, es_peso_variable: false })
+  l.recepciones.push({ cantidad: 0, numero_lote: '', marca_id: l.marca_default_id, codigo_partida: '', ubicacion_id: '', cantidad_unidades: null, es_peso_variable: false, bultos: [] })
   _renderTablaDetalleGuia()
 }
 
@@ -1786,7 +2740,7 @@ window.quitarRecepcionGuia = function (idx, subIdx) {
   if (!l) return
   l.recepciones.splice(subIdx, 1)
   if (l.recepciones.length === 0) {
-    l.recepciones.push({ cantidad: l.cantidad_comprada, numero_lote: '', marca_id: l.marca_default_id, codigo_partida: '', ubicacion_id: '', cantidad_unidades: l.unidades_compradas, es_peso_variable: false })
+    l.recepciones.push({ cantidad: l.cantidad_comprada, numero_lote: '', marca_id: l.marca_default_id, codigo_partida: '', ubicacion_id: '', cantidad_unidades: l.unidades_compradas, es_peso_variable: false, bultos: [] })
   }
   _renderTablaDetalleGuia()
 }
@@ -1864,7 +2818,14 @@ function _renderTablaDetalleGuia() {
   let html = ''
   _guiaLineas.forEach((l, idx) => {
     const totalRecibido = l.recepciones.reduce((s, r) => s + (parseFloat(r.cantidad) || 0), 0)
-    const colorTotal = Math.abs(totalRecibido - l.cantidad_comprada) < 0.0001 ? 'var(--color-success)' : 'var(--color-warning)'
+    // Verde cuando esta guía completa exactamente lo PENDIENTE (comprado
+    // menos lo ya recibido en otras guías) — no lo comprado total, que ya no
+    // es la referencia correcta a partir de la segunda guía parcial.
+    const pendienteLinea = parseFloat(Math.max(0, l.cantidad_comprada - (l.ya_recibido || 0)).toFixed(4))
+    const colorTotal = Math.abs(totalRecibido - pendienteLinea) < 0.0001 ? 'var(--color-success)' : 'var(--color-warning)'
+    const infoYaRecibido = l.ya_recibido > 0
+      ? `Ya recibido: ${formatQty(l.ya_recibido)} &nbsp;|&nbsp; Pendiente: ${formatQty(pendienteLinea)} &nbsp;|&nbsp; `
+      : ''
 
     html += `
       <div style="border:1px solid var(--border-color); border-radius:var(--radius-md); margin-bottom:14px; padding:12px;">
@@ -1872,6 +2833,7 @@ function _renderTablaDetalleGuia() {
           <strong>${l.nombre}</strong>
           <span style="font-size:0.85rem;">
             Comprado: ${formatQty(l.cantidad_comprada)} ${l.unidad_medida || ''} &nbsp;|&nbsp;
+            ${infoYaRecibido}
             Recibiendo: <strong style="color:${colorTotal};">${formatQty(totalRecibido)}</strong>
           </span>
         </div>
@@ -1903,7 +2865,7 @@ function _renderTablaDetalleGuia() {
           <thead>
             <tr>
               ${l.recepciones.length > 1 ? `<th><input type="checkbox" id="gsel-${idx}-all" title="Seleccionar todas" onchange="window.toggleSeleccionTodasGuia(${idx}, this.checked)"></th>` : ''}
-              <th>Cantidad (${l.unidad_medida || 'KG'}) *</th><th>N° de Unidades</th>
+              <th>Cantidad (${l.unidad_medida || 'KG'}) *</th><th title="Obligatorio salvo cuando 'Peso Variable' está marcado (ahí se calcula solo del packing list). Sin esto el lote no puede calcular su peso por unidad.">N° de Unidades *</th>
               <th title="Marca el peso por unidad como aproximado (no exacto). Se usa al vender para saber si pedir unidades exactas o dejarlas estimadas.">Peso Variable</th>
               <th>N° de Lote *</th><th>Marca *</th>
               <th>Partida <span style="font-weight:400; color:var(--text-secondary);" title="Código que agrupa varios lotes de esta misma guía (ej. varios lotes 'LT.26027-01, -02, -03...' comparten la partida 'LT.26027'). Opcional.">(opcional)</span></th>
@@ -1912,12 +2874,15 @@ function _renderTablaDetalleGuia() {
           </thead>
           <tbody>
     `
+    const colspanBultos = l.recepciones.length > 1 ? 8 : 7
     l.recepciones.forEach((r, subIdx) => {
+      const soloLecturaCantidad = r.es_peso_variable ? 'readonly style="width:100px; background:var(--bg-secondary);" title="Se calcula solo del detalle de bultos de abajo"' : 'style="width:100px;"'
+      const soloLecturaUnidades = r.es_peso_variable ? 'readonly style="width:90px; background:var(--bg-secondary);" title="Se calcula solo del detalle de bultos de abajo"' : 'style="width:90px;"'
       html += `
         <tr>
           ${l.recepciones.length > 1 ? `<td><input type="checkbox" id="gc-${idx}-${subIdx}-sel"></td>` : ''}
-          <td><input type="number" id="gc-${idx}-${subIdx}-cantidad" value="${r.cantidad}" step="0.01" min="0" style="width:100px;"></td>
-          <td><input type="number" id="gc-${idx}-${subIdx}-unidades" value="${r.cantidad_unidades ?? ''}" placeholder="Ej: 10" step="1" min="0" style="width:90px;"></td>
+          <td><input type="number" id="gc-${idx}-${subIdx}-cantidad" value="${r.cantidad}" step="0.01" min="0" ${soloLecturaCantidad}></td>
+          <td><input type="number" id="gc-${idx}-${subIdx}-unidades" value="${r.cantidad_unidades ?? ''}" placeholder="Ej: 10" step="1" min="0" ${soloLecturaUnidades}></td>
           <td style="text-align:center;"><input type="checkbox" id="gc-${idx}-${subIdx}-pesovariable" ${r.es_peso_variable ? 'checked' : ''}></td>
           <td>
             <input type="text" id="gc-${idx}-${subIdx}-lote" value="${r.numero_lote}" placeholder="Nuevo o existente..."
@@ -1934,6 +2899,35 @@ function _renderTablaDetalleGuia() {
           <td>${l.recepciones.length > 1 ? `<button type="button" class="btn btn-small btn-danger" onclick="window.quitarRecepcionGuia(${idx}, ${subIdx})">✕</button>` : ''}</td>
         </tr>
       `
+      if (r.es_peso_variable) {
+        // Packing list de esta recepción: peso individual por bulto/caja.
+        // cantidad y cantidad_unidades de arriba se recalculan solos desde
+        // esta lista (ver _sincronizarCantidadDesdeBultos) — nunca se
+        // escriben a mano cuando el producto es peso variable.
+        if (!Array.isArray(r.bultos) || r.bultos.length === 0) r.bultos = [{ peso: null }]
+        const sumaBultos = r.bultos.reduce((s, b) => s + (parseFloat(b.peso) || 0), 0)
+        html += `
+        <tr>
+          <td colspan="${colspanBultos}" style="background:var(--bg-secondary); padding:10px 14px;">
+            <div style="font-size:0.78rem; color:var(--text-secondary); margin-bottom:6px;">
+              📦 Packing list — peso por bulto (${l.unidad_medida || 'KG'}). Total:
+              <strong id="gc-${idx}-${subIdx}-bultostotal">${sumaBultos.toFixed(2)}</strong>
+              en <strong>${r.bultos.length}</strong> bulto(s).
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:8px;">
+              ${r.bultos.map((b, bIdx) => `
+                <div style="display:flex; align-items:center; gap:4px;">
+                  <input type="number" id="gc-${idx}-${subIdx}-bulto-${bIdx}" value="${b.peso ?? ''}"
+                         placeholder="Bulto ${bIdx + 1}" step="0.01" min="0" style="width:90px;">
+                  ${r.bultos.length > 1 ? `<button type="button" class="btn btn-small btn-danger" onclick="window.quitarBultoGuia(${idx},${subIdx},${bIdx})">✕</button>` : ''}
+                </div>
+              `).join('')}
+            </div>
+            <button type="button" class="btn btn-small btn-secondary" style="margin-top:8px;" onclick="window.agregarBultoGuia(${idx},${subIdx})">+ Agregar bulto</button>
+          </td>
+        </tr>
+        `
+      }
     })
     html += `
           </tbody>
@@ -1993,8 +2987,20 @@ function _renderTablaDetalleGuia() {
       if (zona && r.ubicacion_id) zona.value = r.ubicacion_id
       if (pesoVar) pesoVar.checked = !!r.es_peso_variable
 
-      cant?.addEventListener('input', () => { r.cantidad = parseFloat(cant.value || 0); _actualizarTotalesRecepcionGuia() })
-      cantUnid?.addEventListener('input', () => { r.cantidad_unidades = parseFloat(cantUnid.value || 0) || null; _actualizarTotalesRecepcionGuia() })
+      // Mismo estándar de buscador con filtrado en vivo que Ventas y
+      // Traslado Interno de Inventario — estos selects se recrean enteros en
+      // cada render (container.innerHTML = html arriba), así que se vuelven
+      // a envolver cada vez sobre el <select> nuevo.
+      if (marca) { convertirEnBuscador(marca, { placeholder: 'Escribe la marca...', sinResultados: 'Sin marcas' }); refrescarBuscador(marca) }
+      if (zona)  { convertirEnBuscador(zona,  { placeholder: 'Escribe el almacén o zona...', sinResultados: 'Sin zonas' }); refrescarBuscador(zona) }
+
+      // Cuando es peso variable, cantidad/unidades son de solo lectura
+      // (se calculan del packing list de abajo) — no se les pone listener
+      // de edición manual.
+      if (!r.es_peso_variable) {
+        cant?.addEventListener('input', () => { r.cantidad = parseFloat(cant.value || 0); _actualizarTotalesRecepcionGuia() })
+        cantUnid?.addEventListener('input', () => { r.cantidad_unidades = parseFloat(cantUnid.value || 0) || null; _actualizarTotalesRecepcionGuia() })
+      }
       lote?.addEventListener('input', () => {
         r.numero_lote = lote.value?.trim() || ''
         _avisarLoteExistente(idx, subIdx, l, r)
@@ -2002,9 +3008,67 @@ function _renderTablaDetalleGuia() {
       })
       _avisarLoteExistente(idx, subIdx, l, r)
       codigoPartida?.addEventListener('input', () => { r.codigo_partida = codigoPartida.value?.trim() || '' })
-      pesoVar?.addEventListener('change', () => { r.es_peso_variable = !!pesoVar.checked })
+      pesoVar?.addEventListener('change', () => {
+        r.es_peso_variable = !!pesoVar.checked
+        if (r.es_peso_variable && (!Array.isArray(r.bultos) || r.bultos.length === 0)) r.bultos = [{ peso: null }]
+        _renderTablaDetalleGuia()
+      })
+
+      // Packing list: un input por bulto, cada uno recalcula cantidad/unidades.
+      if (r.es_peso_variable && Array.isArray(r.bultos)) {
+        r.bultos.forEach((b, bIdx) => {
+          const bultoInp = document.getElementById(`gc-${idx}-${subIdx}-bulto-${bIdx}`)
+          bultoInp?.addEventListener('input', () => {
+            b.peso = parseFloat(bultoInp.value || 0) || null
+            _sincronizarCantidadDesdeBultos(idx, subIdx)
+          })
+        })
+      }
     })
   })
+}
+
+/**
+ * Recalcula r.cantidad (suma de pesos) y r.cantidad_unidades (conteo de
+ * bultos con peso > 0) desde el packing list, y refleja el resultado en los
+ * inputs de solo-lectura de Cantidad/N° de Unidades sin re-renderizar toda
+ * la tabla (evita perder el foco del input de peso que se está tecleando).
+ */
+function _sincronizarCantidadDesdeBultos(idx, subIdx) {
+  const l = _guiaLineas[idx]
+  const r = l?.recepciones?.[subIdx]
+  if (!r || !Array.isArray(r.bultos)) return
+
+  const bultosConPeso = r.bultos.filter(b => (parseFloat(b.peso) || 0) > 0)
+  r.cantidad = parseFloat(bultosConPeso.reduce((s, b) => s + (parseFloat(b.peso) || 0), 0).toFixed(4))
+  r.cantidad_unidades = bultosConPeso.length
+
+  const cant = document.getElementById(`gc-${idx}-${subIdx}-cantidad`)
+  const cantUnid = document.getElementById(`gc-${idx}-${subIdx}-unidades`)
+  const total = document.getElementById(`gc-${idx}-${subIdx}-bultostotal`)
+  if (cant) cant.value = r.cantidad
+  if (cantUnid) cantUnid.value = r.cantidad_unidades
+  if (total) total.textContent = r.cantidad.toFixed(2)
+  _actualizarTotalesRecepcionGuia()
+}
+
+window.agregarBultoGuia = function (idx, subIdx) {
+  _sincronizarRecepcionesGuiaDesdeDOM()
+  const r = _guiaLineas[idx]?.recepciones?.[subIdx]
+  if (!r) return
+  if (!Array.isArray(r.bultos)) r.bultos = []
+  r.bultos.push({ peso: null })
+  _renderTablaDetalleGuia()
+}
+
+window.quitarBultoGuia = function (idx, subIdx, bultoIdx) {
+  _sincronizarRecepcionesGuiaDesdeDOM()
+  const r = _guiaLineas[idx]?.recepciones?.[subIdx]
+  if (!r || !Array.isArray(r.bultos)) return
+  r.bultos.splice(bultoIdx, 1)
+  if (r.bultos.length === 0) r.bultos.push({ peso: null })
+  _sincronizarCantidadDesdeBultos(idx, subIdx)
+  _renderTablaDetalleGuia()
 }
 
 // Actualiza en vivo el "Recibiendo: X" de cada línea sin re-renderizar toda
@@ -2041,10 +3105,217 @@ function _actualizarTotalesRecepcionGuia() {
 }
 
 window.cerrarModalNuevaGuia = function () {
+  // Si ya eligió una compra o escribió algo, cerrar sin avisar perdería el
+  // trabajo (compra seleccionada + lote/marca/zona por línea ya tipeados).
+  const compraId     = document.getElementById('ngCompra')?.value
+  const numeroGuia    = document.getElementById('ngNumeroGuia')?.value?.trim()
+  const observaciones = document.getElementById('ngObservaciones')?.value?.trim()
+  const hayEdicion = !!compraId || !!numeroGuia || !!observaciones
+  if (hayEdicion && !confirm('Vas a perder los datos ingresados en esta guía. ¿Cerrar de todas formas?')) return
+  _guiaIngresoEditId = null
   window.closeModal('modal-nueva-guia')
 }
 
+/**
+ * Aplica una lista de recepciones YA VALIDADAS a una guía de ingreso: crea o
+ * suma lotes (promedio ponderado si el lote ya existía), actualiza
+ * stock_ubicaciones, inserta el movimiento de entrada en Kardex, registra
+ * bultos si aplica (peso variable), y crea la línea en
+ * detalle_guias_ingreso_compra. Reusado por window.guardarGuiaIngresoCompra
+ * (guía nueva) y window.guardarEdicionGuiaIngreso (revertir + reaplicar).
+ * @returns {number} totalValorGuia — para el asiento de valuación de inventario.
+ */
+async function _aplicarRecepcionesAGuiaIngreso(guia, compra, compraId, recepcionesValidadas, user, fechaGuia, numeroGuia) {
+  // Ubicación virtual "Partners/Vendors": origen de TODO ingreso por
+  // compra en el Kardex (el proveedor es externo, no una zona real de
+  // tu almacén). Se resuelve una sola vez para toda la guía.
+  const vendorsZona = await getUbicacionVendors()
+  let totalValorGuia = 0
+
+  for (const l of recepcionesValidadas) {
+    // Peso por unidad = cantidad total (peso/medida) / N° de unidades
+    // físicas (bultos/cajas). cantidad_unidades es OPCIONAL y NUNCA debe
+    // igualarse a cantidad — son dos dimensiones distintas (antes se
+    // confundían y el "peso por unidad" quedaba mal calculado).
+    const pesoPorUnidad = l.cantidadUnidades && l.cantidadUnidades > 0
+      ? parseFloat((l.cantidad / l.cantidadUnidades).toFixed(4))
+      : null
+
+    // costo_unitario SIEMPRE en soles: l.precio_unitario viene en la
+    // moneda original de la compra (detalle_compras.precio_unitario), se
+    // convierte aquí con el tipo_cambio de la compra (PEN => tipo_cambio=1,
+    // no cambia nada).
+    const monedaCompra = compra?.currency || 'PEN'
+    const tipoCambioCompra = parseFloat(compra?.tipo_cambio) || 1
+    const costoOriginal = parseFloat(l.precio_unitario) || 0
+    const costoPen = parseFloat((costoOriginal * tipoCambioCompra).toFixed(4))
+
+    // ¿El N° de lote ya existe para este producto? Si el usuario lo eligió
+    // del datalist (o lo escribió igual), se SUMA al lote existente en vez
+    // de crear un duplicado. `l.loteExistenteId` lo resolvió la validación
+    // previa, que ya preguntó qué hacer si los costos no coincidían.
+    let lote = null
+    let cantidadResultante = l.cantidad
+    let costoFinalLote = costoPen
+
+    if (l.loteExistenteId) {
+      const existente = await getLoteById(l.loteExistenteId)
+      if (!existente) throw new Error(`El lote ${l.numeroLote} ya no existe`)
+
+      const cantPrevia = parseFloat(existente.cantidad) || 0
+      const unidPrevias = parseFloat(existente.cantidad_unidades) || 0
+      cantidadResultante = parseFloat((cantPrevia + l.cantidad).toFixed(4))
+      const unidadesResultantes = parseFloat((unidPrevias + (l.cantidadUnidades || 0)).toFixed(4))
+
+      // Costo: si el usuario aceptó fusionar con costos distintos, se
+      // recalcula como promedio ponderado sobre la cantidad total. Si los
+      // costos coincidían, el promedio da exactamente el mismo número.
+      const costoPrevio = parseFloat(existente.costo_unitario) || 0
+      costoFinalLote = cantidadResultante > 0
+        ? parseFloat((((cantPrevia * costoPrevio) + (l.cantidad * costoPen)) / cantidadResultante).toFixed(4))
+        : costoPen
+
+      await updateLote(existente.id, {
+        cantidad:          cantidadResultante,
+        cantidad_unidades: unidadesResultantes,
+        costo_unitario:    costoFinalLote,
+        // El peso por unidad se recalcula sobre el acumulado, no se pisa
+        // con el de esta recepción sola.
+        peso_por_unidad:   unidadesResultantes > 0
+          ? parseFloat((cantidadResultante / unidadesResultantes).toFixed(4))
+          : existente.peso_por_unidad
+      })
+      lote = { ...existente, id: existente.id }
+    } else {
+      lote = await addLote({
+        item_id:            l.item_id,
+        proveedor_id:       compra?.contact_id || null,
+        numero_lote:        l.numeroLote,
+        numero_factura:     compra?.numero || null,
+        codigo_partida:     l.codigoPartida,
+        marca_id:           l.marcaId,
+        costo_unitario:     costoPen,
+        moneda:             monedaCompra,
+        tipo_cambio:         tipoCambioCompra,
+        costo_unit_original: costoOriginal,
+        costo_estado:       'definitivo',
+        cantidad:           l.cantidad,
+        unidad_medida:      l.unidadMedida,
+        // lotes.cantidad_unidades es NOT NULL DEFAULT 0: pasar `null`
+        // explícito pisa el DEFAULT y Postgres rechaza el insert (23502).
+        // l.cantidadUnidades sigue en null más arriba para no confundir
+        // "0 unidades" con "no se ingresó" en los cálculos de peso_por_unidad.
+        cantidad_unidades:  l.cantidadUnidades || 0,
+        peso_por_unidad:    pesoPorUnidad,
+        es_peso_variable:   l.esPesoVariable,
+        ubicacion_id:       l.ubicacionId,
+        fecha_ingreso:      fechaGuia,
+        compra_id:          compraId,
+        guia_id:            guia.id,
+        created_by:         user.db_id
+      })
+    }
+
+    if (lote?.id) {
+      // stock_ubicaciones: si el lote ya tenía stock en ESA zona, se suma
+      // a esa fila; si entra a una zona nueva, se crea la fila. (Un mismo
+      // lote puede estar repartido en varias zonas.)
+      const filasZona = l.loteExistenteId ? await getStockUbicacionesByLote(lote.id) : []
+      const filaMisma = (filasZona || []).find(f => f.ubicacion_id === l.ubicacionId)
+      if (filaMisma) {
+        await updateStockUbicacion(filaMisma.id, {
+          cantidad:          parseFloat(((parseFloat(filaMisma.cantidad) || 0) + l.cantidad).toFixed(4)),
+          cantidad_unidades: parseFloat(((parseFloat(filaMisma.cantidad_unidades) || 0) + (l.cantidadUnidades || 0)).toFixed(4))
+        })
+      } else {
+        await addStockUbicacion({
+          lote_id:           lote.id,
+          ubicacion_id:      l.ubicacionId,
+          cantidad:          l.cantidad,
+          cantidad_unidades: l.cantidadUnidades || 0
+        })
+      }
+
+      // Kardex: entrada de Partners/Vendors (externo) a la zona real
+      // elegida. Saldo = la cantidad del lote recién creado (costeo por
+      // identificación específica: cada lote lleva su propio saldo).
+      const costoTotalLinea = parseFloat((l.cantidad * costoPen).toFixed(2))
+      totalValorGuia += costoTotalLinea
+      await addKardexMovimiento({
+        item_id:              l.item_id,
+        lote_id:               lote.id,
+        ubicacion_origen_id:   vendorsZona?.id || null,
+        ubicacion_destino_id:  l.ubicacionId,
+        fecha:                 fechaGuia,
+        tipo_movimiento:       'entrada',
+        concepto:              'Compra - ingreso a almacén',
+        documento_referencia:  numeroGuia,
+        cantidad_entrada:      l.cantidad,
+        cantidad_salida:       0,
+        cantidad_unidades_entrada: l.cantidadUnidades || 0,
+        cantidad_unidades_salida:  0,
+        costo_unitario:        costoPen,
+        valor_entrada:         costoTotalLinea,
+        valor_salida:          0,
+        moneda:                monedaCompra,
+        tipo_cambio:            tipoCambioCompra,
+        costo_unit_original:    costoOriginal,
+        // Saldo = cantidad ACUMULADA del lote tras esta entrada. Antes se
+        // escribía solo `l.cantidad`, así que al recibir sobre un lote ya
+        // existente el kardex mostraba un saldo menor al real.
+        saldo_cantidad:        cantidadResultante,
+        saldo_valor:           parseFloat((cantidadResultante * costoFinalLote).toFixed(2)),
+        saldo_unidades:        l.cantidadUnidades || 0,
+        compra_id:             compraId,
+        created_by:            user.db_id
+      })
+
+      // Packing list: un lote_bultos por caja/bolsa con su peso real. Con
+      // esto, lotes.cantidad/cantidad_unidades dejan de ser lo que se
+      // escribió a mano arriba y pasan a ser la suma/conteo real de los
+      // bultos (recalcularLoteDesdeBultos pisa lo que puso addLote/updateLote).
+      if (l.esPesoVariable && Array.isArray(l.bultos) && l.bultos.length > 0) {
+        const pesosValidos = l.bultos
+          .map(b => parseFloat(b.peso) || 0)
+          .filter(p => p > 0)
+        for (const peso of pesosValidos) {
+          await addLoteBulto({
+            lote_id:        lote.id,
+            peso,
+            unidad_medida:  l.unidadMedida,
+            ubicacion_id:   l.ubicacionId,
+            estado:         'disponible',
+            guia_ingreso_id: guia.id,
+            fecha_ingreso:  fechaGuia,
+            created_by:     user.db_id
+          })
+        }
+        if (pesosValidos.length > 0) await recalcularLoteDesdeBultos(lote.id)
+      }
+    }
+
+    await addDetalleGuiaIngresoCompra({
+      guia_id:             guia.id,
+      detalle_compra_id:   l.detalle_compra_id,
+      item_id:             l.item_id,
+      cantidad:            l.cantidad,
+      numero_lote:         l.numeroLote,
+      marca_id:            l.marcaId,
+      codigo_partida:      l.codigoPartida,
+      ubicacion_id:        l.ubicacionId,
+      lote_id:             lote?.id || null
+    })
+  }
+
+  return totalValorGuia
+}
+
 window.guardarGuiaIngresoCompra = async function () {
+  // Modo edición: el mismo botón/modal se reusa para "Editar Guía de
+  // Ingreso" (window.editarGuiaIngreso la puso en este modo) — se delega a
+  // la ruta de revertir + reaplicar en vez de crear una guía nueva.
+  if (_guiaIngresoEditId) { await _guardarEdicionGuiaIngreso(); return }
+
   const btn = document.getElementById('btnGuardarGuiaIngresoCompra')
   if (btn?.disabled) return
   if (btn) { btn.disabled = true; btn.textContent = 'Guardando...' }
@@ -2069,10 +3340,22 @@ window.guardarGuiaIngresoCompra = async function () {
     const recepcionesValidadas = []
     for (const l of _guiaLineas) {
       for (const r of l.recepciones) {
+        // Entrega parcial: este producto de la factura simplemente no llegó
+        // en ESTA guía — se omite sin error (ver _esRecepcionVaciaGuia).
+        if (_esRecepcionVaciaGuia(r)) continue
         if (!r.cantidad || r.cantidad <= 0) { showToast(`Cantidad recibida inválida para "${l.nombre}"`, 'warning'); return }
         if (!r.numero_lote)                 { showToast(`Falta el N° de Lote de "${l.nombre}"`, 'warning'); return }
         if (!r.marca_id)                    { showToast(`Falta la Marca de "${l.nombre}"`, 'warning'); return }
         if (!r.ubicacion_id)                { showToast(`Falta el Almacén/Zona de "${l.nombre}"`, 'warning'); return }
+        // N° de Unidades obligatorio cuando NO es peso variable: sin esto,
+        // peso_por_unidad queda null y el lote no puede sugerir unidades al
+        // vender (bug recurrente de 13 lotes corregido el 05/09/2026 vía
+        // backfill — esta validación evita que se repita). Cuando SÍ es peso
+        // variable, cantidad_unidades se calcula solo del packing list.
+        if (!r.es_peso_variable && (!r.cantidad_unidades || r.cantidad_unidades <= 0)) {
+          showToast(`Falta el N° de Unidades (bultos/cajas) de "${l.nombre}"`, 'warning')
+          return
+        }
 
         recepcionesValidadas.push({
           detalle_compra_id: l.detalle_compra_id,
@@ -2087,9 +3370,15 @@ window.guardarGuiaIngresoCompra = async function () {
           codigoPartida:      (r.codigo_partida || '').trim() || null, // opcional: agrupa lotes de esta guía
           ubicacionId:        r.ubicacion_id,
           esPesoVariable:     !!r.es_peso_variable,
+          bultos:             r.es_peso_variable ? (r.bultos || []) : null,  // packing list, solo si es_peso_variable
           loteExistenteId:    null   // lo resuelve el bloque de abajo
         })
       }
+    }
+
+    if (recepcionesValidadas.length === 0) {
+      showToast('Ingresa la cantidad recibida de al menos un producto', 'warning')
+      return
     }
 
     const compra = await getCompraById(compraId)
@@ -2099,7 +3388,10 @@ window.guardarGuiaIngresoCompra = async function () {
     // hay que preguntar y una respuesta negativa cancela toda la guía.
     const conflictosCosto = []
     for (const rec of recepcionesValidadas) {
-      const existente = _buscarLoteExistente(rec.item_id, rec.numeroLote)
+      // Compara solo contra lotes de ESTA MISMA compra — identificación
+      // específica por adquisición: un mismo texto de lote en otra factura
+      // nunca entra aquí, se crea como fila nueva más abajo (addLote).
+      const existente = _buscarLoteExistente(rec.item_id, rec.numeroLote, compraId)
       if (!existente) continue
 
       rec.loteExistenteId = existente.id
@@ -2112,21 +3404,21 @@ window.guardarGuiaIngresoCompra = async function () {
     }
 
     if (conflictosCosto.length > 0) {
-      // El costeo es por identificación específica: cada lote lleva su propio
-      // costo. Fusionar dos ingresos de costo distinto bajo el mismo N° de
-      // lote obliga a promediar, y eso ya no es identificación específica.
-      // Por eso se pregunta en vez de decidir por el usuario.
+      // A esta altura ya es SIEMPRE la misma compra_id (identificación
+      // específica por adquisición se resolvió arriba, en _buscarLoteExistente).
+      // Si aun así el costo no coincide, es una corrección real dentro de la
+      // misma factura (ej. precio_unitario tipeado distinto entre líneas de
+      // una misma guía) — ahí sí tiene sentido preguntar si promediar.
       const detalle = conflictosCosto.map(c =>
         `• ${c.rec.nombreProducto} — lote ${c.rec.numeroLote}\n` +
-        `    existente: ${(parseFloat(c.existente.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} ${c.existente.unidad_medida || 'KG'} a S/ ${c.costoExistente.toFixed(4)}\n` +
-        `    ingresando: ${c.rec.cantidad.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${c.rec.unidadMedida} a S/ ${c.costoNuevo.toFixed(4)}`
+        `    ya registrado en esta factura: ${(parseFloat(c.existente.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} ${c.existente.unidad_medida || 'KG'} a S/ ${c.costoExistente.toFixed(4)}\n` +
+        `    ingresando ahora: ${c.rec.cantidad.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${c.rec.unidadMedida} a S/ ${c.costoNuevo.toFixed(4)}`
       ).join('\n\n')
 
       const fusionar = confirm(
-        `⚠ ${conflictosCosto.length} lote(s) ya existen pero con OTRO costo unitario:\n\n${detalle}\n\n` +
-        `Aceptar = SUMAR al lote existente recalculando su costo como promedio ponderado.\n` +
-        `Cancelar = no guardar (podrás cambiar el N° de lote para mantenerlos separados,\n` +
-        `que es lo correcto si son ingresos de costos distintos).`
+        `⚠ ${conflictosCosto.length} lote(s) de ESTA MISMA factura ya existían con OTRO costo unitario:\n\n${detalle}\n\n` +
+        `Aceptar = SUMAR al lote existente recalculando su costo como promedio ponderado (correcto si es una corrección de precio dentro de la misma factura).\n` +
+        `Cancelar = no guardar (revisa el precio unitario o el N° de lote antes de reintentar).`
       )
       if (!fusionar) {
         showToast('Guía no guardada: cambia el N° de lote para separar los ingresos de distinto costo', 'warning')
@@ -2144,159 +3436,7 @@ window.guardarGuiaIngresoCompra = async function () {
 
     if (!guia?.id) { showToast('No se pudo registrar la guía de remisión', 'danger'); return }
 
-    // Ubicación virtual "Partners/Vendors": origen de TODO ingreso por
-    // compra en el Kardex (el proveedor es externo, no una zona real de
-    // tu almacén). Se resuelve una sola vez para toda la guía.
-    const vendorsZona = await getUbicacionVendors()
-    let totalValorGuia = 0
-
-    for (const l of recepcionesValidadas) {
-      // Peso por unidad = cantidad total (peso/medida) / N° de unidades
-      // físicas (bultos/cajas). cantidad_unidades es OPCIONAL y NUNCA debe
-      // igualarse a cantidad — son dos dimensiones distintas (antes se
-      // confundían y el "peso por unidad" quedaba mal calculado).
-      const pesoPorUnidad = l.cantidadUnidades && l.cantidadUnidades > 0
-        ? parseFloat((l.cantidad / l.cantidadUnidades).toFixed(4))
-        : null
-
-      // costo_unitario SIEMPRE en soles: l.precio_unitario viene en la
-      // moneda original de la compra (detalle_compras.precio_unitario), se
-      // convierte aquí con el tipo_cambio de la compra (PEN => tipo_cambio=1,
-      // no cambia nada).
-      const monedaCompra = compra?.currency || 'PEN'
-      const tipoCambioCompra = parseFloat(compra?.tipo_cambio) || 1
-      const costoOriginal = parseFloat(l.precio_unitario) || 0
-      const costoPen = parseFloat((costoOriginal * tipoCambioCompra).toFixed(4))
-
-      // ¿El N° de lote ya existe para este producto? Si el usuario lo eligió
-      // del datalist (o lo escribió igual), se SUMA al lote existente en vez
-      // de crear un duplicado. `l.loteExistenteId` lo resolvió la validación
-      // previa, que ya preguntó qué hacer si los costos no coincidían.
-      let lote = null
-      let cantidadResultante = l.cantidad
-      let costoFinalLote = costoPen
-
-      if (l.loteExistenteId) {
-        const existente = await getLoteById(l.loteExistenteId)
-        if (!existente) throw new Error(`El lote ${l.numeroLote} ya no existe`)
-
-        const cantPrevia = parseFloat(existente.cantidad) || 0
-        const unidPrevias = parseFloat(existente.cantidad_unidades) || 0
-        cantidadResultante = parseFloat((cantPrevia + l.cantidad).toFixed(4))
-        const unidadesResultantes = parseFloat((unidPrevias + (l.cantidadUnidades || 0)).toFixed(4))
-
-        // Costo: si el usuario aceptó fusionar con costos distintos, se
-        // recalcula como promedio ponderado sobre la cantidad total. Si los
-        // costos coincidían, el promedio da exactamente el mismo número.
-        const costoPrevio = parseFloat(existente.costo_unitario) || 0
-        costoFinalLote = cantidadResultante > 0
-          ? parseFloat((((cantPrevia * costoPrevio) + (l.cantidad * costoPen)) / cantidadResultante).toFixed(4))
-          : costoPen
-
-        await updateLote(existente.id, {
-          cantidad:          cantidadResultante,
-          cantidad_unidades: unidadesResultantes,
-          costo_unitario:    costoFinalLote,
-          // El peso por unidad se recalcula sobre el acumulado, no se pisa
-          // con el de esta recepción sola.
-          peso_por_unidad:   unidadesResultantes > 0
-            ? parseFloat((cantidadResultante / unidadesResultantes).toFixed(4))
-            : existente.peso_por_unidad
-        })
-        lote = { ...existente, id: existente.id }
-      } else {
-        lote = await addLote({
-          item_id:            l.item_id,
-          proveedor_id:       compra?.contact_id || null,
-          numero_lote:        l.numeroLote,
-          numero_factura:     compra?.numero || null,
-          codigo_partida:     l.codigoPartida,
-          marca_id:           l.marcaId,
-          costo_unitario:     costoPen,
-          moneda:             monedaCompra,
-          tipo_cambio:         tipoCambioCompra,
-          costo_unit_original: costoOriginal,
-          costo_estado:       'definitivo',
-          cantidad:           l.cantidad,
-          unidad_medida:      l.unidadMedida,
-          cantidad_unidades:  l.cantidadUnidades,
-          peso_por_unidad:    pesoPorUnidad,
-          es_peso_variable:   l.esPesoVariable,
-          ubicacion_id:       l.ubicacionId,
-          fecha_ingreso:      fechaGuia,
-          compra_id:          compraId,
-          guia_id:            guia.id,
-          created_by:         user.db_id
-        })
-      }
-
-      if (lote?.id) {
-        // stock_ubicaciones: si el lote ya tenía stock en ESA zona, se suma
-        // a esa fila; si entra a una zona nueva, se crea la fila. (Un mismo
-        // lote puede estar repartido en varias zonas.)
-        const filasZona = l.loteExistenteId ? await getStockUbicacionesByLote(lote.id) : []
-        const filaMisma = (filasZona || []).find(f => f.ubicacion_id === l.ubicacionId)
-        if (filaMisma) {
-          await updateStockUbicacion(filaMisma.id, {
-            cantidad:          parseFloat(((parseFloat(filaMisma.cantidad) || 0) + l.cantidad).toFixed(4)),
-            cantidad_unidades: parseFloat(((parseFloat(filaMisma.cantidad_unidades) || 0) + (l.cantidadUnidades || 0)).toFixed(4))
-          })
-        } else {
-          await addStockUbicacion({
-            lote_id:           lote.id,
-            ubicacion_id:      l.ubicacionId,
-            cantidad:          l.cantidad,
-            cantidad_unidades: l.cantidadUnidades || 0
-          })
-        }
-
-        // Kardex: entrada de Partners/Vendors (externo) a la zona real
-        // elegida. Saldo = la cantidad del lote recién creado (costeo por
-        // identificación específica: cada lote lleva su propio saldo).
-        const costoTotalLinea = parseFloat((l.cantidad * costoPen).toFixed(2))
-        totalValorGuia += costoTotalLinea
-        await addKardexMovimiento({
-          item_id:              l.item_id,
-          lote_id:               lote.id,
-          ubicacion_origen_id:   vendorsZona?.id || null,
-          ubicacion_destino_id:  l.ubicacionId,
-          fecha:                 fechaGuia,
-          tipo_movimiento:       'entrada',
-          concepto:              'Compra - ingreso a almacén',
-          documento_referencia:  numeroGuia,
-          cantidad_entrada:      l.cantidad,
-          cantidad_salida:       0,
-          cantidad_unidades_entrada: l.cantidadUnidades || 0,
-          cantidad_unidades_salida:  0,
-          costo_unitario:        costoPen,
-          valor_entrada:         costoTotalLinea,
-          valor_salida:          0,
-          moneda:                monedaCompra,
-          tipo_cambio:            tipoCambioCompra,
-          costo_unit_original:    costoOriginal,
-          // Saldo = cantidad ACUMULADA del lote tras esta entrada. Antes se
-          // escribía solo `l.cantidad`, así que al recibir sobre un lote ya
-          // existente el kardex mostraba un saldo menor al real.
-          saldo_cantidad:        cantidadResultante,
-          saldo_valor:           parseFloat((cantidadResultante * costoFinalLote).toFixed(2)),
-          saldo_unidades:        l.cantidadUnidades || 0,
-          compra_id:             compraId,
-          created_by:            user.db_id
-        })
-      }
-
-      await addDetalleGuiaIngresoCompra({
-        guia_id:             guia.id,
-        detalle_compra_id:   l.detalle_compra_id,
-        item_id:             l.item_id,
-        cantidad:            l.cantidad,
-        numero_lote:         l.numeroLote,
-        marca_id:            l.marcaId,
-        codigo_partida:      l.codigoPartida,
-        ubicacion_id:        l.ubicacionId,
-        lote_id:             lote?.id || null
-      })
-    }
+    const totalValorGuia = await _aplicarRecepcionesAGuiaIngreso(guia, compra, compraId, recepcionesValidadas, user, fechaGuia, numeroGuia)
 
     // Asiento de valuación de inventario (20111 debe / 611511 haber).
     // Detrás del mismo candado de desarrollo que la factura de compra.
@@ -2317,7 +3457,10 @@ window.guardarGuiaIngresoCompra = async function () {
     }
 
     showToast('Guía registrada: stock actualizado en Inventario', 'success')
-    window.cerrarModalNuevaGuia()
+    // Cierre directo (no cerrarModalNuevaGuia): la guía ya se guardó, así
+    // que preguntar "¿vas a perder los datos?" aquí sería un falso aviso
+    // sobre datos que ya están en la base.
+    window.closeModal('modal-nueva-guia')
     _guiaLineas = []
     // Lotes, stock y kardex cambiaron: sin esto los reportes y el kardex
     // seguirían mostrando las cifras cacheadas de antes de la guía.
@@ -2444,6 +3587,13 @@ function _resetModalProveedor() {
   if (titulo) titulo.textContent = 'Nuevo Proveedor'
   const form = document.getElementById('formNewProveedor')
   if (form) form.reset()
+  // form.reset() no toca los spans "Datos SUNAT" (no son campos de formulario).
+  ;['provEstadoSunat', 'provCondicionSunat', 'provBuenContribuyenteSunat', 'provAgenteRetencionSunat'].forEach(id => {
+    const el = document.getElementById(id)
+    if (el) { pintarBadgeSunat(el, '—', 'secondary'); delete el.dataset.value }
+  })
+  const tipoDocEl = document.getElementById('provTipoDocumento')
+  if (tipoDocEl) tipoDocEl.dispatchEvent(new Event('change'))
 }
 
 window.abrirModalNuevoProveedor = function () {
@@ -2464,6 +3614,26 @@ window.editarProveedor = async function (provId) {
     document.getElementById('provDireccion').value = p.direccion || ''
     document.getElementById('provDistrito').value = p.distrito || ''
     document.getElementById('provPais').value = p.pais || ''
+    const chkRet = document.getElementById('provSujetoRetencion')
+    if (chkRet) chkRet.checked = !!p.sujeto_retencion
+
+    // Datos SUNAT guardados de una consulta previa (si el contacto es RUC).
+    pintarBadgeSunat(document.getElementById('provEstadoSunat'), p.estado || '—', p.estado === 'ACTIVO' ? 'success' : (p.estado ? 'danger' : 'secondary'))
+    pintarBadgeSunat(document.getElementById('provCondicionSunat'), p.condicion || '—', p.condicion === 'HABIDO' ? 'success' : (p.condicion ? 'danger' : 'secondary'))
+    const bcEl = document.getElementById('provBuenContribuyenteSunat')
+    if (bcEl) {
+      pintarBadgeSunat(bcEl, p.es_buen_contribuyente === true ? 'Sí' : (p.es_buen_contribuyente === false ? 'No' : '—'), p.es_buen_contribuyente === true ? 'success' : 'secondary')
+      bcEl.dataset.value = p.es_buen_contribuyente === null || p.es_buen_contribuyente === undefined ? '' : String(p.es_buen_contribuyente)
+    }
+    const arEl = document.getElementById('provAgenteRetencionSunat')
+    if (arEl) {
+      pintarBadgeSunat(arEl, p.es_agente_retencion_sunat === true ? 'Sí' : (p.es_agente_retencion_sunat === false ? 'No' : '—'), p.es_agente_retencion_sunat === true ? 'success' : 'secondary')
+      arEl.dataset.value = p.es_agente_retencion_sunat === null || p.es_agente_retencion_sunat === undefined ? '' : String(p.es_agente_retencion_sunat)
+    }
+    // Dispara el toggle de visibilidad del bloque "Datos SUNAT" según el
+    // tipo_documento recién cargado (attachConsultaDocumento escucha 'change').
+    const tipoDocEl = document.getElementById('provTipoDocumento')
+    if (tipoDocEl) tipoDocEl.dispatchEvent(new Event('change'))
 
     _provEditandoId = provId
     const titulo = document.getElementById('modalProveedorTitle')
@@ -2509,7 +3679,19 @@ window.guardarProveedor = async function () {
       numero: document.getElementById('provPhone')?.value || '',
       direccion: document.getElementById('provDireccion')?.value || '',
       distrito: document.getElementById('provDistrito')?.value || '',
-      pais: document.getElementById('provPais')?.value || ''
+      pais: document.getElementById('provPais')?.value || '',
+      sujeto_retencion: !!document.getElementById('provSujetoRetencion')?.checked,
+      // Datos SUNAT (llenados por "Consultar" si Tipo Documento = RUC).
+      estado:    document.getElementById('provEstadoSunat')?.textContent === '—' ? null : (document.getElementById('provEstadoSunat')?.textContent || null),
+      condicion: document.getElementById('provCondicionSunat')?.textContent === '—' ? null : (document.getElementById('provCondicionSunat')?.textContent || null),
+      es_buen_contribuyente: (() => {
+        const v = document.getElementById('provBuenContribuyenteSunat')?.dataset.value
+        return v === 'true' ? true : (v === 'false' ? false : null)
+      })(),
+      es_agente_retencion_sunat: (() => {
+        const v = document.getElementById('provAgenteRetencionSunat')?.dataset.value
+        return v === 'true' ? true : (v === 'false' ? false : null)
+      })()
     }
 
     let resultado
@@ -2566,8 +3748,8 @@ async function cargarProveedoresSelect() {
   try {
     const proveedores = await getSuppliers()
 
-    // Selects que deben listar proveedores: OC, compra directa de mercadería y compra de servicio/gasto
-    const ids = ['ocProveedor', 'cmProveedor', 'csProveedor']
+    // Selects que deben listar proveedores: OC y el modal unificado de Nueva Compra
+    const ids = ['ocProveedor', 'nqProveedor']
     ids.forEach(idSelect => {
       const select = document.getElementById(idSelect)
       if (!select) return
@@ -2941,13 +4123,14 @@ window.guardarLoteDesdeCompras = async function () {
     }
 
     // Columnas reales de lotes: item_id, cantidad (no product_id/stock/costo_destino).
-    // cantidad_unidades no se pide en este modal: queda null en vez de
-    // igualarse a cantidad (eran dos dimensiones distintas).
+    // cantidad_unidades no se pide en este modal. lotes.cantidad_unidades es
+    // NOT NULL DEFAULT 0, así que va 0 (no null: eso pisaría el DEFAULT y
+    // Postgres rechazaría el insert con 23502).
     await addLote({
       item_id:            productId,
       numero_lote:        numeroLote,
       cantidad:           cantidad,
-      cantidad_unidades:  null,
+      cantidad_unidades:  0,
       costo_unitario:     costoUnitario,
       moneda:             'PEN',
       tipo_cambio:         1,
@@ -2988,15 +4171,17 @@ window.guardarCompraServicio = async function () {
     const user = await getCurrentUser()
     if (!user) { showToast('Usuario no autenticado', 'danger'); return }
 
-    const contactId    = parseInt(document.getElementById('csProveedor')?.value || 0)
-    const moneda       = document.getElementById('csMoneda')?.value || 'PEN'
+    const contactId    = parseInt(document.getElementById('nqProveedor')?.value || 0)
+    const moneda       = document.getElementById('nqMoneda')?.value || 'PEN'
     // PEN siempre es 1; en USD se toma el valor del campo (manual o el que
     // dejó el botón "↻ Auto"). Antes se guardaba 1 fijo aunque la compra
     // fuera en dólares, así que el costo en soles quedaba mal.
     const tipoCambioServicio = moneda === 'USD'
-      ? (parseFloat(document.getElementById('csTipoCambio')?.value || 0) || 1)
+      ? (parseFloat(document.getElementById('nqTipoCambio')?.value || 0) || 1)
       : 1
-    const fecha        = document.getElementById('csFecha')?.value
+    const fecha          = document.getElementById('nqFecha')?.value
+    const nroComprobante = document.getElementById('nqNumeroComprobante')?.value?.trim() || null
+    const tipoComprobante = document.getElementById('nqTipoComprobante')?.value || '01'
     const descripcion  = document.getElementById('csDescripcion')?.value?.trim()
     const cuentaSelect = document.getElementById('csCuentaGasto')
     const cuentaCodigo = cuentaSelect?.value || ''
@@ -3021,15 +4206,21 @@ window.guardarCompraServicio = async function () {
     const total    = parseFloat(document.getElementById('csTotal')?.value || 0)
 
     const prov = await getContactById(contactId)
-    const referencia = `SERV-${Date.now()}`
+    // Si el usuario dejó el N° de Comprobante (campo ahora compartido con
+    // Mercadería/Anticipo), se usa igual que allá; si no, se mantiene el
+    // comportamiento histórico de un correlativo interno.
+    const referencia = nroComprobante || `SERV-${Date.now()}`
+    const [serieServ, numeroServ] = (nroComprobante && nroComprobante.includes('-'))
+      ? nroComprobante.split(/-(.+)/)
+      : [null, referencia]
 
     // compras no tiene columna de cuenta contable: se deja trazado en la descripción.
     const compra = await addCompra({
       referencia,
       tipo_referencia:        'compra_directa',
-      tipo_comprobante:       '01',
-      serie:                  null,
-      numero:                 referencia,
+      tipo_comprobante:       tipoComprobante,
+      serie:                  serieServ,
+      numero:                 numeroServ,
       periodo_mes:            parseInt(fecha.slice(5, 7)),
       periodo_ano:            parseInt(fecha.slice(0, 4)),
       fecha_emision:          fecha,
@@ -3058,7 +4249,8 @@ window.guardarCompraServicio = async function () {
       showToast('No se pudo registrar la compra de servicio (¿referencia duplicada?)', 'danger')
       return
     }
-    await _crearCuentaPagarSiFactura(compra, user.db_id)
+    const cxpServicio = await _crearCuentaPagarSiFactura(compra, user.db_id)
+    await _aplicarAnticiposSeleccionados(compra, cxpServicio, user.db_id)
 
     await addCompraDetalle({
       compra_id:       compra.id,
@@ -3087,14 +4279,295 @@ window.guardarCompraServicio = async function () {
     }
 
     showToast('Compra de servicio registrada exitosamente', 'success')
-    window.closeModal('modal-nueva-compra-servicio')
-    const form = document.getElementById('formNewCompraServicio')
+    window.closeModal('modal-nueva-compra-mercaderia')
+    const form = document.getElementById('formNewCompraMercaderia')
     if (form) form.reset()
     await renderCompras(true)
   } catch (error) {
     console.error('Error en guardarCompraServicio:', error)
     showToast('Error: ' + error.message, 'danger')
   }
+}
+
+/** Espejo de calcularCompraServicio, para la sección Anticipo del modal unificado. */
+window.calcularCompraAnticipo = function () {
+  const subtotal = parseFloat(document.getElementById('atSubtotal')?.value || 0)
+  const igvPct   = parseFloat(document.getElementById('atIGV')?.value || 0)
+  const igvMonto = parseFloat((subtotal * igvPct / 100).toFixed(2))
+  const total    = parseFloat((subtotal + igvMonto).toFixed(2))
+
+  const igvEl   = document.getElementById('atIGVMonto')
+  const totalEl = document.getElementById('atTotal')
+  if (igvEl)   igvEl.value   = igvMonto.toFixed(2)
+  if (totalEl) totalEl.value = total.toFixed(2)
+}
+
+// ============================================================================
+// COMPRA — ANTICIPO A PROVEEDOR (Art. 5° Reglamento de Comprobantes de Pago:
+// el pago anticipado, total o parcial, obliga a emitir el comprobante ANTES
+// de que exista mercadería que recibir). Se registra como una compra más
+// (para el Registro de Compras/IGV/CxP de SUNAT), pero con tipo_compra=
+// 'anticipo' para que NUNCA aparezca en el selector de Nueva Guía de Ingreso
+// (ese selector solo lista tipo_compra='mercaderia' — ver
+// _cargarComprasSelectGuia) ni mueva stock. Más adelante se aplica contra la
+// factura real desde la sección "Anticipos disponibles" (ver
+// _cargarAnticiposDisponiblesProveedor / _aplicarAnticiposSeleccionados).
+// Decisión confirmada con Luis 2026-09-07 a partir del caso real BENJI
+// BILLION E.I.R.L. (factura FFFI-00000185, anticipo 100% Spun 20/1 RW).
+// ============================================================================
+
+window.guardarCompraAnticipo = async function () {
+  try {
+    const user = await getCurrentUser()
+    if (!user) { showToast('Usuario no autenticado', 'danger'); return }
+
+    const contactId  = parseInt(document.getElementById('nqProveedor')?.value || 0)
+    const moneda     = document.getElementById('nqMoneda')?.value || 'USD'
+    const tipoCambio = moneda === 'USD'
+      ? (parseFloat(document.getElementById('nqTipoCambio')?.value || 0) || 1)
+      : 1
+    const fecha           = document.getElementById('nqFecha')?.value
+    const nroComprobante  = document.getElementById('nqNumeroComprobante')?.value?.trim() || null
+    const tipoComprobante = document.getElementById('nqTipoComprobante')?.value || '01'
+    const descripcion     = document.getElementById('atDescripcion')?.value?.trim() || 'ANTICIPO'
+    const refPedido       = document.getElementById('atReferenciaPedido')?.value?.trim() || ''
+    const igvPct = parseFloat(document.getElementById('atIGV')?.value || 0)
+    const subtotal = parseFloat(document.getElementById('atSubtotal')?.value || 0)
+
+    if (!contactId) { showToast('Selecciona un proveedor', 'warning'); return }
+    if (!fecha)     { showToast('Ingresa la fecha', 'warning'); return }
+    if (moneda === 'USD' && tipoCambio <= 1) {
+      showToast('Ingresa el Tipo de Cambio para un anticipo en dólares (usa "↻ Auto" para traer el de la SBS)', 'warning')
+      return
+    }
+    if (!descripcion) { showToast('Ingresa la descripción del anticipo', 'warning'); return }
+    if (!subtotal || subtotal <= 0) { showToast('Ingresa un subtotal válido', 'warning'); return }
+
+    window.calcularCompraAnticipo()
+    const igvMonto = parseFloat(document.getElementById('atIGVMonto')?.value || 0)
+    const total    = parseFloat(document.getElementById('atTotal')?.value || 0)
+
+    const prov = await getContactById(contactId)
+    const referencia = nroComprobante || `ANT-${Date.now()}`
+    const [serieAnt, numeroAnt] = (nroComprobante && nroComprobante.includes('-'))
+      ? nroComprobante.split(/-(.+)/)
+      : [null, referencia]
+    const descripcionFinal = refPedido ? `${descripcion} [Pedido: ${refPedido}]` : descripcion
+
+    const compra = await addCompra({
+      referencia,
+      tipo_referencia:        'compra_directa',
+      tipo_comprobante:       tipoComprobante,
+      serie:                  serieAnt,
+      numero:                 numeroAnt,
+      periodo_mes:            parseInt(fecha.slice(5, 7)),
+      periodo_ano:            parseInt(fecha.slice(0, 4)),
+      fecha_emision:          fecha,
+      fecha_recepcion:        fecha,
+      contact_id:             contactId,
+      proveedor_ruc:          prov?.nro_documento || '-',
+      proveedor_nombre:       prov?.nombre || '-',
+      tipo_compra:            'anticipo',
+      descripcion:            descripcionFinal,
+      unidad_medida:          'UND',
+      cantidad:               1,
+      precio_unitario:        subtotal,
+      base_imponible_gravada: igvPct > 0 ? subtotal : 0,
+      monto_exonerado:        igvPct === 0 ? subtotal : 0,
+      igv_gravado:            igvMonto,
+      subtotal,
+      total,
+      currency:               moneda,
+      tipo_cambio:            tipoCambio,
+      estado_pago:            'pendiente',
+      asiento_id:             null,
+      created_by:             user.db_id
+    })
+
+    if (!compra?.id) {
+      showToast('No se pudo registrar el anticipo (¿referencia duplicada?)', 'danger')
+      return
+    }
+
+    // TODO CONTABILIDAD (detrás de ASIENTOS_AUTO_COMPRAS_ACTIVO cuando se
+    // active el módulo): Debe 281111 Anticipo de Mercadería (o 422112
+    // Anticipos a Proveedores ME si es en moneda extranjera) + 40111 IGV /
+    // Haber Bancos (si se pagó de inmediato, término CONTADO como en el caso
+    // BENJI) o 42111 Facturas por Pagar (si queda a crédito). Ver detalle
+    // completo en 55_anticipos_proveedor_cliente.sql. NO se genera CxP con
+    // cronograma de cuotas aquí (igual que Servicio): un anticipo se paga
+    // completo, no se financia en cuotas.
+    await _crearCuentaPagarSiFactura(compra, user.db_id)
+
+    await addCompraDetalle({
+      compra_id:       compra.id,
+      item_id:         null,
+      descripcion:     descripcionFinal,
+      unidad_medida:   'UND',
+      cantidad:        1,
+      precio_unitario: subtotal,
+      subtotal,
+      tipo_base:       igvPct > 0 ? 'gravada' : 'exonerada',
+      igv_porcentaje:  igvPct,
+      igv_monto:       igvMonto,
+      total_linea:     total
+    })
+
+    const archivoAnticipo = document.getElementById('atAdjunto')?.files?.[0]
+    if (archivoAnticipo) {
+      try {
+        await subirAdjuntoCompra(compra.id, archivoAnticipo)
+      } catch (errorAdjunto) {
+        console.error('Error subiendo adjunto del anticipo:', errorAdjunto)
+        showToast(errorAdjunto.message || 'Anticipo registrado, pero no se pudo subir el documento', 'warning')
+      }
+    }
+
+    showToast('Anticipo a proveedor registrado. Podrás aplicarlo al registrar la factura real de mercadería.', 'success')
+    window.closeModal('modal-nueva-compra-mercaderia')
+    const form = document.getElementById('formNewCompraMercaderia')
+    if (form) form.reset()
+    await renderCompras(true)
+  } catch (error) {
+    console.error('Error en guardarCompraAnticipo:', error)
+    showToast('Error: ' + error.message, 'danger')
+  }
+}
+
+// ============================================================================
+// APLICAR ANTICIPO A PROVEEDOR — al elegir proveedor en el modal de Nueva
+// Compra (tipos Mercadería/Servicio), se buscan sus facturas tipo_compra=
+// 'anticipo' con saldo sin aplicar y se ofrecen para descontar del total de
+// ESTA factura. La aplicación es un DESCUENTO APARTE en la CxP recién creada
+// (monto_anticipo_aplicado, mismo patrón que monto_notas_credito) — nunca
+// una línea dentro de detalle_compras, para no ensuciar la tabla de
+// productos real que usan Guía de Ingreso/kardex/reportes.
+// ============================================================================
+
+let _anticiposDisponiblesCache = []
+
+/** Recalcula saldo disponible = compras.total del anticipo - lo ya aplicado en compras_anticipos_aplicados. */
+async function _obtenerAnticiposDisponibles(contactId) {
+  if (!contactId) return []
+  const [compras, aplicaciones] = await Promise.all([getCompras(), getTodosComprasAnticiposAplicados()])
+  const aplicadoPorAnticipo = new Map()
+  for (const a of (aplicaciones || [])) {
+    aplicadoPorAnticipo.set(a.compra_anticipo_id, (aplicadoPorAnticipo.get(a.compra_anticipo_id) || 0) + (parseFloat(a.monto_aplicado) || 0))
+  }
+  return (compras || [])
+    .filter(c => c.contact_id === contactId && c.tipo_compra === 'anticipo' && !estaAnulado(c))
+    .map(c => {
+      const aplicado = aplicadoPorAnticipo.get(c.id) || 0
+      const saldo = parseFloat((parseFloat(c.total || 0) - aplicado).toFixed(2))
+      return { id: c.id, referencia: c.serie ? `${c.serie}-${c.numero}` : (c.numero || c.referencia), fecha: c.fecha_emision, moneda: c.currency || 'PEN', saldo }
+    })
+    .filter(a => a.saldo > 0.01)
+    .sort((a, b) => new Date(a.fecha || 0) - new Date(b.fecha || 0))
+}
+
+/** Total actual del formulario, según el Tipo de Compra elegido — sirve para prellenar el monto a aplicar. */
+function _totalActualFormularioCompra() {
+  if (_tipoCompraActual === 'servicio') return parseFloat(document.getElementById('csTotal')?.value || 0) || 0
+  if (_tipoCompraActual === 'anticipo') return 0 // no aplica: un anticipo no recibe otro anticipo
+  return _detallesCompraEnCreacion.reduce((s, d) => s + (parseFloat(d.total) || 0), 0)
+}
+
+async function _cargarAnticiposDisponiblesProveedor() {
+  const wrap = document.getElementById('nqAnticiposDisponibles')
+  const lista = document.getElementById('nqAnticiposLista')
+  if (!wrap || !lista) return
+
+  const contactId = parseInt(document.getElementById('nqProveedor')?.value || 0)
+  if (!contactId || _tipoCompraActual === 'anticipo') {
+    wrap.style.display = 'none'
+    lista.innerHTML = ''
+    _anticiposDisponiblesCache = []
+    return
+  }
+
+  try {
+    _anticiposDisponiblesCache = await _obtenerAnticiposDisponibles(contactId)
+  } catch (e) {
+    console.error('Error cargando anticipos disponibles:', e)
+    _anticiposDisponiblesCache = []
+  }
+
+  if (_anticiposDisponiblesCache.length === 0) {
+    wrap.style.display = 'none'
+    lista.innerHTML = ''
+    return
+  }
+
+  wrap.style.display = ''
+  lista.innerHTML = _anticiposDisponiblesCache.map(a => `
+    <div style="display:flex; align-items:center; gap:10px; padding:6px 8px; background:var(--bg-primary); border-radius:var(--radius-sm);">
+      <input type="checkbox" id="nqAntSel-${a.id}" onchange="window._toggleAnticipoAplicar(${a.id})">
+      <span style="flex:1; font-size:0.85rem;">Factura ${_escCompras(a.referencia || '')} — ${a.fecha || ''} · Saldo disponible: ${a.moneda} ${a.saldo.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+      <input type="number" id="nqAntMonto-${a.id}" style="width:110px;" step="0.01" min="0" max="${a.saldo}" value="${a.saldo.toFixed(2)}" disabled>
+    </div>
+  `).join('')
+}
+
+window._toggleAnticipoAplicar = function (anticipoId) {
+  const chk = document.getElementById(`nqAntSel-${anticipoId}`)
+  const input = document.getElementById(`nqAntMonto-${anticipoId}`)
+  if (!input) return
+  input.disabled = !chk?.checked
+  if (chk?.checked) {
+    const a = _anticiposDisponiblesCache.find(x => x.id === anticipoId)
+    const totalActual = _totalActualFormularioCompra()
+    if (a) input.value = Math.min(a.saldo, totalActual > 0 ? totalActual : a.saldo).toFixed(2)
+  }
+}
+
+/** Aplica los anticipos marcados en el modal contra la CxP recién creada de
+ * `compraDestino`. Se llama después de _crearCuentaPagarSiFactura en los 3
+ * flujos de guardado (Mercadería/Servicio; Anticipo nunca llama esto). */
+async function _aplicarAnticiposSeleccionados(compraDestino, cxpDestino, userId) {
+  if (!compraDestino?.id || !_anticiposDisponiblesCache.length) return
+
+  let totalAplicado = 0
+  for (const a of _anticiposDisponiblesCache) {
+    const chk = document.getElementById(`nqAntSel-${a.id}`)
+    if (!chk?.checked) continue
+    const monto = parseFloat(document.getElementById(`nqAntMonto-${a.id}`)?.value || 0)
+    if (!monto || monto <= 0) continue
+    if (monto > a.saldo + 0.01) {
+      showToast(`El monto a aplicar del anticipo ${a.referencia} supera su saldo disponible — se omitió`, 'warning')
+      continue
+    }
+
+    const guardado = await addCompraAnticipoAplicado({
+      compra_anticipo_id: a.id,
+      compra_destino_id:  compraDestino.id,
+      monto_aplicado:     monto,
+      moneda:             compraDestino.currency || 'PEN',
+      tipo_cambio:        parseFloat(compraDestino.tipo_cambio) || 1,
+      created_by:         userId
+    })
+    if (!guardado?.id) {
+      showToast(`No se pudo aplicar el anticipo ${a.referencia} — revísalo manualmente en Cuentas por Pagar`, 'warning')
+      continue
+    }
+    totalAplicado += monto
+  }
+
+  if (totalAplicado <= 0) return
+  if (!cxpDestino?.id) {
+    showToast('Anticipo(s) aplicado(s), pero esta compra no generó Cuenta por Pagar (no es factura/invoice) — revísalo manualmente', 'warning')
+    return
+  }
+
+  // TODO CONTABILIDAD (cuando se active el módulo): este es el momento de
+  // generar el asiento de reclasificación Debe 60/20 Mercaderías (o la
+  // cuenta de gasto de Servicio) / Haber 281111-422112 Anticipo, por
+  // `totalAplicado` — NO un asiento de "pago" nuevo, es solo mover el saldo
+  // de una cuenta transitoria a la definitiva. Ver 55_anticipos_proveedor_cliente.sql.
+  const nuevoAplicado = parseFloat((parseFloat(cxpDestino.monto_anticipo_aplicado || 0) + totalAplicado).toFixed(2))
+  const saldoRestante = parseFloat(cxpDestino.monto_total || 0) - parseFloat(cxpDestino.monto_pagado || 0) - parseFloat(cxpDestino.monto_notas_credito || 0) - nuevoAplicado
+  const nuevoEstado = saldoRestante <= 0.01 ? 'pagado' : (nuevoAplicado > 0 ? 'parcial' : 'pendiente')
+  await updateCuentaPagar(cxpDestino.id, { monto_anticipo_aplicado: nuevoAplicado, estado: nuevoEstado })
+  showToast(`Anticipo aplicado: -${(compraDestino.currency || 'PEN')} ${totalAplicado.toFixed(2)}`, 'success')
 }
 
 // ============================================================================
@@ -3181,13 +4654,19 @@ window.eliminarAdjuntoCompraActual = async function () {
 
 let _detallesCompraEnCreacion = []
 
-window.abrirModalNuevaCompraMercaderia = function () {
+// Tipo actualmente seleccionado en el modal unificado: 'mercaderia' | 'servicio' | 'anticipo'.
+let _tipoCompraActual = 'mercaderia'
+
+/** Punto de entrada único del botón "+ Nueva Compra" — reemplaza a los
+ * antiguos abrirModalNuevaCompraMercaderia/abrirModalCompraServicio, hoy
+ * fusionados en un solo modal con selector de Tipo (2026-09-07). */
+window.abrirModalNuevaCompra = function () {
   _detallesCompraEnCreacion = []
   const form = document.getElementById('formNewCompraMercaderia')
   if (form) form.reset()
-  const fechaEl = document.getElementById('cmFecha')
+  const fechaEl = document.getElementById('nqFecha')
   if (fechaEl) fechaEl.value = new Date().toISOString().split('T')[0]
-  const monedaEl = document.getElementById('cmMoneda')
+  const monedaEl = document.getElementById('nqMoneda')
   if (monedaEl) monedaEl.value = getModuloConfig('compras').monedaDefault || 'USD'
   // form.reset() devuelve el <select> a su opción `selected` del HTML y deja
   // el bloque del T.C. como estaba; hay que re-aplicar la regla a mano.
@@ -3195,7 +4674,48 @@ window.abrirModalNuevaCompraMercaderia = function () {
   _renderTablaDetalleCompra()
   _cronogramaCompraListo = false
   _prepararCronogramaCompra(true)
+  const atDesc = document.getElementById('atDescripcion')
+  if (atDesc) atDesc.value = 'ANTICIPO'
+  window.cambiarTipoCompra('mercaderia')
   window.openModal('modal-nueva-compra-mercaderia')
+}
+
+/** Alterna qué sección de detalle se ve dentro del modal unificado de Nueva
+ * Compra, según el Tipo elegido. Nunca se mezclan tipos en un mismo
+ * comprobante (decisión confirmada con Luis 2026-09-07). */
+window.cambiarTipoCompra = function (tipo) {
+  _tipoCompraActual = tipo
+
+  const cuerpos = { mercaderia: 'tcBodyMercaderia', servicio: 'tcBodyServicio', anticipo: 'tcBodyAnticipo' }
+  Object.entries(cuerpos).forEach(([t, id]) => {
+    const el = document.getElementById(id)
+    if (el) el.style.display = (t === tipo) ? '' : 'none'
+  })
+
+  const botones = { mercaderia: 'tcBtnMercaderia', servicio: 'tcBtnServicio', anticipo: 'tcBtnAnticipo' }
+  Object.entries(botones).forEach(([t, id]) => {
+    document.getElementById(id)?.classList.toggle('on', t === tipo)
+  })
+
+  // El cronograma de cuotas solo aplica a Mercadería (Servicio/Anticipo usan
+  // Crédito/Contado simple, igual que siempre tuvo Servicio). Los anticipos
+  // disponibles del proveedor no tienen sentido si esta MISMA compra es un
+  // anticipo (no se puede aplicar un anticipo a otro anticipo).
+  const cronoWrap = document.getElementById('nqCronogramaWrap')
+  if (cronoWrap) cronoWrap.style.display = (tipo === 'mercaderia') ? '' : 'none'
+
+  const titulo = { mercaderia: 'Nueva Compra (Mercadería)', servicio: 'Nueva Compra de Servicio/Gasto', anticipo: 'Nueva Compra — Anticipo a Proveedor' }
+  const tituloEl = document.getElementById('ncTituloModal')
+  if (tituloEl) tituloEl.textContent = titulo[tipo] || 'Nueva Compra'
+
+  _cargarAnticiposDisponiblesProveedor()
+}
+
+/** Despacha el guardado al flujo correcto según el Tipo de Compra elegido. */
+window.guardarCompraUnificada = function () {
+  if (_tipoCompraActual === 'servicio') return window.guardarCompraServicio()
+  if (_tipoCompraActual === 'anticipo') return window.guardarCompraAnticipo()
+  return window.guardarCompraMercaderia()
 }
 
 // ============================================================================
@@ -3205,14 +4725,16 @@ window.abrirModalNuevaCompraMercaderia = function () {
 let _cronogramaCompraListo = false
 
 window.onCambiarFechaCompra = function () {
-  const fecha = document.getElementById('cmFecha')?.value
+  const fecha = document.getElementById('nqFecha')?.value
   if (!fecha) return
   if (_cronogramaCompraListo) actualizarCronograma('compra-cronograma', { fechaEmision: fecha })
 }
 
-/** Se llama al elegir proveedor: precarga el término habitual de ESE proveedor. */
+/** Se llama al elegir proveedor: precarga el término habitual de ESE proveedor
+ * y refresca la lista de anticipos disponibles de ese mismo proveedor. */
 window.onCambiarProveedorCompra = function () {
   if (_cronogramaCompraListo) _prepararCronogramaCompra(true)
+  _cargarAnticiposDisponiblesProveedor()
 }
 
 /** Se llama al abrir el modal y cada vez que cambia el total de la compra. */
@@ -3221,13 +4743,13 @@ async function _prepararCronogramaCompra(forzarRender = false) {
   if (!cont) return
 
   const total = _detallesCompraEnCreacion.reduce((s, d) => s + (parseFloat(d.total) || 0), 0)
-  const fechaEmision = document.getElementById('cmFecha')?.value || new Date().toISOString().slice(0, 10)
+  const fechaEmision = document.getElementById('nqFecha')?.value || new Date().toISOString().slice(0, 10)
 
   if (!_cronogramaCompraListo || forzarRender) {
     // El término del proveedor solo PRECARGA el selector: la condición real
     // se negocia por operación, así que la compra guarda la suya y nunca se
     // reescribe la ficha del contacto desde aquí.
-    const contactId = parseInt(document.getElementById('cmProveedor')?.value || 0)
+    const contactId = parseInt(document.getElementById('nqProveedor')?.value || 0)
     const prov = contactId ? await getContactById(contactId) : null
 
     await renderEditorCronograma('compra-cronograma', {
@@ -3236,7 +4758,7 @@ async function _prepararCronogramaCompra(forzarRender = false) {
       onCambio: (crono) => {
         // La fecha de vencimiento del comprobante = última cuota.
         const ultima = crono?.cuotas?.[crono.cuotas.length - 1]
-        const fv = document.getElementById('cmFechaVencimiento')
+        const fv = document.getElementById('nqFechaVencimiento')
         if (fv && ultima) fv.value = ultima.fecha_vencimiento
       }
     })
@@ -3253,7 +4775,7 @@ function _refrescarCronogramaCompra() {
 
 window.abrirModalDetalleCompraMercaderia = async function () {
   try {
-    const proveedorId = document.getElementById('cmProveedor')?.value || ''
+    const proveedorId = document.getElementById('nqProveedor')?.value || ''
     if (!proveedorId) { showToast('Primero selecciona un proveedor', 'warning'); return }
 
     await cargarItemsSelectDetalle('newDetalleCompraProducto')
@@ -3271,16 +4793,39 @@ window.abrirModalDetalleCompraMercaderia = async function () {
   }
 }
 
+// Separado del cálculo porque lo usan tanto la vista previa en vivo
+// (calcularDetalleCompraMercaderia) como el guardado real
+// (crearDetalleCompraMercaderia) — antes cada uno repetía la fórmula, y al
+// agregar "18% incluido" hubiera sido fácil actualizar una y olvidar la otra.
+function _calcularMontosDetalleCompra(cantidad, precio, descuento, igvValor) {
+  const incluido = String(igvValor).endsWith('-inc')
+  const igvPct = parseFloat(igvValor) || 0
+
+  let bruto = cantidad * precio
+  if (descuento > 0) bruto -= bruto * (descuento / 100)
+
+  let subtotal, igvMonto, total
+  if (incluido && igvPct > 0) {
+    // El Precio Unitario ya trae el IGV adentro: se extrae, no se suma encima.
+    total = bruto
+    subtotal = bruto / (1 + igvPct / 100)
+    igvMonto = total - subtotal
+  } else {
+    subtotal = bruto
+    igvMonto = (subtotal * igvPct) / 100
+    total = subtotal + igvMonto
+  }
+
+  return { subtotal, igvMonto, total, igvPct }
+}
+
 window.calcularDetalleCompraMercaderia = function () {
   const cantidad  = parseFloat(document.getElementById('newDetalleCompraCantidad')?.value || 0)
   const precio    = parseFloat(document.getElementById('newDetalleCompraPrecio')?.value || 0)
   const descuento = parseFloat(document.getElementById('newDetalleCompraDescuento')?.value || 0)
-  const igvPct    = parseInt(document.getElementById('newDetalleCompraIGV')?.value || 18)
+  const igvValor  = document.getElementById('newDetalleCompraIGV')?.value || '18'
 
-  let subtotal = cantidad * precio
-  if (descuento > 0) subtotal -= subtotal * (descuento / 100)
-  const igvMonto = (subtotal * igvPct) / 100
-  const total = subtotal + igvMonto
+  const { subtotal, igvMonto, total } = _calcularMontosDetalleCompra(cantidad, precio, descuento, igvValor)
 
   document.getElementById('newDetalleCompraSubtotal').value = subtotal.toFixed(2)
   document.getElementById('newDetalleCompraIGVMonto').value = igvMonto.toFixed(2)
@@ -3297,15 +4842,12 @@ window.crearDetalleCompraMercaderia = function () {
     const unidad      = document.getElementById('newDetalleCompraUnidad')?.value || 'KG'
     const precio      = parseFloat(document.getElementById('newDetalleCompraPrecio')?.value || 0)
     const descuento   = parseFloat(document.getElementById('newDetalleCompraDescuento')?.value || 0)
-    const igvPct      = parseInt(document.getElementById('newDetalleCompraIGV')?.value || 18)
+    const igvValor    = document.getElementById('newDetalleCompraIGV')?.value || '18'
     const nroUnidades = parseFloat(document.getElementById('newDetalleCompraUnidades')?.value || 0) || null
 
     if (cantidad <= 0 || precio <= 0) { showToast('Cantidad y precio deben ser mayores a 0', 'warning'); return }
 
-    let subtotal = cantidad * precio
-    if (descuento > 0) subtotal -= subtotal * (descuento / 100)
-    const igvMonto = (subtotal * igvPct) / 100
-    const total = subtotal + igvMonto
+    const { subtotal, igvMonto, total, igvPct } = _calcularMontosDetalleCompra(cantidad, precio, descuento, igvValor)
 
     _detallesCompraEnCreacion.push({
       item_id:         itemId,
@@ -3397,14 +4939,14 @@ window.guardarCompraMercaderia = async function () {
     const user = await getCurrentUser()
     if (!user) { showToast('Usuario no autenticado', 'danger'); return }
 
-    const contactId      = parseInt(document.getElementById('cmProveedor')?.value || 0)
-    const moneda          = document.getElementById('cmMoneda')?.value || 'USD'
-    const fecha           = document.getElementById('cmFecha')?.value
-    const nroComprobante  = document.getElementById('cmNumeroComprobante')?.value?.trim() || null
+    const contactId      = parseInt(document.getElementById('nqProveedor')?.value || 0)
+    const moneda          = document.getElementById('nqMoneda')?.value || 'USD'
+    const fecha           = document.getElementById('nqFecha')?.value
+    const nroComprobante  = document.getElementById('nqNumeroComprobante')?.value?.trim() || null
     // PEN siempre es 1. En USD se usa el valor del campo (manual o el que
     // trajo el botón "↻ Auto" desde la SBS).
     const tipoCambio = moneda === 'USD'
-      ? (parseFloat(document.getElementById('cmTipoCambio')?.value || 0) || 1)
+      ? (parseFloat(document.getElementById('nqTipoCambio')?.value || 0) || 1)
       : 1
 
     if (!contactId) { showToast('Selecciona un proveedor', 'warning'); return }
@@ -3444,10 +4986,16 @@ window.guardarCompraMercaderia = async function () {
       return
     }
 
+    // Tipo de comprobante: '01' Factura nacional o '91' Comprobante de Pago
+    // No Domiciliado (invoice de proveedor extranjero, importaciones
+    // registradas directo aquí). Boleta no está entre las opciones: no da
+    // derecho a crédito fiscal de IGV, Compras no la acepta.
+    const tipoComprobanteC = document.getElementById('nqTipoComprobante')?.value || '01'
+
     const compra = await addCompra({
       referencia,
       tipo_referencia:        'compra_directa',
-      tipo_comprobante:       '01',
+      tipo_comprobante:       tipoComprobanteC,
       serie:                  serieC,
       numero:                 numeroC,
       periodo_mes:            parseInt(fecha.slice(5, 7)),
@@ -3479,10 +5027,17 @@ window.guardarCompraMercaderia = async function () {
       showToast('No se pudo registrar la compra (¿referencia duplicada?)', 'danger')
       return
     }
-    await _crearCuentaPagarSiFactura(compra, user.db_id, cronograma)
+    const cxpMercaderia = await _crearCuentaPagarSiFactura(compra, user.db_id, cronograma)
+    await _aplicarAnticiposSeleccionados(compra, cxpMercaderia, user.db_id)
 
     // Asiento contable de la factura (601111/40111C debe, 42111 haber).
     // Detrás del candado de desarrollo: ver config-asientos-auto.js.
+    // TODO CONTABILIDAD: si esta compra tuvo anticipo(s) aplicado(s) (ver
+    // _aplicarAnticiposSeleccionados arriba), el asiento de esta factura NO
+    // debe generar una CxP nueva por el monto ya cubierto por el anticipo —
+    // debe reclasificar 281111/422112 (anticipo) → 60/20 Mercaderías por el
+    // monto aplicado, y solo generar CxP real por el saldo restante (si
+    // queda alguno). Ver TODO detallado en 55_anticipos_proveedor_cliente.sql.
     if (ASIENTOS_AUTO_COMPRAS_ACTIVO) {
       try {
         await generarAsientoCompra(compra.id, user.db_id)
@@ -3827,7 +5382,7 @@ async function construirReporteCompras(panelId) {
         mes: nombreMes((c.fecha_emision || '').slice(0, 7)),
         fecha: c.fecha_emision || '',
         comprobante: `${c.tipo_comprobante || ''} ${c.serie || ''}-${c.numero || ''}`,
-        tipo_comprobante: c.tipo_comprobante === '01' ? 'Factura' : (c.tipo_comprobante === '03' ? 'Boleta' : (c.tipo_comprobante || 'Otro')),
+        tipo_comprobante: c.tipo_comprobante === '01' ? 'Factura' : (c.tipo_comprobante === '03' ? 'Boleta' : (c.tipo_comprobante === '91' ? 'Invoice (No Domiciliado)' : (c.tipo_comprobante || 'Otro'))),
         moneda: c.currency || c.moneda || 'PEN',
         estado_pago: c.estado_pago || 'pendiente',
         base: parseFloat(c.base_imponible_gravada || c.subtotal || 0) * sg,
@@ -4007,6 +5562,19 @@ window.anularCompra = async function (id) {
       bloqueos.push(`Tiene ${guias.length} guía(s) de ingreso activa(s) (${guias.map(g => g.numero_guia).join(', ')}). Anúlalas primero — son las que retiran el stock de Inventario.`)
     }
 
+    // --- NC de devolución con stock ya retirado por una Guía de Devolución:
+    // anular la NC sin revertir esa guía dejaría el stock afuera sin ninguna
+    // NC que lo respalde.
+    if (String(compra.tipo_comprobante) === TIPO_NC && compra.estado_devolucion && compra.estado_devolucion !== 'pendiente') {
+      const detalleNota = await getNotaCreditoCompraDetalleByNota(id)
+      const idsDetalle = new Set((detalleNota || []).map(d => d.id))
+      const todasLasGuiasDetalle = await getTodosDetalleGuiasDevolucionCompra()
+      const guiasIds = new Set((todasLasGuiasDetalle || []).filter(dg => idsDetalle.has(dg.nota_credito_compra_detalle_id)).map(dg => dg.guia_id))
+      if (guiasIds.size > 0) {
+        bloqueos.push(`Esta NC ya tiene ${guiasIds.size} Guía(s) de Devolución que retiraron stock (estado: ${compra.estado_devolucion}). Elimínalas primero en la pestaña Guía de Remisión — revierten el stock automáticamente.`)
+      }
+    }
+
     if (compra.asiento_id) {
       efectos.push('Se generará un asiento de reversión (el asiento original no se borra).')
     }
@@ -4150,7 +5718,13 @@ window.anularGuiaIngreso = async function (id) {
           const idsLotes = aRetirar.map(x => x.lote.id)
           const kardexCompra = await getKardexByCompra(guia.compra_id)
           for (const k of (kardexCompra || [])) {
-            if (idsLotes.includes(k.lote_id)) await deleteKardexMovimiento(k.id)
+            if (idsLotes.includes(k.lote_id)) {
+              const okKardex = await deleteKardexMovimiento(k.id)
+              if (!okKardex) {
+                const motivo = ultimoErrorDelete()
+                throw new Error(`No se pudo eliminar el movimiento de Kardex #${k.id}: ${motivo?.mensaje || 'motivo desconocido'}. Se detiene la anulación para no dejar el Kardex descuadrado.`)
+              }
+            }
           }
         }
 
@@ -4211,6 +5785,172 @@ function _invalidarCacheCompras() {
 window.abrirModalNotaCreditoCompra = function (compraId) { _abrirNotaCompra(compraId, TIPO_NC) }
 window.abrirModalNotaDebitoCompra  = function (compraId) { _abrirNotaCompra(compraId, TIPO_ND) }
 
+// ── Detalle por ítem dentro de la NC de compra (devolución al proveedor) ───
+// Catálogo 09 SUNAT (motivos de NC), mapeo confirmado con Luis:
+//   01/02 anulación total          -> sin detalle (importe = total, ya lo maneja notas.js)
+//   03 corrección de descripción   -> detalle opcional, solo informativo (no dispara guía)
+//   04 descuento GLOBAL            -> sin detalle por ítem (a propósito: es monto único, no por línea)
+//   05 descuento por ítem          -> detalle requerido, solo ajusta precio (NO mueve stock)
+//   06 devolución total            -> detalle requerido, SÍ dispara Guía de Devolución (mueve stock)
+//   07 devolución por ítem         -> detalle requerido, SÍ dispara Guía de Devolución (mueve stock)
+//   08 bonificación                -> detalle requerido, solo ajusta precio (NO mueve stock)
+//   09 disminución en el valor     -> detalle requerido, solo ajusta precio (NO mueve stock)
+//   10 otros conceptos             -> sin detalle forzado (catch-all)
+const MOTIVOS_NCC_CON_DETALLE  = ['03', '05', '06', '07', '08', '09']
+const MOTIVOS_NCC_REQUERIDO    = ['05', '06', '07', '08', '09']  // 03 es opcional
+const MOTIVOS_NCC_DEVOLUCION   = ['06', '07']                    // disparan Guía de Devolución
+
+let _ncCompraLineas = []        // lotes de la compra origen, candidatos a devolver
+let _ncCompraOrigenId = null
+
+/** Arma _ncCompraLineas a partir de los lotes de la compra que la NC referencia. Solo lotes que SIGUEN existiendo y con cantidad > 0 (lo demás ya se consumió/devolvió por completo). */
+async function _prepararDetalleNotaCompra(compraOrigenId) {
+  _ncCompraOrigenId = compraOrigenId
+  const lotes = await getLotesByCompraId(compraOrigenId)
+  const lineas = []
+  for (const l of (lotes || [])) {
+    if ((parseFloat(l.cantidad) || 0) <= 0) continue
+    const item = await getItemById(l.item_id)
+    lineas.push({
+      loteId: l.id, itemId: l.item_id,
+      nombre: item?.nombre || `Item #${l.item_id}`,
+      numeroLote: l.numero_lote,
+      unidadMedida: l.unidad_medida || item?.unidad_medida || 'UND',
+      cantidadDisponible: parseFloat(l.cantidad) || 0,
+      precioDefault: parseFloat(l.costo_unit_original ?? l.costo_unitario) || 0
+    })
+  }
+  _ncCompraLineas = lineas
+}
+
+/** HTML de la sección de detalle por ítem, inyectada en #nota-extra del modal genérico. */
+function _renderDetalleNotaCompra() {
+  if (_ncCompraLineas.length === 0) {
+    return `<div id="nccDetalle-bloque" style="display:none; margin-top:6px; padding:10px 12px; border-radius:var(--radius-md); background:var(--bg-secondary); font-size:0.82rem; color:var(--text-secondary);">
+      No quedan lotes disponibles de la compra origen para referenciar en el detalle (ya se consumieron o devolvieron por completo).
+    </div>`
+  }
+  const igvDefault = String(getModuloConfig('compras').igvDefault ?? 18)
+  const filas = _ncCompraLineas.map((l, idx) => `
+    <tr style="border-top:1px solid var(--border-color);">
+      <td style="text-align:center; width:36px; padding:8px 10px;"><input type="checkbox" id="nccDet-${idx}-chk" onchange="window.toggleLineaDetalleNotaCompra(${idx})"></td>
+      <td style="padding:8px 10px;">
+        <strong>${_escNcc(l.nombre)}</strong>
+        <div style="color:var(--text-secondary); font-size:0.78rem;">lote ${_escNcc(l.numeroLote)}</div>
+      </td>
+      <td style="text-align:right; white-space:nowrap; color:var(--text-secondary); font-size:0.85rem; padding:8px 10px;">${l.cantidadDisponible} ${_escNcc(l.unidadMedida)}</td>
+      <td style="width:100px; padding:8px 10px;">
+        <input type="number" id="nccDet-${idx}-cantidad" value="${l.cantidadDisponible}" step="0.01" min="0.01" max="${l.cantidadDisponible}" style="width:100%;" disabled oninput="window.onCambiarLineaDetalleNotaCompra(${idx})">
+      </td>
+      <td style="width:110px; padding:8px 10px;">
+        <input type="number" id="nccDet-${idx}-precio" value="${l.precioDefault}" step="0.0001" min="0" style="width:100%;" disabled oninput="window.onCambiarLineaDetalleNotaCompra(${idx})">
+      </td>
+      <td style="width:130px; padding:8px 10px;">
+        <select id="nccDet-${idx}-igv" style="width:100%;" disabled onchange="window.onCambiarLineaDetalleNotaCompra(${idx})">
+          <option value="18"${igvDefault === '18' ? ' selected' : ''}>18%</option>
+          <option value="18-inc" title="El precio unitario ya incluye el IGV.">18% (incluido)</option>
+          <option value="10"${igvDefault === '10' ? ' selected' : ''}>10%</option>
+          <option value="0"${igvDefault === '0' ? ' selected' : ''}>Exonerada</option>
+        </select>
+      </td>
+      <td style="text-align:right; padding:8px 10px; font-weight:600;" id="nccDet-${idx}-total">0.00</td>
+    </tr>`).join('')
+
+  return `
+    <div id="nccDetalle-bloque" style="display:none; margin-top:10px;">
+      <div id="nccDet-requerido-aviso" style="display:none; margin-bottom:10px; padding:10px 12px; border-radius:var(--radius-md); background:rgba(245,158,11,.14); color:var(--color-warning); font-size:0.82rem;">
+        Este motivo exige detalle por ítem: selecciona al menos una línea.
+      </div>
+      <strong style="display:block; margin-bottom:4px; font-size:0.9rem;">📦 Detalle de la Nota de Crédito</strong>
+      <small style="display:block; margin-bottom:10px; color:var(--text-secondary); line-height:1.4;">
+        Solo puedes referenciar lotes de la compra que esta NC modifica. Si el motivo es Devolución (06/07), al emitir la NC quedará pendiente de "Guía de Devolución" en el tab Guía de Remisión — la mercadería sale del stock recién cuando emitas esa guía, no aquí.
+        Los importes de la nota (arriba) se calculan solos sumando lo que marques aquí.
+      </small>
+      <div style="border:1px solid var(--border-color); border-radius:var(--radius-md); overflow:hidden; overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse; margin:0;">
+          <thead>
+            <tr style="background:var(--bg-secondary);">
+              <th style="width:36px;"></th>
+              <th style="text-align:left; padding:8px 10px; font-size:0.78rem;">Producto / Lote</th>
+              <th style="text-align:right; padding:8px 10px; font-size:0.78rem;">Disponible</th>
+              <th style="text-align:left; padding:8px 10px; font-size:0.78rem;">Cantidad</th>
+              <th style="text-align:left; padding:8px 10px; font-size:0.78rem;">Precio unit.</th>
+              <th style="text-align:left; padding:8px 10px; font-size:0.78rem;">Tipo IGV</th>
+              <th style="text-align:right; padding:8px 10px; font-size:0.78rem;">Total línea</th>
+            </tr>
+          </thead>
+          <tbody>${filas}</tbody>
+          <tfoot>
+            <tr style="border-top:2px solid var(--border-color); background:var(--bg-secondary); font-weight:600;">
+              <td colspan="6" style="text-align:right; padding:8px 10px;">Total seleccionado:</td>
+              <td style="text-align:right; padding:8px 10px;" id="nccDet-total-general">0.00</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>`
+}
+
+function _escNcc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])) }
+
+window.toggleLineaDetalleNotaCompra = function (idx) {
+  const chk = document.getElementById(`nccDet-${idx}-chk`)
+  const inpCant = document.getElementById(`nccDet-${idx}-cantidad`)
+  const inpPrecio = document.getElementById(`nccDet-${idx}-precio`)
+  const selIgv = document.getElementById(`nccDet-${idx}-igv`)
+  if (inpCant)  inpCant.disabled = !chk?.checked
+  if (inpPrecio) inpPrecio.disabled = !chk?.checked
+  if (selIgv)   selIgv.disabled = !chk?.checked
+  window.onCambiarLineaDetalleNotaCompra(idx)
+}
+
+/** Recalcula el total de una línea del detalle y, con eso, los 3 campos de importes de la nota (arriba, en modo lectura mientras el detalle está activo). */
+window.onCambiarLineaDetalleNotaCompra = function (idx) {
+  const chk = document.getElementById(`nccDet-${idx}-chk`)
+  const totalCell = document.getElementById(`nccDet-${idx}-total`)
+  if (!chk?.checked) {
+    if (totalCell) totalCell.textContent = '0.00'
+    _recalcularTotalesDetalleNotaCompra()
+    return
+  }
+  const cantidad = parseFloat(document.getElementById(`nccDet-${idx}-cantidad`)?.value || 0)
+  const precio   = parseFloat(document.getElementById(`nccDet-${idx}-precio`)?.value || 0)
+  const igvValor = document.getElementById(`nccDet-${idx}-igv`)?.value || '18'
+  const { total } = _calcularMontosDetalleCompra(cantidad, precio, 0, igvValor)
+  if (totalCell) totalCell.textContent = total.toFixed(2)
+  _recalcularTotalesDetalleNotaCompra()
+}
+
+/** Suma todas las líneas marcadas y escribe el resultado en los 3 campos de importes de la nota vía el hook que expone notas.js. */
+function _recalcularTotalesDetalleNotaCompra() {
+  let base = 0, igv = 0, importe = 0
+  _ncCompraLineas.forEach((l, idx) => {
+    const chk = document.getElementById(`nccDet-${idx}-chk`)
+    if (!chk?.checked) return
+    const cantidad = parseFloat(document.getElementById(`nccDet-${idx}-cantidad`)?.value || 0)
+    const precio   = parseFloat(document.getElementById(`nccDet-${idx}-precio`)?.value || 0)
+    const igvValor = document.getElementById(`nccDet-${idx}-igv`)?.value || '18'
+    const r = _calcularMontosDetalleCompra(cantidad, precio, 0, igvValor)
+    base += r.subtotal; igv += r.igvMonto; importe += r.total
+  })
+  const totalGeneral = document.getElementById('nccDet-total-general')
+  if (totalGeneral) totalGeneral.textContent = importe.toFixed(2)
+  window.setTotalesNotaDesdeDetalle?.({ base, igv, importe })
+}
+
+/** Lee del DOM lo que el usuario marcó/tipeó. Solo líneas con checkbox marcado y cantidad > 0. */
+function _leerDetalleNotaCompra() {
+  const seleccion = []
+  _ncCompraLineas.forEach((l, idx) => {
+    const chk = document.getElementById(`nccDet-${idx}-chk`)
+    if (!chk?.checked) return
+    const cantidad = parseFloat(document.getElementById(`nccDet-${idx}-cantidad`)?.value || 0)
+    const precio   = parseFloat(document.getElementById(`nccDet-${idx}-precio`)?.value || 0)
+    if (cantidad > 0) seleccion.push({ ...l, cantidad: Math.min(cantidad, l.cantidadDisponible), precioUnitario: precio })
+  })
+  return seleccion
+}
+
 async function _abrirNotaCompra(compraId, tipoNota) {
   try {
     const compra = await getCompraById(compraId)
@@ -4245,9 +5985,19 @@ async function _abrirNotaCompra(compraId, tipoNota) {
     const saldo = cxp
       ? parseFloat(cxp.monto_total || 0) + parseFloat(cxp.monto_notas_debito || 0)
         - parseFloat(cxp.monto_notas_credito || 0) - parseFloat(cxp.monto_pagado || 0)
+        - parseFloat(cxp.monto_anticipo_aplicado || 0)
       : totalOrigen
 
     const cfg = getModuloConfig('compras')
+
+    // Detalle por ítem: solo tiene sentido en una NC sobre una compra de
+    // mercadería (una ND nunca referencia lotes; un ajuste de servicio tampoco).
+    if (tipoNota === TIPO_NC && compra.tipo_compra === 'mercaderia') {
+      await _prepararDetalleNotaCompra(compraId)
+    } else {
+      _ncCompraLineas = []
+      _ncCompraOrigenId = null
+    }
 
     await abrirModalNota({
       tipoNota, contexto: 'compra',
@@ -4259,6 +6009,31 @@ async function _abrirNotaCompra(compraId, tipoNota) {
       serieSugerida: '',
       numeroSugerido: '',
       bloqueos,
+      anchoAmplio: tipoNota === TIPO_NC && _ncCompraLineas.length > 0,
+      renderExtra: () => _renderDetalleNotaCompra(),
+      onMotivoCambio: (motivo) => {
+        const bloque = document.getElementById('nccDetalle-bloque')
+        const conDetalle = MOTIVOS_NCC_CON_DETALLE.includes(motivo)
+        if (bloque) bloque.style.display = conDetalle ? 'block' : 'none'
+        const aviso = document.getElementById('nccDet-requerido-aviso')
+        if (aviso) aviso.style.display = MOTIVOS_NCC_REQUERIDO.includes(motivo) ? 'block' : 'none'
+
+        // Con detalle visible, los importes de la nota se calculan solos
+        // sumando las líneas marcadas — el bloque de totales se mueve al
+        // final y queda de solo lectura (window.setModoDetalleNota, en
+        // notas.js). Sin detalle, vuelve a ser editable a mano arriba.
+        window.setModoDetalleNota?.(conDetalle)
+        if (conDetalle) _recalcularTotalesDetalleNotaCompra()
+      },
+      validarExtra: () => {
+        const motivo = document.getElementById('notaMotivo')?.value
+        if (!MOTIVOS_NCC_REQUERIDO.includes(motivo)) return { ok: true }
+        const seleccion = _leerDetalleNotaCompra()
+        if (seleccion.length === 0) {
+          return { ok: false, mensaje: 'Este motivo exige detalle por ítem: selecciona al menos un lote de la compra origen (o cambia el motivo si no corresponde).' }
+        }
+        return { ok: true }
+      },
       onEmitir: async (d) => {
         if (!d.serie || !d.numero) {
           throw new Error('Copia la serie y el número exactos de la nota que te envió el proveedor')
@@ -4268,7 +6043,13 @@ async function _abrirNotaCompra(compraId, tipoNota) {
         const igv  = parseFloat(d.igv.toFixed(2))
         const tot  = parseFloat(d.importe.toFixed(2))
 
-        await addCompra({
+        // Detalle por ítem (si el motivo lo trae) — se lee ANTES de crear la
+        // NC porque el modal se cierra apenas onEmitir resuelve.
+        const detalleSeleccionado = (tipoNota === TIPO_NC && MOTIVOS_NCC_CON_DETALLE.includes(d.motivo))
+          ? _leerDetalleNotaCompra() : []
+        const esDevolucionStock = MOTIVOS_NCC_DEVOLUCION.includes(d.motivo) && detalleSeleccionado.length > 0
+
+        const nota = await addCompra({
           referencia:             `${tipoNota === TIPO_NC ? 'NC' : 'ND'}-${d.serie}-${d.numero}`,
           tipo_referencia:        'nota',
           tipo_comprobante:       tipoNota,
@@ -4301,8 +6082,32 @@ async function _abrirNotaCompra(compraId, tipoNota) {
           doc_referencia_numero:  String(compra.numero || ''),
           motivo_nota_codigo:     d.motivo,
           motivo_nota_texto:      d.motivoTexto,
+          estado_devolucion:      esDevolucionStock ? 'pendiente' : null,
           created_by:             d.usuarioId
         })
+
+        // addCompra devuelve null si el INSERT falló en Supabase (RLS, CHECK,
+        // NOT NULL, etc.) — sin este control la UI seguía de largo y mostraba
+        // "Nota registrada ✅" aunque la fila nunca se guardó (bug real
+        // encontrado 2026-09-03: al CHECK de tipo_comprobante le faltaba '07').
+        if (!nota?.id) {
+          throw new Error('Supabase rechazó el registro de la nota (revisa la consola del navegador para el detalle exacto). No se guardó nada.')
+        }
+
+        // Guardar el detalle por ítem (declarativo: no mueve stock). Si el
+        // motivo es devolución (06/07), estado_devolucion='pendiente' ya
+        // quedó marcado arriba — la Guía de Devolución es la que después
+        // realmente saca la mercadería (pantalla "Devoluciones pendientes").
+        if (detalleSeleccionado.length > 0 && nota?.id) {
+          for (const linea of detalleSeleccionado) {
+            await addNotaCreditoCompraDetalle({
+              nota_compra_id: nota.id, compra_origen_id: compraId,
+              item_id: linea.itemId, lote_id: linea.loteId,
+              cantidad: linea.cantidad, precio_unitario: linea.precioUnitario,
+              unidad_medida: linea.unidadMedida, created_by: d.usuarioId
+            })
+          }
+        }
 
         // Ajustar la Cuenta por Pagar del comprobante original
         if (cxp) {
@@ -4314,7 +6119,7 @@ async function _abrirNotaCompra(compraId, tipoNota) {
             const nuevoSaldo = parseFloat(cxp.monto_total || 0)
               + parseFloat(cxp.monto_notas_debito || 0) + (tipoNota === TIPO_ND ? tot : 0)
               - parseFloat(cxp.monto_notas_credito || 0) - (tipoNota === TIPO_NC ? tot : 0)
-              - parseFloat(cxp.monto_pagado || 0)
+              - parseFloat(cxp.monto_pagado || 0) - parseFloat(cxp.monto_anticipo_aplicado || 0)
             if (nuevoSaldo <= 0.01) campos.estado = d.anulaTotal ? 'anulado' : 'pagado'
 
             await updateCuentaPagar(cxp.id, campos)
@@ -4348,6 +6153,526 @@ async function _abrirNotaCompra(compraId, tipoNota) {
 }
 
 // ============================================================================
+// GUÍA DE DEVOLUCIÓN A PROVEEDOR — segundo paso del flujo de devolución.
+// ============================================================================
+// La NC (arriba) solo DECLARA qué se debe devolver — no toca stock. Esta guía
+// es la que de verdad lo saca: descuenta lotes.cantidad, marca bultos de peso
+// variable como devuelto_proveedor, y registra Kardex salida hacia la zona
+// virtual Partners/Vendors (espejo exacto de la entrada de Compras). Ver
+// 53_devolucion_compra.sql y notas de diseño al inicio de _abrirNotaCompra.
+
+/** Recalcula compras.estado_devolucion de una NC comparando lo declarado (nota_credito_compra_detalle) contra lo ya cubierto por guías de devolución. */
+async function _recalcularEstadoDevolucionNota(notaCompraId) {
+  const detalleNota = await getNotaCreditoCompraDetalleByNota(notaCompraId)
+  if (!detalleNota || detalleNota.length === 0) return
+  const totalDeclarado = detalleNota.reduce((s, d) => s + (parseFloat(d.cantidad) || 0), 0)
+
+  const todasLasGuiasDetalle = await getTodosDetalleGuiasDevolucionCompra()
+  const idsDetalleNota = new Set(detalleNota.map(d => d.id))
+  const totalDevuelto = (todasLasGuiasDetalle || [])
+    .filter(dg => idsDetalleNota.has(dg.nota_credito_compra_detalle_id))
+    .reduce((s, dg) => s + (parseFloat(dg.cantidad) || 0), 0)
+
+  let estado = 'pendiente'
+  if (totalDevuelto >= totalDeclarado - 0.0001) estado = 'completa'
+  else if (totalDevuelto > 0.0001) estado = 'parcial'
+
+  await updateCompra(notaCompraId, { estado_devolucion: estado })
+}
+
+// ── Pantalla "Devoluciones pendientes" (dentro del tab Guía de Remisión) ───
+async function renderDevolucionesPendientes(forzar = false) {
+  const card = document.getElementById('card-devoluciones-pendientes')
+  const container = document.getElementById('tabla-devoluciones-pendientes')
+  if (!card || !container) return
+
+  const contEmitidas = document.getElementById('tabla-guias-devolucion-emitidas')
+
+  // La tarjeta siempre se muestra (no se oculta) — lista TODAS las NC de
+  // devolución (motivo 06/07), sin importar su estado_devolucion. Si no hay
+  // ninguna, se muestra un mensaje vacío pero la tarjeta se queda visible.
+  card.style.display = 'block'
+
+  const [todas, guiasEmitidas] = await Promise.all([getCompras(forzar), getGuiasDevolucionCompra(forzar)])
+  const notasDevolucion = (todas || []).filter(c =>
+    String(c.tipo_comprobante) === TIPO_NC && !!c.estado_devolucion && !estaAnulado(c)
+  )
+
+  if (notasDevolucion.length === 0) {
+    container.innerHTML = '<p style="text-align:center; color:var(--text-secondary); padding:16px;">Aún no hay Notas de Crédito con devolución de mercadería (motivo 06/07).</p>'
+  } else {
+    const filas = await Promise.all(notasDevolucion.map(async nota => {
+      const detalleNota = await getNotaCreditoCompraDetalleByNota(nota.id)
+      const totalDeclarado = (detalleNota || []).reduce((s, d) => s + (parseFloat(d.cantidad) || 0), 0)
+      const compraOrigen = nota.compra_referencia_id ? await getCompraById(nota.compra_referencia_id) : null
+      return { nota, compraOrigen, itemsCount: (detalleNota || []).length, totalDeclarado }
+    }))
+    filas.sort((a, b) => b.nota.id - a.nota.id)
+
+    const ESTADO_LABEL = { pendiente: 'Pendiente', parcial: 'Parcial', completa: 'Completo' }
+    const ESTADO_BADGE = { pendiente: 'badge-info', parcial: 'badge-warning', completa: 'badge-success' }
+
+    container.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Nota de Crédito</th><th>Compra origen</th><th>Proveedor</th>
+            <th>Ítems declarados</th><th>Estado</th><th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${filas.map(({ nota, compraOrigen, itemsCount, totalDeclarado }) => `
+            <tr>
+              <td><strong>${nota.serie || ''}-${nota.numero || ''}</strong></td>
+              <td>${compraOrigen ? (compraOrigen.referencia || `Compra #${compraOrigen.id}`) : '-'}</td>
+              <td>${nota.proveedor_nombre || '-'}</td>
+              <td>${itemsCount} línea(s) — ${totalDeclarado.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+              <td><span class="badge ${ESTADO_BADGE[nota.estado_devolucion] || 'badge-secondary'}">${ESTADO_LABEL[nota.estado_devolucion] || nota.estado_devolucion}</span></td>
+              <td>${nota.estado_devolucion === 'completa'
+                ? '<span style="color:var(--text-secondary); font-size:0.82rem;">Ya cubierta</span>'
+                : `<button class="btn btn-primary btn-small" onclick="window.abrirModalGuiaDevolucion(${nota.id})">Emitir Guía de Devolución</button>`}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`
+  }
+
+  if (contEmitidas) {
+    if (!guiasEmitidas || guiasEmitidas.length === 0) {
+      contEmitidas.innerHTML = ''
+    } else {
+      const comprasMap = {}
+      for (const c of (todas || [])) comprasMap[c.id] = c
+      const ordenadas = [...guiasEmitidas].sort((a, b) => b.id - a.id)
+      contEmitidas.innerHTML = `
+        <strong style="display:block; margin:10px 0 6px; font-size:0.85rem;">Guías de Devolución emitidas</strong>
+        <table>
+          <thead><tr><th>N° Guía</th><th>Fecha</th><th>Compra origen</th><th>Proveedor</th><th>Observaciones</th><th>Acciones</th></tr></thead>
+          <tbody>
+            ${ordenadas.map(g => {
+              const compra = comprasMap[g.compra_id]
+              return `<tr>
+                <td><strong>${g.numero_guia}</strong></td>
+                <td>${g.fecha_guia || '-'}</td>
+                <td>${compra?.referencia || `Compra #${g.compra_id}`}</td>
+                <td>${compra?.proveedor_nombre || '-'}</td>
+                <td>${g.observaciones || '-'}</td>
+                <td class="col-acciones">${menuAccionesFila([
+                  { label: 'Editar cabecera', icono: '✏️', onclick: `window.editarGuiaDevolucion(${g.id})` },
+                  { label: 'Eliminar (revierte stock)', icono: '🗑️', onclick: `window.eliminarGuiaDevolucion(${g.id})`, peligro: true }
+                ])}</td>
+              </tr>`
+            }).join('')}
+          </tbody>
+        </table>`
+    }
+  }
+}
+
+let _gdvNotaId = null
+let _gdvCompraOrigenId = null
+let _gdvLineas = []   // líneas pendientes de devolver de la NC seleccionada
+
+window.abrirModalGuiaDevolucion = async function (notaCompraId) {
+  try {
+    const nota = await getCompraById(notaCompraId)
+    if (!nota) { showToast('No se encontró la Nota de Crédito', 'danger'); return }
+    if (estaAnulado(nota)) { showToast('Esta Nota de Crédito está anulada', 'warning'); return }
+
+    const compraOrigen = nota.compra_referencia_id ? await getCompraById(nota.compra_referencia_id) : null
+    _gdvNotaId = notaCompraId
+    _gdvCompraOrigenId = nota.compra_referencia_id || null
+
+    const detalleNota = await getNotaCreditoCompraDetalleByNota(notaCompraId)
+    const lineas = []
+    for (const d of (detalleNota || [])) {
+      const yaDevuelto = (await getDetalleGuiasDevolucionCompraByNotaDetalle(d.id) || [])
+        .reduce((s, dg) => s + (parseFloat(dg.cantidad) || 0), 0)
+      const pendiente = parseFloat(((parseFloat(d.cantidad) || 0) - yaDevuelto).toFixed(4))
+      if (pendiente <= 0.0001) continue
+
+      const [lote, item] = await Promise.all([getLoteById(d.lote_id), getItemById(d.item_id)])
+      if (!lote) continue
+
+      if (lote.es_peso_variable) {
+        const bultosLote = await getLoteBultosByLote(lote.id)
+        const disponibles = (bultosLote || []).filter(b => b.estado === 'disponible')
+        if (disponibles.length === 0) continue
+        const zonas = await getUbicaciones()
+        const zonasMap = {}
+        for (const z of (zonas || [])) zonasMap[z.id] = z.nombre
+        lineas.push({
+          notaDetalleId: d.id, itemId: d.item_id, nombre: item?.nombre || `Item #${d.item_id}`,
+          loteId: lote.id, numeroLote: lote.numero_lote, unidadMedida: lote.unidad_medida || 'KG',
+          esPesoVariable: true, pendiente,
+          bultos: disponibles.map(b => ({ id: b.id, peso: parseFloat(b.peso) || 0, ubicacionId: b.ubicacion_id, zonaNombre: zonasMap[b.ubicacion_id] || '?' }))
+        })
+      } else {
+        const filasStock = await getStockUbicacionesByLote(lote.id)
+        const zonas = await getUbicaciones()
+        const zonasMap = {}
+        for (const z of (zonas || [])) zonasMap[z.id] = z.nombre
+        const zonasConStock = (filasStock || [])
+          .filter(f => (parseFloat(f.cantidad) || 0) > 0)
+          .map(f => ({ id: f.ubicacion_id, nombre: zonasMap[f.ubicacion_id] || '?', disponible: parseFloat(f.cantidad) || 0 }))
+        if (zonasConStock.length === 0) continue
+        lineas.push({
+          notaDetalleId: d.id, itemId: d.item_id, nombre: item?.nombre || `Item #${d.item_id}`,
+          loteId: lote.id, numeroLote: lote.numero_lote, unidadMedida: lote.unidad_medida || item?.unidad_medida || 'UND',
+          esPesoVariable: false, pendiente, zonasConStock
+        })
+      }
+    }
+    _gdvLineas = lineas
+
+    document.getElementById('gdvInfoNota').innerHTML = `
+      <div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">Cubre la Nota de Crédito</div>
+      <div style="font-weight:600; font-size:1.05rem; margin-top:2px;">${_escGdv(nota.serie || '')}-${_escGdv(nota.numero || '')}</div>
+      <div style="font-size:0.85rem; color:var(--text-secondary); margin-top:2px;">
+        ${_escGdv(nota.proveedor_nombre || '-')} · Compra origen: ${compraOrigen ? _escGdv(compraOrigen.referencia || `#${compraOrigen.id}`) : '-'}
+      </div>
+    `
+    document.getElementById('gdvNumeroGuia').value = ''
+    document.getElementById('gdvFechaGuia').value = new Date().toISOString().split('T')[0]
+    document.getElementById('gdvObservaciones').value = ''
+    _setEvGdv('gdv-titulo-modal', 'Emitir Guía de Devolución')
+
+    _renderTablaDetalleGuiaDevolucion()
+    window.openModal('modal-guia-devolucion')
+  } catch (e) {
+    console.error('abrirModalGuiaDevolucion:', e)
+    showToast('Error al preparar la guía de devolución: ' + e.message, 'danger')
+  }
+}
+
+window.cerrarModalGuiaDevolucion = function () {
+  _gdvNotaId = null; _gdvCompraOrigenId = null; _gdvLineas = []
+  window.closeModal('modal-guia-devolucion')
+}
+
+function _renderTablaDetalleGuiaDevolucion() {
+  const cont = document.getElementById('tabla-detalle-guia-devolucion')
+  if (!cont) return
+  if (_gdvLineas.length === 0) {
+    cont.innerHTML = '<p style="text-align:center; color:var(--text-secondary); padding:20px;">No queda nada pendiente por devolver en esta NC (ya se cubrió con guías anteriores).</p>'
+    return
+  }
+
+  const filas = _gdvLineas.map((l, idx) => {
+    if (l.esPesoVariable) {
+      const bultosHtml = l.bultos.map((b, bIdx) => `
+        <label style="display:flex; align-items:center; gap:6px; padding:3px 0; font-weight:400; cursor:pointer;">
+          <input type="checkbox" id="gdv-${idx}-b${bIdx}-chk">
+          <span>Bulto #${b.id} — ${b.peso.toFixed(2)} ${_escGdv(l.unidadMedida)}</span>
+          <span style="color:var(--text-secondary); font-size:0.78rem;">(${_escGdv(b.zonaNombre)})</span>
+        </label>`).join('')
+      return `
+        <tr style="border-top:1px solid var(--border-color);">
+          <td style="padding:8px 10px; vertical-align:top;">
+            <strong>${_escGdv(l.nombre)}</strong>
+            <div style="color:var(--text-secondary); font-size:0.78rem;">lote ${_escGdv(l.numeroLote)} · peso variable</div>
+          </td>
+          <td style="text-align:right; white-space:nowrap; color:var(--text-secondary); font-size:0.85rem; padding:8px 10px; vertical-align:top;">${l.pendiente} ${_escGdv(l.unidadMedida)}</td>
+          <td colspan="2" style="padding:8px 10px;">${bultosHtml}</td>
+        </tr>`
+    }
+    return `
+      <tr style="border-top:1px solid var(--border-color);">
+        <td style="padding:8px 10px;">
+          <strong>${_escGdv(l.nombre)}</strong>
+          <div style="color:var(--text-secondary); font-size:0.78rem;">lote ${_escGdv(l.numeroLote)}</div>
+        </td>
+        <td style="text-align:right; white-space:nowrap; color:var(--text-secondary); font-size:0.85rem; padding:8px 10px;">${l.pendiente} ${_escGdv(l.unidadMedida)}</td>
+        <td style="width:120px; padding:8px 10px;">
+          <input type="number" id="gdv-${idx}-cantidad" value="0" step="0.01" min="0" max="${l.pendiente}" style="width:100%;">
+        </td>
+        <td style="width:220px; padding:8px 10px;">
+          <select id="gdv-${idx}-zona" style="width:100%;">
+            ${l.zonasConStock.map(z => `<option value="${z.id}">${_escGdv(z.nombre)} (disp: ${z.disponible})</option>`).join('')}
+          </select>
+        </td>
+      </tr>`
+  }).join('')
+
+  cont.innerHTML = `
+    <div style="border:1px solid var(--border-color); border-radius:var(--radius-md); overflow:hidden; overflow-x:auto;">
+      <table style="width:100%; border-collapse:collapse; margin:0;">
+        <thead>
+          <tr style="background:var(--bg-secondary);">
+            <th style="text-align:left; padding:8px 10px; font-size:0.78rem;">Producto / Lote</th>
+            <th style="text-align:right; padding:8px 10px; font-size:0.78rem;">Pendiente</th>
+            <th style="text-align:left; padding:8px 10px; font-size:0.78rem;">Cantidad a devolver</th>
+            <th style="text-align:left; padding:8px 10px; font-size:0.78rem;">Zona de salida</th>
+          </tr>
+        </thead>
+        <tbody>${filas}</tbody>
+      </table>
+    </div>`
+}
+
+window.guardarGuiaDevolucionCompra = async function () {
+  const btn = document.getElementById('btnGuardarGuiaDevolucion')
+  try {
+    if (!_gdvNotaId || !_gdvCompraOrigenId) { showToast('Guía inválida', 'danger'); return }
+    const numeroGuia = document.getElementById('gdvNumeroGuia')?.value?.trim()
+    const fechaGuia = document.getElementById('gdvFechaGuia')?.value
+    const observaciones = document.getElementById('gdvObservaciones')?.value?.trim() || null
+    if (!numeroGuia) { showToast('Ingresa el N° de Guía', 'warning'); return }
+    if (!fechaGuia)  { showToast('Ingresa la fecha de la guía', 'warning'); return }
+
+    const seleccionFija = []      // peso fijo: { linea, cantidad, ubicacionId }
+    const seleccionVariable = []  // peso variable: { linea, bulto }
+    _gdvLineas.forEach((l, idx) => {
+      if (l.esPesoVariable) {
+        l.bultos.forEach((b, bIdx) => {
+          const chk = document.getElementById(`gdv-${idx}-b${bIdx}-chk`)
+          if (chk?.checked) seleccionVariable.push({ linea: l, bulto: b })
+        })
+      } else {
+        const cantidad = parseFloat(document.getElementById(`gdv-${idx}-cantidad`)?.value || 0)
+        const ubicacionId = parseInt(document.getElementById(`gdv-${idx}-zona`)?.value || 0)
+        if (cantidad > 0 && ubicacionId) seleccionFija.push({ linea: l, cantidad: Math.min(cantidad, l.pendiente), ubicacionId })
+      }
+    })
+
+    if (seleccionFija.length === 0 && seleccionVariable.length === 0) {
+      showToast('Selecciona o ingresa al menos una línea a devolver', 'warning')
+      return
+    }
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Guardando…' }
+    const user = getCurrentUser()
+    const usuarioId = user?.db_id || null
+
+    const guia = await addGuiaDevolucionCompra({
+      compra_id: _gdvCompraOrigenId, numero_guia: numeroGuia, fecha_guia: fechaGuia,
+      observaciones, created_by: usuarioId
+    })
+    if (!guia?.id) throw new Error('No se pudo crear la guía')
+
+    const vendorsZona = await getUbicacionVendors()
+    const lotesTocados = new Set()
+
+    // Líneas de peso fijo: una fila de detalle + descuento directo del lote/zona + kardex
+    for (const { linea, cantidad, ubicacionId } of seleccionFija) {
+      const dg = await addDetalleGuiaDevolucionCompra({
+        guia_id: guia.id, nota_credito_compra_detalle_id: linea.notaDetalleId,
+        item_id: linea.itemId, cantidad, numero_lote: linea.numeroLote,
+        lote_id: linea.loteId, ubicacion_id: ubicacionId
+      })
+
+      const lote = await getLoteById(linea.loteId)
+      const nuevaCantidad = parseFloat(Math.max(0, (parseFloat(lote?.cantidad) || 0) - cantidad).toFixed(4))
+      await updateLote(linea.loteId, { cantidad: nuevaCantidad })
+
+      const filas = await getStockUbicacionesByLote(linea.loteId)
+      const fila = (filas || []).find(f => f.ubicacion_id === ubicacionId)
+      if (fila) {
+        await updateStockUbicacion(fila.id, { cantidad: parseFloat(Math.max(0, (parseFloat(fila.cantidad) || 0) - cantidad).toFixed(4)) })
+      }
+
+      const costoUnit = parseFloat(lote?.costo_unitario || 0)
+      await addKardexMovimiento({
+        item_id: linea.itemId, lote_id: linea.loteId,
+        ubicacion_origen_id: ubicacionId, ubicacion_destino_id: vendorsZona?.id || null,
+        fecha: fechaGuia, tipo_movimiento: 'salida', concepto: 'Devolución a proveedor (Guía de Devolución)',
+        documento_referencia: numeroGuia,
+        cantidad_entrada: 0, cantidad_salida: cantidad,
+        cantidad_unidades_entrada: 0, cantidad_unidades_salida: 0,
+        costo_unitario: costoUnit,
+        valor_entrada: 0, valor_salida: parseFloat((cantidad * costoUnit).toFixed(2)),
+        moneda: lote?.moneda || 'PEN', tipo_cambio: parseFloat(lote?.tipo_cambio) || 1,
+        costo_unit_original: parseFloat(lote?.costo_unit_original ?? costoUnit),
+        saldo_cantidad: nuevaCantidad, saldo_valor: parseFloat((nuevaCantidad * costoUnit).toFixed(2)),
+        saldo_unidades: parseFloat(lote?.cantidad_unidades || 0),
+        compra_id: _gdvCompraOrigenId, created_by: usuarioId
+      })
+    }
+
+    // Líneas de peso variable: una fila de detalle por bulto + el bulto pasa a devuelto_proveedor
+    const kardexPorZona = new Map()  // agrupa bultos por (loteId, ubicacionId) para un solo movimiento de kardex
+    for (const { linea, bulto } of seleccionVariable) {
+      const dg = await addDetalleGuiaDevolucionCompra({
+        guia_id: guia.id, nota_credito_compra_detalle_id: linea.notaDetalleId,
+        item_id: linea.itemId, cantidad: bulto.peso, numero_lote: linea.numeroLote,
+        lote_id: linea.loteId, ubicacion_id: bulto.ubicacionId
+      })
+      await updateLoteBulto(bulto.id, {
+        estado: 'devuelto_proveedor', nota_credito_compra_id: _gdvNotaId, detalle_guia_devolucion_id: dg?.id || null
+      })
+      lotesTocados.add(linea.loteId)
+
+      const key = `${linea.loteId}|${bulto.ubicacionId}`
+      const acc = kardexPorZona.get(key) || { itemId: linea.itemId, loteId: linea.loteId, ubicacionId: bulto.ubicacionId, cantidad: 0 }
+      acc.cantidad += bulto.peso
+      kardexPorZona.set(key, acc)
+    }
+    for (const loteId of lotesTocados) await recalcularLoteDesdeBultos(loteId)
+    for (const { itemId, loteId, ubicacionId, cantidad } of kardexPorZona.values()) {
+      const lote = await getLoteById(loteId)
+      const costoUnit = parseFloat(lote?.costo_unitario || 0)
+      await addKardexMovimiento({
+        item_id: itemId, lote_id: loteId,
+        ubicacion_origen_id: ubicacionId, ubicacion_destino_id: vendorsZona?.id || null,
+        fecha: fechaGuia, tipo_movimiento: 'salida', concepto: 'Devolución a proveedor (Guía de Devolución)',
+        documento_referencia: numeroGuia,
+        cantidad_entrada: 0, cantidad_salida: cantidad,
+        cantidad_unidades_entrada: 0, cantidad_unidades_salida: 0,
+        costo_unitario: costoUnit,
+        valor_entrada: 0, valor_salida: parseFloat((cantidad * costoUnit).toFixed(2)),
+        moneda: lote?.moneda || 'PEN', tipo_cambio: parseFloat(lote?.tipo_cambio) || 1,
+        costo_unit_original: parseFloat(lote?.costo_unit_original ?? costoUnit),
+        saldo_cantidad: parseFloat(lote?.cantidad || 0), saldo_valor: parseFloat(((parseFloat(lote?.cantidad) || 0) * costoUnit).toFixed(2)),
+        saldo_unidades: parseFloat(lote?.cantidad_unidades || 0),
+        compra_id: _gdvCompraOrigenId, created_by: usuarioId
+      })
+    }
+
+    await _recalcularEstadoDevolucionNota(_gdvNotaId)
+
+    _invalidarCacheCompras()
+    showToast(`Guía de Devolución ${numeroGuia} emitida ✅ — stock retirado de Inventario`, 'success')
+    window.cerrarModalGuiaDevolucion()
+    await renderGuias(true)
+    await renderCompras(true)
+  } catch (e) {
+    console.error('guardarGuiaDevolucionCompra:', e)
+    showToast('No se pudo guardar la guía de devolución: ' + e.message, 'danger', 7000)
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Guardar Guía (retira stock)' }
+  }
+}
+
+// ── Editar (solo cabecera) / Eliminar (revierte stock) Guía de Devolución ──
+window.editarGuiaDevolucion = async function (id) {
+  try {
+    const g = await getGuiaDevolucionCompraById(id)
+    if (!g) { showToast('No se encontró la guía', 'danger'); return }
+    document.getElementById('egdId').value = g.id
+    document.getElementById('egdNumeroGuia').value = g.numero_guia || ''
+    document.getElementById('egdFechaGuia').value = g.fecha_guia || ''
+    document.getElementById('egdObservaciones').value = g.observaciones || ''
+    window.openModal('modal-editar-guia-devolucion')
+  } catch (e) {
+    console.error('editarGuiaDevolucion:', e)
+    showToast('Error al abrir la guía para editar', 'danger')
+  }
+}
+
+window.guardarEdicionGuiaDevolucion = async function () {
+  try {
+    const id = parseInt(document.getElementById('egdId')?.value || 0)
+    if (!id) { showToast('Guía inválida', 'danger'); return }
+    const numeroGuia = document.getElementById('egdNumeroGuia')?.value?.trim()
+    const fechaGuia = document.getElementById('egdFechaGuia')?.value
+    const observaciones = document.getElementById('egdObservaciones')?.value?.trim() || null
+    if (!numeroGuia) { showToast('Ingresa el N° de Guía', 'warning'); return }
+    if (!fechaGuia)  { showToast('Ingresa la fecha de la guía', 'warning'); return }
+
+    const ok = await updateGuiaDevolucionCompra(id, { numero_guia: numeroGuia, fecha_guia: fechaGuia, observaciones })
+    if (!ok) { showToast('No se pudo actualizar la guía', 'danger'); return }
+
+    showToast('Guía actualizada', 'success')
+    window.closeModal('modal-editar-guia-devolucion')
+    await renderGuias(true)
+  } catch (e) {
+    console.error('guardarEdicionGuiaDevolucion:', e)
+    showToast('Error al actualizar la guía', 'danger')
+  }
+}
+
+/**
+ * Elimina una Guía de Devolución revirtiendo lo que había retirado:
+ *   - Líneas de peso fijo: se suma la cantidad de vuelta al lote y a su zona.
+ *   - Líneas de peso variable: el/los bulto(s) que esta línea marcó vuelven a
+ *     'disponible' (revertirBultosDeDetalleGuiaDevolucion) y el lote se
+ *     recalcula desde sus bultos reales.
+ *   - Kardex: se borran los movimientos cuyo documento_referencia sea el N°
+ *     de esta guía (se generaron con ese mismo número al emitirla).
+ *   - La(s) NC que esta guía cubría vuelven a 'pendiente'/'parcial'.
+ */
+window.eliminarGuiaDevolucion = async function (id) {
+  try {
+    const guia = await getGuiaDevolucionCompraById(id)
+    if (!guia) { showToast('No se encontró la guía', 'danger'); return }
+
+    if (!confirm(`Se eliminará la guía ${guia.numero_guia} revirtiendo el stock retirado. ¿Continuar?`)) return
+
+    const detalles = await getDetalleGuiasDevolucionCompra(id)
+    const notasATocar = new Set()
+    const lotesTocadosBultos = new Set()
+
+    for (const dg of (detalles || [])) {
+      notasATocar.add(dg.nota_credito_compra_detalle_id)
+
+      const bultosDeEstaLinea = await getLoteBultosPorDetalleGuiaDevolucion(dg.id)
+      if (bultosDeEstaLinea && bultosDeEstaLinea.length > 0) {
+        await revertirBultosDeDetalleGuiaDevolucion(dg.id)
+        lotesTocadosBultos.add(dg.lote_id)
+      } else if (dg.lote_id) {
+        const lote = await getLoteById(dg.lote_id)
+        if (lote) {
+          const nuevaCantidad = parseFloat(((parseFloat(lote.cantidad) || 0) + (parseFloat(dg.cantidad) || 0)).toFixed(4))
+          await updateLote(dg.lote_id, { cantidad: nuevaCantidad })
+          if (dg.ubicacion_id) {
+            const filas = await getStockUbicacionesByLote(dg.lote_id)
+            const fila = (filas || []).find(f => f.ubicacion_id === dg.ubicacion_id)
+            if (fila) {
+              await updateStockUbicacion(fila.id, { cantidad: parseFloat(((parseFloat(fila.cantidad) || 0) + (parseFloat(dg.cantidad) || 0)).toFixed(4)) })
+            }
+          }
+        }
+      }
+    }
+    for (const loteId of lotesTocadosBultos) await recalcularLoteDesdeBultos(loteId)
+
+    // Kardex de esta guía: se identifican por documento_referencia (el N° de
+    // guía, único), filtrando dentro del kardex de la compra origen.
+    if (guia.compra_id) {
+      const kardexCompra = await getKardexByCompra(guia.compra_id)
+      for (const k of (kardexCompra || [])) {
+        if (k.documento_referencia === guia.numero_guia && k.tipo_movimiento === 'salida') {
+          const okKardex = await deleteKardexMovimiento(k.id)
+          if (!okKardex) {
+            const motivo = ultimoErrorDelete()
+            throw new Error(`No se pudo eliminar el movimiento de Kardex #${k.id}: ${motivo?.mensaje || 'motivo desconocido'}. Se detiene la reversión.`)
+          }
+        }
+      }
+    }
+
+    const ok = await deleteGuiaDevolucionCompra(id) // cascada: borra detalle_guias_devolucion_compra
+    if (!ok) {
+      const motivo = ultimoErrorDelete()
+      throw new Error(motivo?.mensaje || 'no se pudo eliminar')
+    }
+
+    // Recalcular estado_devolucion de todas las NC que esta guía cubría.
+    // Como nota_credito_compra_detalle_id ya no es resoluble tras el borrado
+    // en cascada, se usa el detalle leído ANTES de eliminar.
+    const notaIdsPorDetalle = {}
+    for (const dg of (detalles || [])) {
+      if (!(dg.nota_credito_compra_detalle_id in notaIdsPorDetalle)) {
+        const d = (await getNotaCreditoCompraDetalleByCompraOrigen(guia.compra_id) || []).find(x => x.id === dg.nota_credito_compra_detalle_id)
+        if (d) notaIdsPorDetalle[dg.nota_credito_compra_detalle_id] = d.nota_compra_id
+      }
+    }
+    const notasUnicas = new Set(Object.values(notaIdsPorDetalle))
+    for (const notaId of notasUnicas) await _recalcularEstadoDevolucionNota(notaId)
+
+    _invalidarCacheCompras()
+    showToast(`Guía ${guia.numero_guia} eliminada: stock revertido en Inventario`, 'success')
+    await renderGuias(true)
+    await renderCompras(true)
+  } catch (e) {
+    console.error('eliminarGuiaDevolucion:', e)
+    showToast('No se pudo eliminar la guía: ' + e.message, 'danger', 7000)
+  }
+}
+
+function _setEvGdv(id, texto) { const el = document.getElementById(id); if (el) el.textContent = texto }
+function _escGdv(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])) }
+
+// ============================================================================
 // BUSCADORES EN VIVO — selects largos del módulo Compras
 // ============================================================================
 // Mismos selects que antes, pero con filtrado por texto. El <select> original
@@ -4358,9 +6683,7 @@ function _activarBuscadoresCompras() {
   convertirVarios([
     { id: 'ocProveedor',              placeholder: 'Escribe el nombre o RUC del proveedor...', sinResultados: 'Ningún proveedor coincide',
       alCrearNuevo: { label: 'Registrar proveedor nuevo', onClick: () => window.abrirModalNuevoProveedor?.() } },
-    { id: 'cmProveedor',              placeholder: 'Escribe el nombre o RUC del proveedor...', sinResultados: 'Ningún proveedor coincide',
-      alCrearNuevo: { label: 'Registrar proveedor nuevo', onClick: () => window.abrirModalNuevoProveedor?.() } },
-    { id: 'csProveedor',              placeholder: 'Escribe el nombre o RUC del proveedor...', sinResultados: 'Ningún proveedor coincide',
+    { id: 'nqProveedor',              placeholder: 'Escribe el nombre o RUC del proveedor...', sinResultados: 'Ningún proveedor coincide',
       alCrearNuevo: { label: 'Registrar proveedor nuevo', onClick: () => window.abrirModalNuevoProveedor?.() } },
     { id: 'ngCompra',                 placeholder: 'Escribe el N° de compra o proveedor...',   sinResultados: 'Sin compras pendientes de guía' },
     { id: 'newDetalleCompraProducto', placeholder: 'Escribe el producto o SKU...',             sinResultados: 'Sin productos' },
@@ -4386,17 +6709,34 @@ function _escCompras(s) {
 // Ahora el campo ofrece los lotes que ya existen del producto y, si eliges
 // uno, la mercadería SE SUMA a ese lote en vez de crear otro.
 //
-// Cuidado con el costeo: el método es identificación específica (LIR Art. 62°),
-// donde cada lote lleva un costo unitario fijo. Sumar a un lote existente solo
-// es correcto si el costo coincide. Si no coincide, se avisa y se pide decidir:
-//   * mantener lotes separados (correcto contablemente), o
-//   * fusionar recalculando el costo como promedio ponderado.
-
-function _buscarLoteExistente(itemId, numeroLote) {
+// Identificación Específica por ADQUISICIÓN (LIR Art. 62° inciso c) / NIC 2
+// párr. 24 — aprobado por contabilidad): la unidad de identificación es la
+// compra/factura, no el texto que escribe el usuario en "N° de Lote". Un
+// mismo texto de lote puede repetirse entre facturas distintas (common
+// cuando el proveedor reutiliza su propia numeración) — eso NUNCA debe
+// fusionarse ni promediarse, porque el costo real (y su tipo de cambio) es
+// distinto por adquisición. Por eso _buscarLoteExistente exige tanto el
+// texto del lote COMO la misma compra_id:
+//   * mismo texto + misma compra  → es la misma adquisición, se suma a esa
+//     fila (con aviso si el costo no cuadra, ver conflictosCosto abajo).
+//   * mismo texto + compra distinta → nunca es un match: se crea una fila
+//     nueva en `lotes` sin preguntar (índice único ahora es
+//     (item_id, numero_lote, compra_id), ver 43_lote_bultos.sql).
+function _buscarLoteExistente(itemId, numeroLote, compraId) {
   const num = String(numeroLote || '').trim().toLowerCase()
   if (!num) return null
   return (_guiaLotesPorItem[itemId] || []).find(lo =>
-    String(lo.numero_lote || '').trim().toLowerCase() === num) || null
+    String(lo.numero_lote || '').trim().toLowerCase() === num &&
+    lo.compra_id === compraId) || null
+}
+
+/** Solo para el aviso en pantalla: ¿este texto de lote ya existe pero en OTRA compra? */
+function _buscarLoteEnOtraCompra(itemId, numeroLote, compraId) {
+  const num = String(numeroLote || '').trim().toLowerCase()
+  if (!num) return null
+  return (_guiaLotesPorItem[itemId] || []).find(lo =>
+    String(lo.numero_lote || '').trim().toLowerCase() === num &&
+    lo.compra_id !== compraId) || null
 }
 
 /** Costo unitario en soles que tendría esta recepción (para comparar con el lote existente). */
@@ -4409,12 +6749,22 @@ function _avisarLoteExistente(idx, subIdx, linea, recepcion) {
   const el = document.getElementById(`gc-${idx}-${subIdx}-loteaviso`)
   if (!el) return
 
-  const existente = _buscarLoteExistente(linea.item_id, recepcion.numero_lote)
+  const compraId = _guiaCompraActual?.id
+  const existente = _buscarLoteExistente(linea.item_id, recepcion.numero_lote, compraId)
+
   if (!existente) {
+    const enOtraCompra = _buscarLoteEnOtraCompra(linea.item_id, recepcion.numero_lote, compraId)
     el.className = 'lote-aviso'
-    el.innerHTML = recepcion.numero_lote
-      ? '<span style="color:var(--color-success);">Lote nuevo</span>'
-      : ''
+    if (enOtraCompra) {
+      // Mismo texto de N° de lote, pero de otra factura: identificación
+      // específica por adquisición → se crea como capa de costo aparte,
+      // no se fusiona ni se pregunta.
+      el.innerHTML = `<span style="color:var(--color-info);">↪ Este N° ya existe en otra factura (S/ ${(parseFloat(enOtraCompra.costo_unitario) || 0).toFixed(4)}). Se creará como registro aparte — no se fusiona.</span>`
+    } else {
+      el.innerHTML = recepcion.numero_lote
+        ? '<span style="color:var(--color-success);">Lote nuevo</span>'
+        : ''
+    }
     return
   }
 
@@ -4460,19 +6810,13 @@ function _aplicarMonedaCompra({ idMoneda, idGrupoTC, idInputTC, idAviso, autoFet
   }
 }
 
+// Un solo set de campos de Moneda/T.C. compartido por los 3 tipos de compra
+// (Mercadería/Servicio/Anticipo) desde que se unificó el modal (2026-09-07).
 window.onCambiarMonedaCompra = function () {
   _aplicarMonedaCompra({
-    idMoneda: 'cmMoneda', idGrupoTC: 'cmTipoCambioGroup',
-    idInputTC: 'cmTipoCambio', idAviso: 'cmTCAviso',
-    autoFetch: window.autoFetchTCMercaderia
-  })
-}
-
-window.onCambiarMonedaServicio = function () {
-  _aplicarMonedaCompra({
-    idMoneda: 'csMoneda', idGrupoTC: 'csTipoCambioGroup',
-    idInputTC: 'csTipoCambio', idAviso: 'csTCAviso',
-    autoFetch: window.autoFetchTCServicio
+    idMoneda: 'nqMoneda', idGrupoTC: 'nqTipoCambioGroup',
+    idInputTC: 'nqTipoCambio', idAviso: 'nqTCAviso',
+    autoFetch: window.autoFetchTCCompra
   })
 }
 
@@ -4507,23 +6851,8 @@ async function _traerTCCompraA(idInputTC, idAviso, idFecha, idBoton) {
   }
 }
 
-window.autoFetchTCMercaderia = function () {
-  return _traerTCCompraA('cmTipoCambio', 'cmTCAviso', 'cmFecha', 'btnAutoTCMercaderia')
-}
-
-window.autoFetchTCServicio = function () {
-  return _traerTCCompraA('csTipoCambio', 'csTCAviso', 'csFecha', 'btnAutoTCServicio')
-}
-
-window.abrirModalCompraServicio = function () {
-  const form = document.getElementById('formNewCompraServicio')
-  if (form) form.reset()
-  const fechaEl = document.getElementById('csFecha')
-  if (fechaEl) fechaEl.value = new Date().toISOString().split('T')[0]
-  const monedaEl = document.getElementById('csMoneda')
-  if (monedaEl) monedaEl.value = getModuloConfig('compras').monedaDefault || 'USD'
-  window.onCambiarMonedaServicio()
-  window.openModal('modal-nueva-compra-servicio')
+window.autoFetchTCCompra = function () {
+  return _traerTCCompraA('nqTipoCambio', 'nqTCAviso', 'nqFecha', 'btnAutoTCNuevaCompra')
 }
 
 // ============================================================================
@@ -4688,6 +7017,10 @@ window.procesarImportacionGuias = async function () {
         if (!(cantidad > 0)) errFila.push('cantidad debe ser mayor a 0')
 
         const unidades = parseFloat(_valorFila(fila, 'numero_unidades', 'unidades', 'n_unidades') || 0) || null
+        // Obligatorio (mismo motivo que en el formulario manual): sin esto
+        // peso_por_unidad queda null y el lote nunca podrá sugerir unidades
+        // al vender. Causó un bug de 13 lotes corregido el 05/09/2026.
+        if (!(unidades > 0)) errFila.push('falta numero_unidades (obligatorio, mayor a 0)')
 
         const numeroLote = _valorFila(fila, 'numero_lote', 'lote')
         if (!numeroLote) errFila.push('falta numero_lote')

@@ -108,7 +108,13 @@ function _interpretarErrorDelete(error, tabla) {
 export async function query(table, filters = {}) {
   try {
     let q = supabase.from(table).select('*')
-    Object.keys(filters).forEach(key => { q = q.eq(key, filters[key]) })
+    // Si un filtro llega en undefined/null (ej. función invocada sin argumento),
+    // se ignora en vez de mandar "col=eq.undefined" a PostgREST, que Postgres
+    // rechaza con 400 al castear y hacía que la consulta devolviera [] silenciosamente.
+    Object.keys(filters).forEach(key => {
+      if (filters[key] === undefined || filters[key] === null) return
+      q = q.eq(key, filters[key])
+    })
     const { data, error } = await q
     if (error) { console.error(`Error querying ${table}:`, error); return [] }
     return data || []

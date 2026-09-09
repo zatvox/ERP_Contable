@@ -85,6 +85,13 @@ export async function getMotivosNota(tipoNota) {
 let _onEmitirActual = null
 let _motivosActuales = []
 let _maxImporteActual = 0
+// Ganchos opcionales para que el llamador (ej. ventas.js) agregue una
+// sección propia dentro del modal genérico (ej. selección de bultos a
+// devolver) sin que notas.js necesite saber nada de bultos/lotes/Kardex.
+//   renderExtra()              -> string HTML (se llama una vez, al abrir)
+//   onMotivoCambio(motivo, anulaTotal) -> se llama cada vez que cambia el motivo
+//   validarExtra()              -> { ok:boolean, mensaje?:string } antes de emitir
+let _ganchosActuales = null
 
 function _asegurarModal() {
   if (document.getElementById('modal-nota-cd')) return
@@ -92,16 +99,16 @@ function _asegurarModal() {
   div.id = 'modal-nota-cd'
   div.className = 'modal'
   div.innerHTML = `
-    <div class="modal-content" style="max-width:620px;">
+    <div class="modal-content" style="width:min(94vw, 620px); max-width:min(94vw, 620px); transition:width .15s ease;" id="modal-nota-cd-content">
       <div class="modal-header">
         <h3 class="modal-title" id="nota-titulo">Nota</h3>
         <button class="modal-close" onclick="window.cerrarModalNota()">&times;</button>
       </div>
-      <div style="padding:20px; display:flex; flex-direction:column; gap:14px;">
+      <div style="padding:20px; display:flex; flex-direction:column; gap:14px; max-height:80vh; overflow-y:auto;">
         <div id="nota-origen" style="padding:12px 14px; background:var(--bg-secondary); border-radius:var(--radius-md); border-left:3px solid var(--color-info);"></div>
         <div id="nota-bloqueo" style="display:none; padding:12px 14px; border-radius:var(--radius-md); background:rgba(239,68,68,.12); color:var(--color-danger); font-size:0.87rem; line-height:1.5;"></div>
 
-        <div id="nota-formulario">
+        <div id="nota-formulario" style="display:flex; flex-direction:column; gap:14px;">
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
             <div class="form-group">
               <label>Motivo SUNAT *</label>
@@ -125,30 +132,44 @@ function _asegurarModal() {
             </div>
           </div>
 
-          <div class="form-group">
-            <label>Importe total de la nota *</label>
-            <input type="number" id="notaImporte" step="0.01" min="0.01" placeholder="0.00" oninput="window.onCambiarImporteNota()">
+          <!-- Los 3 importes están enlazados: editar cualquiera de los tres
+               recalcula los otros dos usando el % de IGV vigente. Cuando el
+               llamador activa "modo detalle" (ej. detalle por ítem en
+               Compras), este bloque pasa a order:10 (después de #nota-extra)
+               y los 3 campos quedan de solo lectura, alimentados en vivo por
+               la suma del detalle. -->
+          <div id="nota-totales-bloque" style="display:flex; flex-direction:column; gap:8px; padding:12px 14px; border-radius:var(--radius-md); background:var(--bg-secondary);">
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;">
+              <div class="form-group" style="margin:0;">
+                <label>Base imponible</label>
+                <input type="number" id="notaBase" step="0.01" min="0" placeholder="0.00" oninput="window.onCambiarTotalesNota('base')">
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label>IGV</label>
+                <input type="number" id="notaIgv" step="0.01" min="0" placeholder="0.00" oninput="window.onCambiarTotalesNota('igv')">
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label>Importe total de la nota *</label>
+                <input type="number" id="notaImporte" step="0.01" min="0.01" placeholder="0.00" oninput="window.onCambiarTotalesNota('importe')">
+              </div>
+            </div>
             <small id="nota-importe-ayuda" style="color:var(--text-secondary);"></small>
+            <small id="nota-totales-ayuda" style="color:var(--text-secondary);">Edita cualquiera de los tres campos: los otros dos se recalculan solos.</small>
           </div>
 
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-            <div class="form-group">
-              <label>IGV incluido en el importe</label>
-              <input type="number" id="notaIgv" step="0.01" min="0" placeholder="0.00">
-              <small style="color:var(--text-secondary);">Se calcula solo, pero puedes ajustarlo.</small>
-            </div>
-            <div class="form-group">
-              <label>Base imponible</label>
-              <input type="number" id="notaBase" step="0.01" readonly style="background:var(--bg-tertiary);">
-            </div>
-          </div>
-
-          <div class="form-group">
+          <div class="form-group" id="nota-descripcion-grupo">
             <label>Descripción / sustento *</label>
             <input type="text" id="notaDescripcion" placeholder="Detalle de la nota (aparece en el comprobante)">
           </div>
 
           <div id="nota-aviso-anula" style="display:none; padding:10px 12px; border-radius:var(--radius-md); background:rgba(245,158,11,.14); color:var(--color-warning); font-size:0.85rem; line-height:1.45;"></div>
+
+          <!-- Sección opcional inyectada por el llamador (ej. devolución de
+               stock en Ventas cuando la factura tiene guía de despacho, o
+               detalle por ítem en Compras). El modal no sabe nada de su
+               contenido: solo la muestra y, al emitir, llama a los ganchos
+               onMotivoCambio/validarExtra. -->
+          <div id="nota-extra"></div>
         </div>
       </div>
       <div class="modal-footer">
@@ -228,13 +249,36 @@ export async function abrirModalNota(o) {
   document.getElementById('modal-nota-cd').dataset.igvPct = String(o.igvPorcentaje ?? 18)
   document.getElementById('modal-nota-cd').dataset.tipoNota = o.tipoNota
 
+  // El modal crece cuando el llamador va a inyectar una sección con tabla
+  // (detalle por ítem, bultos a devolver, etc.) — 620px se queda corto para
+  // una tabla con varias columnas. Hay que fijar width Y max-width inline:
+  // la clase .modal-content trae max-width:600px desde styles.css, y sin un
+  // max-width inline que la gane, el modal nunca pasaba de ~600px aunque
+  // "width" se agrandara.
+  const contenidoModal = document.getElementById('modal-nota-cd-content')
+  if (contenidoModal) {
+    const ancho = o.anchoAmplio ? 'min(96vw, 980px)' : 'min(94vw, 620px)'
+    contenidoModal.style.width = ancho
+    contenidoModal.style.maxWidth = ancho
+  }
+
+  // El bloque de totales arranca siempre en modo manual/editable — el
+  // llamador lo pasa a modo detalle (solo lectura, al final) desde su propio
+  // onMotivoCambio llamando a window.setModoDetalleNota(true).
+  window.setModoDetalleNota(false)
+
   _onEmitirActual = o.onEmitir
+  _ganchosActuales = { onMotivoCambio: o.onMotivoCambio, validarExtra: o.validarExtra }
+  document.getElementById('nota-extra').innerHTML = o.renderExtra ? (await o.renderExtra()) : ''
+
   window.onCambiarMotivoNota()
   window.openModal('modal-nota-cd')
 }
 
 window.cerrarModalNota = function () {
   _onEmitirActual = null
+  _ganchosActuales = null
+  document.getElementById('nota-extra').innerHTML = ''
   window.closeModal('modal-nota-cd')
 }
 
@@ -256,24 +300,87 @@ window.onCambiarMotivoNota = function () {
   // Si el motivo anula todo, el importe es el total y no se discute.
   if (anula && esNC && _maxImporteActual > 0) {
     _valor('notaImporte', _maxImporteActual.toFixed(2))
-    window.onCambiarImporteNota()
+    window.onCambiarTotalesNota('importe')
   }
   if (opt && !document.getElementById('notaDescripcion').value) {
     _valor('notaDescripcion', opt.textContent.split('—').slice(1).join('—').trim())
   }
+
+  _ganchosActuales?.onMotivoCambio?.(sel?.value, anula)
 }
 
-window.onCambiarImporteNota = function () {
+/**
+ * Los 3 campos (Importe, Base, IGV) están enlazados por el % de IGV vigente
+ * (modal.dataset.igvPct): editar cualquiera de los tres recalcula los otros
+ * dos. `campo` indica cuál acaba de tocar el usuario, para saber qué
+ * ecuación usar y no pisar el valor que justo está escribiendo.
+ *   importe = base * (1 + pct/100)
+ *   igv     = importe - base
+ */
+window.onCambiarTotalesNota = function (campo) {
   const modal = document.getElementById('modal-nota-cd')
   const pct = parseFloat(modal?.dataset.igvPct || '18')
   const importe = parseFloat(document.getElementById('notaImporte')?.value || 0)
-  if (!(importe > 0)) { _valor('notaIgv', ''); _valor('notaBase', ''); return }
+  const base    = parseFloat(document.getElementById('notaBase')?.value || 0)
+  const igv     = parseFloat(document.getElementById('notaIgv')?.value || 0)
 
-  // El importe que digita el usuario es el TOTAL (con IGV), igual que en el
-  // comprobante original. De ahí se desagrega la base y el IGV.
-  const base = importe / (1 + pct / 100)
-  _valor('notaBase', base.toFixed(2))
-  _valor('notaIgv', (importe - base).toFixed(2))
+  if (campo === 'importe') {
+    if (!(importe > 0)) { _valor('notaBase', ''); _valor('notaIgv', ''); return }
+    const b = importe / (1 + pct / 100)
+    _valor('notaBase', b.toFixed(2))
+    _valor('notaIgv', (importe - b).toFixed(2))
+  } else if (campo === 'base') {
+    if (!(base > 0)) { _valor('notaImporte', ''); _valor('notaIgv', ''); return }
+    const i = base * (1 + pct / 100)
+    _valor('notaImporte', i.toFixed(2))
+    _valor('notaIgv', (i - base).toFixed(2))
+  } else if (campo === 'igv') {
+    // Se ancla a la Base actual (si la hay) para no adivinar cuál de los
+    // otros dos "quiso" cambiar el usuario al tocar el IGV.
+    const b = base > 0 ? base : (importe > 0 ? importe / (1 + pct / 100) : 0)
+    _valor('notaBase', b.toFixed(2))
+    _valor('notaImporte', (b + igv).toFixed(2))
+  }
+}
+
+/**
+ * Modo "detalle": lo activa el llamador (ej. Compras cuando el motivo exige
+ * detalle por ítem) desde su propio onMotivoCambio. En este modo el bloque
+ * de totales se mueve al final (después de #nota-extra) y sus 3 campos
+ * pasan a solo-lectura — el propio llamador es quien escribe los valores
+ * (sumando su detalle) llamando a window.setTotalesNotaDesdeDetalle().
+ */
+window.setModoDetalleNota = function (activo) {
+  const bloque = document.getElementById('nota-totales-bloque')
+  const formulario = document.getElementById('nota-formulario')
+  const marcador = document.getElementById('nota-descripcion-grupo')
+  if (!bloque || !formulario) return
+
+  // Se mueve el nodo de verdad (en vez de CSS order) para que el orden
+  // visual sea siempre correcto sin depender de que el contenedor sea flex.
+  if (activo) {
+    formulario.appendChild(bloque) // al final, después de #nota-extra
+  } else if (marcador) {
+    formulario.insertBefore(bloque, marcador) // vuelve a su lugar original
+  }
+
+  const ayuda = document.getElementById('nota-totales-ayuda')
+  if (ayuda) ayuda.textContent = activo
+    ? 'Calculado automáticamente desde el detalle por ítem — no editable aquí.'
+    : 'Edita cualquiera de los tres campos: los otros dos se recalculan solos.'
+  for (const id of ['notaImporte', 'notaBase', 'notaIgv']) {
+    const el = document.getElementById(id)
+    if (!el) continue
+    el.readOnly = activo
+    el.style.background = activo ? 'var(--bg-tertiary)' : ''
+  }
+}
+
+/** El llamador (Compras) escribe aquí la suma de su detalle mientras el modo detalle está activo. */
+window.setTotalesNotaDesdeDetalle = function ({ base, igv, importe }) {
+  _valor('notaBase', (parseFloat(base) || 0).toFixed(2))
+  _valor('notaIgv', (parseFloat(igv) || 0).toFixed(2))
+  _valor('notaImporte', (parseFloat(importe) || 0).toFixed(2))
 }
 
 window.emitirNota = async function () {
@@ -303,6 +410,11 @@ window.emitirNota = async function () {
       return
     }
     if (typeof _onEmitirActual !== 'function') { window.cerrarModalNota(); return }
+
+    if (typeof _ganchosActuales?.validarExtra === 'function') {
+      const r = _ganchosActuales.validarExtra()
+      if (r && r.ok === false) { window.showToast?.(r.mensaje || 'Completa la sección adicional de la nota', 'warning'); return }
+    }
 
     if (btn) { btn.disabled = true; btn.textContent = 'Emitiendo…' }
     const user = getCurrentUser()

@@ -837,14 +837,14 @@ async function construirPosicionTesoreria() {
       moneda: b.moneda || 'PEN', monto: _saldo(b), signo: 'Disponible'
     }))
     cxc.filter(c => c.estado !== 'cobrado' && c.estado !== 'anulado').forEach(c => {
-      const saldo = parseFloat(c.monto_total || 0) - parseFloat(c.monto_cobrado || 0) - parseFloat(c.monto_retenido || 0)
+      const saldo = parseFloat(c.monto_total || 0) - parseFloat(c.monto_cobrado || 0) - parseFloat(c.monto_retenido || 0) - parseFloat(c.monto_anticipo_aplicado || 0)
       if (saldo > 0.01) filas.push({
         concepto: `Por cobrar ${c.serie || ''}-${c.numero_comprobante || ''}`, categoria: '2 · Por cobrar',
         moneda: c.moneda || 'PEN', monto: saldo, signo: 'Entrada'
       })
     })
     cxp.filter(c => c.estado !== 'pagado' && c.estado !== 'anulado').forEach(c => {
-      const saldo = parseFloat(c.monto_total || 0) - parseFloat(c.monto_pagado || 0)
+      const saldo = parseFloat(c.monto_total || 0) - parseFloat(c.monto_pagado || 0) - parseFloat(c.monto_anticipo_aplicado || 0)
       if (saldo > 0.01) filas.push({
         concepto: `Por pagar ${c.serie || ''}-${c.numero_comprobante || ''}`, categoria: '3 · Por pagar',
         moneda: c.moneda || 'PEN', monto: -saldo, signo: 'Salida'
