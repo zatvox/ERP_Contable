@@ -23,12 +23,13 @@ registrarColumnas('lotes', [
 registrarColumnas('resumen-stock', [
   { key: 'sku',             label: 'SKU' },
   { key: 'producto',        label: 'Producto' },
+  { key: 'lotes',           label: 'N° Lote' },
   { key: 'stock_total',     label: 'Stock Total' },
   { key: 'total_unidades',  label: 'Total Unidades' },
-  { key: 'cantidad_lotes',  label: 'Cantidad Lotes' },
   { key: 'costo_promedio',  label: 'Costo Promedio Unit.' },
   { key: 'valor_total',     label: 'Valor Total Inventario' },
-  { key: 'stock_critico',   label: 'Stock Crítico' }
+  { key: 'stock_critico',   label: 'Stock Crítico' },
+  { key: 'acciones',        label: 'Acciones' }
 ])
 
 registrarColumnas('stock-zonas', [
@@ -126,13 +127,7 @@ function initTabsInventario() {
 
       if (tab === 'productos')  await renderProductos()
       if (tab === 'lotes')      await renderLotes()
-      if (tab === 'resumen') {
-        // Resumen Stock tiene sus propios subtabs (General / Por Zona) — se
-        // carga el que esté activo en ese momento, igual que Configuración.
-        const activo = document.querySelector('#inv-subtabs-resumen .subtab.active')?.getAttribute('data-sub') || 'res-general'
-        if (activo === 'res-general') await renderResumenStock()
-        if (activo === 'res-porzona') await renderStockZonas()
-      }
+      if (tab === 'resumen') await window.renderResumenStockUnificado()
       if (tab === 'categorias') await renderCategorias()
       if (tab === 'marcas')     await renderMarcas()
       if (tab === 'partidas')   await renderPartidas()
@@ -154,12 +149,9 @@ function initTabsInventario() {
 
   initSubtabs('#inv-subtabs-reportes', (panel) => construirReporteInv(panel))
 
-  // Subtabs de Resumen Stock: General (agregado por producto) y Por Zona
-  // (detalle por lote/zona, con su propio filtro).
-  initSubtabs('#inv-subtabs-resumen', async (panel) => {
-    if (panel === 'res-general') await renderResumenStock()
-    if (panel === 'res-porzona') await renderStockZonas()
-  })
+  // Resumen Stock: ya no son 2 subtabs con 2 tablas — es una sola tabla-vista
+  // con un botón de agrupamiento (window.setModoResumenStock), ver bloque
+  // "RESUMEN DE STOCK" más abajo.
 
   // Subtabs de Configuración: General (parámetros del módulo) y Almacenes
   // (estructura física de almacenes/zonas — antes vivía como tab aparte del
@@ -674,9 +666,111 @@ function _poblarFiltroCategoriasResumen(categorias) {
   })
 }
 
+// ============================================================================
+// RESUMEN DE STOCK — tabla única con botón de agrupamiento
+// ============================================================================
+// Antes eran 2 subtabs con 2 tablas (renderResumenStock = por producto,
+// renderStockZonas = por lote+zona), ambas ya sobre la misma fuente de
+// verdad (stock_ubicaciones / kardex). Luis pidió fusionarlas en una sola
+// tabla-vista con un botón que cambia el nivel de agrupamiento (2026-09-10).
+// Las dos funciones de render se mantienen separadas por legibilidad, pero
+// comparten contenedor ("tabla-resumen") y barra de filtros — el dispatcher
+// de abajo decide cuál pintar según el modo activo.
+window._resumenStockModo = 'general'
+
+window.setModoResumenStock = async function (modo) {
+  window._resumenStockModo = modo
+  document.querySelectorAll('#resumenStockModoToggle .subtab').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-modo') === modo)
+  })
+  const zonaWrap = document.getElementById('filtroResumenZonaWrap')
+  if (zonaWrap) zonaWrap.hidden = (modo !== 'zona')
+  await window.renderResumenStockUnificado()
+}
+
+window.renderResumenStockUnificado = async function () {
+  if (window._resumenStockModo === 'zona') {
+    await renderStockZonas()
+  } else {
+    await renderResumenStock()
+  }
+}
+
+// Texto de la columna "N° Lote" en el resumen por producto: si son pocos
+// lotes los lista todos, si son muchos (ej. un producto con 78 lotes) corta
+// a los primeros 2 y deja el resto en un title="" (tooltip al pasar el mouse)
+// para no romper el ancho de la tabla.
+function _formatearListaLotes(numeros, maxVisibles = 2) {
+  if (!numeros || numeros.length === 0) return '-'
+  if (numeros.length <= maxVisibles) return numeros.join(', ')
+  const visibles = numeros.slice(0, maxVisibles).join(', ')
+  return `<span title="${numeros.join(', ')}">${visibles} +${numeros.length - maxVisibles} más</span>`
+}
+
+// ============================================================================
+// Orden asc/desc al hacer click en el encabezado — compartido entre los 2
+// modos de Resumen de Stock (cada modo tiene su propia columna/dirección
+// activa, porque no tienen las mismas columnas). 2026-09-10.
+// ============================================================================
+window._resumenStockOrden = {
+  general: { col: null, dir: 'asc' },
+  zona:    { col: null, dir: 'asc' }
+}
+
+window.ordenarResumenStock = async function (col) {
+  const st = window._resumenStockOrden[window._resumenStockModo]
+  if (st.col === col) {
+    st.dir = st.dir === 'asc' ? 'desc' : 'asc'
+  } else {
+    st.col = col
+    st.dir = 'asc'
+  }
+  await window.renderResumenStockUnificado()
+}
+
+// Aplica en sitio el orden activo sobre un array de "filas" ya calculadas,
+// según un mapa { columna: fila => valorComparable }. No hace nada si no hay
+// columna de orden elegida todavía (se deja el orden natural de cada modo).
+function _aplicarOrdenFilas(filas, estado, extractores) {
+  if (!estado.col || !extractores[estado.col]) return
+  const get = extractores[estado.col]
+  const factor = estado.dir === 'desc' ? -1 : 1
+  filas.sort((a, b) => {
+    const va = get(a)
+    const vb = get(b)
+    const cmp = (typeof va === 'string' || typeof vb === 'string')
+      ? String(va ?? '').localeCompare(String(vb ?? ''), 'es', { numeric: true, sensitivity: 'base' })
+      : (va || 0) - (vb || 0)
+    return cmp * factor
+  })
+}
+
+// Encabezado <th> completo, clicable para ordenar: mantiene los mismos
+// data-col-tabla/data-col/colStyle(...) que ya usa el menú "⋮" de columnas
+// (para que ocultar/mostrar columnas siga funcionando igual) y le suma la
+// clase 'th-ordenable' + el onclick + la flechita (▲/▼) cuando es la
+// columna por la que está ordenado activamente ese modo.
+function _flechaOrden(modo, col) {
+  const st = window._resumenStockOrden[modo]
+  if (st.col !== col) return ''
+  return st.dir === 'asc' ? ' <span class="orden-flecha">▲</span>' : ' <span class="orden-flecha">▼</span>'
+}
+
+function _thOrden(modo, tablaId, col, label) {
+  return `<th data-col-tabla="${tablaId}" data-col="${col}" class="th-ordenable"${colStyle(tablaId, col)} onclick="window.ordenarResumenStock('${col}')">${label}${_flechaOrden(modo, col)}</th>`
+}
+
 async function renderResumenStock() {
   try {
-    const [productos, lotes, categorias] = await Promise.all([getItems(), getLotes(), getCategorias()])
+    // Kardex (vía la vista stock_ubicaciones) es la fuente de verdad de
+    // CANTIDADES — el mismo dato que ya usa el subtab "Por Zona". lotes
+    // solo se consulta aquí para costo_unitario (dato de costeo, no de
+    // cantidad, y no forma parte del problema de desincronización) y para
+    // poder listar productos con stock=0. Antes este resumen sumaba
+    // lotes.cantidad directo, que es un campo mantenido a mano por cada
+    // flujo (compra/venta/traslado/nota/ajuste) y puede desincronizarse de
+    // kardex — por eso a veces no coincidía con "Por Zona".
+    const [productos, stockUbic, lotes, categorias] = await Promise.all([getItems(), getStockUbicaciones(), getLotes(), getCategorias()])
     const container = document.getElementById('tabla-resumen')
 
     if (!container) return
@@ -690,13 +784,27 @@ async function renderResumenStock() {
     const fStock = document.getElementById('filtroResumenStock')?.value ?? 'con'
     const fBusqueda = (document.getElementById('buscarResumenStock')?.value || '').trim().toLowerCase()
 
+    const loteMap = {}
+    ;(lotes || []).forEach(l => { loteMap[l.id] = l })
+
+    // Agrega stock_ubicaciones (por lote+zona) a nivel de producto, sumando
+    // todas las zonas reales de todos sus lotes — mismas filas que ve "Por
+    // Zona", solo que agrupadas distinto.
     const stockPorProducto = {}
-    ;(lotes || []).forEach(l => {
-      stockPorProducto[l.item_id] = (stockPorProducto[l.item_id] || 0) + (parseFloat(l.cantidad) || 0)
+    ;(stockUbic || []).forEach(s => {
+      const lote = loteMap[s.lote_id]
+      if (!lote) return
+      const acc = stockPorProducto[lote.item_id] || { cantidad: 0, unidades: 0, lotesSet: new Set(), valor: 0 }
+      const cant = parseFloat(s.cantidad) || 0
+      acc.cantidad += cant
+      acc.unidades += parseFloat(s.cantidad_unidades) || 0
+      acc.valor += cant * (parseFloat(lote.costo_unitario) || 0)
+      acc.lotesSet.add(s.lote_id)
+      stockPorProducto[lote.item_id] = acc
     })
 
     const productosFiltrados = (productos || []).filter(p => {
-      const stock = stockPorProducto[p.id] || 0
+      const stock = stockPorProducto[p.id]?.cantidad || 0
       if (fCat && String(p.categoria_id) !== fCat) return false
       if (fStock === 'con' && stock <= 0) return false
       if (fStock === 'sin' && stock > 0) return false
@@ -714,18 +822,45 @@ async function renderResumenStock() {
       return
     }
 
+    // Se calculan todos los valores de cada fila ANTES de pintar (en vez de
+    // ir directo del array de productos al html) para poder ordenarlas por
+    // cualquier columna, no solo por el orden en que vino getItems().
+    const filas = productosFiltrados.map(prod => {
+      const acc = stockPorProducto[prod.id] || { cantidad: 0, unidades: 0, lotesSet: null, valor: 0 }
+      const stockTotal = acc.cantidad
+      const totalUnidades = acc.unidades
+      const loteIds = acc.lotesSet ? Array.from(acc.lotesSet) : []
+      const numerosLote = loteIds.map(id => loteMap[id]?.numero_lote).filter(Boolean)
+      const valorTotal = acc.valor
+      const costoPromedio = stockTotal > 0 ? valorTotal / stockTotal : 0
+      const critico = stockTotal < umbralCritico
+      return { prod, stockTotal, totalUnidades, numerosLote, valorTotal, costoPromedio, critico }
+    })
+
+    _aplicarOrdenFilas(filas, window._resumenStockOrden.general, {
+      sku:            f => f.prod.sku || '',
+      producto:       f => f.prod.nombre || '',
+      lotes:          f => f.numerosLote.join(', '),
+      stock_total:    f => f.stockTotal,
+      total_unidades: f => f.totalUnidades,
+      costo_promedio: f => f.costoPromedio,
+      valor_total:    f => f.valorTotal,
+      stock_critico:  f => f.critico ? 1 : 0
+    })
+
     let html = `
       <table>
         <thead>
           <tr>
-            <th data-col-tabla="resumen-stock" data-col="sku"${colStyle('resumen-stock','sku')}>SKU</th>
-            <th data-col-tabla="resumen-stock" data-col="producto"${colStyle('resumen-stock','producto')}>Producto</th>
-            <th data-col-tabla="resumen-stock" data-col="stock_total"${colStyle('resumen-stock','stock_total')}>Stock Total</th>
-            <th data-col-tabla="resumen-stock" data-col="total_unidades"${colStyle('resumen-stock','total_unidades')}>Total Unidades</th>
-            <th data-col-tabla="resumen-stock" data-col="cantidad_lotes"${colStyle('resumen-stock','cantidad_lotes')}>Cantidad Lotes</th>
-            <th data-col-tabla="resumen-stock" data-col="costo_promedio"${colStyle('resumen-stock','costo_promedio')}>Costo Promedio Unit.</th>
-            <th data-col-tabla="resumen-stock" data-col="valor_total"${colStyle('resumen-stock','valor_total')}>Valor Total Inventario</th>
-            <th data-col-tabla="resumen-stock" data-col="stock_critico"${colStyle('resumen-stock','stock_critico')}>Stock Crítico (&lt;${umbralCritico})</th>
+            ${_thOrden('general', 'resumen-stock', 'sku', 'SKU')}
+            ${_thOrden('general', 'resumen-stock', 'producto', 'Producto')}
+            ${_thOrden('general', 'resumen-stock', 'lotes', 'N° Lote')}
+            ${_thOrden('general', 'resumen-stock', 'stock_total', 'Stock Total')}
+            ${_thOrden('general', 'resumen-stock', 'total_unidades', 'Total Unidades')}
+            ${_thOrden('general', 'resumen-stock', 'costo_promedio', 'Costo Promedio Unit.')}
+            ${_thOrden('general', 'resumen-stock', 'valor_total', 'Valor Total Inventario')}
+            ${_thOrden('general', 'resumen-stock', 'stock_critico', `Stock Crítico (&lt;${umbralCritico})`)}
+            <th data-col-tabla="resumen-stock" data-col="acciones"${colStyle('resumen-stock','acciones')}>Acciones</th>
           </tr>
         </thead>
         <tbody>
@@ -735,14 +870,9 @@ async function renderResumenStock() {
     let totalStockGeneral = 0
     let totalUnidadesGeneral = 0
 
-    for (const prod of productosFiltrados) {
-      const lotesProducto = (lotes || []).filter(l => l.item_id === prod.id)
-      const stockTotal = lotesProducto.reduce((sum, l) => sum + (parseFloat(l.cantidad) || 0), 0)
-      const totalUnidades = lotesProducto.reduce((sum, l) => sum + (parseFloat(l.cantidad_unidades) || 0), 0)
-      const cantidadLotes = lotesProducto.length
-      const valorTotal = lotesProducto.reduce((sum, l) => sum + ((parseFloat(l.cantidad) || 0) * (parseFloat(l.costo_unitario) || 0)), 0)
-      const costoPromedio = stockTotal > 0 ? valorTotal / stockTotal : 0
-      const critico = stockTotal < umbralCritico
+    for (const fila of filas) {
+      const { prod, stockTotal, totalUnidades, numerosLote, valorTotal, costoPromedio, critico } = fila
+      const listaLotes = _formatearListaLotes(numerosLote)
 
       totalInventario += valorTotal
       totalStockGeneral += stockTotal
@@ -754,12 +884,13 @@ async function renderResumenStock() {
         <tr style="${colorCritico}">
           <td data-col-tabla="resumen-stock" data-col="sku"${colStyle('resumen-stock','sku')}><strong>${prod.sku}</strong></td>
           <td data-col-tabla="resumen-stock" data-col="producto"${colStyle('resumen-stock','producto')}>${prod.nombre}</td>
+          <td data-col-tabla="resumen-stock" data-col="lotes"${colStyle('resumen-stock','lotes')}>${listaLotes}</td>
           <td data-col-tabla="resumen-stock" data-col="stock_total" style="text-align: center; font-weight: bold;${colStyle('resumen-stock','stock_total') ? ' display:none;' : ''}">${stockTotal.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
           <td data-col-tabla="resumen-stock" data-col="total_unidades" style="text-align: center;${colStyle('resumen-stock','total_unidades') ? ' display:none;' : ''}">${totalUnidades.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
-          <td data-col-tabla="resumen-stock" data-col="cantidad_lotes" style="text-align: center;${colStyle('resumen-stock','cantidad_lotes') ? ' display:none;' : ''}">${cantidadLotes.toLocaleString('en-US')}</td>
           <td data-col-tabla="resumen-stock" data-col="costo_promedio"${colStyle('resumen-stock','costo_promedio')}>S/. ${costoPromedio.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td data-col-tabla="resumen-stock" data-col="valor_total"${colStyle('resumen-stock','valor_total')}>S/. ${valorTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td data-col-tabla="resumen-stock" data-col="stock_critico" style="text-align: center;${colStyle('resumen-stock','stock_critico') ? ' display:none;' : ''}">${critico ? '⚠️ SÍ' : 'NO'}</td>
+          <td data-col-tabla="resumen-stock" data-col="acciones"${colStyle('resumen-stock','acciones')}><button class="btn btn-small btn-secondary" onclick="window.abrirModalTrasladoDesdeProducto(${prod.id})">Trasladar</button></td>
         </tr>
       `
     }
@@ -770,12 +901,13 @@ async function renderResumenStock() {
           <tr style="border-top: 2px solid var(--border-color); font-weight: bold;">
             <td data-col-tabla="resumen-stock" data-col="sku"${colStyle('resumen-stock','sku')}></td>
             <td data-col-tabla="resumen-stock" data-col="producto"${colStyle('resumen-stock','producto')}>TOTAL INVENTARIO</td>
+            <td data-col-tabla="resumen-stock" data-col="lotes"${colStyle('resumen-stock','lotes')}></td>
             <td data-col-tabla="resumen-stock" data-col="stock_total" style="text-align: center;${colStyle('resumen-stock','stock_total') ? ' display:none;' : ''}">${totalStockGeneral.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
             <td data-col-tabla="resumen-stock" data-col="total_unidades" style="text-align: center;${colStyle('resumen-stock','total_unidades') ? ' display:none;' : ''}">${totalUnidadesGeneral.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
-            <td data-col-tabla="resumen-stock" data-col="cantidad_lotes"${colStyle('resumen-stock','cantidad_lotes')}></td>
             <td data-col-tabla="resumen-stock" data-col="costo_promedio"${colStyle('resumen-stock','costo_promedio')}></td>
             <td data-col-tabla="resumen-stock" data-col="valor_total"${colStyle('resumen-stock','valor_total')}>S/. ${totalInventario.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
             <td data-col-tabla="resumen-stock" data-col="stock_critico"${colStyle('resumen-stock','stock_critico')}></td>
+            <td data-col-tabla="resumen-stock" data-col="acciones"${colStyle('resumen-stock','acciones')}></td>
           </tr>
         </tfoot>
       </table>
@@ -786,10 +918,6 @@ async function renderResumenStock() {
     console.error('Error en renderResumenStock:', error)
     showToast('Error al cargar resumen', 'danger')
   }
-}
-
-window.aplicarFiltrosResumenStock = async function () {
-  await renderResumenStock()
 }
 
 // ============================================================================
@@ -2312,7 +2440,7 @@ window.eliminarZona = async function (id) {
 
 async function renderStockZonas() {
   try {
-    const container = document.getElementById('tabla-stock-zonas')
+    const container = document.getElementById('tabla-resumen')
     if (!container) return
 
     const [stock, lotes, items, marcas, zonas, almacenes] = await Promise.all([
@@ -2354,7 +2482,7 @@ async function renderStockZonas() {
     // mismo patrón que "buscarResumenStock" en el tab General), y busca en
     // producto, SKU, lote, marca y zona a la vez (antes solo dejaba elegir
     // un producto de una lista, uno por uno).
-    const fBusqueda = (document.getElementById('buscarStockZonas')?.value || '').trim().toLowerCase()
+    const fBusqueda = (document.getElementById('buscarResumenStock')?.value || '').trim().toLowerCase()
 
     let stockConCantidad = (stock || []).filter(s => (parseFloat(s.cantidad) || 0) > 0)
     if (fZona) stockConCantidad = stockConCantidad.filter(s => s.ubicacion_id === fZona)
@@ -2389,19 +2517,52 @@ async function renderStockZonas() {
       const a = z ? almacenMap[z.almacen_id] : null
       return `${a?.nombre || '?'} — ${z?.nombre || 'Zona #' + s.ubicacion_id}`
     }
-    stockConCantidad.sort((a, b) => nombreZona(a).localeCompare(nombreZona(b)) || a.id - b.id)
+
+    // Orden: por defecto se agrupa por zona (banners) igual que antes. Si el
+    // usuario eligió una columna haciendo click en el encabezado, esa manda:
+    // - con una sola zona filtrada (no hay banners) se ordena plano.
+    // - con todas las zonas juntas, "Almacén — Zona" reordena los bloques;
+    //   cualquier otra columna ordena DENTRO de cada bloque de zona, para no
+    //   perder el agrupamiento visual que el banner promete.
+    const stOrden = window._resumenStockOrden.zona
+    const extractoresZona = {
+      codigo:    s => itemMap[loteMap[s.lote_id]?.item_id]?.sku || '',
+      producto:  s => itemMap[loteMap[s.lote_id]?.item_id]?.nombre || '',
+      lote:      s => loteMap[s.lote_id]?.numero_lote || '',
+      marca:     s => marcaMap[loteMap[s.lote_id]?.marca_id]?.nombre || '',
+      zona:      s => nombreZona(s),
+      cantidad:  s => parseFloat(s.cantidad) || 0,
+      unidades:  s => parseFloat(s.cantidad_unidades) || 0
+    }
+    if (!fZona && stOrden.col && stOrden.col !== 'zona') {
+      const getCol = extractoresZona[stOrden.col]
+      const factor = stOrden.dir === 'desc' ? -1 : 1
+      stockConCantidad.sort((a, b) => {
+        const z = nombreZona(a).localeCompare(nombreZona(b))
+        if (z !== 0) return z
+        const va = getCol(a), vb = getCol(b)
+        const cmp = (typeof va === 'string' || typeof vb === 'string')
+          ? String(va ?? '').localeCompare(String(vb ?? ''), 'es', { numeric: true, sensitivity: 'base' })
+          : (va || 0) - (vb || 0)
+        return cmp * factor
+      })
+    } else if (stOrden.col) {
+      _aplicarOrdenFilas(stockConCantidad, stOrden, extractoresZona)
+    } else {
+      stockConCantidad.sort((a, b) => nombreZona(a).localeCompare(nombreZona(b)) || a.id - b.id)
+    }
 
     let html = `
       <table>
         <thead>
           <tr>
-            <th data-col-tabla="stock-zonas" data-col="codigo"${colStyle('stock-zonas','codigo')}>Código</th>
-            <th data-col-tabla="stock-zonas" data-col="producto"${colStyle('stock-zonas','producto')}>Producto</th>
-            <th data-col-tabla="stock-zonas" data-col="lote"${colStyle('stock-zonas','lote')}>N° Lote</th>
-            <th data-col-tabla="stock-zonas" data-col="marca"${colStyle('stock-zonas','marca')}>Marca</th>
-            <th data-col-tabla="stock-zonas" data-col="zona"${colStyle('stock-zonas','zona')}>Almacén — Zona</th>
-            <th data-col-tabla="stock-zonas" data-col="cantidad" style="text-align:right;${colStyle('stock-zonas','cantidad') ? ' display:none;' : ''}">Cantidad</th>
-            <th data-col-tabla="stock-zonas" data-col="unidades" style="text-align:right;${colStyle('stock-zonas','unidades') ? ' display:none;' : ''}">Unidades</th>
+            ${_thOrden('zona', 'stock-zonas', 'codigo', 'Código')}
+            ${_thOrden('zona', 'stock-zonas', 'producto', 'Producto')}
+            ${_thOrden('zona', 'stock-zonas', 'lote', 'N° Lote')}
+            ${_thOrden('zona', 'stock-zonas', 'marca', 'Marca')}
+            ${_thOrden('zona', 'stock-zonas', 'zona', 'Almacén — Zona')}
+            <th data-col-tabla="stock-zonas" data-col="cantidad" class="th-ordenable" style="text-align:right;${colStyle('stock-zonas','cantidad') ? ' display:none;' : ''}" onclick="window.ordenarResumenStock('cantidad')">Cantidad${_flechaOrden('zona', 'cantidad')}</th>
+            <th data-col-tabla="stock-zonas" data-col="unidades" class="th-ordenable" style="text-align:right;${colStyle('stock-zonas','unidades') ? ' display:none;' : ''}" onclick="window.ordenarResumenStock('unidades')">Unidades${_flechaOrden('zona', 'unidades')}</th>
             <th data-col-tabla="stock-zonas" data-col="acciones"${colStyle('stock-zonas','acciones')}>Acciones</th>
           </tr>
         </thead>
@@ -2527,6 +2688,24 @@ window.abrirModalTraslado = async function (stockId) {
     if (!_tdEsPesoVariable) document.getElementById('tdCantidad').value = registro.cantidad
   } catch (error) {
     console.error('Error en abrirModalTraslado:', error)
+    showToast('Error al abrir el traslado', 'danger')
+  }
+}
+
+// Atajo desde el botón "Trasladar" de una fila del resumen POR PRODUCTO
+// (modo "General" de Resumen de Stock): a diferencia de abrirModalTraslado
+// (que ya sabe zona+lote exactos porque viene de una fila de "Por
+// Ubicación"), aquí el producto puede tener stock repartido en varios lotes
+// y varias zonas a la vez, así que no hay un origen único que prellenar. Se
+// abre el modal de Nuevo Traslado en blanco (igual que "+ Nuevo Traslado")
+// y se le pide al usuario elegir la zona de origen y agregar ahí la línea
+// del producto/lote que quiere mover.
+window.abrirModalTrasladoDesdeProducto = async function (itemId) {
+  try {
+    await window.abrirModalNuevoTraslado()
+    showToast('Elige la zona de origen y agrega el producto/lote a trasladar', 'info')
+  } catch (error) {
+    console.error('Error en abrirModalTrasladoDesdeProducto:', error)
     showToast('Error al abrir el traslado', 'danger')
   }
 }
@@ -2966,7 +3145,7 @@ window.guardarTrasladoInterno = async function () {
     _detallesTrasladoEnCreacion = []
     const form = document.getElementById('formTrasladoInterno')
     if (form) form.reset()
-    await renderStockZonas()
+    await window.renderResumenStockUnificado()
   } catch (error) {
     console.error('Error en guardarTrasladoInterno:', error)
     showToast('Error al registrar el traslado', 'danger')
@@ -3198,7 +3377,7 @@ window.procesarImportacionTraslados = async function () {
 
     if (ok > 0) {
       showToast(`${ok} traslado(s) importado(s) correctamente`, 'success')
-      await renderStockZonas()
+      await window.renderResumenStockUnificado()
     }
     if (fallidas > 0 && ok === 0) {
       showToast('No se pudo importar ninguna fila. Revisa el detalle de errores.', 'danger')
@@ -3287,7 +3466,7 @@ window.eliminarTrasladoInterno = async function (kardexId) {
     await _revertirTrasladoInterno(mov)
 
     showToast('Traslado eliminado y stock devuelto a la zona de origen', 'success')
-    await renderStockZonas()
+    await window.renderResumenStockUnificado()
     if (document.getElementById('kardexItemSelect')?.value) await window.cargarKardex()
   } catch (error) {
     console.error('Error en eliminarTrasladoInterno:', error)
@@ -3321,7 +3500,7 @@ window.editarTrasladoInterno = async function (kardexId) {
     await _revertirTrasladoInterno(mov)
 
     showToast('Traslado revertido. Corrige los datos y guarda de nuevo.', 'success')
-    await renderStockZonas()
+    await window.renderResumenStockUnificado()
     if (document.getElementById('kardexItemSelect')?.value) await window.cargarKardex()
 
     // Reabre el modal multi-línea con la cabecera prellenada y esta línea ya

@@ -137,72 +137,57 @@
         </div>
 
         <div id="tab-resumen" class="tab-content">
-          <div class="subtab-bar" id="inv-subtabs-resumen">
-            <button class="subtab active" data-sub="res-general">General</button>
-            <button class="subtab" data-sub="res-porzona">Por Zona</button>
-          </div>
-
-          <!-- Subtab General: resumen agregado por producto (stock total,
-               sin desglosar por zona). -->
-          <div id="res-general" class="subtab-panel active">
-            <div class="card">
-              <div class="col-menu card-corner-menu" id="resumenStockColMenu">
-                <button type="button" class="card-menu-btn" onclick="window._colMenuToggle('resumen-stock', 'resumenStockColMenu', 'resumenStockColMenuDropdown')" title="Elegir qué columnas mostrar">⋮</button>
-                <div class="col-menu-dropdown" id="resumenStockColMenuDropdown"></div>
-              </div>
-              <div class="card-header" style="padding-right:34px;">
-                <h3 class="card-title">Resumen de Stock</h3>
-              </div>
-              <!-- FILTROS RESUMEN STOCK (igual que tab Productos) -->
-              <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; padding:12px 16px; border-bottom:1px solid var(--border-color, #e0e0e0);">
-                <div class="form-group" style="margin:0; min-width:220px; flex:1;">
-                  <label style="font-size:0.8rem;">Buscar</label>
-                  <input type="text" id="buscarResumenStock" placeholder="Nombre o SKU..." oninput="window.aplicarFiltrosResumenStock()">
+          <!-- Tabla única "tipo vista": General (por producto, con columna de
+               Lote) y Por Ubicación (desglosado por lote+zona) son el mismo
+               dato (kardex vía stock_ubicaciones), solo cambia el nivel de
+               agrupamiento — un botón alterna entre ambos en vez de haber
+               dos subtabs con dos tablas separadas. -->
+          <div class="card">
+            <div class="col-menu card-corner-menu" id="resumenStockColMenu">
+              <button type="button" class="card-menu-btn" onclick="window._colMenuToggle(window._resumenStockModo === 'zona' ? 'stock-zonas' : 'resumen-stock', 'resumenStockColMenu', 'resumenStockColMenuDropdown')" title="Elegir qué columnas mostrar">⋮</button>
+              <div class="col-menu-dropdown" id="resumenStockColMenuDropdown"></div>
+            </div>
+            <div class="card-header" style="padding-right:34px; flex-wrap:wrap; gap:10px;">
+              <h3 class="card-title">Resumen de Stock</h3>
+              <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <div class="subtab-bar" id="resumenStockModoToggle" style="margin:0;">
+                  <button type="button" class="subtab active" data-modo="general" onclick="window.setModoResumenStock('general')">General</button>
+                  <button type="button" class="subtab" data-modo="zona" onclick="window.setModoResumenStock('zona')">Por Ubicación</button>
                 </div>
-                <div class="form-group" style="margin:0; min-width:180px;">
-                  <label style="font-size:0.8rem;">Categoría</label>
-                  <select id="filtroResumenCategoria" onchange="window.aplicarFiltrosResumenStock()">
-                    <option value="">Todas</option>
-                  </select>
-                </div>
-                <div class="form-group" style="margin:0; min-width:160px;">
-                  <label style="font-size:0.8rem;">Stock Total</label>
-                  <select id="filtroResumenStock" onchange="window.aplicarFiltrosResumenStock()">
-                    <option value="con" selected>Con stock (&gt; 0)</option>
-                    <option value="sin">Sin stock (= 0)</option>
-                    <option value="">Todos</option>
-                  </select>
-                </div>
-              </div>
-              <div id="tabla-resumen" class="table-container">
-                <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Cargando...</p>
+                <button class="btn btn-secondary btn-small" onclick="window.abrirModalImportarTraslados()">📥 Importar</button>
+                <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevoTraslado()">+ Nuevo Traslado</button>
               </div>
             </div>
-          </div>
-
-          <!-- Subtab Por Zona (movido desde el antiguo tab "Almacenes"): mismo
-               stock, desglosado por lote y por Almacén/Zona física, con
-               filtro para ver solo una zona. -->
-          <div id="res-porzona" class="subtab-panel">
-            <div class="card">
-              <div class="col-menu card-corner-menu" id="stockZonasColMenu">
-                <button type="button" class="card-menu-btn" onclick="window._colMenuToggle('stock-zonas', 'stockZonasColMenu', 'stockZonasColMenuDropdown')" title="Elegir qué columnas mostrar">⋮</button>
-                <div class="col-menu-dropdown" id="stockZonasColMenuDropdown"></div>
+            <!-- FILTROS compartidos por ambos modos; "Zona" solo aplica y se
+                 muestra cuando el modo activo es "Por Ubicación". -->
+            <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; padding:12px 16px; border-bottom:1px solid var(--border-color, #e0e0e0);">
+              <div class="form-group" style="margin:0; min-width:220px; flex:1;">
+                <label style="font-size:0.8rem;">Buscar</label>
+                <input type="text" id="buscarResumenStock" placeholder="Nombre, SKU, lote, marca o zona..." oninput="window.aplicarFiltrosResumenStock()">
               </div>
-              <div class="card-header" style="padding-right:34px;">
-                <h3 class="card-title">Stock por Zona</h3>
-                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                  <input type="text" id="buscarStockZonas" placeholder="Buscar producto, SKU, lote, marca o zona..." oninput="window.renderStockZonas()" style="min-width:320px; flex:1;">
-                  <select id="filtroZonaStock" onchange="window.renderStockZonas()" style="min-width:220px;">
-                    <option value="">-- Todas las zonas --</option>
-                  </select>
-                  <button class="btn btn-secondary btn-small" onclick="window.abrirModalImportarTraslados()">📥 Importar</button>
-                  <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevoTraslado()">+ Nuevo Traslado</button>
-                </div>
+              <div class="form-group" style="margin:0; min-width:180px;">
+                <label style="font-size:0.8rem;">Categoría</label>
+                <select id="filtroResumenCategoria" onchange="window.aplicarFiltrosResumenStock()">
+                  <option value="">Todas</option>
+                </select>
               </div>
-              <div id="tabla-stock-zonas" class="table-container">
-                <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Cargando...</p>
+              <div class="form-group" style="margin:0; min-width:160px;">
+                <label style="font-size:0.8rem;">Stock Total</label>
+                <select id="filtroResumenStock" onchange="window.aplicarFiltrosResumenStock()">
+                  <option value="con" selected>Con stock (&gt; 0)</option>
+                  <option value="sin">Sin stock (= 0)</option>
+                  <option value="">Todos</option>
+                </select>
               </div>
+              <div class="form-group" id="filtroResumenZonaWrap" style="margin:0; min-width:220px;" hidden>
+                <label style="font-size:0.8rem;">Zona</label>
+                <select id="filtroZonaStock" onchange="window.aplicarFiltrosResumenStock()">
+                  <option value="">-- Todas las zonas --</option>
+                </select>
+              </div>
+            </div>
+            <div id="tabla-resumen" class="table-container">
+              <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Cargando...</p>
             </div>
           </div>
         </div>

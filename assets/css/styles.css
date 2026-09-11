@@ -571,6 +571,23 @@ td {
   font-size: calc(var(--font-size-sm) * var(--font-scale, 1));
 }
 
+/* Encabezado de columna clicable para ordenar asc/desc (ver
+   inventario.js: window.ordenarResumenStock). Clase en vez de style
+   inline para no pisar el atributo style que ya usa colStyle() en el
+   sistema de columnas ocultables. */
+th.th-ordenable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+th.th-ordenable:hover {
+  text-decoration: underline;
+}
+th.th-ordenable .orden-flecha {
+  font-size: 0.75em;
+  opacity: 0.7;
+}
+
 tbody tr:hover {
   background-color: var(--bg-secondary);
 }
