@@ -346,11 +346,18 @@ window.onCambiarTotalesNota = function (campo) {
 /**
  * Modo "detalle": lo activa el llamador (ej. Compras cuando el motivo exige
  * detalle por ítem) desde su propio onMotivoCambio. En este modo el bloque
- * de totales se mueve al final (después de #nota-extra) y sus 3 campos
- * pasan a solo-lectura — el propio llamador es quien escribe los valores
- * (sumando su detalle) llamando a window.setTotalesNotaDesdeDetalle().
+ * de totales se mueve al final (después de #nota-extra) y, salvo que se pida
+ * `soloReposicionar`, sus 3 campos pasan a solo-lectura — el propio llamador
+ * es quien escribe los valores (sumando su detalle) llamando a
+ * window.setTotalesNotaDesdeDetalle().
+ *
+ * `soloReposicionar: true` (ej. Ventas, devolución de mercadería por guía):
+ * solo mueve el bloque de posición, sin bloquear los campos ni asumir que el
+ * importe de la nota es la suma del detalle — la sección inyectada es solo
+ * físico/cantidades (no trae precio de venta), el importe de la NC lo sigue
+ * escribiendo el usuario a mano.
  */
-window.setModoDetalleNota = function (activo) {
+window.setModoDetalleNota = function (activo, opciones = {}) {
   const bloque = document.getElementById('nota-totales-bloque')
   const formulario = document.getElementById('nota-formulario')
   const marcador = document.getElementById('nota-descripcion-grupo')
@@ -363,6 +370,8 @@ window.setModoDetalleNota = function (activo) {
   } else if (marcador) {
     formulario.insertBefore(bloque, marcador) // vuelve a su lugar original
   }
+
+  if (opciones.soloReposicionar) return
 
   const ayuda = document.getElementById('nota-totales-ayuda')
   if (ayuda) ayuda.textContent = activo
@@ -425,8 +434,13 @@ window.emitirNota = async function () {
     })
     window.cerrarModalNota()
   } catch (e) {
-    console.error('emitirNota:', e)
-    window.showToast?.('No se pudo emitir la nota: ' + e.message, 'danger')
+    // e.cancelado: el propio llamador (onEmitir) armó una confirmación extra
+    // (ej. Ventas antes de reingresar stock por una guía) y el usuario le dio
+    // "Cancelar" — no es un error real, se queda en el modal sin más aviso.
+    if (!e?.cancelado) {
+      console.error('emitirNota:', e)
+      window.showToast?.('No se pudo emitir la nota: ' + e.message, 'danger')
+    }
     if (btn) { btn.disabled = false; btn.textContent = 'Emitir nota' }
   }
 }

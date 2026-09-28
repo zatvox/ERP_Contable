@@ -1,1 +1,4 @@
 .env.local
+
+# Caché local de Supabase CLI (no subir)
+supabase/.temp/

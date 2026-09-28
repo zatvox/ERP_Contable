@@ -252,8 +252,24 @@ export function refrescarReporte(id) {
   if (ordenKey) {
     const dir = estado.ordenDir === 'asc' ? 1 : -1
     grupos.sort((a, b) => {
-      const va = ordenKey === '_etiqueta' ? a._etiqueta : (a[ordenKey] ?? 0)
-      const vb = ordenKey === '_etiqueta' ? b._etiqueta : (b[ordenKey] ?? 0)
+      if (ordenKey === '_etiqueta') {
+        // Cada segmento de la etiqueta (separados por ' ▸ ' cuando se agrupa
+        // por varias dimensiones) se intenta convertir a un valor ordenable
+        // cronológicamente si es un mes tipo "Ago 2026" (formato de
+        // nombreMes) — así "Mes" ordena por fecha real y no alfabéticamente,
+        // sin afectar el orden alfabético normal de Cliente/Producto/etc.
+        const pa = String(a._etiqueta).split(' ▸ ').map(_valorOrdenable)
+        const pb = String(b._etiqueta).split(' ▸ ').map(_valorOrdenable)
+        for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+          const va = pa[i], vb = pb[i]
+          if (va === vb) continue
+          if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir
+          return String(va ?? '').localeCompare(String(vb ?? '')) * dir
+        }
+        return 0
+      }
+      const va = a[ordenKey] ?? 0
+      const vb = b[ordenKey] ?? 0
       if (typeof va === 'string' || typeof vb === 'string') return String(va).localeCompare(String(vb)) * dir
       return (va - vb) * dir
     })
@@ -498,12 +514,25 @@ export function tramoAntiguedad(dias) {
   return '4 · Más de 90 días'
 }
 
+const _MESES_ABREV = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Set', 'Oct', 'Nov', 'Dic']
+
 /** Nombre de mes legible desde 'YYYY-MM'. */
 export function nombreMes(ym) {
   if (!ym) return '(sin fecha)'
   const [a, m] = ym.split('-')
-  const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Set', 'Oct', 'Nov', 'Dic']
-  return `${meses[parseInt(m, 10) - 1] || m} ${a}`
+  return `${_MESES_ABREV[parseInt(m, 10) - 1] || m} ${a}`
+}
+
+/** Convierte una etiqueta "Ago 2026" (formato de nombreMes) en un número
+ *  YYYYMM ordenable cronológicamente. Si no matchea ese formato (Cliente,
+ *  Producto, Lote, "(sin fecha)", etc.) devuelve el valor tal cual, así
+ *  sigue ordenando alfabéticamente como antes. */
+function _valorOrdenable(valor) {
+  const m = /^([A-Za-z]{3})\s(\d{4})$/.exec(valor)
+  if (!m) return valor
+  const idx = _MESES_ABREV.indexOf(m[1])
+  if (idx === -1) return valor
+  return parseInt(m[2], 10) * 100 + (idx + 1)
 }
 
 function _esc(s) {

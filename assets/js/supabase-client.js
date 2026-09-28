@@ -31,13 +31,45 @@ export async function getById(table, id) {
   } catch (e) { console.error('Error en getById:', e); return null }
 }
 
+// Última razón por la que falló un insert. Los módulos la leen con
+// `ultimoErrorInsert()` para poder mostrar en pantalla POR QUÉ no se pudo
+// crear el registro (típicamente choque contra un índice único), en vez
+// del genérico "no se pudo crear" que obligaba a abrir la consola.
+let _ultimoErrorInsert = null
+
+export function ultimoErrorInsert() { return _ultimoErrorInsert }
+
 export async function insert(table, data) {
+  _ultimoErrorInsert = null
   try {
     console.log("Datos a insertar:", data);
     const { data: result, error } = await supabase.from(table).insert([data]).select()
-    if (error) { console.error(`Error inserting into ${table}:`, error); return null }
+    if (error) {
+      console.error(`Error inserting into ${table}:`, error)
+      _ultimoErrorInsert = _interpretarErrorInsert(error, table)
+      return null
+    }
     return result ? result[0] : null
-  } catch (e) { console.error('Error en insert:', e); return null }
+  } catch (e) {
+    console.error('Error en insert:', e)
+    _ultimoErrorInsert = { mensaje: e.message, tabla: null, codigo: null }
+    return null
+  }
+}
+
+function _interpretarErrorInsert(error, tabla) {
+  const codigo = error?.code || null
+  if (codigo === '23505') {
+    return {
+      codigo,
+      tabla,
+      mensaje: 'ya existe un registro igual (choca contra un valor que debe ser único). Revisa si el dato ya fue creado antes.'
+    }
+  }
+  if (codigo === '23503') {
+    return { codigo, tabla, mensaje: 'hace referencia a un registro que no existe (llave foránea inválida).' }
+  }
+  return { codigo, tabla, mensaje: error?.message || 'error desconocido' }
 }
 
 export async function update(table, id, data) {

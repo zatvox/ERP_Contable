@@ -94,6 +94,36 @@ export function formatQty(value, maxDecimals = 2) {
 }
 
 // ============================================================================
+// DOCUMENTO DE CONTACTO (RUC / DNI) — texto reutilizable para cualquier
+// selector de Cliente/Proveedor en el sistema: una vez elegido el contacto,
+// se muestra su RUC o DNI debajo del selector. Si el contacto no tiene
+// ninguno guardado en su ficha, se avisa en vez de dejarlo en blanco.
+// ============================================================================
+
+export function textoDocumentoContacto(contacto) {
+  // El contacto guarda un solo documento genérico (tipo_documento +
+  // nro_documento: 'RUC'/'DNI'/'CE'/etc.), no columnas separadas ruc/dni.
+  const numero = (contacto?.nro_documento || '').toString().trim()
+  const tipo = (contacto?.tipo_documento || '').toString().trim().toUpperCase()
+  if (!numero) return '\u26a0 Sin RUC/DNI registrado'
+  return tipo ? `${tipo}: ${numero}` : numero
+}
+
+/** Pinta (o limpia, si `contacto` es null) el <small> de documento debajo de
+ * un selector de contacto. `elementoId` es el id de ese <small>. */
+export function pintarDocumentoContacto(elementoId, contacto) {
+  const el = document.getElementById(elementoId)
+  if (!el) return
+  if (!contacto) {
+    el.style.display = 'none'
+    el.textContent = ''
+    return
+  }
+  el.textContent = textoDocumentoContacto(contacto)
+  el.style.display = 'block'
+}
+
+// ============================================================================
 // MODAL HELPERS (Global)
 // ============================================================================
 

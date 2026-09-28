@@ -1054,6 +1054,75 @@ input[type="number"] {
   margin: 4px 0;
 }
 
+/* ── Barras de filtros en 2 filas de 3 columnas (ej. Kardex Valorizado) ── */
+.kardex-filtros-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kardex-filtros-fila {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 700px) {
+  .kardex-filtros-fila { grid-template-columns: 1fr; }
+}
+
+/* ── Botón "select-like" para filtros con checklist en dropdown (multi-
+   selección de lote/tipo, etc.) ─────────────────────────────────────────
+   Antes usaban .btn-secondary (botón de acción color crema), que se veía
+   fuera de lugar al lado de <select> nativos en la misma barra de filtros.
+   Este estilo copia el look de input/select (fondo, borde, texto) para que
+   se perciban como parte del mismo grupo de filtros, con una flechita ▾
+   que imita la de un <select> nativo. */
+.filtro-selectlike {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.filtro-selectlike:hover { border-color: var(--color-primary); }
+
+.col-menu.open .filtro-selectlike {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(49, 46, 129, 0.1);
+}
+
+.filtro-selectlike:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(49, 46, 129, 0.1);
+}
+
+.filtro-selectlike span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filtro-selectlike::after {
+  content: '▾';
+  color: var(--text-secondary);
+  font-size: 0.75em;
+  flex-shrink: 0;
+}
+
 /* ── Menú "⋮" de esquina (kebab) ──────────────────────────────────────────
    Estándar del sistema para "elegir columnas" u otras acciones secundarias
    de una tabla/tarjeta: un ícono discreto en la esquina superior derecha en
@@ -1493,6 +1562,26 @@ body.dark-mode .reporte-chip.on { background-color: var(--color-info); border-co
 .cfg-hint { font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px; line-height: 1.35; }
 .cfg-acciones { margin-top: 20px; display: flex; align-items: center; gap: 10px; }
 .cfg-ok { color: var(--color-success); font-size: 0.82rem; display: none; }
+
+/* --- Banco de comandos: salida estilo terminal --- */
+.terminal-box {
+  width: 100%;
+  margin-top: 4px;
+  background: #0d1117;
+  color: #c9d1d9;
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  max-height: 380px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.terminal-line-info  { color: #79c0ff; }
+.terminal-line-ok    { color: #3fb950; }
+.terminal-line-error { color: #f85149; }
 
 /* --- Switch bonito para checkboxes de configuración --- */
 .switch { position: relative; display: inline-block; width: 42px; height: 23px; flex-shrink: 0; }

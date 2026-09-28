@@ -20,7 +20,7 @@
         <li><a href="bancos.html" data-page="bancos">🏦 Bancos</a></li>
         <li><a href="contabilidad.html" data-page="contabilidad">📑 Contabilidad</a></li>
         <li data-solo-admin><a href="usuarios.html" data-page="usuarios">👤 Usuarios</a></li>
-        <li><a href="perfil.html" data-page="perfil">🙍 Perfil</a></li>
+        <li><a href="perfil.html" data-page="perfil">⚙️ Configuración</a></li>
         <!-- En standby hasta la v3: módulo de importaciones.
         <li><a href="costeo-importaciones.html" data-page="costeo">🚢 Costeo Importaciones</a></li>
         -->
@@ -329,6 +329,7 @@
             <select id="ventaContactId" onchange="window.onCambiarClienteVenta()">
               <option value="">-- Selecciona cliente --</option>
             </select>
+            <small id="ventaClienteDocInfo" style="display:none; color:var(--text-secondary); font-size:0.92rem;"></small>
             <small id="ventaClienteRetencionAviso" style="display:none; color:var(--color-warning);"></small>
           </div>
           <div class="form-group">
@@ -638,7 +639,8 @@
         <div style="display:grid; grid-template-columns:2fr 1.2fr 1fr .8fr 1fr; gap:12px;">
           <div class="form-group">
             <label>Cliente</label>
-            <select id="evContactId"><option value="">-- Selecciona --</option></select>
+            <select id="evContactId" onchange="window._onCambiarClienteEditarVenta()"><option value="">-- Selecciona --</option></select>
+            <small id="evClienteDocInfo" style="display:none; color:var(--text-secondary); font-size:0.72rem;"></small>
             <small id="ev-cliente-aviso" style="color:var(--text-secondary); font-size:0.72rem;"></small>
           </div>
           <div class="form-group">
@@ -721,8 +723,10 @@
       </form>
 
       <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="window.closeModal('modal-editar-venta')">Cancelar</button>
-        <button class="btn btn-primary" id="btnGuardarEdicionVenta" onclick="window.guardarEdicionVenta()">Guardar y propagar cambios</button>
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-editar-venta')">Cerrar</button>
+        <button class="btn btn-primary" id="evBtnEditar" onclick="window.activarEdicionVenta()">✏️ Editar</button>
+        <button class="btn btn-secondary" id="evBtnCancelarEdicion" style="display:none;" onclick="window.cancelarEdicionVenta()">✕ Cancelar</button>
+        <button class="btn btn-primary" id="btnGuardarEdicionVenta" style="display:none;" onclick="window.guardarEdicionVenta()">Guardar y propagar cambios</button>
       </div>
     </div>
   </div>
@@ -739,9 +743,10 @@
           <div style="display: flex; gap: 10px; align-items: flex-end;">
             <div style="flex: 1;">
               <label>Cliente *</label>
-              <select id="cotCliente" required>
+              <select id="cotCliente" required onchange="window._onCambiarClienteCotizacion()">
                 <option value="">-- Selecciona --</option>
               </select>
+              <small id="cotClienteDocInfo" style="display:none; color:var(--text-secondary); font-size:0.72rem;"></small>
             </div>
             <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioCliente()" style="margin-bottom: 0;">+ Nuevo</button>
           </div>
@@ -783,7 +788,7 @@
                 <option value="">-- Selecciona --</option>
               </select>
             </div>
-            <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioLote()" style="margin-bottom: 0;">+ Nuevo</button>
+            <!-- 2026-09-25: "+ Nuevo" lote retirado — el stock entra por Guía de Remisión o Ajuste de Inventario. -->
           </div>
         </div>
 

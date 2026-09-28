@@ -4,7 +4,7 @@
   <link rel="icon" href="data:,">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>JHIRO ERP - Mi Perfil</title>
+  <title>JHIRO ERP - Configuración</title>
   <link rel="stylesheet" href="assets/css/styles.css">
 </head>
 <body>
@@ -20,7 +20,7 @@
         <li><a href="bancos.html" data-page="bancos">🏦 Bancos</a></li>
         <li><a href="contabilidad.html" data-page="contabilidad">📑 Contabilidad</a></li>
         <li data-solo-admin><a href="usuarios.html" data-page="usuarios">👤 Usuarios</a></li>
-        <li><a href="perfil.html" class="active" data-page="perfil">🙍 Perfil</a></li>
+        <li><a href="perfil.html" class="active" data-page="perfil">⚙️ Configuración</a></li>
         <!-- En standby hasta la v3: módulo de importaciones.
         <li><a href="costeo-importaciones.html" data-page="costeo">🚢 Costeo Importaciones</a></li>
         -->
@@ -35,14 +35,20 @@
       <header class="header">
         <div class="header-left">
           <button class="menu-toggle" id="menuToggle">☰</button>
-          <h2 class="header-title">Mi Perfil</h2>
+          <h2 class="header-title">Configuración</h2>
         </div>
 
         <nav class="module-nav" id="perfilTabs">
-          <button type="button" class="tab-btn active" data-tab="datos">Mis Datos</button>
-          <button type="button" class="tab-btn" data-tab="seguridad">Seguridad</button>
-          <button type="button" class="tab-btn" data-tab="actividad">Mi Actividad</button>
-          <button type="button" class="tab-btn module-nav-config" data-tab="configuracion">⚙️ Preferencias</button>
+          <div class="module-nav-group">
+            <button type="button" class="module-nav-group-toggle">🙍 Perfil</button>
+            <div class="module-nav-dropdown">
+              <button class="tab-btn active" data-tab="datos">Mis Datos</button>
+              <button class="tab-btn" data-tab="seguridad">Seguridad</button>
+              <button class="tab-btn" data-tab="actividad">Mi Actividad</button>
+              <button class="tab-btn" data-tab="configuracion">⚙️ Preferencias</button>
+            </div>
+          </div>
+          <button type="button" class="tab-btn" data-tab="comandos">🖥️ Comandos</button>
         </nav>
 
         <div class="header-controls">
@@ -51,7 +57,7 @@
       </header>
 
       <main class="content">
-        <h1 class="page-title">Mi Perfil</h1>
+        <h1 class="page-title">Configuración</h1>
 
         <!-- TAB: DATOS -->
         <div id="tab-datos" class="tab-content active">
@@ -183,6 +189,11 @@
         <!-- TAB: PREFERENCIAS -->
         <div id="tab-configuracion" class="tab-content">
           <div id="perfil-config-container"></div>
+        </div>
+
+        <!-- TAB: COMANDOS -->
+        <div id="tab-comandos" class="tab-content">
+          <div id="perfil-comandos-container"></div>
         </div>
 
       </main>

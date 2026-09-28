@@ -2,11 +2,11 @@
 // SUPABASE-DATA.JS - Gestión de datos con Supabase
 // ============================================================================
 
-import { supabase, getAll, getById, insert, update, deleteRecord, query, ultimoErrorDelete } from './supabase-client.js'
+import { supabase, getAll, getById, insert, update, deleteRecord, query, ultimoErrorDelete, ultimoErrorInsert } from './supabase-client.js'
 
 // Se re-exporta para que los módulos puedan explicar en pantalla por qué
 // falló un borrado (qué tabla sigue referenciando el registro).
-export { ultimoErrorDelete }
+export { ultimoErrorDelete, ultimoErrorInsert }
 // ============================================================================
 // ITEMS
 // ============================================================================
@@ -2606,6 +2606,23 @@ export async function reversarAsiento(asientoId, userId, motivo = 'Corrección')
   })
   if (error) throw new Error(`Error al reversar asiento: ${error.message}`)
   return data  // retorna el ID del asiento de reversión
+}
+
+// ============================================================================
+// SECUENCIA DE DOCUMENTOS (correlativo estilo Odoo, ej. "SJLP/INT/00393")
+// ============================================================================
+// Sube el contador atómicamente en la BD (ver 56_secuencias_documentos_traslados.sql)
+// y devuelve el número entero — el llamador arma el string final con el
+// código del almacén y el tipo. Un error aquí (p. ej. migración no corrida
+// todavía) se propaga para que el llamador decida (normalmente: seguir sin
+// numero_documento en vez de bloquear el traslado).
+export async function obtenerSiguienteNumeroSecuencia(almacenId, tipo) {
+  const { data, error } = await supabase.rpc('obtener_siguiente_numero_secuencia', {
+    p_almacen_id: almacenId,
+    p_tipo:       tipo
+  })
+  if (error) throw new Error(`Error al generar número de documento: ${error.message}`)
+  return data // entero
 }
 
 // ============================================================================

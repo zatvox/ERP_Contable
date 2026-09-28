@@ -20,7 +20,7 @@
         <li><a href="bancos.html" data-page="bancos">🏦 Bancos</a></li>
         <li><a href="contabilidad.html" data-page="contabilidad">📑 Contabilidad</a></li>
         <li data-solo-admin><a href="usuarios.html" data-page="usuarios">👤 Usuarios</a></li>
-        <li><a href="perfil.html" data-page="perfil">🙍 Perfil</a></li>
+        <li><a href="perfil.html" data-page="perfil">⚙️ Configuración</a></li>
         <!-- En standby hasta la v3: módulo de importaciones.
         <li><a href="costeo-importaciones.html" data-page="costeo">🚢 Costeo Importaciones</a></li>
         -->
@@ -54,6 +54,7 @@
               <button class="tab-btn" data-tab="lotes">Lotes</button>
               <button class="tab-btn" data-tab="resumen">Resumen Stock</button>
               <button class="tab-btn" data-tab="kardex">Kardex Valorizado</button>
+              <button class="tab-btn" data-tab="historial">Historial de Movimientos</button>
             </div>
           </div>
           <div class="module-nav-group">
@@ -125,7 +126,7 @@
             </div>
             <div class="card-header" style="padding-right:34px;">
               <h3 class="card-title">Lotes</h3>
-              <button class="btn btn-primary btn-small" onclick="abrirModalLote()">+ Nuevo Lote</button>
+              <!-- 2026-09-25: "+ Nuevo Lote" retirado — el stock entra por Guía de Remisión o Ajuste de Inventario (lotes.cantidad se calcula del Kardex). -->
             </div>
             <div style="padding:12px 16px; border-bottom:1px solid var(--border-color, #e0e0e0);">
               <input type="text" id="buscarLote" placeholder="Buscar por N° de lote, partida o producto..." style="width:100%; max-width:420px;" oninput="window.filtrarLotes()">
@@ -154,6 +155,10 @@
                   <button type="button" class="subtab active" data-modo="general" onclick="window.setModoResumenStock('general')">General</button>
                   <button type="button" class="subtab" data-modo="zona" onclick="window.setModoResumenStock('zona')">Por Ubicación</button>
                 </div>
+                <span id="resumenStockExportarWrap" hidden>
+                  <button class="btn btn-secondary btn-small" style="margin-right:8px;" onclick="window.exportarStockZonasExcel()" title="Exporta las filas seleccionadas (o todas si no marcas ninguna) con las columnas actualmente visibles">📊 Exportar Excel</button>
+                  <button class="btn btn-secondary btn-small" onclick="window.exportarStockZonasPDF()" title="Exporta las filas seleccionadas (o todas si no marcas ninguna) con las columnas actualmente visibles">📄 Exportar PDF</button>
+                </span>
                 <button class="btn btn-secondary btn-small" onclick="window.abrirModalImportarTraslados()">📥 Importar</button>
                 <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevoTraslado()">+ Nuevo Traslado</button>
               </div>
@@ -233,6 +238,10 @@
 
         <div id="tab-kardex" class="tab-content">
           <div id="content-kardex" class="card">Cargando...</div>
+        </div>
+
+        <div id="tab-historial" class="tab-content">
+          <div id="content-historial" class="card">Cargando...</div>
         </div>
 
         <!-- TAB REPORTES: bloque de reportes del módulo, se arranca con
@@ -916,7 +925,8 @@
         <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
           <div class="form-group">
             <label>Cantidad</label>
-            <input type="number" id="ajusteKardexCant" step="0.001" min="0.001" placeholder="0.000">
+            <input type="number" id="ajusteKardexCant" step="0.001" min="0" placeholder="0.000">
+            <small style="color:var(--text-secondary);">Déjala en 0 si solo vas a corregir N° de Unidades sin mover peso.</small>
           </div>
           <div class="form-group">
             <label>N° Unidades (opcional)</label>

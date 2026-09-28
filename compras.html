@@ -21,7 +21,7 @@
         <li><a href="bancos.html" data-page="bancos">🏦 Bancos</a></li>
         <li><a href="contabilidad.html" data-page="contabilidad">📑 Contabilidad</a></li>
         <li data-solo-admin><a href="usuarios.html" data-page="usuarios">👤 Usuarios</a></li>
-        <li><a href="perfil.html" data-page="perfil">🙍 Perfil</a></li>
+        <li><a href="perfil.html" data-page="perfil">⚙️ Configuración</a></li>
         <!-- En standby hasta la v3: módulo de importaciones.
         <li><a href="costeo-importaciones.html" data-page="costeo">🚢 Costeo Importaciones</a></li>
         -->
@@ -114,12 +114,15 @@
           <div class="card" id="card-devoluciones-pendientes" style="display:none; margin-bottom:16px;">
             <div class="card-header">
               <h3 class="card-title">↩️ Devoluciones a Proveedor pendientes</h3>
+              <button type="button" class="card-menu-btn" id="btnToggleDevolucionesPendientes" onclick="window._toggleDevolucionesPendientes()" title="Ocultar/mostrar esta sección">▾</button>
             </div>
-            <div style="padding:0 16px 4px; font-size:0.82rem; color:var(--text-secondary);">
-              Notas de Crédito recibidas con detalle de devolución (motivo 06/07) que aún no tienen — o no completaron — su Guía de Devolución. La mercadería sigue en Inventario hasta que emitas la guía.
+            <div id="devolucionesPendientesBody">
+              <div style="padding:0 16px 4px; font-size:0.82rem; color:var(--text-secondary);">
+                Notas de Crédito recibidas con detalle de devolución (motivo 06/07) que aún no tienen — o no completaron — su Guía de Devolución. La mercadería sigue en Inventario hasta que emitas la guía.
+              </div>
+              <div id="tabla-devoluciones-pendientes" class="table-container"></div>
+              <div id="tabla-guias-devolucion-emitidas" class="table-container" style="margin-top:10px;"></div>
             </div>
-            <div id="tabla-devoluciones-pendientes" class="table-container"></div>
-            <div id="tabla-guias-devolucion-emitidas" class="table-container" style="margin-top:10px;"></div>
           </div>
           <div class="card">
             <div class="col-menu card-corner-menu" id="guiasIngresoColMenu">
@@ -202,9 +205,10 @@
             <div style="display: flex; gap: 10px; align-items: flex-end;">
               <div style="flex: 1;">
                 <label>Proveedor *</label>
-                <select id="ocProveedor" required>
+                <select id="ocProveedor" required onchange="window._onCambiarProveedorOC()">
                   <option value="">-- Selecciona --</option>
                 </select>
+                <small id="ocProveedorDocInfo" style="display:none; color:var(--text-secondary); font-size:0.72rem;"></small>
               </div>
               <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioProveedor()" style="margin-bottom: 0;">+ Nuevo</button>
             </div>
@@ -371,6 +375,7 @@
                 <select id="nqProveedor" required onchange="window.onCambiarProveedorCompra()">
                   <option value="">-- Selecciona --</option>
                 </select>
+                <small id="nqProveedorDocInfo" style="display:none; color:var(--text-secondary); font-size:0.72rem;"></small>
               </div>
               <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioProveedor()" style="margin-bottom: 0;">+ Nuevo</button>
             </div>
@@ -443,7 +448,7 @@
             <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Sin productos agregados</p>
           </div>
 
-          <div style="margin-top: 20px; padding: 15px; background-color: var(--bg-secondary); border-radius: var(--radius-md); display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px;">
+          <div style="margin-top: 20px; padding: 15px; background-color: var(--bg-secondary); border-radius: var(--radius-md); display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px;">
             <div style="text-align: center;">
               <div style="font-size: 12px; color: var(--text-secondary);">Cantidad Total</div>
               <div style="font-size: 18px; font-weight: 600; color: var(--text-primary);" id="totalCantidadCompra">0</div>
@@ -454,12 +459,20 @@
             </div>
             <div style="text-align: center;">
               <div style="font-size: 12px; color: var(--text-secondary);">Subtotal</div>
-              <div style="font-size: 18px; font-weight: 600; color: var(--text-primary);" id="totalSubtotalCompra">0.00</div>
+              <input type="number" step="0.01" id="totalSubtotalCompra" oninput="window._onEditarTotalesCompra()" style="width:100%; text-align:center; font-size:16px; font-weight:600; padding:4px 2px; background:var(--bg-primary);" value="0.00">
+            </div>
+            <div style="text-align: center;">
+              <div style="font-size: 12px; color: var(--text-secondary);">IGV</div>
+              <input type="number" step="0.01" id="totalIGVCompra" oninput="window._onEditarTotalesCompra()" style="width:100%; text-align:center; font-size:16px; font-weight:600; padding:4px 2px; background:var(--bg-primary);" value="0.00">
             </div>
             <div style="text-align: center;">
               <div style="font-size: 12px; color: var(--text-secondary);">Total</div>
               <div style="font-size: 18px; font-weight: 600; color: var(--color-success);" id="totalMontoCompra">0.00</div>
             </div>
+          </div>
+          <div style="margin-top:8px; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+            <small style="color:var(--text-secondary);">Subtotal e IGV se recalculan solos desde el detalle. Edítalos a mano solo para ajustar por redondeo contra el comprobante físico.</small>
+            <button type="button" class="btn btn-small btn-secondary" id="btnRecalcularTotalesCompra" onclick="window._recalcularTotalesCompraDesdeDetalle()" style="display:none; white-space:nowrap;">↺ Recalcular desde el detalle</button>
           </div>
         </div>
 
@@ -887,7 +900,7 @@
   <div id="modal-editar-compra" class="modal">
     <div class="modal-content" style="width:min(94vw, 980px); max-width:min(94vw, 980px);">
       <div class="modal-header">
-        <h3>Editar Compra</h3>
+        <h3 id="ec-titulo-modal">Detalle de Compra</h3>
         <button class="modal-close" onclick="closeModal('modal-editar-compra')">✕</button>
       </div>
       <form id="formEditarCompra" onsubmit="return false;">
@@ -969,8 +982,10 @@
         </p>
       </form>
       <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeModal('modal-editar-compra')">Cancelar</button>
-        <button class="btn btn-primary" onclick="window.guardarEdicionCompra()">Guardar Cambios</button>
+        <button class="btn btn-secondary" onclick="closeModal('modal-editar-compra')">Cerrar</button>
+        <button class="btn btn-primary" id="ecBtnEditar" onclick="window.activarEdicionCompra()">✏️ Editar</button>
+        <button class="btn btn-secondary" id="ecBtnCancelarEdicion" style="display:none;" onclick="window.cancelarEdicionCompra()">✕ Cancelar</button>
+        <button class="btn btn-primary" id="ecBtnGuardar" style="display:none;" onclick="window.guardarEdicionCompra()">💾 Guardar Cambios</button>
       </div>
     </div>
   </div>

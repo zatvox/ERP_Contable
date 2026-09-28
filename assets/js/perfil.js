@@ -15,6 +15,7 @@ import { showToast, formatNumber } from './helpers.js'
 import { initModuleNavDropdowns } from './main.js'
 import { renderConfiguracionTab, aplicarPreferenciasVista, getModuloConfig } from './config-modulo.js'
 import { cacheado, invalidarTodo } from './data-cache.js'
+import { renderComandos } from './comandos.js'
 
 const MODULO = 'perfil'
 
@@ -31,6 +32,7 @@ const MODULOS_DISPONIBLES = [
 
 let _user = null
 let _actividadCargada = false
+let _comandosCargados = false
 
 document.addEventListener('DOMContentLoaded', async () => {
   try {
@@ -65,8 +67,17 @@ function initTabs() {
       const nombre = btn.getAttribute('data-tab')
       document.getElementById(`tab-${nombre}`)?.classList.add('active')
       if (nombre === 'actividad') cargarActividad()
+      if (nombre === 'comandos') cargarComandos()
     })
   })
+}
+
+// El botón "Comandos" vive fuera del grupo "Perfil", así que initModuleNavDropdowns
+// ya lo trata como un tab-btn normal (ver main.js) — no requiere manejo especial aquí.
+function cargarComandos() {
+  if (_comandosCargados) return
+  _comandosCargados = true
+  renderComandos('perfil-comandos-container')
 }
 
 // El cache de auth se llena de forma asíncrona; esperamos un momento antes de
