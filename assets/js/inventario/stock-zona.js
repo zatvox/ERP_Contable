@@ -4,7 +4,7 @@
 // ============================================================================
 import { colStyle } from '../col-menu.js'
 import { getItems, getLotes, getMarcas, getAlmacenes, getUbicaciones, getStockUbicaciones, getCategorias, getFamilias, getFamiliaLotes } from '../supabase-data.js'
-import { showToast } from '../helpers.js'
+import { showToast, pdfTablaUnaLinea } from '../helpers.js'
 import { _fechaDDMMAAAA } from './kardex.js'
 import { _aplicarOrdenFilas, _flechaOrden, _thOrden } from './resumen-stock.js'
 
@@ -413,7 +413,7 @@ window.exportarStockZonasExcel = async function () {
     // dato) — lo más cerca que xlsx community permite de "se ve prolijo".
     ws['!cols'] = encabezados.map((h, i) => {
       const maxLen = Math.max(h.length, ...filasArray.map(f => String(f[i] ?? '').length))
-      return { wch: Math.min(Math.max(maxLen + 2, 10), 40) }
+      return { wch: Math.min(Math.max(maxLen + 2, 8), 90) }   // sin cortar: texto en una sola línea
     })
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Stock por Ubicación')
@@ -454,14 +454,15 @@ window.exportarStockZonasPDF = async function () {
     // como `autoTable(doc, opts)` en vez de como `applyPlugin(jsPDF)`.
     const { applyPlugin } = await import('https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/+esm')
     applyPlugin(jsPDF)
-    const doc = new jsPDF({ orientation: 'landscape' })
     const fechaHoy = new Date().toISOString().slice(0, 10)
-    doc.setFontSize(12)
-    doc.text('Resumen de Stock — Por Ubicación', 14, 12)
-    doc.setFontSize(9)
-    doc.text(`Generado: ${_fechaDDMMAAAA(fechaHoy)}`, 14, 18)
-    doc.autoTable({ head: [encabezados], body: filasTexto, startY: 22, styles: { fontSize: 8 } })
-    doc.save(`Resumen_Stock_Por_Ubicacion_${fechaHoy}.pdf`)
+    // Cada celda en UNA sola línea: la letra se ajusta sola para que entre
+    // en la hoja (pdfTablaUnaLinea, helpers.js — 2026-10-06).
+    const NUM = new Set(['cantidad', 'unidades', 'peso_unidad', 'tc', 'costo_orig', 'costo'])
+    const derecha = new Set(ths.map((th, i) => NUM.has(th.dataset.col) ? i : -1).filter(i => i >= 0))
+    pdfTablaUnaLinea({
+      jsPDF, titulo: 'Resumen de Stock — Por Ubicación', subtitulo: `Generado: ${_fechaDDMMAAAA(fechaHoy)}`,
+      head: encabezados, body: filasTexto, derecha, archivo: `Resumen_Stock_Por_Ubicacion_${fechaHoy}.pdf`
+    })
     showToast(`PDF exportado: ${filasAExportar.length} fila(s), ${ths.length} columna(s) ✅`, 'success')
   } catch (e) {
     console.error('exportarStockZonasPDF:', e)

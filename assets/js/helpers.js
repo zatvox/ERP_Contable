@@ -406,3 +406,59 @@ export function hacerTablaOrdenable(table) {
   new MutationObserver(() => { if (!ordenando) ordenar() }).observe(tbody, { childList: true })
 }
 window.hacerTablaOrdenable = hacerTablaOrdenable
+
+// ============================================================================
+// PDF de tabla con cada celda en UNA sola línea (2026-10-06)
+// ============================================================================
+// Mide el texto más largo de cada columna y elige el tamaño de letra más
+// grande (8 → 5 pt) con el que toda la tabla entra en el ancho de la hoja,
+// sin partir ningún texto. Si ni en 5 pt entra en A4 horizontal, pasa a A3
+// horizontal. Cada columna toma exactamente el ancho de su texto más largo.
+//   doc        : instancia jsPDF ya creada SIN página especial (se recrea)
+//   opts       : { jsPDF, titulo, subtitulo, head:[...], body:[[...]], derecha:Set(idx), archivo }
+export function pdfTablaUnaLinea({ jsPDF, titulo, subtitulo = '', head, body, derecha = new Set(), archivo }) {
+  const MARGEN = 10, PAD = 1.4, startY = subtitulo ? 22 : 17
+  const medir = (doc, fs) => {
+    doc.setFontSize(fs)
+    return head.map((h, c) => {
+      doc.setFont('helvetica', 'bold')
+      let w = doc.getTextWidth(String(h ?? ''))
+      doc.setFont('helvetica', 'normal')
+      for (const fila of body) w = Math.max(w, doc.getTextWidth(String(fila[c] ?? '')))
+      return w + PAD * 2 + 0.6
+    })
+  }
+  let elegido = null
+  for (const formato of ['a4', 'a3']) {
+    const doc = new jsPDF({ orientation: 'landscape', format: formato, unit: 'mm' })
+    const disponible = doc.internal.pageSize.getWidth() - MARGEN * 2
+    for (let fs = 8; fs >= 5; fs -= 0.5) {
+      const anchos = medir(doc, fs)
+      if (anchos.reduce((a, b) => a + b, 0) <= disponible) { elegido = { doc, fs, anchos }; break }
+    }
+    if (elegido) break
+  }
+  if (!elegido) {   // ni en A3 a 5 pt: A3 y se reparte proporcional (último recurso)
+    const doc = new jsPDF({ orientation: 'landscape', format: 'a3', unit: 'mm' })
+    const anchos = medir(doc, 5)
+    const disponible = doc.internal.pageSize.getWidth() - MARGEN * 2
+    const k = disponible / anchos.reduce((a, b) => a + b, 0)
+    elegido = { doc, fs: 5, anchos: anchos.map(w => w * k) }
+  }
+  const { doc, fs, anchos } = elegido
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(12); doc.text(titulo || 'Reporte', MARGEN, 12)
+  if (subtitulo) { doc.setFontSize(9); doc.text(subtitulo, MARGEN, 18) }
+  const columnStyles = {}
+  anchos.forEach((w, i) => { columnStyles[i] = { cellWidth: w, halign: derecha.has(i) ? 'right' : 'left' } })
+  doc.autoTable({
+    head: [head], body, startY,
+    margin: { left: MARGEN, right: MARGEN },
+    styles: { fontSize: fs, cellPadding: PAD, overflow: 'visible', valign: 'middle' },
+    headStyles: { fontStyle: 'bold' },
+    columnStyles,
+    didParseCell: (d) => { if (d.section === 'head') d.cell.styles.halign = derecha.has(d.column.index) ? 'right' : 'left' }
+  })
+  doc.save(archivo)
+  return doc
+}

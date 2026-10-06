@@ -736,7 +736,7 @@ export async function exportarExcel(id) {
       if (ws[ref] && typeof ws[ref].v === 'number') ws[ref].z = fmt(m)
     })
   }
-  ws['!cols'] = mx.cab.map((h, c) => ({ wch: Math.min(60, Math.max(String(h).length + 2, ...aoa.map(f => String(f[c] ?? '').length + 2))) }))
+  ws['!cols'] = mx.cab.map((h, c) => ({ wch: Math.min(90, Math.max(String(h).length + 2, ...aoa.map(f => String(f[c] ?? '').length + 2))) }))
   ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: aoa.length - 2, c: mx.cab.length - 1 } }) }
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, (mx.config.titulo || 'Reporte').replace(/[\\/?*\[\]:]/g, '').slice(0, 31))

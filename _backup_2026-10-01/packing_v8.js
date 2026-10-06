@@ -19,7 +19,6 @@ import { _nombreCliente, _nombreVendedor, _stockTotalPorItem } from './helpers.j
 import { menuAccionesFila } from '../main.js'
 import { getTCVenta, textoAvisoTC } from '../sunat-api.js'
 import { vincularTCEnVivo } from '../tc-en-vivo.js'
-import { estaAnulado } from '../anulacion.js'
 
 // Datos del emisor para el PDF (mismos del PDF de Odoo). Logo: assets/img/logo-jhiro.png
 const EMPRESA = {
@@ -33,7 +32,7 @@ const EMPRESA = {
 const _esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const _hoy = () => new Date().toISOString().split('T')[0]
 const _sumarDias = (f, d) => { const x = new Date(f + 'T12:00:00'); x.setDate(x.getDate() + (parseInt(d) || 0)); return x.toISOString().split('T')[0] }
-const ESTADOS = { borrador: ['Borrador', 'badge-secondary'], enviado: ['Enviado', 'badge-info'], parcial: ['Parcial', 'badge-warning'], facturado: ['Facturado', 'badge-success'], anulado: ['Anulado', 'badge-danger'] }
+const ESTADOS = { borrador: ['Borrador', 'badge-secondary'], enviado: ['Enviado', 'badge-info'], facturado: ['Facturado', 'badge-success'], anulado: ['Anulado', 'badge-danger'] }
 
 let _pkLista = []
 let _pkLineas = []
@@ -52,61 +51,6 @@ async function _getDetalle(packingId) {
   const { data } = await supabase.from('detalle_packing').select('*').eq('packing_id', packingId).order('orden')
   return data || []
 }
-// ─── Facturación parcial (sql/70) ───────────────────────────────────────────
-// Facturado por línea del PK = Σ cantidad de las líneas de facturas VIGENTES
-// que la referencian (detalle_ventas.detalle_packing_id). No se guarda: se
-// calcula — anular una factura devuelve su cantidad a "pendiente" sola.
-const _TOL = 0.0005
-async function _facturacionPK(packingId) {
-  const lineas = await _getDetalle(packingId)
-  const porLinea = {}
-  const ids = lineas.map(l => l.id)
-  if (ids.length) {
-    const { data: dvs, error } = await supabase.from('detalle_ventas').select('detalle_packing_id, cantidad, venta_id').in('detalle_packing_id', ids)
-    if (error) { console.warn('Facturación parcial no disponible (¿falta sql/70?):', error.message); return { lineas, porLinea, sinSQL: true } }
-    const vIds = [...new Set((dvs || []).map(d => d.venta_id))]
-    let vigentes = new Set()
-    if (vIds.length) {
-      const { data: vs } = await supabase.from('ventas').select('id, estado, comprobante_anulado, estado_comprobante').in('id', vIds)
-      vigentes = new Set((vs || []).filter(v => !estaAnulado(v)).map(v => v.id))
-    }
-    for (const d of (dvs || [])) {
-      if (vigentes.has(d.venta_id)) porLinea[d.detalle_packing_id] = (porLinea[d.detalle_packing_id] || 0) + (parseFloat(d.cantidad) || 0)
-    }
-  }
-  return { lineas, porLinea }
-}
-
-/** Recalcula subtotal/IGV/total de una línea PK para una cantidad nueva (mismo precio). */
-function _lineaConCantidad(l, cant) {
-  const old = parseFloat(l.cantidad) || 0
-  const unid = old > 0 && (+l.cantidad_unidades) ? Math.round((+l.cantidad_unidades) * cant / old) : (+l.cantidad_unidades || 0)
-  return { cantidad: +(+cant).toFixed(3), cantidad_unidades: unid, ..._calcLinea(+cant, +l.precio_unitario, l.tipo_base || 'gravada') }
-}
-
-async function _recalcularTotalesPK(packingId) {
-  const lineas = await _getDetalle(packingId)
-  const t = lineas.reduce((a, l) => ({ b: a.b + (+l.subtotal), i: a.i + (+l.igv_monto), t: a.t + (+l.total_linea) }), { b: 0, i: 0, t: 0 })
-  await update('packing', packingId, { subtotal: +t.b.toFixed(2), igv: +t.i.toFixed(2), total: +t.t.toFixed(2), updated_at: new Date().toISOString() })
-}
-
-/** Estado del PK según lo facturado: todo → facturado; algo → parcial; nada → borrador. */
-export async function recalcularEstadoPacking(packingId) {
-  if (!packingId) return
-  const { data: pk } = await supabase.from('packing').select('id, estado').eq('id', packingId).single()
-  if (!pk || pk.estado === 'anulado') return
-  const { lineas, porLinea } = await _facturacionPK(packingId)
-  const { data: vs } = await supabase.from('ventas').select('id, estado, comprobante_anulado, estado_comprobante').eq('packing_id', packingId)
-  const vig = (vs || []).filter(v => !estaAnulado(v)).sort((a, b) => a.id - b.id)
-  const algo = lineas.some(l => (porLinea[l.id] || 0) > _TOL)
-  const todo = lineas.length > 0 && lineas.every(l => (porLinea[l.id] || 0) >= (+l.cantidad) - _TOL)
-  const estado = todo ? 'facturado' : (algo || vig.length) ? 'parcial'
-    : (pk.estado === 'facturado' || pk.estado === 'parcial') ? 'borrador' : pk.estado
-  await update('packing', packingId, { estado, venta_id: vig.length ? vig[vig.length - 1].id : null, updated_at: new Date().toISOString() })
-  if (document.getElementById('tabla-packing-body')) await renderPacking(true)
-}
-window.recalcularEstadoPacking = recalcularEstadoPacking
-
 async function _maxCorrelativoPK(serie) {
   const { data } = await supabase.from('packing').select('correlativo').eq('serie', serie).order('correlativo', { ascending: false }).limit(1)
   return data?.[0]?.correlativo || 0
@@ -149,21 +93,10 @@ export async function renderPacking(forzar = true) {
         const { data } = await supabase.from('ventas').select('id, serie, correlativo').in('id', idsVenta)
         for (const v of (data || [])) _pkVentasMap.set(v.id, `${v.serie}-${String(v.correlativo).padStart(8, '0')}`)
       }
-      // Facturas vigentes de cada PK (puede tener varias si es parcial)
-      const _factPorPK = {}
-      const idsPK = _pkLista.map(p => p.id)
-      if (idsPK.length) {
-        const { data: vs } = await supabase.from('ventas').select('id, serie, correlativo, numero, base_imponible, packing_id, estado, comprobante_anulado, estado_comprobante').in('packing_id', idsPK)
-        for (const v of (vs || []).filter(x => !estaAnulado(x))) {
-          (_factPorPK[v.packing_id] = _factPorPK[v.packing_id] || []).push({ id: v.id, numero: v.numero || `${v.serie}-${String(v.correlativo).padStart(8, '0')}`, base: parseFloat(v.base_imponible) || 0 })
-        }
-      }
       let conteoAdj = {}
       try { conteoAdj = await getConteoAdjuntos('packing') || {} } catch { /* tabla adjuntos aún no creada */ }
       for (const p of _pkLista) {
         p._adjuntos = conteoAdj[p.id] || 0
-        p._facturas = _factPorPK[p.id] || []
-        p._avance = (+p.subtotal) > 0 ? Math.min(100, p._facturas.reduce((s, f) => s + f.base, 0) / (+p.subtotal) * 100) : 0
         p._cliente = await _nombreCliente(p.contact_id)
         p._sinEmitir = p.estado === 'anulado' && !p.contact_id && /^ANULADO SIN EMITIR/.test(p.observaciones || '')
       }
@@ -185,7 +118,7 @@ window.filtrarPacking = function () {
   if (!lista.length) { tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;">Sin PK registrados</td></tr>'; return }
   tbody.innerHTML = lista.map(p => {
     const [lbl, cls] = ESTADOS[p.estado] || [p.estado, 'badge-secondary']
-    const abierto = p.estado === 'borrador' || p.estado === 'enviado' || p.estado === 'parcial'
+    const abierto = p.estado === 'borrador' || p.estado === 'enviado'
     const vencido = abierto && p.fecha_validez && p.fecha_validez < hoy
     return `<tr style="${p.estado === 'anulado' ? 'opacity:.55;' : ''}">
       <td><strong>${_esc(p.numero)}</strong>${p._adjuntos ? ` <span title="${p._adjuntos} adjunto(s)" style="cursor:pointer;" onclick="window.verAdjuntosPacking(${p.id})">📎</span>` : ''}</td>
@@ -197,17 +130,14 @@ window.filtrarPacking = function () {
       <td>${_esc(p.moneda)}</td>
       <td style="text-align:right; font-weight:600;">${formatNumber(p.total)}</td>
       <td><span class="badge ${cls}">${lbl}</span></td>
-      <td>${p._facturas?.length
-        ? `${p._facturas.map(f => `<div style="white-space:nowrap;">${_esc(f.numero)}</div>`).join('')}
-           ${p.estado === 'parcial' ? `<div title="Facturado sobre el subtotal del PK" style="margin-top:3px; height:5px; background:var(--bg-secondary); border-radius:3px; overflow:hidden;"><div style="height:100%; width:${p._avance.toFixed(0)}%; background:var(--color-warning);"></div></div><small style="color:var(--text-secondary);">${p._avance.toFixed(0)} % facturado</small>` : ''}`
-        : (p.venta_id ? _esc(_pkVentasMap.get(p.venta_id) || '#' + p.venta_id) : '—')}</td>
+      <td>${p.venta_id ? _esc(_pkVentasMap.get(p.venta_id) || '#' + p.venta_id) : '—'}</td>
       <td class="col-acciones">${menuAccionesFila([
         abierto ? { icono: '🧾', label: 'Facturar', onclick: `window.facturarPacking(${p.id})` } : null,
         { icono: abierto ? '✏️' : '👁', label: abierto ? 'Editar' : 'Ver detalle', onclick: `window.abrirModalPacking(${p.id})` },
         p._sinEmitir ? null : { icono: '📄', label: 'PDF', onclick: `window.imprimirPacking(${p.id})` },
         p._adjuntos ? { icono: '📎', label: `Ver adjunto${p._adjuntos > 1 ? 's (' + p._adjuntos + ')' : ''}`, onclick: `window.verAdjuntosPacking(${p.id})` } : null,
         abierto ? { separador: true } : null,
-        (abierto && !p._facturas?.length) ? { icono: '🚫', label: 'Anular', onclick: `window.anularPacking(${p.id})`, peligro: true } : null,
+        abierto ? { icono: '🚫', label: 'Anular', onclick: `window.anularPacking(${p.id})`, peligro: true } : null,
         (p.estado === 'anulado' && !p.venta_id) ? { separador: true } : null,
         (p.estado === 'anulado' && !p.venta_id) ? { icono: '✕', label: 'Eliminar', onclick: `window.eliminarPacking(${p.id})`, peligro: true } : null
       ])}</td></tr>`
@@ -358,7 +288,6 @@ function _asegurarModal() {
 
     <div class="modal-footer">
       <button class="btn" onclick="window.closeModal('modal-packing')">Cancelar</button>
-      <button class="btn btn-secondary" id="pkBtnFacturar" style="display:none;" onclick="window._pkGuardarYFacturar(this)" title="Guarda los cambios del PK y abre la facturación (total o parcial)">🧾 Guardar y facturar</button>
       <button class="btn btn-primary" id="pkBtnGuardar" onclick="window.conCarga(this, window.guardarPacking)">💾 Guardar PK</button>
     </div>
   </div>`
@@ -590,14 +519,7 @@ window._pkAgregarLinea = function () {
     cantidad_unidades: parseFloat(document.getElementById('pkUnid').value) || 0,
     ..._calcLinea(cant, precio, document.getElementById('pkIGV').value)
   }
-  if (_pkLineaEditIdx != null) {
-    const prev = _pkLineas[_pkLineaEditIdx]
-    const fact = prev?.id ? (_pkFactPorLinea[prev.id] || 0) : 0
-    if (fact > _TOL && cant < fact - _TOL) { showToast(`Ya se facturaron ${formatNumber(fact)} de esta línea: la cantidad no puede ser menor.`, 'warning', 7000); return }
-    if (fact > _TOL && prev.item_id !== linea.item_id) { showToast('Esta línea ya tiene facturas: no se puede cambiar el producto.', 'warning', 7000); return }
-    if (prev?.id) linea.id = prev.id
-    _pkLineas[_pkLineaEditIdx] = linea
-  }
+  if (_pkLineaEditIdx != null) _pkLineas[_pkLineaEditIdx] = linea
   else _pkLineas.push(linea)
   window.closeModal('modal-pk-linea')
   window._pkPintarLineas()
@@ -643,7 +565,7 @@ window._pkPintarLineas = function () {
   const soloLectura = document.getElementById('pkBtnGuardar')?.style.display === 'none'
   tb.innerHTML = _pkLineas.length ? _pkLineas.map((l, i) => `<tr>
     <td>${_esc(l.descripcion)}${l.nota ? `<br><small style="color:var(--text-secondary); font-style:italic;">${_esc(l.nota)}</small>` : ''}</td>
-    <td style="text-align:right;">${formatNumber(l.cantidad)}${l.id && _pkFactPorLinea[l.id] ? `<br><small style="color:var(--color-success); white-space:nowrap;">fact. ${formatNumber(_pkFactPorLinea[l.id])}</small><br><small style="color:var(--color-warning); white-space:nowrap;">pend. ${formatNumber(Math.max(0, l.cantidad - _pkFactPorLinea[l.id]))}</small>` : ''}</td><td>${_esc(l.unidad_medida)}</td>
+    <td style="text-align:right;">${formatNumber(l.cantidad)}</td><td>${_esc(l.unidad_medida)}</td>
     <td style="text-align:right;">${l.cantidad_unidades || '—'}</td>
     <td style="text-align:right;">${(+l.precio_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
     <td>${l.tipo_base === 'gravada' ? 'Gravada' : _esc(l.tipo_base)}</td>
@@ -652,7 +574,7 @@ window._pkPintarLineas = function () {
     <td style="text-align:right; font-weight:600;">${formatNumber(l.total_linea)}</td>
     <td style="text-align:right; white-space:nowrap;">${gans[i] ? `<span style="color:${_colorGan(gans[i].gan)}; font-weight:600;" title="Costo estimado: ${formatNumber(gans[i].costo)}">${formatNumber(gans[i].gan)}</span><br><small style="color:var(--text-secondary);">${gans[i].pct.toFixed(1)}%</small>` : '<span style="color:var(--text-secondary);" title="Sin stock con costo o falta T.C.">—</span>'}</td>
     <td style="white-space:nowrap;">${soloLectura ? '' : `<button class="btn btn-small btn-secondary" onclick="window._pkAbrirLinea(${i})" title="Editar">✏️</button>
-      ${l.id && _pkFactPorLinea[l.id] ? '' : `<button class="btn btn-small btn-danger" onclick="window._pkQuitarLinea(${i})" title="Quitar">✕</button>`}`}</td></tr>`).join('')
+      <button class="btn btn-small btn-danger" onclick="window._pkQuitarLinea(${i})" title="Quitar">✕</button>`}</td></tr>`).join('')
     : '<tr><td colspan="11" style="text-align:center; color:var(--text-secondary); padding:20px;">Sin productos agregados</td></tr>'
   const t = _pkLineas.reduce((a, l) => ({ c: a.c + (+l.cantidad), b: a.b + (+l.subtotal), i: a.i + (+l.igv_monto), t: a.t + (+l.total_linea) }), { c: 0, b: 0, i: 0, t: 0 })
   const mon = document.getElementById('pkMoneda')?.value === 'USD' ? '$' : 'S/'
@@ -676,12 +598,6 @@ window._pkPintarLineas = function () {
 }
 
 let _pkSerieActual = null
-let _pkFactPorLinea = {}
-
-window._pkGuardarYFacturar = async function (btn) {
-  window._pkFacturarTrasGuardar = true
-  try { await window.conCarga(btn, window.guardarPacking) } finally { window._pkFacturarTrasGuardar = false }
-}
 let _pkCorrSugerido = null
 
 window.abrirModalPacking = async function (id = null) {
@@ -717,10 +633,7 @@ window.abrirModalPacking = async function (id = null) {
     _setOpcional('grupo-pk-oc', 'chkPkOC', 'pkOC', pk?.orden_compra_cliente)
     _setOpcional('grupo-pk-obs', 'chkPkObs', 'pkObs', pk?.observaciones)
 
-    const abierto = !pk || pk.estado === 'borrador' || pk.estado === 'enviado' || pk.estado === 'parcial'
-    // Facturado/pendiente por línea (para mostrar y para no dejar bajar de lo ya facturado)
-    _pkFactPorLinea = pk ? (await _facturacionPK(pk.id)).porLinea : {}
-    document.getElementById('pkBtnFacturar').style.display = (pk && abierto) ? '' : 'none'
+    const abierto = !pk || pk.estado === 'borrador' || pk.estado === 'enviado'
     document.getElementById('pkTitulo').textContent = pk ? `${abierto ? 'Editar' : 'Ver'} ${pk.numero}` : 'Nuevo PK — Packing'
     document.getElementById('pkBtnGuardar').style.display = abierto ? '' : 'none'
     document.getElementById('pkBtnAgregarLinea').style.display = abierto ? '' : 'none'
@@ -731,8 +644,7 @@ window.abrirModalPacking = async function (id = null) {
     })
     const aviso = document.getElementById('pkAvisoSoloLectura')
     aviso.style.display = abierto ? 'none' : 'block'
-    if (abierto && pk?.estado === 'parcial') { aviso.style.display = 'block'; aviso.textContent = 'PK facturado parcialmente: puedes editarlo, pero no bajar una línea por debajo de lo ya facturado.' }
-    else aviso.textContent = abierto ? '' : (pk.estado === 'facturado' ? `Facturado en ${_pkVentasMap.get(pk.venta_id) || 'la venta #' + pk.venta_id} — solo lectura.` : 'PK anulado — solo lectura.')
+    aviso.textContent = abierto ? '' : (pk.estado === 'facturado' ? `Facturado en ${_pkVentasMap.get(pk.venta_id) || 'la venta #' + pk.venta_id} — solo lectura.` : 'PK anulado — solo lectura.')
     window._pkOnMoneda()
     window.openModal('modal-packing')
     _pintarAdjuntosPK(pk?.id || null)
@@ -817,32 +729,14 @@ window.guardarPacking = async function () {
       subtotal: +t.b.toFixed(2), igv: +t.i.toFixed(2), total: +t.t.toFixed(2),
       updated_at: new Date().toISOString()
     }
-    // PK con facturas: ninguna línea facturada puede quitarse ni bajar de lo facturado
-    let _prevLineas = [], _prevFact = {}
-    if (_pkEditId) {
-      const f = await _facturacionPK(_pkEditId)
-      _prevLineas = f.lineas; _prevFact = f.porLinea
-      for (const pl of _prevLineas) {
-        const fact = _prevFact[pl.id] || 0
-        if (fact <= _TOL) continue
-        const actual = _pkLineas.find(l => l.id === pl.id)
-        if (!actual) throw new Error(`"${pl.descripcion}" ya tiene ${formatNumber(fact)} facturado: no se puede retirar del PK.`)
-        if (actual.cantidad < fact - _TOL) throw new Error(`"${pl.descripcion}": la cantidad no puede ser menor a lo facturado (${formatNumber(fact)}).`)
-      }
-    }
     let pk = null
     if (_pkEditId) {
       if (corr.manual) { cab.correlativo = corr.n; cab.numero = formatearNumero(_pkSerieActual, corr.n) }
       pk = await update('packing', _pkEditId, cab)
       if (!pk) throw new Error('No se pudo actualizar el PK')
       if (corr.manual) await registrarUsoSerie('PK', pk.serie, pk.correlativo)
-      // Líneas retiradas (sin facturas) se borran; el resto se ACTUALIZA por id
-      const quedan = new Set(_pkLineas.filter(l => l.id).map(l => l.id))
-      for (const pl of _prevLineas) {
-        if (quedan.has(pl.id)) continue
-        const { error } = await supabase.from('detalle_packing').delete().eq('id', pl.id)
-        if (error) throw new Error('No se pudo retirar una línea: ' + error.message)
-      }
+      const { error } = await supabase.from('detalle_packing').delete().eq('packing_id', _pkEditId)
+      if (error) throw new Error('No se pudo reemplazar el detalle: ' + error.message)
     } else {
       // Correlativo: siguiente de la serie; si otro usuario tomó el mismo
       // número al mismo tiempo (UNIQUE), se reintenta con el siguiente.
@@ -857,30 +751,24 @@ window.guardarPacking = async function () {
       await registrarUsoSerie('PK', pk.serie, pk.correlativo)
     }
     for (const [i, l] of _pkLineas.entries()) {
-      const fila = {
+      const r = await insert('detalle_packing', {
         packing_id: pk.id, orden: i, item_id: l.item_id, descripcion: l.descripcion, nota: l.nota || null,
         cantidad: l.cantidad, unidad_medida: l.unidad_medida, cantidad_unidades: l.cantidad_unidades || 0,
         precio_unitario: l.precio_unitario, tipo_base: l.tipo_base, igv_porcentaje: l.igv_porcentaje,
         subtotal: l.subtotal, igv_monto: l.igv_monto, total_linea: l.total_linea
-      }
-      const r = l.id && _pkEditId ? await update('detalle_packing', l.id, fila) : await insert('detalle_packing', fila)
+      })
       if (!r) throw new Error(`No se pudo guardar la línea ${i + 1} (${l.descripcion})`)
     }
     showToast(`${pk.numero} guardado ✅`, 'success')
     window.closeModal('modal-packing')
-    if (_pkEditId && Object.keys(_prevFact).length) await recalcularEstadoPacking(pk.id)
     await renderPacking(true)
-    if (window._pkFacturarTrasGuardar) { window._pkFacturarTrasGuardar = false; await window.facturarPacking(pk.id) }
   } catch (e) { showToast('Error: ' + e.message, 'danger', 7000) }
   finally { btn.disabled = false }
 }
 
 window.anularPacking = async function (id) {
   const pk = _pkLista.find(p => p.id === id)
-  if (!pk || !(pk.estado === 'borrador' || pk.estado === 'enviado')) {
-    if (pk?.estado === 'parcial') showToast('El PK ya tiene facturas: no se anula. Retira lo pendiente editando el PK.', 'warning', 7000)
-    return
-  }
+  if (!pk || !(pk.estado === 'borrador' || pk.estado === 'enviado')) return
   if (!confirm(`¿Anular ${pk.numero}? Queda registrado (no se borra) y ya no se podrá facturar.`)) return
   const r = await update('packing', id, { estado: 'anulado', updated_at: new Date().toISOString() })
   showToast(r ? `${pk.numero} anulado` : 'No se pudo anular', r ? 'success' : 'danger')
@@ -1019,209 +907,22 @@ window.verAdjuntosPacking = async function (id) {
 }
 
 // ─── Facturar: abre Nueva Venta precargada (flujo completo de la venta) ──────
-// Sub-modal "Facturar PK": por línea Pedido / Facturado / Pendiente / A facturar.
-// · A facturar > pendiente (peso real mayor) → el PK se ACTUALIZA con la cantidad real.
-// · "Retirar" (ítem que el cliente ya no lleva): sin facturas → se quita del PK;
-//   con facturas → el pedido se ajusta a lo ya facturado. Se guarda en el PK.
-// · Continuar → Nueva Venta precargada con lo seleccionado (precio editable con aviso).
-let _pkFac = null   // { pk, filas: [{ l, fact, pend, sel, aFact, unid, retirar }] }
-
-function _asegurarModalFacturarPK() {
-  if (document.getElementById('modal-pk-facturar')) return
-  const div = document.createElement('div')
-  div.id = 'modal-pk-facturar'
-  div.className = 'modal'
-  div.innerHTML = `
-    <div class="modal-content" style="width:min(96vw, 1100px); max-width:min(96vw, 1100px); max-height:90vh; overflow-y:auto;">
-      <div class="modal-header">
-        <h3 id="pkFacTitulo">Facturar PK</h3>
-        <button class="modal-close" onclick="window.closeModal('modal-pk-facturar')">&times;</button>
-      </div>
-      <div class="modal-body" style="padding:16px 20px;">
-        <div id="pkFacInfo" style="padding:12px 14px; margin-bottom:14px; background:var(--bg-secondary); border-radius:var(--radius-md); border-left:3px solid var(--color-info); font-size:0.88rem; line-height:1.6;"></div>
-        <strong style="${_TIT}">Qué facturar ahora</strong>
-        <div style="border:1px solid var(--border-color); border-radius:var(--radius-md); overflow:hidden; overflow-x:auto;">
-          <table style="width:100%; border-collapse:collapse; margin:0;">
-            <thead><tr style="background:var(--bg-secondary);">
-              <th style="width:40px; padding:8px 10px;"></th>
-              <th style="text-align:left; padding:8px 10px; font-size:0.78rem;">Producto</th>
-              <th style="text-align:right; padding:8px 10px; font-size:0.78rem;">Pedido</th>
-              <th style="text-align:right; padding:8px 10px; font-size:0.78rem;">Facturado</th>
-              <th style="text-align:right; padding:8px 10px; font-size:0.78rem;">Pendiente</th>
-              <th style="text-align:right; padding:8px 10px; font-size:0.78rem; width:140px;">A facturar</th>
-              <th style="text-align:right; padding:8px 10px; font-size:0.78rem; width:100px;">N° Unid.</th>
-              <th style="text-align:right; padding:8px 10px; font-size:0.78rem;">Precio PK</th>
-              <th style="text-align:right; padding:8px 10px; font-size:0.78rem;">Subtotal</th>
-              <th style="width:110px; padding:8px 10px;"></th>
-            </tr></thead>
-            <tbody id="pkFacBody"></tbody>
-          </table>
-        </div>
-        <div id="pkFacResumen" style="margin-top:12px; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:0.88rem;"></div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn" onclick="window.closeModal('modal-pk-facturar')">Cancelar</button>
-        <button class="btn btn-primary" id="pkFacBtn" onclick="window._pkFacContinuar()">Continuar a la factura →</button>
-      </div>
-    </div>`
-  document.body.appendChild(div)
-}
-
 window.facturarPacking = async function (id) {
-  try {
-    const pk = _pkLista.find(p => p.id === id) || (await supabase.from('packing').select('*').eq('id', id).single()).data
-    if (!pk) return
-    if (pk.estado === 'facturado') { showToast('Este PK ya está facturado por completo', 'warning'); return }
-    if (pk.estado === 'anulado') { showToast('PK anulado: no se puede facturar', 'warning'); return }
-    const { lineas, porLinea, sinSQL } = await _facturacionPK(pk.id)
-    if (sinSQL) { showToast('Falta correr assets/sql/70_packing_facturacion_parcial.sql en Supabase', 'danger', 8000); return }
-    if (!lineas.length) { showToast('El PK no tiene líneas', 'warning'); return }
-    _asegurarModalFacturarPK()
-    _pkFac = {
-      pk,
-      filas: lineas.map(l => {
-        const fact = porLinea[l.id] || 0
-        const pend = Math.max(0, (+l.cantidad) - fact)
-        const unidPend = (+l.cantidad) > 0 && (+l.cantidad_unidades) ? Math.round((+l.cantidad_unidades) * pend / (+l.cantidad)) : 0
-        return { l, fact, pend, sel: pend > _TOL, aFact: +pend.toFixed(3), unid: unidPend, retirar: false }
-      })
-    }
-    const cli = pk._cliente || await _nombreCliente(pk.contact_id)
-    const previas = (pk._facturas || []).map(f => f.numero).join(', ')
-    document.getElementById('pkFacTitulo').textContent = `Facturar ${pk.numero}`
-    document.getElementById('pkFacInfo').innerHTML = `
-      <div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">Packing</div>
-      <div style="font-weight:600; font-size:1.05rem; margin-top:2px;">${_esc(pk.numero)} · ${_esc(cli || '')}</div>
-      <div style="font-size:0.85rem; color:var(--text-secondary); margin-top:2px;">${_esc(pk.moneda)} ${formatNumber(pk.total)} · ${previas ? `Ya facturado en: ${_esc(previas)}` : 'Aún sin facturas'}</div>`
-    _pkFacPintar()
-    window.openModal('modal-pk-facturar')
-  } catch (e) { showToast('Error: ' + e.message, 'danger') }
-}
-
-function _pkFacPintar() {
-  const tb = document.getElementById('pkFacBody')
-  if (!tb || !_pkFac) return
-  const mon = _pkFac.pk.moneda === 'USD' ? '$' : 'S/'
-  tb.innerHTML = _pkFac.filas.map((f, i) => {
-    const l = f.l
-    const completa = f.pend <= _TOL
-    const sub = f.sel && !f.retirar ? _calcLinea(f.aFact || 0, +l.precio_unitario, l.tipo_base || 'gravada').subtotal : 0
-    const exceso = f.sel && !f.retirar && f.aFact > f.pend + _TOL
-    const estilo = f.retirar ? 'opacity:.5; text-decoration:line-through;' : (completa ? 'opacity:.6;' : '')
-    return `<tr style="border-top:1px solid var(--border-color); ${estilo}">
-      <td style="padding:8px 10px; text-align:center;">
-        <input type="checkbox" ${f.sel && !f.retirar ? 'checked' : ''} ${completa || f.retirar ? 'disabled' : ''} onchange="window._pkFacSel(${i}, this.checked)"
-               style="width:18px; height:18px; margin:0; accent-color:var(--color-info);"></td>
-      <td style="padding:8px 10px;">${_esc(l.descripcion)}${l.nota ? `<br><small style="color:var(--text-secondary);">${_esc(l.nota)}</small>` : ''}</td>
-      <td style="padding:8px 10px; text-align:right;">${formatNumber(l.cantidad)} ${_esc(l.unidad_medida)}</td>
-      <td style="padding:8px 10px; text-align:right; color:var(--color-success);">${f.fact ? formatNumber(f.fact) : '—'}</td>
-      <td style="padding:8px 10px; text-align:right; color:var(--color-warning); font-weight:600;">${completa ? '✓' : formatNumber(f.pend)}</td>
-      <td style="padding:8px 10px;">
-        <input type="number" step="0.001" min="0" value="${f.aFact}" ${!f.sel || f.retirar || completa ? 'disabled' : ''}
-               oninput="window._pkFacCant(${i}, this.value)" style="width:100%; text-align:right;">
-        ${exceso ? `<small style="color:var(--color-info); display:block; line-height:1.2;">El PK se actualizará a ${formatNumber(f.fact + f.aFact)} (cantidad real)</small>` : ''}
-      </td>
-      <td style="padding:8px 10px;">
-        <input type="number" step="1" min="0" value="${f.unid || 0}" ${!f.sel || f.retirar || completa ? 'disabled' : ''}
-               oninput="window._pkFacUnid(${i}, this.value)" style="width:100%; text-align:right;"></td>
-      <td style="padding:8px 10px; text-align:right;">${(+l.precio_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-      <td style="padding:8px 10px; text-align:right; font-weight:600;">${sub ? formatNumber(sub) : '—'}</td>
-      <td style="padding:8px 10px; text-align:center;">
-        ${completa ? '' : `<button type="button" class="btn btn-small ${f.retirar ? 'btn-secondary' : 'btn-danger'}" onclick="window._pkFacRetirar(${i})"
-           title="${f.fact > _TOL ? 'El cliente no lleva el resto: el pedido se ajusta a lo ya facturado' : 'El cliente ya no lleva este ítem: se retira del PK'}">${f.retirar ? '↩ Deshacer' : (f.fact > _TOL ? '✕ Retirar saldo' : '✕ Retirar')}</button>`}
-      </td></tr>`
-  }).join('')
-  const selec = _pkFac.filas.filter(f => f.sel && !f.retirar && f.aFact > 0)
-  const base = selec.reduce((s, f) => s + _calcLinea(f.aFact, +f.l.precio_unitario, f.l.tipo_base || 'gravada').subtotal, 0)
-  const total = selec.reduce((s, f) => s + _calcLinea(f.aFact, +f.l.precio_unitario, f.l.tipo_base || 'gravada').total_linea, 0)
-  const cambios = _pkFac.filas.filter(f => f.retirar || (f.sel && f.aFact > f.pend + _TOL)).length
-  document.getElementById('pkFacResumen').innerHTML = `
-    <span style="color:var(--text-secondary);">${selec.length} línea(s) a facturar${cambios ? ` · <strong style="color:var(--color-info);">${cambios} cambio(s) se guardarán en el PK</strong>` : ''}</span>
-    <span>Base ${mon} <strong>${formatNumber(base)}</strong> · Total ${mon} <strong style="color:var(--color-success);">${formatNumber(total)}</strong></span>`
-}
-
-window._pkFacSel = (i, v) => { _pkFac.filas[i].sel = v; _pkFacPintar() }
-window._pkFacUnid = (i, v) => { _pkFac.filas[i].unid = parseFloat(v) || 0 }
-window._pkFacCant = (i, v) => {
-  const f = _pkFac.filas[i]
-  f.aFact = Math.max(0, parseFloat(v) || 0)
-  // N° unidades sugerido en proporción
-  if ((+f.l.cantidad) > 0 && (+f.l.cantidad_unidades)) f.unid = Math.round((+f.l.cantidad_unidades) * f.aFact / (+f.l.cantidad))
-  clearTimeout(window._tPkFac); window._tPkFac = setTimeout(_pkFacPintar, 400)
-}
-window._pkFacRetirar = (i) => { const f = _pkFac.filas[i]; f.retirar = !f.retirar; if (f.retirar) f.sel = false; else f.sel = f.pend > _TOL; _pkFacPintar() }
-
-window._pkFacContinuar = async function () {
-  const btn = document.getElementById('pkFacBtn')
-  if (!_pkFac || btn.disabled) return
-  const { pk, filas } = _pkFac
-  const selec = filas.filter(f => f.sel && !f.retirar && f.aFact > _TOL)
-  const retiros = filas.filter(f => f.retirar)
-  const excesos = selec.filter(f => f.aFact > f.pend + _TOL)
-  if (!selec.length && !retiros.length) { showToast('Marca al menos una línea con cantidad a facturar', 'warning'); return }
-  const resumen = [
-    ...retiros.map(f => f.fact > _TOL
-      ? `• ${f.l.descripcion}: pedido ${formatNumber(f.l.cantidad)} → ${formatNumber(f.fact)} (se retira el saldo)`
-      : `• ${f.l.descripcion}: se RETIRA del PK`),
-    ...excesos.map(f => `• ${f.l.descripcion}: pedido ${formatNumber(f.l.cantidad)} → ${formatNumber(f.fact + f.aFact)} (cantidad real)`)
-  ]
-  if (resumen.length && !confirm(`Se actualizará ${pk.numero}:\n\n${resumen.join('\n')}\n\n¿Confirmar?`)) return
-  btn.disabled = true
-  try {
-    // 1) Cambios al PK (se guardan antes de facturar)
-    for (const f of retiros) {
-      if (f.fact > _TOL) {
-        const r = await update('detalle_packing', f.l.id, _lineaConCantidad(f.l, f.fact))
-        if (!r) throw new Error(`No se pudo ajustar ${f.l.descripcion}`)
-      } else {
-        const { error } = await supabase.from('detalle_packing').delete().eq('id', f.l.id)
-        if (error) throw new Error(`No se pudo retirar ${f.l.descripcion}: ${error.message}`)
-      }
-    }
-    for (const f of excesos) {
-      const r = await update('detalle_packing', f.l.id, _lineaConCantidad(f.l, f.fact + f.aFact))
-      if (!r) throw new Error(`No se pudo actualizar ${f.l.descripcion}`)
-    }
-    if (resumen.length) { await _recalcularTotalesPK(pk.id); await recalcularEstadoPacking(pk.id) }
-    window.closeModal('modal-pk-facturar')
-    if (!selec.length) { showToast(`${pk.numero} actualizado ✅`, 'success'); return }
-
-    // 2) Nueva Venta precargada con lo seleccionado (enlazado línea a línea)
-    const lineas = selec.map(f => ({
-      ...f.l,
-      detalle_packing_id: f.l.id,
-      precio_pk: +f.l.precio_unitario,
-      cantidad: +f.aFact.toFixed(3),
-      cantidad_unidades: f.unid || 0,
-      ..._calcLinea(f.aFact, +f.l.precio_unitario, f.l.tipo_base || 'gravada')
-    }))
-    const pkFresco = (await supabase.from('packing').select('*').eq('id', pk.id).single()).data || pk
-    await window.abrirNuevaVentaDesdePacking?.(pkFresco, lineas)
-  } catch (e) { showToast('Error: ' + e.message, 'danger', 8000) }
-  finally { btn.disabled = false }
+  const pk = _pkLista.find(p => p.id === id)
+  if (!pk) return
+  if (pk.estado === 'facturado' || pk.venta_id) { showToast('Este PK ya fue facturado', 'warning'); return }
+  if (pk.estado === 'anulado') { showToast('PK anulado: no se puede facturar', 'warning'); return }
+  const lineas = await _getDetalle(pk.id)
+  if (!lineas.length) { showToast('El PK no tiene líneas', 'warning'); return }
+  await window.abrirNuevaVentaDesdePacking?.(pk, lineas)
 }
 
 // Lo llama venta-nueva.js cuando la factura se guardó bien.
-/** Tras guardar una factura desde el PK: si alguna línea se facturó por ENCIMA
- *  de lo pedido (peso real), el PK toma la cantidad real; luego se recalcula
- *  el estado (parcial / facturado). */
 export async function marcarPackingFacturado(packingId, ventaId) {
-  try {
-    const { lineas, porLinea, sinSQL } = await _facturacionPK(packingId)
-    if (sinSQL) {   // sin sql/70: comportamiento anterior (1 PK → 1 factura)
-      await update('packing', packingId, { estado: 'facturado', venta_id: ventaId, updated_at: new Date().toISOString() })
-    } else {
-      let cambio = false
-      for (const l of lineas) {
-        const f = porLinea[l.id] || 0
-        if (f > (+l.cantidad) + _TOL) { await update('detalle_packing', l.id, _lineaConCantidad(l, f)); cambio = true }
-      }
-      if (cambio) await _recalcularTotalesPK(packingId)
-      await recalcularEstadoPacking(packingId)
-    }
-  } catch (e) { console.warn('No se pudo actualizar el PK tras facturar:', e) }
+  const r = await update('packing', packingId, { estado: 'facturado', venta_id: ventaId, updated_at: new Date().toISOString() })
+  if (!r) console.warn('No se pudo marcar el PK como facturado', packingId)
   if (document.getElementById('tabla-packing-body')) await renderPacking(true)
-  return true
+  return r
 }
 
 // ─── PDF (formato "Orden de Venta" de Odoo) ──────────────────────────────────

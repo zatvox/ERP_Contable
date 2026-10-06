@@ -468,15 +468,6 @@ async function _eliminarVentaCore(id) {
     )
   }
 
-  // Factura emitida desde un PK: al eliminarla, su cantidad vuelve a pendiente
-  // y el PK se recalcula (sin facturas → Borrador, con botones Facturar/Editar/
-  // Anular habilitados; con otras facturas → Parcial). Aplica también al
-  // borrado masivo, que reutiliza esta función.
-  if (venta.packing_id) {
-    try { await window.recalcularEstadoPacking?.(venta.packing_id) }
-    catch (e) { console.warn('PK no recalculado tras eliminar la venta:', e) }
-  }
-
   return numeroVenta
 }
 

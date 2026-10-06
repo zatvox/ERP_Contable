@@ -113,9 +113,6 @@ window.anularVenta = async function (id) {
           estado: 'anulada'
         })
 
-        // 1b. Si vino de un PK, su cantidad vuelve a "pendiente" (estado del PK se recalcula)
-        if (venta.packing_id) { try { await window.recalcularEstadoPacking?.(venta.packing_id) } catch (e) { console.warn('PK no recalculado:', e) } }
-
         // 2. Anular su cuenta por cobrar (ya validamos que no tiene cobros)
         for (const cxc of (cxcs || [])) {
           try {

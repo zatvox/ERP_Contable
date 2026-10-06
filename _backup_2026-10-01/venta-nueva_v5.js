@@ -291,13 +291,6 @@ window.agregarLineaVenta = function() {
   }
 
   const editando = S._ventaLineaEditIdx !== null
-  if (editando) {
-    const prev = S._ventaLineas[S._ventaLineaEditIdx]
-    if (prev?.detalle_packing_id && prev.item_id === lineaGuardada.item_id) {
-      lineaGuardada.detalle_packing_id = prev.detalle_packing_id
-      lineaGuardada.precio_pk = prev.precio_pk
-    }
-  }
   if (editando) S._ventaLineas[S._ventaLineaEditIdx] = lineaGuardada
   else S._ventaLineas.push(lineaGuardada)
 
@@ -417,15 +410,6 @@ window.guardarNuevaVenta = async function() {
     const observaciones = document.getElementById('ventaObservaciones')?.value?.trim() || null
 
     if (!contactId)           { showToast('Selecciona un cliente', 'warning'); return }
-
-    // ── Facturando un PK: precio distinto al pactado → aviso (editable) ──
-    if (S._packingOrigen?.id) {
-      const difieren = S._ventaLineas.filter(l => l.detalle_packing_id && l.precio_pk != null && Math.abs((+l.precio_unitario) - (+l.precio_pk)) > 0.00005)
-      if (difieren.length && !confirm(
-        `⚠ ${difieren.length} línea(s) con precio distinto al del ${S._packingOrigen.numero}:\n\n` +
-        difieren.map(l => `• ${l.descripcion}: PK ${(+l.precio_pk).toFixed(4)} → factura ${(+l.precio_unitario).toFixed(4)}`).join('\n') +
-        `\n\n¿Facturar con el precio nuevo?`)) return
-    }
 
     // ── Validación Tipo ↔ Serie ↔ Cliente (2026-10-02) ────────────────────
     // Caso real: BBOL-00000041 se guardó como Factura (tipo 01) porque la
@@ -620,8 +604,7 @@ window.guardarNuevaVenta = async function() {
         igv_porcentaje:   l.igv_porcentaje,
         igv_monto:        l.igv_monto,
         total_linea:      l.total_linea,
-        costo_unitario:   l.costo_unitario,
-        ...(l.detalle_packing_id ? { detalle_packing_id: l.detalle_packing_id } : {})
+        costo_unitario:   l.costo_unitario
       })
     }
 
@@ -1036,10 +1019,7 @@ window.abrirNuevaVentaDesdePacking = async function (pk, lineasPk) {
     precio_unitario: +l.precio_unitario, subtotal: +l.subtotal, tipo_base: l.tipo_base,
     igv_porcentaje: +l.igv_porcentaje, igv_monto: +l.igv_monto, total_linea: +l.total_linea,
     unidad_medida: l.unidad_medida, ubicacion_id: null, lote_id: null, stock_ubicacion_id: null, numero_lote: null,
-    costo_unitario: parseFloat(_costoPromedioFIFO(_stockTotalPorItem(l.item_id).lotes || [], +l.cantidad).toFixed(4)) || 0,
-    // Enlace con la línea del PK (facturación parcial, sql/70) y su precio original
-    detalle_packing_id: l.detalle_packing_id ?? l.id ?? null,
-    precio_pk: l.precio_pk ?? (+l.precio_unitario)
+    costo_unitario: parseFloat(_costoPromedioFIFO(_stockTotalPorItem(l.item_id).lotes || [], +l.cantidad).toFixed(4)) || 0
   }))
   _renderLineasVenta()
   // Cronograma con el total ya cargado y el término de pago del PK (si tiene)
@@ -1050,11 +1030,7 @@ window.abrirNuevaVentaDesdePacking = async function (pk, lineasPk) {
     const av = document.createElement('div')
     av.id = 'ventaAvisoPacking'
     av.style.cssText = 'margin:10px 20px 0; padding:8px 12px; border-radius:var(--radius-md); background:rgba(59,130,246,.12); color:var(--color-info); font-size:0.85rem;'
+    av.textContent = `📦 Facturando ${pk.numero}: revisa serie (FFFI / NV01 / BBOL…), cronograma y líneas antes de guardar. Al guardar, el PK queda "Facturado".`
     cont.after(av)
-  }
-  const _av = document.getElementById('ventaAvisoPacking')
-  if (_av) {
-    _av.style.display = ''
-    _av.textContent = `📦 Facturando ${pk.numero}: revisa serie, cronograma, cantidades y precios. Si facturas más que lo pedido, el PK se actualiza con la cantidad real; al guardar el PK queda "Parcial" o "Facturado".`
   }
 }

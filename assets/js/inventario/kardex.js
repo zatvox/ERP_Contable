@@ -383,6 +383,9 @@ window.exportarKardexExcel = async function () {
   try {
     const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm')
     const ws = XLSX.utils.json_to_sheet(filasJson)
+    // Ancho de columna al texto más largo: cada celda en una sola línea (2026-10-06)
+    const _cab = Object.keys(filasJson[0] || {})
+    ws['!cols'] = _cab.map(k => ({ wch: Math.min(90, Math.max(k.length, ...filasJson.map(f => String(f[k] ?? '').length)) + 2) }))
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Kardex')
 
