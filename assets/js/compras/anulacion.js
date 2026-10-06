@@ -262,7 +262,7 @@ window.verMotivoAnulacionCompra = async function (tipo, id) {
 }
 
 export function _invalidarCacheCompras() {
-  import('./data-cache.js').then(({ invalidarVarios }) => {
+  import('../data-cache.js').then(({ invalidarVarios }) => {
     invalidarVarios(['compras', 'compra_detalles', 'cuentas_pagar', 'lotes', 'stock_ubicaciones', 'kardex'])
   }).catch(() => {})
   Object.keys(_repComprasListos).forEach(k => { _repComprasListos[k] = false })

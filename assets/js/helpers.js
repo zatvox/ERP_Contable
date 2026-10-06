@@ -305,3 +305,104 @@ window.formatNumber = formatNumber
 window.formatQty = formatQty
 window.openModal = openModalGlobal
 window.closeModal = closeModalGlobal
+
+// ============================================================================
+// BOTÓN GUARDAR CON CARGA (estándar 2026-10-01 — ver DISENO_ESTANDAR.md §4.2)
+// ============================================================================
+// Uso en HTML:  onclick="window.conCarga(this, window.guardarX)"
+// Mientras corre la función: el botón queda bloqueado (no acepta 2° clic),
+// muestra una rueda de carga + "Guardando…" y al terminar (bien o con error)
+// vuelve a su estado original. Evita registros duplicados por doble clic.
+// No usa el atributo `disabled` a propósito: varias funciones guardarX ya
+// revisan `if (btn.disabled) return` y se bloquearían a sí mismas.
+export async function conCarga(btn, fn, texto = 'Guardando…') {
+  if (!btn || typeof fn !== 'function') return
+  if (btn.dataset.cargando === '1') return          // 2° clic ignorado
+  btn.dataset.cargando = '1'
+  const html = btn.innerHTML
+  btn.classList.add('btn-cargando')
+  btn.setAttribute('aria-busy', 'true')
+  btn.innerHTML = `<span class="spinner-btn" aria-hidden="true"></span>${texto}`
+  try {
+    return await fn()
+  } finally {
+    btn.innerHTML = html
+    btn.classList.remove('btn-cargando')
+    btn.removeAttribute('aria-busy')
+    delete btn.dataset.cargando
+  }
+}
+window.conCarga = conCarga
+
+
+// ============================================================================
+// FECHA DD/MM/AAAA (estándar de visualización 2026-10-03)
+// ============================================================================
+/** 'YYYY-MM-DD' (o ISO con hora) → 'DD/MM/AAAA'. Vacío → '—'. */
+export function fechaDMY(v, vacio = '—') {
+  if (!v) return vacio
+  const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/)
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(v)
+}
+
+// ============================================================================
+// TABLA ORDENABLE (clic en el encabezado: asc → desc) — DISENO_ESTANDAR §1.2
+// ============================================================================
+// Ordena las filas ya pintadas (no vuelve a pedir datos). Entiende números
+// ("1,234.50", "USD 12.00", "+11"), fechas DD/MM/AAAA y texto. Una celda
+// puede forzar su valor de orden con data-sort="...". Si la tabla se vuelve a
+// pintar (filtros, recarga), se re-aplica el último orden elegido.
+function _valorOrden(td) {
+  if (!td) return ''
+  if (td.dataset.sort !== undefined) {
+    const n = parseFloat(td.dataset.sort)
+    return isNaN(n) ? td.dataset.sort.toLowerCase() : n
+  }
+  const t = (td.innerText || '').trim().split('\n')[0].trim()
+  const f = t.match(/^(\d{2})\/(\d{2})\/(\d{4})/)
+  if (f) return `${f[3]}-${f[2]}-${f[1]}`
+  const limpio = t.replace(/^(S\/|\$|USD|PEN)\s*/i, '')
+  if (/^[+-]?[\d,]+(\.\d+)?%?$/.test(limpio)) return parseFloat(limpio.replace(/[,%]/g, ''))
+  return t.toLowerCase()
+}
+
+export function hacerTablaOrdenable(table) {
+  if (!table || table.dataset.ordenable === '1' || !table.tHead || !table.tBodies[0]) return
+  table.dataset.ordenable = '1'
+  const tbody = table.tBodies[0]
+  const ths = [...table.tHead.rows[0].cells]
+  let col = -1, dir = 1, ordenando = false
+
+  const ordenar = () => {
+    if (col < 0) return
+    ordenando = true
+    const filas = [...tbody.rows].filter(r => !r.querySelector('td[colspan]'))
+    filas.sort((a, b) => {
+      const va = _valorOrden(a.cells[col]), vb = _valorOrden(b.cells[col])
+      if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir
+      return String(va).localeCompare(String(vb), 'es', { numeric: true }) * dir
+    })
+    filas.forEach(f => tbody.appendChild(f))
+    ordenando = false
+  }
+
+  ths.forEach((th, i) => {
+    const txt = th.textContent.trim()
+    if (!txt || /^acciones$/i.test(txt)) return
+    th.classList.add('th-ordenable')
+    const ind = document.createElement('span')
+    ind.className = 'th-orden-ind'
+    ind.textContent = ' ⇅'
+    th.appendChild(ind)
+    th.addEventListener('click', () => {
+      dir = col === i ? -dir : 1
+      col = i
+      ths.forEach(h => { const s = h.querySelector('.th-orden-ind'); if (s) s.textContent = ' ⇅' })
+      ind.textContent = dir === 1 ? ' ▲' : ' ▼'
+      ordenar()
+    })
+  })
+  // Re-aplicar el orden cuando la tabla se vuelve a pintar
+  new MutationObserver(() => { if (!ordenando) ordenar() }).observe(tbody, { childList: true })
+}
+window.hacerTablaOrdenable = hacerTablaOrdenable

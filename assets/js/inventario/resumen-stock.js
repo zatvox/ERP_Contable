@@ -42,6 +42,8 @@ window.setModoResumenStock = async function (modo) {
   })
   const zonaWrap = document.getElementById('filtroResumenZonaWrap')
   if (zonaWrap) zonaWrap.hidden = (modo !== 'zona')
+  const famWrap = document.getElementById('filtroResumenFamiliaWrap')
+  if (famWrap) famWrap.hidden = (modo !== 'zona')
   // Exportar Excel/PDF (con checkboxes) solo existe en "Por Ubicación" —
   // "General" no tiene columna de selección.
   const exportarWrap = document.getElementById('resumenStockExportarWrap')
@@ -158,6 +160,8 @@ async function renderResumenStock() {
 
     const loteMap = {}
     ;(lotes || []).forEach(l => { loteMap[l.id] = l })
+    const catNombre = {}
+    ;(categorias || []).forEach(c => { catNombre[c.id] = c.nombre })
 
     // Agrega stock_ubicaciones (por lote+zona) a nivel de producto, sumando
     // todas las zonas reales de todos sus lotes — mismas filas que ve "Por
@@ -212,6 +216,7 @@ async function renderResumenStock() {
     _aplicarOrdenFilas(filas, window._resumenStockOrden.general, {
       sku:            f => f.prod.sku || '',
       producto:       f => f.prod.nombre || '',
+      categoria:      f => catNombre[f.prod.categoria_id] || '',
       lotes:          f => f.numerosLote.join(', '),
       stock_total:    f => f.stockTotal,
       total_unidades: f => f.totalUnidades,
@@ -226,6 +231,7 @@ async function renderResumenStock() {
           <tr>
             ${_thOrden('general', 'resumen-stock', 'sku', 'SKU')}
             ${_thOrden('general', 'resumen-stock', 'producto', 'Producto')}
+            ${_thOrden('general', 'resumen-stock', 'categoria', 'Categoría')}
             ${_thOrden('general', 'resumen-stock', 'lotes', 'N° Lote')}
             ${_thOrden('general', 'resumen-stock', 'stock_total', 'Stock Total')}
             ${_thOrden('general', 'resumen-stock', 'total_unidades', 'Total Unidades')}
@@ -256,6 +262,7 @@ async function renderResumenStock() {
         <tr style="${colorCritico}">
           <td data-col-tabla="resumen-stock" data-col="sku"${colStyle('resumen-stock','sku')}><strong>${prod.sku}</strong></td>
           <td data-col-tabla="resumen-stock" data-col="producto"${colStyle('resumen-stock','producto')}>${prod.nombre}</td>
+          <td data-col-tabla="resumen-stock" data-col="categoria"${colStyle('resumen-stock','categoria')}>${catNombre[prod.categoria_id] || '-'}</td>
           <td data-col-tabla="resumen-stock" data-col="lotes"${colStyle('resumen-stock','lotes')}>${listaLotes}</td>
           <td data-col-tabla="resumen-stock" data-col="stock_total" style="text-align: center; font-weight: bold;${colStyle('resumen-stock','stock_total') ? ' display:none;' : ''}">${stockTotal.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
           <td data-col-tabla="resumen-stock" data-col="total_unidades" style="text-align: center;${colStyle('resumen-stock','total_unidades') ? ' display:none;' : ''}">${totalUnidades.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
@@ -273,6 +280,7 @@ async function renderResumenStock() {
           <tr style="border-top: 2px solid var(--border-color); font-weight: bold;">
             <td data-col-tabla="resumen-stock" data-col="sku"${colStyle('resumen-stock','sku')}></td>
             <td data-col-tabla="resumen-stock" data-col="producto"${colStyle('resumen-stock','producto')}>TOTAL INVENTARIO</td>
+            <td data-col-tabla="resumen-stock" data-col="categoria"${colStyle('resumen-stock','categoria')}></td>
             <td data-col-tabla="resumen-stock" data-col="lotes"${colStyle('resumen-stock','lotes')}></td>
             <td data-col-tabla="resumen-stock" data-col="stock_total" style="text-align: center;${colStyle('resumen-stock','stock_total') ? ' display:none;' : ''}">${totalStockGeneral.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
             <td data-col-tabla="resumen-stock" data-col="total_unidades" style="text-align: center;${colStyle('resumen-stock','total_unidades') ? ' display:none;' : ''}">${totalUnidadesGeneral.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>

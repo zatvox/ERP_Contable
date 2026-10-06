@@ -6,6 +6,8 @@ import { S } from './state.js'
 import { getContactById, getLotes, getStockUbicaciones } from '../supabase-data.js'
 import { formatQty, pintarDocumentoContacto } from '../helpers.js'
 import { refrescarBuscador } from '../buscador-select.js'
+import { aplicarTiposPorCliente } from '../series.js'
+import { showToast } from '../helpers.js'
 import { leerCronograma } from '../cronograma.js'
 import { _almacenes, _esc, _zonas } from './init.js'
 import { _cargarAnticiposDisponiblesCliente } from './venta-anticipo.js'
@@ -54,8 +56,18 @@ function _pintarDocClienteVentas(selectId, infoId) {
 }
 
 /** Aviso informativo (no bloquea nada) si el cliente elegido es agente de retención IGV. */
-window.onCambiarClienteVenta = function () {
+window.onCambiarClienteVenta = async function () {
   _pintarDocClienteVentas('ventaContactId', 'ventaClienteDocInfo')
+  // Tipo según documento del cliente: DNI → solo Boleta; RUC → Factura primero.
+  {
+    const id = parseInt(document.getElementById('ventaContactId')?.value || 0)
+    const cli = (S._clientes || []).find(c => c.id === id) || null
+    const selTipo = document.getElementById('ventaTipoComp')
+    if (S._tipoVentaActual !== 'anticipo' && aplicarTiposPorCliente(selTipo, cli)) {
+      showToast(`Tipo → ${selTipo.value === '03' ? 'Boleta' : 'Factura'} según el documento del cliente`, 'info')
+      await window.onCambiarTipoCompVenta?.()
+    }
+  }
   _actualizarAvisoRetencionVenta()
   _avisarCreditoCliente()
   // El término del cliente es solo una sugerencia: se recarga el selector,
@@ -67,8 +79,18 @@ window.onCambiarClienteVenta = function () {
 
 /** Editar Venta: el Cliente normalmente ya viene precargado; si el usuario lo
  * cambia, el RUC/DNI mostrado debe actualizarse igual. */
-window._onCambiarClienteEditarVenta = function () {
+window._onCambiarClienteEditarVenta = async function (soloOpciones = false) {
   _pintarDocClienteVentas('evContactId', 'evClienteDocInfo')
+  // Mismo criterio en Editar. Al ABRIR solo se marcan las opciones no válidas
+  // (no se cambia el tipo guardado); al cambiar de cliente sí se ajusta.
+  const selTipo = document.getElementById('evTipoComp')
+  if (selTipo?.dataset.editable) {
+    const id = parseInt(document.getElementById('evContactId')?.value || 0)
+    const cli = (S._clientes || []).find(c => c.id === id) || null
+    if (aplicarTiposPorCliente(selTipo, cli, { cambiarValor: soloOpciones !== true && !selTipo.disabled })) {
+      await window._onCambiarTipoEdicionVenta?.()
+    }
+  }
 }
 
 /** Cotización: mismo patrón. */

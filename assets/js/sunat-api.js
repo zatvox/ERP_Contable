@@ -270,53 +270,75 @@ async function _consultarDNIApisPe(dni) {
 }
 
 // ============================================================================
-// TIPO DE CAMBIO SBS / SUNAT (APIs.pe)
+// TIPO DE CAMBIO SUNAT — Decolecta + caché en tabla tipos_cambio (2026-10-02)
 // ============================================================================
+// Flujo (ver sql/64_tipos_cambio_decolecta.sql):
+//   1) Se busca la fecha en public.tipos_cambio → si está, NO consume crédito.
+//   2) Si no está y se permite API (botón "Consultar"), se pide a Decolecta
+//      vía decolecta-proxy (tipo 'tc'), se registra en decolecta_consultas_log
+//      (mismo contador mensual que RUC/DNI) y se guarda en tipos_cambio.
+//   Llamadas automáticas (cambiar moneda, abrir modal) usan SOLO la caché:
+//   así ningún cambio de fecha/moneda gasta créditos sin que el usuario pulse
+//   "Consultar".
+// Criterio vigente: Ventas → `venta`, Compras → `compra` (a revisar con el contador).
 
 /**
- * Obtiene el tipo de cambio USD/PEN del día o de una fecha específica.
- * Fuente: APIs.pe → SBS (Superintendencia de Banca y Seguros)
- *
- * NORMATIVA SUNAT (Art. 61° LIR + Art. 5° Rgto. IGV):
- *   Ventas en ME        → usar campo `venta`
- *   Compras/importac.   → usar campo `compra`
- *
- * @param {string|null} fecha - 'YYYY-MM-DD'. Si es null, devuelve el del día.
- * @returns {{ compra: number, venta: number, fecha: string, origen: string }|{ error: string }}
+ * @param {string|null} fecha 'YYYY-MM-DD' (null = hoy)
+ * @param {{ permitirApi?: boolean }} opts
+ * @returns {{ compra, venta, fecha, fechaPublicacion, origen, desdeCache }|{ error, sinCache? }}
  */
-export async function getTipoCambioDia(fecha = null) {
-  const token = SUNAT_CONFIG?.APIS_PE_TOKEN
-  const url = fecha
-    ? `https://api.apis.pe/v1/tipo-cambio?fecha=${fecha}`
-    : 'https://api.apis.pe/v1/tipo-cambio'
-
-  // El endpoint de TC en apis.pe es público, pero si hay token lo enviamos
-  const headers = (token && !token.startsWith('REEMPLAZAR'))
-    ? apispeHeaders()
-    : { 'Referer': 'https://apis.pe' }
-
+export async function getTipoCambioDia(fecha = null, { permitirApi = true } = {}) {
+  const f = fecha || new Date().toISOString().split('T')[0]
+  // 1) Caché
   try {
-    const res = await fetch(url, { headers })
-    if (!res.ok) {
-      const texto = await res.text()
-      return { error: `Error APIs.pe TC ${res.status}: ${texto.slice(0, 80)}` }
+    const { data } = await supabase.from('tipos_cambio').select('*').eq('fecha', f).limit(1)
+    const row = data?.[0]
+    if (row) {
+      return {
+        compra: parseFloat(row.compra), venta: parseFloat(row.venta),
+        fecha: f, fechaPublicacion: row.fecha_publicacion || f,
+        origen: 'SUNAT (guardado)', desdeCache: true
+      }
     }
-    const data = await res.json()
-    const compra = parseFloat(data.compra || 0)
-    const venta  = parseFloat(data.venta  || 0)
-    if (!compra || !venta) {
-      return { error: 'Respuesta inválida del API de tipo de cambio' }
-    }
-    return {
-      compra,
-      venta,
-      fecha:  data.fecha  || fecha || new Date().toISOString().split('T')[0],
-      origen: data.origen || 'SBS'
-    }
+  } catch (e) { console.warn('tipos_cambio no disponible (¿falta correr el SQL 64?):', e) }
+
+  if (!permitirApi) return { error: 'Sin TC guardado para esta fecha — pulsa Consultar', sinCache: true }
+
+  // 2) Decolecta (consume 1 crédito)
+  let data
+  try {
+    const { data: d, error } = await supabase.functions.invoke('decolecta-proxy', { body: { tipo: 'tc', fecha: f } })
+    if (error) throw error
+    data = d
   } catch (err) {
-    console.error('getTipoCambioDia:', err)
-    return { error: 'Sin conexión o error al consultar tipo de cambio' }
+    console.error('decolecta-proxy TC:', err)
+    return { error: 'No se pudo consultar Decolecta (¿proxy desplegado con tipo "tc"?)' }
   }
+  const compra = parseFloat(data?.buy_price || 0)
+  const venta  = parseFloat(data?.sell_price || 0)
+  if (data?.error || !compra || !venta) {
+    await _logDecolecta('tc', f, true, data?.error || 'Respuesta sin TC')
+    return { error: data?.error || `SUNAT no tiene TC para ${f}` }
+  }
+  await _logDecolecta('tc', f, true, null)
+
+  // 3) Guardar en caché (upsert por fecha)
+  try {
+    const user = await getCurrentUser()
+    await supabase.from('tipos_cambio').upsert({
+      fecha: f, compra, venta, fecha_publicacion: data.date || f,
+      moneda: data.base_currency || 'USD', fuente: 'decolecta-sunat', created_by: user?.db_id || null
+    }, { onConflict: 'fecha' })
+  } catch (e) { console.warn('No se pudo guardar el TC en caché:', e) }
+
+  return { compra, venta, fecha: f, fechaPublicacion: data.date || f, origen: 'SUNAT', desdeCache: false }
+}
+
+/** Texto corto para el aviso debajo del T.C. */
+export function textoAvisoTC(result, tipo) {
+  const pub = result.fechaPublicacion && result.fechaPublicacion !== result.fecha ? ` (publicado ${result.fechaPublicacion})` : ''
+  const tc = (tipo === 'compra' ? result.compra : result.venta) ?? result.tc
+  return `TC ${tipo === 'compra' ? 'Compra' : 'Venta'} SUNAT ${result.fecha}${pub}: S/ ${Number(tc).toFixed(3)}${result.desdeCache ? ' · guardado, sin consumo' : ' · consultado a Decolecta (1 crédito)'}`
 }
 
 /**
@@ -326,10 +348,10 @@ export async function getTipoCambioDia(fecha = null) {
  * @param {string|null} fecha - 'YYYY-MM-DD' o null para hoy
  * @returns {{ tc: number, tipo: 'venta', fecha: string, origen: string }|{ error: string }}
  */
-export async function getTCVenta(fecha = null) {
-  const result = await getTipoCambioDia(fecha)
+export async function getTCVenta(fecha = null, opts = {}) {
+  const result = await getTipoCambioDia(fecha, opts)
   if (result.error) return result
-  return { tc: result.venta, tipo: 'venta', fecha: result.fecha, origen: result.origen }
+  return { ...result, tc: result.venta, tipo: 'venta' }
 }
 
 /**
@@ -339,10 +361,10 @@ export async function getTCVenta(fecha = null) {
  * @param {string|null} fecha - 'YYYY-MM-DD' o null para hoy
  * @returns {{ tc: number, tipo: 'compra', fecha: string, origen: string }|{ error: string }}
  */
-export async function getTCCompra(fecha = null) {
-  const result = await getTipoCambioDia(fecha)
+export async function getTCCompra(fecha = null, opts = {}) {
+  const result = await getTipoCambioDia(fecha, opts)
   if (result.error) return result
-  return { tc: result.compra, tipo: 'compra', fecha: result.fecha, origen: result.origen }
+  return { ...result, tc: result.compra, tipo: 'compra' }
 }
 
 // ============================================================================

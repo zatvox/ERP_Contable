@@ -2,7 +2,7 @@
 // compras/moneda-tc.js — parte de compras.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
-import { getTCCompra } from '../sunat-api.js'
+import { getTCCompra, textoAvisoTC } from '../sunat-api.js'
 
 // ============================================================================
 // MONEDA Y TIPO DE CAMBIO EN LOS MODALES DE COMPRA
@@ -20,18 +20,16 @@ function _aplicarMonedaCompra({ idMoneda, idGrupoTC, idInputTC, idAviso, autoFet
   const aviso  = document.getElementById(idAviso)
   const esUSD  = moneda === 'USD'
 
-  if (grupo) grupo.style.display = esUSD ? '' : 'none'
+  // 2026-10-05: el T.C. se muestra y se guarda también en SOLES como
+  // referencia SUNAT (no convierte el costo: guias-ingreso-nueva solo
+  // convierte cuando la moneda es USD).
+  if (grupo) grupo.style.display = ''
+  void esUSD; void aviso
 
-  if (!esUSD) {
-    if (inputTC) inputTC.value = '1'
-    if (aviso) aviso.textContent = ''
-    return
-  }
-
-  // Al volver a USD, si el T.C. quedó en 1 (valor de PEN) se intenta traer el
-  // del día: un T.C. de 1 en dólares descuadraría todo el costeo en soles.
+  // Si el T.C. quedó vacío o en 1 se intenta traer el del día: en USD un
+  // T.C. de 1 descuadraría todo el costeo en soles.
   if (inputTC && (!inputTC.value || parseFloat(inputTC.value) === 1) && typeof autoFetch === 'function') {
-    autoFetch()
+    autoFetch(true)   // automático = solo TC guardado (no consume crédito)
   }
 }
 
@@ -51,24 +49,24 @@ window.onCambiarMonedaCompra = function () {
  * registrar adquisiciones; en Ventas se usa el T.C. VENTA, por eso son dos
  * funciones distintas y no una sola compartida.
  */
-async function _traerTCCompraA(idInputTC, idAviso, idFecha, idBoton) {
+async function _traerTCCompraA(idInputTC, idAviso, idFecha, idBoton, soloCache = false) {
   const campo = document.getElementById(idInputTC)
   const aviso = document.getElementById(idAviso)
   const btn   = document.getElementById(idBoton)
   if (!campo) return
 
   if (btn) btn.disabled = true
-  if (aviso) aviso.textContent = 'Consultando SBS...'
+  if (aviso) aviso.textContent = soloCache ? 'Buscando TC guardado...' : 'Consultando TC SUNAT...'
 
   try {
     const fecha = document.getElementById(idFecha)?.value || null
-    const result = await getTCCompra(fecha)
+    const result = await getTCCompra(fecha, { permitirApi: !soloCache })
     if (result.error) {
-      if (aviso) aviso.textContent = `⚠ ${result.error} — ingrésalo manualmente`
+      if (aviso) aviso.textContent = result.sinCache ? `${result.error} (o ingrésalo manualmente)` : `⚠ ${result.error} — ingrésalo manualmente`
       return
     }
     campo.value = result.tc.toFixed(3)
-    if (aviso) aviso.textContent = `T.C. Compra SBS ${result.fecha}: S/ ${result.tc.toFixed(3)} — Art. 61° LIR`
+    if (aviso) aviso.textContent = textoAvisoTC(result, 'compra')
   } catch (e) {
     if (aviso) aviso.textContent = `⚠ No se pudo consultar (${e.message}) — ingrésalo manualmente`
   } finally {
@@ -76,6 +74,6 @@ async function _traerTCCompraA(idInputTC, idAviso, idFecha, idBoton) {
   }
 }
 
-window.autoFetchTCCompra = function () {
-  return _traerTCCompraA('nqTipoCambio', 'nqTCAviso', 'nqFecha', 'btnAutoTCNuevaCompra')
+window.autoFetchTCCompra = function (soloCache = false) {
+  return _traerTCCompraA('nqTipoCambio', 'nqTCAviso', 'nqFecha', 'btnAutoTCNuevaCompra', soloCache === true)
 }

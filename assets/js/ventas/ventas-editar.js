@@ -14,6 +14,8 @@ import { _poblarSelectClientes, _poblarSelectVendedores } from './helpers.js'
 import { _esc } from './init.js'
 import { _guardarCuotasDeCxC } from './venta-nueva.js'
 import { _ventasListaEnriquecida, renderVentas } from './ventas-lista.js'
+import { getSeries, seriesDeTipo, getSerie, siguienteCorrelativo, NOMBRE_TIPO_SERIE, poblarSelectSeries } from '../series.js'
+import { generarNumeroVenta, getContactById } from '../supabase-data.js'
 
 // ─── Editar Venta (solo cabecera: no se tocan líneas/stock ya descontado) ────
 
@@ -109,8 +111,21 @@ window.editarVenta = async function (id) {
     const numero = `${v.serie || ''}-${String(v.correlativo || '').padStart(8, '0')}`
     _setEv('ev-titulo', `Editar ${nombreTipoComprobante(v.tipo_comprobante)} ${numero}`)
     _valEv('evId', v.id)
-    _valEv('evTipoComp', `${v.tipo_comprobante} — ${nombreTipoComprobante(v.tipo_comprobante)}`)
-    _valEv('evSerie', v.serie || '')
+    // Tipo: Factura ↔ Boleta editable (2026-10-02, caso BBOL-41 guardada como
+    // Factura). Notas de crédito/débito NO cambian de tipo.
+    {
+      const selTipo = document.getElementById('evTipoComp')
+      if (selTipo) {
+        const editableTipo = v.tipo_comprobante === '01' || v.tipo_comprobante === '03'
+        selTipo.innerHTML = editableTipo
+          ? `<option value="01">01 — Factura</option><option value="03">03 — Boleta</option>`
+          : `<option value="${_esc(v.tipo_comprobante)}">${_esc(v.tipo_comprobante)} — ${_esc(nombreTipoComprobante(v.tipo_comprobante))}</option>`
+        selTipo.value = v.tipo_comprobante
+        selTipo.dataset.editable = editableTipo ? '1' : ''
+      }
+    }
+    // Serie = selector con las series activas del tipo (conserva la histórica)
+    await poblarSelectSeries(document.getElementById('evSerie'), v.tipo_comprobante, { incluirActual: v.serie || null })
     _valEv('evCorrelativo', String(v.correlativo || '').padStart(8, '0'))
     _valEv('evPeriodo', v.periodo_contable || (v.fecha_emision || '').slice(0, 7))
     _valEv('evFechaEmision', v.fecha_emision || '')
@@ -139,11 +154,11 @@ window.editarVenta = async function (id) {
     convertirEnBuscador('evVendedor', { placeholder: 'Sin asignar — escribe para buscar...' })
     refrescarBuscador('evContactId')
     refrescarBuscador('evVendedor')
-    window._onCambiarClienteEditarVenta()
+    await window._onCambiarClienteEditarVenta(true)
 
     // Candados cerrados en cada apertura
-    ;[['evSerie','btnCandadoEvSerie','aviso-ev-serie'],
-      ['evCorrelativo','btnCandadoEvCorr','aviso-ev-corr'],
+    document.getElementById('aviso-ev-serie')?.classList.remove('visible')
+    ;[['evCorrelativo','btnCandadoEvCorr','aviso-ev-corr'],
       ['evPeriodo','btnCandadoEvPeriodo','aviso-ev-periodo']].forEach(([i, b, a]) => {
       const inp = document.getElementById(i), btn = document.getElementById(b)
       if (inp) { inp.readOnly = true; inp.dataset.valorAutomatico = inp.value }
@@ -193,8 +208,12 @@ function _aplicarModoVistaEdicionVenta() {
     if (el) el.disabled = _evModoVista
   }
   _disableBuscadorEv('evContactId', _evModoVista || !!c.bloqueos.cliente)
+  const selTipo = document.getElementById('evTipoComp')
+  if (selTipo) selTipo.disabled = _evModoVista || !selTipo.dataset.editable || !!c.bloqueos.numeracion
+  const selSerie = document.getElementById('evSerie')
+  if (selSerie) selSerie.disabled = _evModoVista || !!c.bloqueos.numeracion
 
-  ;['btnCandadoEvSerie', 'btnCandadoEvCorr', 'btnCandadoEvPeriodo'].forEach(id => {
+  ;['btnCandadoEvCorr', 'btnCandadoEvPeriodo'].forEach(id => {
     const btn = document.getElementById(id)
     if (btn) btn.style.display = _evModoVista ? 'none' : ''
   })
@@ -507,14 +526,52 @@ window.onCambiarMonedaEdicion = function () {
   const grupo = document.getElementById('evTipoCambioGroup')
   const inp = document.getElementById('evTipoCambio')
   const bloqueada = !!_evContexto?.bloqueos.moneda
-  if (grupo) grupo.style.display = moneda === 'USD' ? '' : 'none'
-  if (moneda !== 'USD' && inp) inp.value = 1
+  // T.C. siempre visible (2026-10-05): en soles queda como referencia SUNAT.
+  if (grupo) grupo.style.display = ''
   const sel = document.getElementById('evMoneda')
   if (sel) sel.disabled = bloqueada
   const aviso = document.getElementById('ev-cliente-aviso')
   const selCli = document.getElementById('evContactId')
   if (selCli) selCli.disabled = !!_evContexto?.bloqueos.cliente
   if (aviso) aviso.textContent = _evContexto?.bloqueos.cliente ? 'Bloqueado: la venta ya tiene cobros o notas.' : ''
+}
+
+/** Cambio Factura ↔ Boleta en Editar: si la serie actual no es del nuevo
+ *  tipo, se propone la serie por defecto del tipo y su siguiente número. */
+window._onCambiarTipoEdicionVenta = async function () {
+  const c = _evContexto
+  const tipo = document.getElementById('evTipoComp')?.value
+  const sel = document.getElementById('evSerie')
+  if (!c || !tipo || !sel) return
+  const antes = sel.value
+  // El selector se rehace solo con las series del nuevo tipo; si la serie
+  // actual sirve (ej. BBOL al pasar a Boleta) se conserva con su número.
+  await poblarSelectSeries(sel, tipo, { preferida: antes })
+  if (sel.value === antes) {
+    showToast(`Serie ${antes} válida para ${NOMBRE_TIPO_SERIE[tipo]} — se conserva la numeración.`, 'success')
+  } else {
+    await window._onCambiarSerieEdicionVenta()
+    showToast(`La serie ${antes} no es de ${NOMBRE_TIPO_SERIE[tipo]}: se propone ${sel.value}-${document.getElementById('evCorrelativo')?.value}.`, 'info', 7000)
+  }
+}
+
+/** Serie elegida en Editar: si vuelve a la original se restaura su número;
+ *  si es otra, se propone el siguiente correlativo de esa serie. */
+window._onCambiarSerieEdicionVenta = async function () {
+  const c = _evContexto
+  const sel = document.getElementById('evSerie')
+  const corrEl = document.getElementById('evCorrelativo')
+  if (!c || !sel || !corrEl) return
+  const tipo = document.getElementById('evTipoComp')?.value || c.venta.tipo_comprobante
+  document.getElementById('aviso-ev-serie')?.classList.toggle('visible', sel.value !== c.venta.serie)
+  if (sel.value === c.venta.serie) {
+    corrEl.value = String(c.venta.correlativo || '').padStart(8, '0')
+  } else {
+    const fila = await getSerie(tipo, sel.value).catch(() => null)
+    const maxUsado = (await generarNumeroVenta(tipo, sel.value)) - 1
+    corrEl.value = String(siguienteCorrelativo(fila, maxUsado)).padStart(8, '0')
+  }
+  corrEl.dataset.valorAutomatico = corrEl.value
 }
 
 window.guardarEdicionVenta = async function () {
@@ -525,14 +582,17 @@ window.guardarEdicionVenta = async function () {
     const id = parseInt(document.getElementById('evId')?.value || 0)
     if (!id || !c) { showToast('Venta inválida', 'danger'); return }
 
-    const serie      = document.getElementById('evSerie')?.value?.trim()
+    const serie      = document.getElementById('evSerie')?.value?.trim().toUpperCase()
+    const tipoComp   = document.getElementById('evTipoComp')?.value || c.venta.tipo_comprobante
     const correl     = document.getElementById('evCorrelativo')?.value?.trim()
     const periodo    = document.getElementById('evPeriodo')?.value?.trim()
     const fechaEmi   = document.getElementById('evFechaEmision')?.value
     const contactId  = parseInt(document.getElementById('evContactId')?.value || 0) || c.venta.contact_id
     const vendedorId = parseInt(document.getElementById('evVendedor')?.value || 0) || null
     const moneda     = document.getElementById('evMoneda')?.value || c.venta.moneda
-    const tipoCambio = moneda === 'USD' ? (parseFloat(document.getElementById('evTipoCambio')?.value || 0) || 1) : 1
+    // 2026-10-05: en SOLES también se guarda el T.C. SUNAT del día como referencia
+    // (reportes / registro). Solo CONVIERTE montos cuando la moneda es USD.
+    const tipoCambio = parseFloat(document.getElementById('evTipoCambio')?.value || 0) || 1
     const descripcion   = document.getElementById('evDescripcion')?.value?.trim() || null
     const observaciones = document.getElementById('evObservaciones')?.value?.trim() || null
 
@@ -542,6 +602,27 @@ window.guardarEdicionVenta = async function () {
     }
     if (moneda === 'USD' && tipoCambio <= 1) {
       showToast('Ingresa el tipo de cambio para una venta en dólares', 'warning'); return
+    }
+
+    // ── Validación Tipo ↔ Serie ↔ Cliente (mismo criterio que Nueva Venta) ──
+    if (tipoComp === '01' || tipoComp === '03') {
+      const seriesTipo = await seriesDeTipo(tipoComp).catch(() => null)
+      if (seriesTipo?.length && !seriesTipo.some(x => x.serie === serie)) {
+        const otra = (await getSeries().catch(() => [])).find(x => x.serie === serie)
+        showToast(otra
+          ? `La serie ${serie} es de ${NOMBRE_TIPO_SERIE[otra.tipo_documento] || otra.tipo_documento}, no de ${NOMBRE_TIPO_SERIE[tipoComp]}.`
+          : `La serie ${serie} no está registrada para ${NOMBRE_TIPO_SERIE[tipoComp]} (Configuración → Series).`, 'danger', 8000)
+        return
+      }
+      const cli = await getContactById(contactId)
+      const docCli = String(cli?.nro_documento || '').replace(/\D/g, '')
+      const esDNI = String(cli?.tipo_documento || '').toUpperCase() === 'DNI' || docCli.length === 8
+      if (tipoComp === '01' && esDNI) {
+        showToast('Una Factura no se emite a DNI: el cliente necesita RUC. Con DNI corresponde Boleta.', 'danger', 8000)
+        return
+      }
+      if (tipoComp === '03' && docCli.length === 11 && tipoComp !== c.venta.tipo_comprobante &&
+          !confirm('El cliente tiene RUC y la estás pasando a BOLETA (no le sirve para crédito fiscal). ¿Continuar?')) return
     }
 
     // Numeración duplicada: solo se valida si realmente cambió.
@@ -605,6 +686,8 @@ window.guardarEdicionVenta = async function () {
 
     // Resumen de la cascada para que el usuario confirme lo que va a pasar.
     const cambios = []
+    const cambioTipo = tipoComp !== c.venta.tipo_comprobante
+    if (cambioTipo) cambios.push(`tipo (${nombreTipoComprobante(c.venta.tipo_comprobante)} → ${nombreTipoComprobante(tipoComp)})`)
     if (contactId !== c.venta.contact_id) cambios.push('cliente')
     if (numeroNuevo !== numeroViejo) cambios.push('serie/número')
     if (fechaEmi !== c.venta.fecha_emision) cambios.push('fecha de emisión')
@@ -620,6 +703,7 @@ window.guardarEdicionVenta = async function () {
     }
     if (!confirm(
       `Se actualizará ${cambios.join(', ')} en la venta ${numeroViejo}` +
+      (cambioTipo && c.venta.asiento_id ? ` (el asiento contable ya generado NO se regenera)` : '') +
       (c.cxc ? `, y se propagará a su Cuenta por Cobrar${crono ? ' y su cronograma de cuotas' : ''}.` : '.') +
       `\n\n¿Confirmar?`
     )) return
@@ -632,6 +716,7 @@ window.guardarEdicionVenta = async function () {
       : c.venta.fecha_vencimiento
 
     const okVenta = await updateVenta(id, {
+      tipo_comprobante: tipoComp,
       contact_id: contactId, vendedor_id: vendedorId,
       serie, correlativo: correl.replace(/^0+/, '') || correl,
       numero: numeroNuevo,
@@ -675,6 +760,7 @@ window.guardarEdicionVenta = async function () {
     if (c.cxc) {
       try {
         await updateCuentaCobrar(c.cxc.id, {
+          ...(c.cxc.tipo_comprobante !== undefined ? { tipo_comprobante: tipoComp } : {}),
           contact_id: contactId, serie, numero_comprobante: correl.replace(/^0+/, '') || correl,
           fecha_emision: fechaEmi, fecha_vencimiento: fechaVenc,
           moneda, tipo_cambio: tipoCambio,
@@ -703,10 +789,11 @@ window.guardarEdicionVenta = async function () {
     }
 
     // ── 4) Notas que referencian esta venta ────────────────────────────
-    if (numeroNuevo !== numeroViejo && c.notas.length > 0) {
+    if ((numeroNuevo !== numeroViejo || cambioTipo) && c.notas.length > 0) {
       for (const n of c.notas) {
         try {
           await updateVenta(n.id, {
+            ...(cambioTipo ? { doc_referencia_tipo: tipoComp } : {}),
             doc_referencia_serie: serie,
             doc_referencia_numero: correl.replace(/^0+/, '') || correl
           })

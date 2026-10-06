@@ -5,6 +5,7 @@
 // Estado compartido entre submódulos (antes eran `let` sueltos en ventas.js).
 // Se usa como S.nombre para que cualquier submódulo pueda reasignarlo.
 export const S = {
+  _packingOrigen: null,   // { id, numero } del PK que se está facturando (2026-09-30)
   _clientes: [],
   _items: [],
   _lotes: [],

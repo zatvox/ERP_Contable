@@ -3,7 +3,7 @@
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
 import { colStyle } from '../col-menu.js'
-import { getItems, getLotes, getMarcas, getAlmacenes, getUbicaciones, getStockUbicaciones } from '../supabase-data.js'
+import { getItems, getLotes, getMarcas, getAlmacenes, getUbicaciones, getStockUbicaciones, getCategorias, getFamilias, getFamiliaLotes } from '../supabase-data.js'
 import { showToast } from '../helpers.js'
 import { _fechaDDMMAAAA } from './kardex.js'
 import { _aplicarOrdenFilas, _flechaOrden, _thOrden } from './resumen-stock.js'
@@ -21,14 +21,29 @@ export async function renderStockZonas() {
     const container = document.getElementById('tabla-resumen')
     if (!container) return
 
-    const [stock, lotes, items, marcas, zonas, almacenes] = await Promise.all([
+    // Familias (SQL 66): si el checkbox "Agrupar por familia" está activo,
+    // los lotes de una misma familia se suman en una sola fila por zona.
+    const agruparFamilia = !!document.getElementById('chkAgruparFamilia')?.checked
+    const [stock, lotes, items, marcas, zonas, almacenes, categorias, familias, familiaLotes] = await Promise.all([
       getStockUbicaciones(),
       getLotes(),
       getItems(),
       getMarcas(),
       getUbicaciones(),
-      getAlmacenes()
+      getAlmacenes(),
+      getCategorias(),
+      agruparFamilia ? getFamilias().catch(() => []) : [],
+      agruparFamilia ? getFamiliaLotes().catch(() => []) : []
     ])
+    const familiaMap = {}
+    for (const f of (familias || [])) familiaMap[f.id] = f
+    // item_id|numero_lote(lower) -> familia_id
+    const famDeLote = {}
+    for (const fl of (familiaLotes || [])) {
+      famDeLote[`${fl.item_id}|${String(fl.numero_lote || '').trim().toLowerCase()}`] = fl.familia_id
+    }
+    const catNombre = {}
+    for (const c of (categorias || [])) catNombre[c.id] = c.nombre
 
     const almacenMap = {}
     for (const a of (almacenes || [])) almacenMap[a.id] = a
@@ -74,7 +89,8 @@ export async function renderStockZonas() {
         const texto = [
           item?.nombre, item?.sku, item?.codigo,
           lote?.numero_lote, marca?.nombre,
-          z?.nombre, almacen?.nombre
+          z?.nombre, almacen?.nombre,
+          lote ? familiaMap[famDeLote[`${lote.item_id}|${String(lote.numero_lote || '').trim().toLowerCase()}`]]?.nombre : null
         ].filter(Boolean).join(' ').toLowerCase()
         return texto.includes(fBusqueda)
       })
@@ -112,15 +128,28 @@ export async function renderStockZonas() {
     for (const s of stockConCantidad) {
       const lote = loteMap[s.lote_id]
       if (!lote) continue
-      const key = `${lote.item_id}|${String(lote.numero_lote || '').trim().toLowerCase()}|${s.ubicacion_id}`
+      const claveLote = `${lote.item_id}|${String(lote.numero_lote || '').trim().toLowerCase()}`
+      const famId = agruparFamilia ? famDeLote[claveLote] : null
+      const key = famId ? `F${famId}|${s.ubicacion_id}` : `${claveLote}|${s.ubicacion_id}`
       if (!gruposMap[key]) {
         gruposMap[key] = {
+          familiaId: famId || null,
+          itemIds: new Set(),
+          numerosLote: new Set(),
+          marcaIds: new Set(),
           itemId: lote.item_id,
           numeroLote: lote.numero_lote || '-',
           marcaId: lote.marca_id,
           ubicacion_id: s.ubicacion_id,
           cantidad: 0,
           unidades: 0,
+          valor: 0,
+          costos: new Set(),
+          valorOrig: 0,
+          valorTC: 0,
+          costosOrig: new Set(),
+          tcs: new Set(),
+          monedas: new Set(),
           loteIds: []
         }
       }
@@ -128,8 +157,50 @@ export async function renderStockZonas() {
       g.cantidad += parseFloat(s.cantidad) || 0
       g.unidades += parseFloat(s.cantidad_unidades) || 0
       g.loteIds.push(s.lote_id)
+      g.itemIds.add(lote.item_id)
+      g.numerosLote.add(lote.numero_lote || '-')
+      if (lote.marca_id) g.marcaIds.add(lote.marca_id)
+      // Costo (2026-10-05): promedio ponderado por stock actual de todos los
+      // ingresos (lotes.id) que comparten este N° de Lote en esta zona. Si
+      // hubo >1 costo distinto se marca como "promedio" (celda sombreada).
+      const cu = parseFloat(lote.costo_unitario) || 0
+      g.valor += (parseFloat(s.cantidad) || 0) * cu
+      g.costos.add(cu.toFixed(4))
+      // Datos de la factura original (SQL 29: lotes.moneda / tipo_cambio /
+      // costo_unit_original). Lotes antiguos sin esos campos = PEN, TC 1.
+      const cantS = parseFloat(s.cantidad) || 0
+      const mon = lote.moneda || 'PEN'
+      const tc = parseFloat(lote.tipo_cambio) || 1
+      const co = lote.costo_unit_original != null ? (parseFloat(lote.costo_unit_original) || 0) : (tc ? cu / tc : cu)
+      g.monedas.add(mon)
+      g.valorOrig += cantS * co
+      g.valorTC += cantS * tc
+      g.costosOrig.add(co.toFixed(4))
+      g.tcs.add(tc.toFixed(4))
+    }
+    for (const g of Object.values(gruposMap)) {
+      g.costo = g.cantidad > 0 ? g.valor / g.cantidad : 0
+      g.esPromedio = g.costos.size > 1
+      g.moneda = g.monedas.size > 1 ? 'Mixta' : [...g.monedas][0]
+      // Costo original solo se promedia si todos los ingresos son de la
+      // misma moneda — sumar USD con PEN no tiene sentido.
+      g.costoOrig = g.monedas.size > 1 ? null : (g.cantidad > 0 ? g.valorOrig / g.cantidad : 0)
+      g.costoOrigPromedio = g.monedas.size === 1 && g.costosOrig.size > 1
+      g.tc = g.cantidad > 0 ? g.valorTC / g.cantidad : 1
+      g.tcPromedio = g.tcs.size > 1
     }
     const filasAgrupadas = Object.values(gruposMap)
+
+    // Textos por fila: una fila de familia junta varios productos/lotes/marcas.
+    const _unicoOVarios = (set, fn) => set.size === 1 ? fn([...set][0]) : (set.size === 0 ? '-' : `Varios (${set.size})`)
+    const txtSku = g => g.familiaId ? _unicoOVarios(g.itemIds, id => itemMap[id]?.sku || '-') : (itemMap[g.itemId]?.sku || '-')
+    const txtProducto = g => g.familiaId ? (familiaMap[g.familiaId]?.nombre || 'Familia #' + g.familiaId) : (itemMap[g.itemId]?.nombre || 'Item #' + g.itemId)
+    const txtCategoria = g => {
+      const cats = new Set([...g.itemIds].map(id => itemMap[id]?.categoria_id))
+      return _unicoOVarios(cats, c => catNombre[c] || '-')
+    }
+    const txtLote = g => g.familiaId ? `${g.numerosLote.size} lote${g.numerosLote.size === 1 ? '' : 's'}` : g.numeroLote
+    const txtMarca = g => g.familiaId ? _unicoOVarios(g.marcaIds, id => marcaMap[id]?.nombre || '-') : (marcaMap[g.marcaId]?.nombre || '-')
 
     // Orden: por defecto se agrupa por zona (banners) igual que antes. Si el
     // usuario eligió una columna haciendo click en el encabezado, esa manda:
@@ -139,14 +210,19 @@ export async function renderStockZonas() {
     //   perder el agrupamiento visual que el banner promete.
     const stOrden = window._resumenStockOrden.zona
     const extractoresZona = {
-      codigo:    g => itemMap[g.itemId]?.sku || '',
-      producto:  g => itemMap[g.itemId]?.nombre || '',
-      lote:      g => g.numeroLote || '',
-      marca:     g => marcaMap[g.marcaId]?.nombre || '',
+      codigo:    g => txtSku(g),
+      producto:  g => txtProducto(g),
+      categoria: g => txtCategoria(g),
+      lote:      g => txtLote(g),
+      marca:     g => txtMarca(g),
       zona:      g => nombreZona(g),
       cantidad:  g => g.cantidad,
       unidades:  g => g.unidades,
-      peso_unidad: g => g.unidades > 0 ? g.cantidad / g.unidades : 0
+      peso_unidad: g => g.unidades > 0 ? g.cantidad / g.unidades : 0,
+      moneda:    g => g.moneda || '',
+      tc:        g => g.tc,
+      costo_orig: g => g.costoOrig ?? -1,
+      costo:     g => g.costo
     }
     if (!fZona && stOrden.col && stOrden.col !== 'zona') {
       const getCol = extractoresZona[stOrden.col]
@@ -173,12 +249,17 @@ export async function renderStockZonas() {
             <th data-col-tabla="stock-zonas" data-col="sel"${colStyle('stock-zonas','sel')}><input type="checkbox" id="stockZonasSelAll" title="Seleccionar todo" onchange="window._stockZonasToggleSelTodo(this.checked)"></th>
             ${_thOrden('zona', 'stock-zonas', 'codigo', 'Código')}
             ${_thOrden('zona', 'stock-zonas', 'producto', 'Producto')}
+            ${_thOrden('zona', 'stock-zonas', 'categoria', 'Categoría')}
             ${_thOrden('zona', 'stock-zonas', 'lote', 'N° Lote')}
             ${_thOrden('zona', 'stock-zonas', 'marca', 'Marca')}
             ${_thOrden('zona', 'stock-zonas', 'zona', 'Almacén — Zona')}
             <th data-col-tabla="stock-zonas" data-col="cantidad" class="th-ordenable" style="text-align:right;${colStyle('stock-zonas','cantidad') ? ' display:none;' : ''}" onclick="window.ordenarResumenStock('cantidad')">Cantidad${_flechaOrden('zona', 'cantidad')}</th>
             <th data-col-tabla="stock-zonas" data-col="unidades" class="th-ordenable" style="text-align:right;${colStyle('stock-zonas','unidades') ? ' display:none;' : ''}" onclick="window.ordenarResumenStock('unidades')">Unidades${_flechaOrden('zona', 'unidades')}</th>
             <th data-col-tabla="stock-zonas" data-col="peso_unidad" class="th-ordenable" style="text-align:right;${colStyle('stock-zonas','peso_unidad') ? ' display:none;' : ''}" onclick="window.ordenarResumenStock('peso_unidad')" title="Cantidad ÷ Unidades de esta fila — no es el campo guardado en cada lote, ver nota en el código">Peso/Unidad${_flechaOrden('zona', 'peso_unidad')}</th>
+            ${_thOrden('zona', 'stock-zonas', 'moneda', 'Moneda')}
+            <th data-col-tabla="stock-zonas" data-col="tc" class="th-ordenable" style="text-align:right;${colStyle('stock-zonas','tc') ? ' display:none;' : ''}" onclick="window.ordenarResumenStock('tc')" title="Tipo de cambio de la factura original. Sombreado = promedio ponderado de varios ingresos">T.C.${_flechaOrden('zona', 'tc')}</th>
+            <th data-col-tabla="stock-zonas" data-col="costo_orig" class="th-ordenable" style="text-align:right;${colStyle('stock-zonas','costo_orig') ? ' display:none;' : ''}" onclick="window.ordenarResumenStock('costo_orig')" title="Costo unitario en la moneda de la factura original">Costo Orig.${_flechaOrden('zona', 'costo_orig')}</th>
+            <th data-col-tabla="stock-zonas" data-col="costo" class="th-ordenable" style="text-align:right;${colStyle('stock-zonas','costo') ? ' display:none;' : ''}" onclick="window.ordenarResumenStock('costo')" title="Costo unitario en soles. Sombreado = promedio ponderado de varios ingresos con distinto costo">Costo S/.${_flechaOrden('zona', 'costo')}</th>
             <th data-col-tabla="stock-zonas" data-col="acciones"${colStyle('stock-zonas','acciones')}>Acciones</th>
           </tr>
         </thead>
@@ -186,29 +267,36 @@ export async function renderStockZonas() {
     `
     let zonaAnterior = null
     for (const g of filasAgrupadas) {
-      const item = itemMap[g.itemId]
-      const marca = g.marcaId ? marcaMap[g.marcaId] : null
       const etiquetaZona = nombreZona(g)
+      const esFam = !!g.familiaId
+      const tipLotes = esFam
+        ? ' title="' + [...g.numerosLote].join(', ').replace(/"/g, '&quot;') + '"'
+        : ''
 
       // Fila separadora por zona, solo cuando se ven todas juntas (sin
       // filtro) — puramente visual, no cambia los datos.
       if (!fZona && etiquetaZona !== zonaAnterior) {
-        html += `<tr><td colspan="10" style="background:var(--bg-secondary); font-weight:bold; padding:6px 10px;">${etiquetaZona}</td></tr>`
+        html += `<tr><td colspan="15" style="background:var(--bg-secondary); font-weight:bold; padding:6px 10px;">${etiquetaZona}</td></tr>`
         zonaAnterior = etiquetaZona
       }
 
       html += `
         <tr>
           <td data-col-tabla="stock-zonas" data-col="sel"${colStyle('stock-zonas','sel')}><input type="checkbox" class="stock-zona-sel"></td>
-          <td data-col-tabla="stock-zonas" data-col="codigo"${colStyle('stock-zonas','codigo')}>${item?.sku || '-'}</td>
-          <td data-col-tabla="stock-zonas" data-col="producto"${colStyle('stock-zonas','producto')}>${item?.nombre || 'Item #' + g.itemId}</td>
-          <td data-col-tabla="stock-zonas" data-col="lote"${colStyle('stock-zonas','lote')}>${g.numeroLote}</td>
-          <td data-col-tabla="stock-zonas" data-col="marca"${colStyle('stock-zonas','marca')}>${marca?.nombre || '-'}</td>
+          <td data-col-tabla="stock-zonas" data-col="codigo"${colStyle('stock-zonas','codigo')}>${txtSku(g)}</td>
+          <td data-col-tabla="stock-zonas" data-col="producto"${colStyle('stock-zonas','producto')}>${esFam ? '<span class="badge badge-info solo-pantalla" style="margin-right:6px;">Familia</span><strong>' + txtProducto(g) + '</strong>' : txtProducto(g)}</td>
+          <td data-col-tabla="stock-zonas" data-col="categoria"${colStyle('stock-zonas','categoria')}>${txtCategoria(g)}</td>
+          <td data-col-tabla="stock-zonas" data-col="lote"${colStyle('stock-zonas','lote')}${tipLotes}>${txtLote(g)}</td>
+          <td data-col-tabla="stock-zonas" data-col="marca"${colStyle('stock-zonas','marca')}>${txtMarca(g)}</td>
           <td data-col-tabla="stock-zonas" data-col="zona"${colStyle('stock-zonas','zona')}>${etiquetaZona}</td>
-          <td data-col-tabla="stock-zonas" data-col="cantidad" style="text-align:right; font-weight:bold;${colStyle('stock-zonas','cantidad') ? ' display:none;' : ''}">${g.cantidad.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
-          <td data-col-tabla="stock-zonas" data-col="unidades" style="text-align:right;${colStyle('stock-zonas','unidades') ? ' display:none;' : ''}">${g.unidades > 0 ? g.unidades.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '-'}</td>
-          <td data-col-tabla="stock-zonas" data-col="peso_unidad" style="text-align:right;${colStyle('stock-zonas','peso_unidad') ? ' display:none;' : ''}" title="Cantidad ÷ Unidades de esta fila (suma de todas las facturas agrupadas)">${g.unidades > 0 ? (g.cantidad / g.unidades).toLocaleString('en-US', { maximumFractionDigits: 4 }) : '-'}</td>
-          <td data-col-tabla="stock-zonas" data-col="acciones"${colStyle('stock-zonas','acciones')}><button class="btn btn-small btn-secondary" onclick="window.abrirModalTrasladoDesdeResumenZona(${g.itemId}, ${g.ubicacion_id})">Trasladar</button></td>
+          <td data-col-tabla="stock-zonas" data-col="cantidad" data-valor="${g.cantidad}" style="text-align:right; font-weight:bold;${colStyle('stock-zonas','cantidad') ? ' display:none;' : ''}">${g.cantidad.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+          <td data-col-tabla="stock-zonas" data-col="unidades" data-valor="${g.unidades > 0 ? g.unidades : ''}" style="text-align:right;${colStyle('stock-zonas','unidades') ? ' display:none;' : ''}">${g.unidades > 0 ? g.unidades.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '-'}</td>
+          <td data-col-tabla="stock-zonas" data-col="peso_unidad" data-valor="${g.unidades > 0 ? g.cantidad / g.unidades : ''}" style="text-align:right;${colStyle('stock-zonas','peso_unidad') ? ' display:none;' : ''}" title="Cantidad ÷ Unidades de esta fila (suma de todas las facturas agrupadas)">${g.unidades > 0 ? (g.cantidad / g.unidades).toLocaleString('en-US', { maximumFractionDigits: 4 }) : '-'}</td>
+          <td data-col-tabla="stock-zonas" data-col="moneda" class="${g.monedas.size > 1 ? 'costo-promedio' : ''}"${colStyle('stock-zonas','moneda')} title="${g.monedas.size > 1 ? 'Ingresos en distintas monedas: ' + [...g.monedas].join(' · ') : 'Moneda de la factura original'}">${g.moneda}</td>
+          <td data-col-tabla="stock-zonas" data-col="tc" data-valor="${g.tc}" class="${g.tcPromedio ? 'costo-promedio' : ''}" style="text-align:right;${colStyle('stock-zonas','tc') ? ' display:none;' : ''}" title="${g.tcPromedio ? `Promedio ponderado de ${g.tcs.size} T.C.: ` + [...g.tcs].map(t => parseFloat(t).toFixed(3)).join(' · ') : 'T.C. de la factura original'}">${g.tc.toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 4 })}</td>
+          <td data-col-tabla="stock-zonas" data-col="costo_orig" data-valor="${g.costoOrig == null ? '' : g.costoOrig}" class="${g.costoOrigPromedio ? 'costo-promedio' : ''}" style="text-align:right;${colStyle('stock-zonas','costo_orig') ? ' display:none;' : ''}" title="${g.costoOrig == null ? 'Monedas distintas: ver Costo S/.' : g.costoOrigPromedio ? `Promedio ponderado de ${g.costosOrig.size} ingresos: ` + [...g.costosOrig].map(c => parseFloat(c).toFixed(2)).join(' · ') : 'Costo único de la factura original'}">${g.costoOrig == null ? '—' : ({ USD: '$ ', EUR: '€ ' }[g.moneda] || 'S/. ') + g.costoOrig.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+          <td data-col-tabla="stock-zonas" data-col="costo" data-valor="${g.costo}" class="${g.esPromedio ? 'costo-promedio' : ''}" style="text-align:right;${colStyle('stock-zonas','costo') ? ' display:none;' : ''}" title="${g.esPromedio ? `Promedio ponderado de ${g.costos.size} ingresos: ` + [...g.costos].map(c => 'S/. ' + parseFloat(c).toFixed(2)).join(' · ') : 'Costo único del lote'}">S/. ${g.costo.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+          <td data-col-tabla="stock-zonas" data-col="acciones"${colStyle('stock-zonas','acciones')}>${esFam ? '<span style="color:var(--text-secondary); font-size:0.8rem;" title="Desactiva Agrupar por familia para trasladar lote por lote">—</span>' : `<button class="btn btn-small btn-secondary" onclick="window.abrirModalTrasladoDesdeResumenZona(${g.itemId}, ${g.ubicacion_id})">Trasladar</button>`}</td>
         </tr>
       `
     }
@@ -235,6 +323,15 @@ window._stockZonasToggleSelTodo = function (checked) {
 // aplicado), exporta solo las filas marcadas con checkbox o todas si no se
 // marcó ninguna. Solo aplica al modo "Por Ubicación" (filasAgrupadas, una
 // fila por N° de Lote + Zona) — en modo "General" no hay checkboxes.
+// Texto de una celda para Excel/PDF, sin los elementos marcados
+// .solo-pantalla (ej. la etiqueta "Familia" de las filas agrupadas).
+function _textoCeldaExport(celda) {
+  if (!celda) return ''
+  const copia = celda.cloneNode(true)
+  copia.querySelectorAll('.solo-pantalla').forEach(el => el.remove())
+  return copia.textContent.trim().replace(/\s+/g, ' ')
+}
+
 function _filasVisiblesStockZonas() {
   const tabla = document.querySelector('#tabla-resumen table')
   if (!tabla) return null
@@ -264,10 +361,27 @@ window.exportarStockZonasExcel = async function () {
   // arriba, igual que el PDF (doc.text('Resumen de Stock...') + fecha),
   // para que ambos exportables se lean como el mismo reporte.
   const encabezados = ths.map(th => th.textContent.trim().replace(/[▲▼]/g, '').trim().toUpperCase())
+  // Columnas numéricas (2026-10-05): se exportan como NÚMERO real (desde
+  // data-valor, sin redondeo de pantalla) para poder aplicar fórmulas en
+  // Excel. Costo S/. además con formato moneda soles; Costo Orig. sin
+  // formato (puede ser USD o PEN según la fila — la moneda va en su columna).
+  const FORMATO_NUM = {
+    cantidad:    '#,##0.00',
+    unidades:    '#,##0',
+    peso_unidad: '#,##0.0000',
+    tc:          '0.000',
+    costo_orig:  '#,##0.0000',
+    costo:       '"S/." #,##0.0000'
+  }
   const filasArray = filasAExportar.map(tr =>
     ths.map(th => {
-      const celda = tr.querySelector(`[data-col="${th.dataset.col}"]`)
-      return celda ? celda.textContent.trim().replace(/\s+/g, ' ') : ''
+      const col = th.dataset.col
+      const celda = tr.querySelector(`[data-col="${col}"]`)
+      if (FORMATO_NUM[col] && celda?.dataset.valor !== undefined) {
+        const n = parseFloat(celda.dataset.valor)
+        return Number.isFinite(n) ? n : ''
+      }
+      return _textoCeldaExport(celda)
     })
   )
 
@@ -282,6 +396,16 @@ window.exportarStockZonasExcel = async function () {
       ...filasArray
     ]
     const ws = XLSX.utils.aoa_to_sheet(aoa)
+    // Formato numérico por columna (fila de datos empieza en la 5ta: título,
+    // fecha, vacía, encabezados).
+    ths.forEach((th, c) => {
+      const fmt = FORMATO_NUM[th.dataset.col]
+      if (!fmt || fmt === 'General') return
+      for (let r = 0; r < filasArray.length; r++) {
+        const cell = ws[XLSX.utils.encode_cell({ r: r + 4, c })]
+        if (cell && cell.t === 'n') cell.z = fmt
+      }
+    })
     // Título ocupando todo el ancho de la tabla (misma idea que el PDF, que
     // pone el título como texto suelto arriba de la tabla).
     ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: Math.max(0, encabezados.length - 1) } }]
@@ -312,7 +436,7 @@ window.exportarStockZonasPDF = async function () {
   const filasTexto = filasAExportar.map(tr =>
     ths.map(th => {
       const celda = tr.querySelector(`[data-col="${th.dataset.col}"]`)
-      return celda ? celda.textContent.trim().replace(/\s+/g, ' ') : ''
+      return _textoCeldaExport(celda)
     })
   )
 

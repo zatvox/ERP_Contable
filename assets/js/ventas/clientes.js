@@ -7,6 +7,7 @@ import { pintarBadgeSunat } from '../sunat-api.js'
 import { showToast } from '../helpers.js'
 import { getModuloConfig } from '../config-modulo.js'
 import { _poblarSelectClientes } from './helpers.js'
+import { S } from './state.js'
 
 // ============================================================================
 // TAB: CLIENTES
@@ -168,9 +169,21 @@ window.guardarCliente = async function() {
     }
 
     showToast(_cliEditandoId ? 'Cliente actualizado' : 'Cliente creado exitosamente', 'success')
+    // Mantener S._clientes al día: antes el cliente recién creado no entraba
+    // a la lista en memoria, así que _poblarSelectClientes no lo mostraba en
+    // el buscador de Nueva Venta hasta recargar la página.
+    const _fila = typeof resultado === 'object' ? resultado : null
+    if (_fila?.id) {
+      const i = (S._clientes || []).findIndex(c => c.id === _fila.id)
+      if (i >= 0) S._clientes[i] = { ...S._clientes[i], ..._fila }
+      else (S._clientes = S._clientes || []).push(_fila)
+    }
+    const _eraNuevo = !_cliEditandoId
     window.closeModal('modal-nuevo-cliente')
     _resetModalCliente()
     _poblarSelectClientes()
+    // Aviso para otros formularios abiertos (Nuevo PK) que deben seleccionarlo.
+    if (_eraNuevo && _fila?.id) window.dispatchEvent(new CustomEvent('cliente-creado', { detail: _fila }))
     await renderClientes(true)
   } catch (e) {
     console.error('guardarCliente:', e)

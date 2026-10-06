@@ -556,7 +556,11 @@ window.cargarKardex = async function() {
         // movimiento puntual (para la columna). Para el TOTAL del período no
         // se suman entre sí — mezclaría compras con costo de venta — se
         // acumulan por separado (totValorEntrada / totValorSalida).
-        const costoTotal   = valorEntradaMov + valorSalidaMov
+        // Traslado interno: valor_entrada = valor_salida (mismo costo entra y
+        // sale), así que el valor del movimiento es uno solo, no la suma.
+        const costoTotal   = m.tipo_movimiento === 'traslado_interno'
+          ? Math.max(valorEntradaMov, valorSalidaMov)
+          : valorEntradaMov + valorSalidaMov
         const saldoCant    = parseFloat(m.saldo_cantidad   || 0)
         const saldoValor   = parseFloat(m.saldo_valor      || 0)
         const tipoColor    = m.tipo_movimiento?.includes('entrada') || m.tipo_movimiento === 'entrada'

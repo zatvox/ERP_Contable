@@ -6,7 +6,7 @@ import { S } from './state.js'
 import { getLoteById, getItemById, getVentaById, getDetalleVentas, getAlmacenes, getUbicaciones, getGuiasDespachoVenta, getGuiaDespachoVentaById, getDetalleGuiasDespachoVenta, getDetalleGuiasDespachoVentaByVenta } from '../supabase-data.js'
 import { showToast, formatQty } from '../helpers.js'
 import { estaAnulado } from '../anulacion.js'
-import { _renderTablaDetalleGuiaDespacho } from './guias-despacho-form.js'
+import { _renderTablaDetalleGuiaDespacho, _numGuiaDespacho } from './guias-despacho-form.js'
 import { _refrescarStockLoteEnVivo } from './helpers.js'
 import { _esc, _zonas } from './init.js'
 import { _guiaEstaVigente, _setEv, _valEv } from './ventas-editar.js'
@@ -220,7 +220,7 @@ window.editarGuiaDespachoVenta = async function (id) {
       selVenta.value = String(ventaId)
       selVenta.disabled = true
     }
-    _valEv('gdNumeroGuia', guia.numero_guia || '')
+    await _numGuiaDespacho()?.establecer(guia.numero_guia || '')   // serie ▾ + N° 🔒 (se conserva el original)
     _valEv('gdFechaGuia', guia.fecha_guia || '')
     _valEv('gdObservaciones', guia.observaciones || '')
 

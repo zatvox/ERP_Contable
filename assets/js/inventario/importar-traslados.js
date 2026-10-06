@@ -204,7 +204,8 @@ window.procesarImportacionTraslados = async function () {
           cantidad_unidades_entrada: unidades,
           cantidad_unidades_salida:  unidades,
           costo_unitario:       costoUnitario,
-          valor_entrada:        0,
+          // Mismo costo entra y sale (neto de valor 0) — ver guardarTrasladoInterno.
+          valor_entrada:        parseFloat((cantidad * costoUnitario).toFixed(2)),
           valor_salida:         parseFloat((cantidad * costoUnitario).toFixed(2)),
           moneda:               lote?.moneda || 'PEN',
           tipo_cambio:           parseFloat(lote?.tipo_cambio) || 1,

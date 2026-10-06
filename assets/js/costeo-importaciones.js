@@ -504,7 +504,7 @@ window.crearImportacion = async function () {
       proforma_number: proforma_number,
       product: product,
       status: 'borrador',
-      created_by: user.id,
+      created_by: user.db_id,
       terminos_delivery: terminos_delivery,
       terminos_payment: terminos_payment,
       costo_seguro: costo_seguro,
@@ -2021,7 +2021,7 @@ window.crearGuiaRemision = async function () {
           descripcion: `Guía de Remisión - Ingreso a almacén (${numeroGuia})`,
           contact_id: parseInt(proveedor),
           fecha: fechaGuia,
-          userId: user?.id
+          userId: user?.db_id
         })
         showToast('Guía de remisión creada y asiento de valuación de inventario generado', 'success')
       } catch (errorAsiento) {

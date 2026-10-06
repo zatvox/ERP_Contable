@@ -5,6 +5,7 @@
 import { getCurrentUser } from '../auth-supabase.js'
 import { getContactById, getVentaById, updateVenta, getDetalleVentas, generarAsientoVenta } from '../supabase-data.js'
 import { emitirCPE, emitirNota } from '../sunat-api.js'
+import { serieEsCPE } from '../series.js'
 import { showToast } from '../helpers.js'
 import { TIPO_NC, esNota } from '../notas.js'
 import { renderVentas } from './ventas-lista.js'
@@ -16,6 +17,11 @@ import { renderVentas } from './ventas-lista.js'
 window.emitirCPEVenta = async function(ventaId) {
   try {
     const venta   = await getVentaById(ventaId)
+    // Serie física (es_cpe=false en series_documentos, ej. NV01): nunca a NUBEFACT.
+    if (!(await serieEsCPE(venta.tipo_comprobante, venta.serie))) {
+      showToast(`La serie ${venta.serie} es de comprobante físico: no se envía a NUBEFACT.`, 'warning')
+      return
+    }
     const lineas  = await getDetalleVentas(ventaId)
     const cliente = await getContactById(venta.contact_id)
 
@@ -132,7 +138,7 @@ window.emitirNotaVenta = async function(notaId) {
 window.generarAsientoDeVenta = async function(ventaId) {
   try {
     const user = await getCurrentUser()
-    await generarAsientoVenta(ventaId, user?.id)
+    await generarAsientoVenta(ventaId, user?.db_id)
     showToast('Asiento contable generado ✅', 'success')
     await renderVentas(true)
   } catch (e) {

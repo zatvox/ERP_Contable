@@ -19,6 +19,7 @@
 // Uso desde el frontend (sunat-api.js):
 //   const { data, error } = await supabase.functions.invoke('decolecta-proxy', {
 //     body: { tipo: 'ruc' | 'dni', numero: '20601030013' }
+//     body: { tipo: 'tc', fecha: '2026-10-02' }      ← tipo de cambio SUNAT (2026-10-02)
 //   })
 //
 // Seguridad:
@@ -50,14 +51,20 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const { tipo, numero } = await req.json()
+    const { tipo, numero, fecha } = await req.json()
 
-    if (!tipo || !['ruc', 'dni'].includes(tipo)) {
-      return new Response(JSON.stringify({ error: 'tipo debe ser "ruc" o "dni"' }), {
+    if (!tipo || !['ruc', 'dni', 'tc'].includes(tipo)) {
+      return new Response(JSON.stringify({ error: 'tipo debe ser "ruc", "dni" o "tc"' }), {
         status: 400, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
       })
     }
     const num = String(numero || '').trim()
+    const fec = String(fecha || '').trim()
+    if (tipo === 'tc' && fec && !/^\d{4}-\d{2}-\d{2}$/.test(fec)) {
+      return new Response(JSON.stringify({ error: 'fecha debe ser YYYY-MM-DD' }), {
+        status: 400, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
+      })
+    }
     if (tipo === 'ruc' && num.length !== 11) {
       return new Response(JSON.stringify({ error: 'El RUC debe tener 11 dígitos' }), {
         status: 400, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
@@ -84,7 +91,10 @@ Deno.serve(async (req: Request) => {
 
     const url = tipo === 'ruc'
       ? `https://api.decolecta.com/v1/sunat/ruc?numero=${num}`
-      : `https://api.decolecta.com/v1/reniec/dni?numero=${num}`
+      : tipo === 'dni'
+        ? `https://api.decolecta.com/v1/reniec/dni?numero=${num}`
+        // TC SUNAT: { buy_price, sell_price, base_currency, quote_currency, date }
+        : `https://api.decolecta.com/v1/tipo-cambio/sunat${fec ? `?date=${fec}` : ''}`
 
     const res = await fetch(url, {
       headers: { 'Authorization': `Bearer ${token.trim()}`, 'Content-Type': 'application/json' }

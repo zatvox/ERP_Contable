@@ -43,7 +43,8 @@
             <button type="button" class="module-nav-group-toggle">Por Cobrar</button>
             <div class="module-nav-dropdown">
               <button class="tab-btn active" data-tab="cxc">Cuentas por Cobrar</button>
-              <button class="tab-btn" data-tab="cobros">Registrar Cobro</button>
+              <button class="tab-btn" data-tab="cobros">Cobros Registrados</button>
+              <button class="tab-btn" data-tab="letras" data-letra-tipo="emitida">Letras por Cobrar</button>
               <button class="tab-btn" data-tab="retenciones">Retenciones IGV</button>
             </div>
           </div>
@@ -51,11 +52,10 @@
             <button type="button" class="module-nav-group-toggle">Por Pagar</button>
             <div class="module-nav-dropdown">
               <button class="tab-btn" data-tab="cxp">Cuentas por Pagar</button>
-              <button class="tab-btn" data-tab="pagos-prov">Registrar Pago</button>
+              <button class="tab-btn" data-tab="pagos-prov">Pagos Registrados</button>
+              <button class="tab-btn" data-tab="letras" data-letra-tipo="recibida">Letras por Pagar</button>
             </div>
           </div>
-          <button type="button" class="tab-btn" data-tab="terminos">📅 Términos de Pago</button>
-          <button type="button" class="tab-btn" data-tab="letras">💱 Letras</button>
           <button type="button" class="tab-btn" data-tab="reportes">📊 Reportes</button>
           <button type="button" class="tab-btn module-nav-config" data-tab="configuracion">⚙️ Configuración</button>
         </nav>
@@ -95,9 +95,9 @@
         <!-- ================= TAB: CxC ================= -->
         <div id="tab-cxc" class="tab-content active">
           <div class="card">
-            <div class="card-header">
-              <h3 class="card-title">Cuentas por Cobrar</h3>
+            <div class="card-header solo-acciones">
               <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button class="btn btn-primary btn-small" onclick="window.abrirRegistrarCobro()">+ Registrar Cobro</button>
                 <button class="btn btn-secondary btn-small" onclick="window.exportarCxC()">⬇ CSV</button>
                 <button class="btn btn-secondary btn-small" onclick="window.cargarCxC()">↺ Actualizar</button>
               </div>
@@ -167,73 +167,9 @@
 
         <!-- ================= TAB: Registrar Cobro ================= -->
         <div id="tab-cobros" class="tab-content">
-          <div class="card" style="max-width:680px;">
-            <div class="card-header">
-              <h3 class="card-title">Registrar Cobro de Cliente</h3>
-            </div>
-            <div style="padding:20px; display:flex; flex-direction:column; gap:12px;">
-              <div class="form-group">
-                <label>Cuenta por Cobrar</label>
-                <select id="cobroSelectCxC" onchange="window.onSelectCxC()">
-                  <option value="">-- Seleccione CxC --</option>
-                </select>
-                <small id="cobro-cxc-info" style="color:var(--text-secondary);"></small>
-              </div>
-              <div id="cobro-retencion-block" style="display:none; padding:10px 12px; background:var(--bg-secondary); border-radius:var(--radius-md); border:1px solid var(--color-warning);">
-                <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:0;">
-                  <input type="checkbox" id="cobroAplicarRetencion" checked onchange="window.onToggleRetencionCobro()">
-                  <span>Cliente sujeto a retención IGV — aplicar retención en este cobro</span>
-                </label>
-                <small id="cobro-retencion-info" style="display:block; margin-top:4px; color:var(--text-secondary);"></small>
-              </div>
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-                <div class="form-group">
-                  <label>Fecha de Cobro</label>
-                  <input type="date" id="cobroFecha">
-                </div>
-                <div class="form-group">
-                  <label>Importe a Cobrar</label>
-                  <input type="number" id="cobroMonto" step="0.01" min="0.01" placeholder="0.00">
-                </div>
-              </div>
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-                <div class="form-group">
-                  <label>Medio de Pago</label>
-                  <select id="cobroMedioPago">
-                    <option value="transferencia">Transferencia Bancaria</option>
-                    <option value="deposito">Depósito en Cuenta</option>
-                    <option value="efectivo">Efectivo</option>
-                    <option value="cheque">Cheque</option>
-                    <option value="detraccion">Detracción</option>
-                    <option value="otro">Otro</option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label>Banco Destino</label>
-                  <select id="cobroBanco">
-                    <option value="">-- Seleccione banco --</option>
-                  </select>
-                  <small id="cobro-banco-aviso" style="color:var(--text-secondary);"></small>
-                </div>
-              </div>
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-                <div class="form-group">
-                  <label>N° Operación / Referencia</label>
-                  <input type="text" id="cobroReferencia" placeholder="N° transferencia o cheque">
-                </div>
-                <div class="form-group">
-                  <label>Tipo de Cambio (si USD)</label>
-                  <input type="number" id="cobroTipoCambio" step="0.001" placeholder="3.750" value="3.750">
-                </div>
-              </div>
-              <button class="btn btn-primary" onclick="window.registrarCobro()" style="width:100%;">
-                ✅ Registrar Cobro y Generar Asiento
-              </button>
-            </div>
-          </div>
           <div class="card" style="margin-top:20px;">
-            <div class="card-header">
-              <h3 class="card-title">Cobros Recientes</h3>
+            <div class="card-header solo-acciones">
+              <button class="btn btn-primary btn-small" onclick="window.abrirRegistrarCobro()">+ Registrar Cobro</button>
               <input type="text" id="buscarCobro" placeholder="Buscar cliente o referencia..." style="max-width:280px;" oninput="window.filtrarCobrosRecientes()">
             </div>
             <div class="table-container">
@@ -252,9 +188,9 @@
         <!-- ================= TAB: CxP ================= -->
         <div id="tab-cxp" class="tab-content">
           <div class="card">
-            <div class="card-header">
-              <h3 class="card-title">Cuentas por Pagar (Proveedores)</h3>
+            <div class="card-header solo-acciones">
               <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button class="btn btn-primary btn-small" onclick="window.abrirRegistrarPago()">+ Registrar Pago</button>
                 <button class="btn btn-secondary btn-small" onclick="window.exportarCxP()">⬇ CSV</button>
                 <button class="btn btn-secondary btn-small" onclick="window.cargarCxP()">↺ Actualizar</button>
               </div>
@@ -317,73 +253,9 @@
 
         <!-- ================= TAB: Pagos a proveedores ================= -->
         <div id="tab-pagos-prov" class="tab-content">
-          <div class="card" style="max-width:680px;">
-            <div class="card-header">
-              <h3 class="card-title">Registrar Pago a Proveedor</h3>
-            </div>
-            <div style="padding:20px; display:flex; flex-direction:column; gap:12px;">
-              <div class="form-group">
-                <label>Cuenta por Pagar</label>
-                <select id="pagoSelectCompra" onchange="window.onSelectCompra()">
-                  <option value="">-- Seleccione Compra --</option>
-                </select>
-                <small id="pago-compra-info" style="color:var(--text-secondary);"></small>
-              </div>
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-                <div class="form-group">
-                  <label>Fecha de Pago</label>
-                  <input type="date" id="pagoFecha">
-                </div>
-                <div class="form-group">
-                  <label>Monto a Pagar</label>
-                  <input type="number" id="pagoMonto" step="0.01" min="0.01" placeholder="0.00">
-                </div>
-              </div>
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-                <div class="form-group">
-                  <label>Moneda</label>
-                  <select id="pagoMoneda">
-                    <option value="PEN">PEN - Soles</option>
-                    <option value="USD">USD - Dólares</option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label>Tipo de Cambio</label>
-                  <input type="number" id="pagoTipoCambio" step="0.001" placeholder="3.750" value="3.750">
-                </div>
-              </div>
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-                <div class="form-group">
-                  <label>Medio de Pago</label>
-                  <select id="pagoMedioPago">
-                    <option value="transferencia">Transferencia</option>
-                    <option value="cheque">Cheque</option>
-                    <option value="efectivo">Efectivo</option>
-                    <option value="deposito">Depósito</option>
-                    <option value="detraccion">Detracción</option>
-                    <option value="otro">Otro</option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label>Banco Origen</label>
-                  <select id="pagoBanco">
-                    <option value="">-- Seleccione banco --</option>
-                  </select>
-                  <small id="pago-banco-aviso" style="color:var(--text-secondary);"></small>
-                </div>
-              </div>
-              <div class="form-group">
-                <label>N° Operación / Referencia</label>
-                <input type="text" id="pagoReferencia" placeholder="N° transferencia">
-              </div>
-              <button class="btn btn-primary" onclick="window.registrarPagoProveedor()" style="width:100%;">
-                ✅ Registrar Pago y Generar Asiento
-              </button>
-            </div>
-          </div>
           <div class="card" style="margin-top:20px;">
-            <div class="card-header">
-              <h3 class="card-title">Pagos Recientes</h3>
+            <div class="card-header solo-acciones">
+              <button class="btn btn-primary btn-small" onclick="window.abrirRegistrarPago()">+ Registrar Pago</button>
               <input type="text" id="buscarPago" placeholder="Buscar proveedor o referencia..." style="max-width:280px;" oninput="window.filtrarPagosRecientes()">
             </div>
             <div class="table-container">
@@ -402,8 +274,7 @@
         <!-- ================= TAB: Retenciones ================= -->
         <div id="tab-retenciones" class="tab-content">
           <div class="card">
-            <div class="card-header">
-              <h3 class="card-title">Comprobantes de Retención IGV recibidos</h3>
+            <div class="card-header solo-acciones">
               <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
                 <input type="month" id="retencionesPeriodo" onchange="window.cargarRetenciones()">
                 <button class="btn btn-secondary btn-small" onclick="window.cargarRetenciones()">↺ Actualizar</button>
@@ -438,28 +309,10 @@
         </div>
 
         <!-- ================= TAB: TÉRMINOS DE PAGO ================= -->
-        <div id="tab-terminos" class="tab-content">
-          <div class="card">
-            <div class="card-header">
-              <h3 class="card-title">Términos de Pago</h3>
-              <button class="btn btn-primary btn-small" onclick="window.abrirModalTerminoPago()">+ Nuevo Término</button>
-            </div>
-            <p style="padding:0 16px; color:var(--text-secondary); font-size:0.85rem;">
-              Define cómo se fracciona un total: porcentajes y días. Las fechas se calculan al aplicarlo sobre cada venta o compra.
-              Si en una operación puntual se negocia algo distinto (ej. 37/64/83 días), <strong>no crees un término nuevo</strong>:
-              usa la opción <em>Personalizado</em> en el cronograma de esa venta.
-            </p>
-            <div id="tabla-terminos" class="table-container">
-              <p class="reporte-vacio">Cargando...</p>
-            </div>
-          </div>
-        </div>
-
         <!-- ================= TAB: LETRAS ================= -->
         <div id="tab-letras" class="tab-content">
           <div class="card">
-            <div class="card-header">
-              <h3 class="card-title">Letras de Cambio</h3>
+            <div class="card-header solo-acciones">
               <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevaLetra()">+ Nueva Letra</button>
             </div>
             <p style="padding:0 16px; color:var(--text-secondary); font-size:0.85rem;">
@@ -510,14 +363,16 @@
         <!-- ================= TAB: REPORTES ================= -->
         <div id="tab-reportes" class="tab-content">
           <div class="subtab-bar" id="cob-subtabs-reportes">
-            <button class="subtab active" data-sub="rep-antiguedad-cxc">Antigüedad CxC</button>
+            <button class="subtab active" data-sub="rep-estado-cuenta">Estado de cuenta</button>
+            <button class="subtab" data-sub="rep-antiguedad-cxc">Antigüedad CxC</button>
             <button class="subtab" data-sub="rep-antiguedad-cxp">Antigüedad CxP</button>
             <button class="subtab" data-sub="rep-cobros">Cobranza</button>
             <button class="subtab" data-sub="rep-pagos">Pagos</button>
             <button class="subtab" data-sub="rep-retenciones">Retenciones</button>
             <button class="subtab" data-sub="rep-flujo">Flujo proyectado</button>
           </div>
-          <div id="rep-antiguedad-cxc" class="subtab-panel active"></div>
+          <div id="rep-estado-cuenta"  class="subtab-panel active"></div>
+          <div id="rep-antiguedad-cxc" class="subtab-panel"></div>
           <div id="rep-antiguedad-cxp" class="subtab-panel"></div>
           <div id="rep-cobros"         class="subtab-panel"></div>
           <div id="rep-pagos"          class="subtab-panel"></div>
@@ -528,6 +383,22 @@
         <!-- ================= TAB: CONFIGURACIÓN ================= -->
         <div id="tab-configuracion" class="tab-content">
           <div id="cob-config-container"></div>
+          <!-- Términos de Pago: dato maestro del módulo (antes era un tab aparte) -->
+          <div id="tab-terminos-wrap" style="margin-top:20px;">
+          <div class="card">
+            <div class="card-header solo-acciones">
+              <button class="btn btn-primary btn-small" onclick="window.abrirModalTerminoPago()">+ Nuevo Término</button>
+            </div>
+            <p style="padding:0 16px; color:var(--text-secondary); font-size:0.85rem;">
+              Define cómo se fracciona un total: porcentajes y días. Las fechas se calculan al aplicarlo sobre cada venta o compra.
+              Si en una operación puntual se negocia algo distinto (ej. 37/64/83 días), <strong>no crees un término nuevo</strong>:
+              usa la opción <em>Personalizado</em> en el cronograma de esa venta.
+            </p>
+            <div id="tabla-terminos" class="table-container">
+              <p class="reporte-vacio">Cargando...</p>
+            </div>
+          </div>
+          </div>
         </div>
 
       </main>
@@ -594,7 +465,7 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="window.closeModal('modal-termino-pago')">Cancelar</button>
-        <button class="btn btn-primary" onclick="window.guardarTerminoPago()">💾 Guardar Término</button>
+        <button class="btn btn-primary" onclick="window.conCarga(this, window.guardarTerminoPago)">💾 Guardar Término</button>
       </div>
     </div>
   </div>
@@ -649,7 +520,7 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="window.closeModal('modal-nueva-letra')">Cancelar</button>
-        <button class="btn btn-primary" onclick="window.guardarLetra()">💾 Guardar Letra</button>
+        <button class="btn btn-primary" onclick="window.conCarga(this, window.guardarLetra)">💾 Guardar Letra</button>
       </div>
     </div>
   </div>
@@ -690,7 +561,334 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="window.closeModal('modal-letra-banco')">Cancelar</button>
-        <button class="btn btn-primary" onclick="window.confirmarLetraABanco()">Confirmar</button>
+        <button class="btn btn-primary" onclick="window.conCarga(this, window.confirmarLetraABanco)">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Registrar Cobro de Cliente (flota sobre la tabla; mismos IDs que el formulario anterior) -->
+  <div id="modal-registrar-cobro" class="modal">
+    <div class="modal-content" style="width:min(94vw, 720px); max-width:min(94vw, 720px); max-height:calc(100vh - 48px); overflow-y:auto;">
+      <div class="modal-header">
+        <h3 class="modal-title">Registrar Cobro de Cliente</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-registrar-cobro')">&times;</button>
+      </div>
+            <div style="padding:16px 20px; display:flex; flex-direction:column; gap:14px;">
+              <!-- 1. DOCUMENTO -->
+              <div>
+                <strong style="display:block; margin:4px 0 8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Documento</strong>
+                <div class="form-group" style="margin:0;">
+                  <label>Cuenta por Cobrar *</label>
+                  <select id="cobroSelectCxC" onchange="window.onSelectCxC()">
+                    <option value="">-- Seleccione CxC --</option>
+                  </select>
+                </div>
+                <div id="cobro-cxc-info" style="display:none; margin-top:10px; padding:12px 14px; background:var(--bg-secondary); border-radius:var(--radius-md); border-left:3px solid var(--color-info); font-size:0.88rem; line-height:1.6;"></div>
+              </div>
+
+              <!-- 2. DATOS DEL COBRO -->
+              <div style="padding-top:12px; border-top:1px solid var(--border-color);">
+                <strong style="display:block; margin:4px 0 8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Datos del cobro</strong>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                  <div class="form-group"><label>Fecha de Cobro *</label><input type="date" id="cobroFecha" onchange="window._tcDefaultCP('cobro')"></div>
+                  <div class="form-group">
+                    <label>Medio de Pago</label>
+                    <select id="cobroMedioPago">
+                      <option value="transferencia">Transferencia Bancaria</option>
+                      <option value="deposito">Depósito en Cuenta</option>
+                      <option value="efectivo">Efectivo</option>
+                      <option value="cheque">Cheque</option>
+                      <option value="detraccion">Detracción</option>
+                      <option value="otro">Otro</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>Banco Destino</label>
+                    <select id="cobroBanco"><option value="">-- Seleccione banco --</option></select>
+                    <small id="cobro-banco-aviso" style="color:var(--text-secondary); font-size:0.72rem;"></small>
+                  </div>
+                  <div class="form-group"><label>N° Operación / Referencia</label><input type="text" id="cobroReferencia" placeholder="N° transferencia o cheque"></div>
+                </div>
+              </div>
+
+              <!-- 3. IMPORTES -->
+              <div style="padding-top:12px; border-top:1px solid var(--border-color);">
+                <strong style="display:block; margin:4px 0 8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Importes</strong>
+                <div style="display:grid; grid-template-columns:0.8fr 0.8fr 1.2fr; gap:12px;">
+                  <div class="form-group">
+                    <label>Moneda del cobro</label>
+                    <select id="cobroMonedaCobro" onchange="window._cpRecalc('cobro','moneda')">
+                      <option value="PEN">PEN - Soles</option>
+                      <option value="USD">USD - Dólares</option>
+                    </select>
+                  </div>
+                  <div class="form-group" id="cobroTCGroup">
+                    <label>Tipo de Cambio</label>
+                    <input type="number" id="cobroTipoCambio" step="0.0001" placeholder="3.750" value="3.750" oninput="window._cpRecalc('cobro','tc')">
+                  </div>
+                  <div class="form-group">
+                    <label id="cobroLblRecibido">Importe recibido *</label>
+                    <input type="number" id="cobroMontoRecibido" step="0.01" min="0" placeholder="0.00" oninput="window._cpRecalc('cobro','recibido')">
+                  </div>
+                </div>
+                <div id="cobroAplicadoGroup" style="display:grid; grid-template-columns:1.6fr 1.2fr; gap:12px; align-items:end;">
+                  <small style="color:var(--text-secondary); line-height:1.4; padding-bottom:8px;">El cobro se convierte a la moneda de la factura con el tipo de cambio. Puedes digitar cualquiera de los dos importes.</small>
+                  <div class="form-group">
+                    <label id="cobroLblAplicado">Se aplica a la factura</label>
+                    <input type="number" id="cobroMonto" step="0.01" min="0.01" placeholder="0.00" oninput="window._cpRecalc('cobro','aplicado')">
+                  </div>
+                </div>
+                <div id="cobro-retencion-block" style="display:none; margin-top:4px; padding:10px 12px; background:var(--bg-secondary); border-radius:var(--radius-md); border:1px solid var(--color-warning);">
+                  <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:0;">
+                    <input type="checkbox" id="cobroAplicarRetencion" checked onchange="window.onToggleRetencionCobro()" style="width:auto;">
+                    <span>Cliente sujeto a retención IGV — aplicar retención en este cobro</span>
+                  </label>
+                  <small id="cobro-retencion-info" style="display:block; margin-top:4px; color:var(--text-secondary);"></small>
+                </div>
+                <div id="cobro-resumen" style="margin-top:10px; padding:10px 14px; background:var(--bg-secondary); border-radius:var(--radius-md); display:grid; grid-template-columns:repeat(3,1fr); gap:10px; text-align:center;"></div>
+              </div>
+
+              <!-- 4. VOUCHER / RECIBO -->
+              <div style="padding-top:12px; border-top:1px solid var(--border-color);">
+                <strong style="display:block; margin:4px 0 8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">📎 Archivos adjuntos <span style="text-transform:none; letter-spacing:0; font-weight:400;">(opcional)</span></strong>
+                <input type="file" id="cobroArchivo" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp" onchange="window._adjSeleccionar('cobro')">
+                <div id="cobro-adj-lista" style="display:flex; flex-direction:column; gap:6px; margin-top:8px;"></div>
+                <small style="display:block; margin-top:4px; color:var(--text-secondary); font-size:0.72rem;">Hasta 3 archivos por vez (PDF, JPG, PNG o WEBP · máx. 10 MB c/u). Elige a cada uno su concepto: Voucher, Recibo u Otro.</small>
+              </div>
+            </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="window.closeModal('modal-registrar-cobro')">Cancelar</button>
+        <button class="btn btn-primary" id="modal-registrar-cobro-ok" onclick="window.conCarga(this, window.registrarCobro)">✅ Registrar Cobro y Generar Asiento</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Registrar Pago a Proveedor (flota sobre la tabla; mismos IDs que el formulario anterior) -->
+  <div id="modal-registrar-pago" class="modal">
+    <div class="modal-content" style="width:min(94vw, 720px); max-width:min(94vw, 720px); max-height:calc(100vh - 48px); overflow-y:auto;">
+      <div class="modal-header">
+        <h3 class="modal-title">Registrar Pago a Proveedor</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-registrar-pago')">&times;</button>
+      </div>
+            <div style="padding:16px 20px; display:flex; flex-direction:column; gap:14px;">
+              <!-- 1. DOCUMENTO -->
+              <div>
+                <strong style="display:block; margin:4px 0 8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Documento</strong>
+                <div class="form-group" style="margin:0;">
+                  <label>Cuenta por Pagar *</label>
+                  <select id="pagoSelectCompra" onchange="window.onSelectCompra()">
+                    <option value="">-- Seleccione Compra --</option>
+                  </select>
+                </div>
+                <div id="pago-compra-info" style="display:none; margin-top:10px; padding:12px 14px; background:var(--bg-secondary); border-radius:var(--radius-md); border-left:3px solid var(--color-info); font-size:0.88rem; line-height:1.6;"></div>
+              </div>
+
+              <!-- 2. DATOS DEL PAGO -->
+              <div style="padding-top:12px; border-top:1px solid var(--border-color);">
+                <strong style="display:block; margin:4px 0 8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Datos del pago</strong>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                  <div class="form-group"><label>Fecha de Pago *</label><input type="date" id="pagoFecha" onchange="window._tcDefaultCP('pago')"></div>
+                  <div class="form-group">
+                    <label>Medio de Pago</label>
+                    <select id="pagoMedioPago">
+                      <option value="transferencia">Transferencia</option>
+                      <option value="cheque">Cheque</option>
+                      <option value="efectivo">Efectivo</option>
+                      <option value="deposito">Depósito</option>
+                      <option value="detraccion">Detracción</option>
+                      <option value="otro">Otro</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>Banco Origen</label>
+                    <select id="pagoBanco"><option value="">-- Seleccione banco --</option></select>
+                    <small id="pago-banco-aviso" style="color:var(--text-secondary); font-size:0.72rem;"></small>
+                  </div>
+                  <div class="form-group"><label>N° Operación / Referencia</label><input type="text" id="pagoReferencia" placeholder="N° transferencia"></div>
+                </div>
+              </div>
+
+              <!-- 3. IMPORTES -->
+              <div style="padding-top:12px; border-top:1px solid var(--border-color);">
+                <strong style="display:block; margin:4px 0 8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Importes</strong>
+                <div style="display:grid; grid-template-columns:0.8fr 0.8fr 1.2fr; gap:12px;">
+                  <div class="form-group">
+                    <label>Moneda del pago</label>
+                    <select id="pagoMoneda" onchange="window._cpRecalc('pago','moneda')">
+                      <option value="PEN">PEN - Soles</option>
+                      <option value="USD">USD - Dólares</option>
+                    </select>
+                  </div>
+                  <div class="form-group" id="pagoTCGroup">
+                    <label>Tipo de Cambio</label>
+                    <input type="number" id="pagoTipoCambio" step="0.0001" placeholder="3.750" value="3.750" oninput="window._cpRecalc('pago','tc')">
+                  </div>
+                  <div class="form-group">
+                    <label id="pagoLblRecibido">Importe pagado *</label>
+                    <input type="number" id="pagoMontoMoneda" step="0.01" min="0" placeholder="0.00" oninput="window._cpRecalc('pago','recibido')">
+                  </div>
+                </div>
+                <div id="pagoAplicadoGroup" style="display:grid; grid-template-columns:1.6fr 1.2fr; gap:12px; align-items:end;">
+                  <small style="color:var(--text-secondary); line-height:1.4; padding-bottom:8px;">El pago se convierte a la moneda de la factura con el tipo de cambio. Puedes digitar cualquiera de los dos importes.</small>
+                  <div class="form-group">
+                    <label id="pagoLblAplicado">Se aplica a la factura</label>
+                    <input type="number" id="pagoMonto" step="0.01" min="0.01" placeholder="0.00" oninput="window._cpRecalc('pago','aplicado')">
+                  </div>
+                </div>
+                <div id="pago-resumen" style="margin-top:10px; padding:10px 14px; background:var(--bg-secondary); border-radius:var(--radius-md); display:grid; grid-template-columns:repeat(3,1fr); gap:10px; text-align:center;"></div>
+              </div>
+
+              <!-- 4. VOUCHER / RECIBO -->
+              <div style="padding-top:12px; border-top:1px solid var(--border-color);">
+                <strong style="display:block; margin:4px 0 8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">📎 Archivos adjuntos <span style="text-transform:none; letter-spacing:0; font-weight:400;">(opcional)</span></strong>
+                <input type="file" id="pagoArchivo" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp" onchange="window._adjSeleccionar('pago')">
+                <div id="pago-adj-lista" style="display:flex; flex-direction:column; gap:6px; margin-top:8px;"></div>
+                <small style="display:block; margin-top:4px; color:var(--text-secondary); font-size:0.72rem;">Hasta 3 archivos por vez (PDF, JPG, PNG o WEBP · máx. 10 MB c/u). Elige a cada uno su concepto: Voucher, Recibo u Otro.</small>
+              </div>
+            </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="window.closeModal('modal-registrar-pago')">Cancelar</button>
+        <button class="btn btn-primary" id="modal-registrar-pago-ok" onclick="window.conCarga(this, window.registrarPagoProveedor)">✅ Registrar Pago y Generar Asiento</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Cobrar / Pagar letra (misma estructura que modal-letra-banco) -->
+  <div id="modal-cancelar-letra" class="modal">
+    <div class="modal-content" style="max-width: 480px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="clet-titulo">Cobrar letra</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-cancelar-letra')">✕</button>
+      </div>
+      <div style="padding:20px; display:flex; flex-direction:column; gap:14px;">
+        <input type="hidden" id="cletId">
+        <div id="clet-info" style="padding:12px 14px; background:var(--bg-secondary); border-radius:var(--radius-md); border-left:3px solid var(--color-info); font-size:0.88rem; line-height:1.6;"></div>
+        <div class="form-group">
+          <label>Cuenta bancaria *</label>
+          <select id="cletBanco"><option value="">-- Selecciona --</option></select>
+        </div>
+        <div class="form-group">
+          <label>Fecha *</label>
+          <input type="date" id="cletFecha">
+        </div>
+        <div class="form-group">
+          <label>N° de Operación</label>
+          <input type="text" id="cletNumOp" placeholder="Opcional">
+        </div>
+        <div class="form-group" id="cletTCGroup">
+          <label>Tipo de Cambio del cobro/pago</label>
+          <input type="number" id="cletTC" step="0.0001" min="0">
+          <small style="color:var(--text-secondary); font-size:0.72rem;">Si difiere del T.C. de la letra, la diferencia va a 776 (ganancia) o 676 (pérdida).</small>
+        </div>
+        <small style="color:var(--text-secondary); font-size:0.72rem;">Genera el movimiento bancario (N° de registro MB-xxxxxx), ajusta el saldo de la cuenta y crea el asiento banco ↔ letra.</small>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-cancelar-letra')">Cancelar</button>
+        <button class="btn btn-primary" id="cletBtnOk" onclick="window.conCarga(this, window.confirmarCancelarLetra)">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Editar Letra (misma estructura que modal-editar-cp) -->
+  <div id="modal-editar-letra" class="modal">
+    <div class="modal-content" style="max-width: 560px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="elet-titulo">Editar letra</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-editar-letra')">✕</button>
+      </div>
+      <div style="padding:20px; display:flex; flex-direction:column; gap:12px;">
+        <small id="elet-info" style="color:var(--text-secondary);"></small>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div class="form-group"><label>N° Letra *</label><input type="text" id="eletNumero"></div>
+          <div class="form-group"><label>Monto *</label><input type="number" id="eletMonto" step="0.01" min="0"></div>
+          <div class="form-group"><label>F. Emisión *</label><input type="date" id="eletFechaEmision"></div>
+          <div class="form-group"><label>F. Vencimiento *</label><input type="date" id="eletFechaVenc"></div>
+        </div>
+        <div class="form-group"><label>Observaciones</label><textarea id="eletObs" rows="2"></textarea></div>
+        <div id="elet-cobro" style="display:none; padding-top:10px; border-top:1px solid var(--border-color);">
+          <strong id="elet-cobro-titulo" style="display:block; margin-bottom:8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Cobro de la letra</strong>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+            <div class="form-group" style="grid-column:1/-1;"><label>Cuenta bancaria *</label><select id="eletBanco"></select></div>
+            <div class="form-group"><label>Fecha *</label><input type="date" id="eletFechaCobro"></div>
+            <div class="form-group"><label>N° Operación</label><input type="text" id="eletNumOp"></div>
+            <div class="form-group" id="eletTCGroup"><label>T.C. del cobro/pago</label><input type="number" id="eletTC" step="0.0001" min="0"></div>
+          </div>
+        </div>
+        <small style="color:var(--text-secondary);">Cambiar monto, N° o fecha de emisión regenera el asiento de canje (y ajusta cuota y documento si cambia el monto). Si la letra está cobrada, también se regeneran su movimiento bancario y su asiento de cobro.</small>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="window.closeModal('modal-editar-letra')">Cancelar</button>
+        <button class="btn btn-primary" id="eletBtnOk" onclick="window.conCarga(this, window.guardarEdicionLetra)">Guardar cambios</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Editar Cuota (misma estructura que modal-editar-cp) -->
+  <div id="modal-editar-cuota" class="modal">
+    <div class="modal-content" style="max-width: 480px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="ecu-titulo">Editar cuota</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-editar-cuota')">✕</button>
+      </div>
+      <div style="padding:20px; display:flex; flex-direction:column; gap:12px;">
+        <small id="ecu-info" style="color:var(--text-secondary);"></small>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div class="form-group"><label>Vencimiento *</label><input type="date" id="ecuFecha"></div>
+          <div class="form-group"><label>Monto *</label><input type="number" id="ecuMonto" step="0.01" min="0"></div>
+        </div>
+        <div class="form-group"><label>Observaciones</label><textarea id="ecuObs" rows="2"></textarea></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="window.closeModal('modal-editar-cuota')">Cancelar</button>
+        <button class="btn btn-primary" id="ecuBtnOk" onclick="window.conCarga(this, window.guardarEdicionCuota)">Guardar cambios</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Detalle de Cobro / Pago -->
+  <div id="modal-detalle-cp" class="modal">
+    <div class="modal-content" style="max-width: 720px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="detalle-cp-titulo">Detalle</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-detalle-cp')">✕</button>
+      </div>
+      <div id="detalle-cp-body" style="padding:20px; max-height:70vh; overflow:auto;"></div>
+      <div class="modal-footer" id="detalle-cp-acciones"></div>
+    </div>
+  </div>
+
+  <!-- MODAL: Editar Cobro / Pago -->
+  <div id="modal-editar-cp" class="modal">
+    <div class="modal-content" style="max-width: 560px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="ecp-titulo">Editar</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-editar-cp')">✕</button>
+      </div>
+      <div style="padding:20px; display:flex; flex-direction:column; gap:12px;">
+        <small id="ecp-info" style="color:var(--text-secondary);"></small>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div class="form-group"><label>Fecha *</label><input type="date" id="ecpFecha"></div>
+          <div class="form-group"><label>Monto aplicado * <small style="color:var(--text-secondary);">(moneda de la factura)</small></label><input type="number" id="ecpMonto" step="0.01" min="0"></div>
+          <div class="form-group ecp-solo-cobro"><label>Retención IGV</label><input type="number" id="ecpRetencion" step="0.01" min="0"></div>
+          <div class="form-group ecp-solo-cobro"><label>N° Comprobante retención</label><input type="text" id="ecpCompRet" placeholder="Opcional"></div>
+          <div class="form-group"><label>Medio de pago</label><select id="ecpMedio"></select></div>
+          <div class="form-group"><label>Tipo de cambio</label><input type="number" id="ecpTC" step="any"></div>
+        </div>
+        <div class="form-group"><label>Banco</label><select id="ecpBanco"></select></div>
+        <div class="form-group"><label>N° Operación / Referencia</label><input type="text" id="ecpReferencia"></div>
+        <div class="form-group"><label>Observaciones</label><textarea id="ecpObs" rows="2"></textarea></div>
+        <div class="form-group">
+          <label>📎 Archivos adjuntos</label>
+          <div id="ecp-adjunto" style="display:flex; flex-direction:column; gap:4px; font-size:0.85rem; margin-bottom:6px;"></div>
+          <input type="file" id="ecpArchivo" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp" onchange="window._adjSeleccionar('ecp')">
+          <div id="ecp-adj-lista" style="display:flex; flex-direction:column; gap:6px; margin-top:8px;"></div>
+          <small style="color:var(--text-secondary); font-size:0.72rem;">Agrega hasta 3 archivos por vez; se suman a los que ya tiene.</small>
+        </div>
+        <small style="color:var(--text-secondary);">Cambiar fecha, monto, retención, banco o medio regenera asiento, movimiento bancario, CxC/CxP y cuotas. Referencia y observaciones se actualizan directo.</small>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-editar-cp')">Cancelar</button>
+        <button class="btn btn-primary" onclick="window.conCarga(this, window.guardarEdicionCP)">Guardar cambios</button>
       </div>
     </div>
   </div>

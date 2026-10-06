@@ -5,6 +5,7 @@
 import { getCurrentUser } from '../auth-supabase.js'
 import { getCompras, getCompraById, updateCompra, getLoteById, updateLote, getItemById, getUbicaciones, getUbicacionVendors, addKardexMovimiento, getKardexByCompra, deleteKardexMovimiento, ultimoErrorDelete, updateStockUbicacion, getStockUbicacionesByLote, recalcularLoteDesdeBultos, getLoteBultosByLote, updateLoteBulto, revertirBultosDeDetalleGuiaDevolucion, getLoteBultosPorDetalleGuiaDevolucion, getNotaCreditoCompraDetalleByNota, getNotaCreditoCompraDetalleByCompraOrigen, getGuiasDevolucionCompra, getGuiaDevolucionCompraById, addGuiaDevolucionCompra, updateGuiaDevolucionCompra, deleteGuiaDevolucionCompra, getDetalleGuiasDevolucionCompra, getDetalleGuiasDevolucionCompraByNotaDetalle, getTodosDetalleGuiasDevolucionCompra, addDetalleGuiaDevolucionCompra } from '../supabase-data.js'
 import { showToast } from '../helpers.js'
+import { registrarUsoGuia, montarNumeroConSerie } from '../series.js'
 import { menuAccionesFila } from '../main.js'
 import { estaAnulado } from '../anulacion.js'
 import { TIPO_NC } from '../notas.js'
@@ -225,7 +226,12 @@ window.abrirModalGuiaDevolucion = async function (notaCompraId) {
         ${_escGdv(nota.proveedor_nombre || '-')} · Compra origen: ${compraOrigen ? _escGdv(compraOrigen.referencia || `#${compraOrigen.id}`) : '-'}
       </div>
     `
-    document.getElementById('gdvNumeroGuia').value = ''
+    // Devolución a proveedor también usa la serie T001 (decisión Luis,
+    // 2026-10-02): se sugiere el siguiente número, editable. Destino en el
+    // kardex sigue siendo Partners/Vendors (no el destino de la serie, que
+    // es para ventas).
+    // N° = [Serie 09 ▾] + [Correlativo 🔒], T001 por defecto (series.js)
+    await montarNumeroConSerie('gdvNumeroGuia', { tipo: '09' })?.preparar({ serie: 'T001' })
     document.getElementById('gdvFechaGuia').value = new Date().toISOString().split('T')[0]
     document.getElementById('gdvObservaciones').value = ''
     _setEvGdv('gdv-titulo-modal', 'Emitir Guía de Devolución')
@@ -342,6 +348,7 @@ window.guardarGuiaDevolucionCompra = async function () {
       observaciones, created_by: usuarioId
     })
     if (!guia?.id) throw new Error('No se pudo crear la guía')
+    await registrarUsoGuia(numeroGuia)
 
     const vendorsZona = await getUbicacionVendors()
     const lotesTocados = new Set()
@@ -453,7 +460,7 @@ window.editarGuiaDevolucion = async function (id) {
     const g = await getGuiaDevolucionCompraById(id)
     if (!g) { showToast('No se encontró la guía', 'danger'); return }
     document.getElementById('egdId').value = g.id
-    document.getElementById('egdNumeroGuia').value = g.numero_guia || ''
+    await montarNumeroConSerie('egdNumeroGuia', { tipo: '09' })?.establecer(g.numero_guia || '')
     document.getElementById('egdFechaGuia').value = g.fecha_guia || ''
     document.getElementById('egdObservaciones').value = g.observaciones || ''
     window.openModal('modal-editar-guia-devolucion')

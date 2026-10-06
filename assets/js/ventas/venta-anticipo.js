@@ -280,13 +280,41 @@ export async function _cargarAnticiposDisponiblesCliente() {
   }
 
   wrap.style.display = ''
-  lista.innerHTML = S._anticiposVentaDisponiblesCache.map(a => `
-    <div style="display:flex; align-items:center; gap:10px; padding:6px 8px; background:var(--bg-primary); border-radius:var(--radius-sm);">
-      <input type="checkbox" id="tvAntSel-${a.id}" onchange="window._toggleAnticipoVentaAplicar(${a.id})">
-      <span style="flex:1; font-size:0.85rem;">Factura ${_esc(a.referencia || '')} — ${a.fecha || ''} · Saldo disponible: ${a.moneda} ${a.saldo.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-      <input type="number" id="tvAntMonto-${a.id}" style="width:110px;" step="0.01" min="0" max="${a.saldo}" value="${a.saldo.toFixed(2)}" disabled>
-    </div>
-  `).join('')
+  // Tabla estándar del ERP (wrapper con borde + thead bg-secondary). El
+  // checkbox lleva width:auto: el estilo global de inputs (width:100%) lo
+  // estiraba hasta ocupar media fila y aplastaba el texto (2026-10-02).
+  const monedaVenta = document.getElementById('ventaMoneda')?.value || 'PEN'
+  const fmt = n => (+n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  lista.innerHTML = `
+    <div style="border:1px solid var(--border-color); border-radius:var(--radius-md); overflow:hidden; overflow-x:auto;">
+      <table style="width:100%; border-collapse:collapse; margin:0;">
+        <thead><tr style="background:var(--bg-secondary);">
+          <th style="width:44px; padding:8px 10px;"></th>
+          <th style="text-align:left; padding:8px 10px; font-size:0.78rem;">Anticipo</th>
+          <th style="text-align:left; padding:8px 10px; font-size:0.78rem;">Fecha</th>
+          <th style="text-align:right; padding:8px 10px; font-size:0.78rem;">Saldo disponible</th>
+          <th style="text-align:right; padding:8px 10px; font-size:0.78rem; width:170px;">Monto a aplicar</th>
+        </tr></thead>
+        <tbody>
+          ${S._anticiposVentaDisponiblesCache.map(a => `
+          <tr style="border-top:1px solid var(--border-color); cursor:pointer;" onclick="if (event.target.tagName !== 'INPUT') { const c = document.getElementById('tvAntSel-${a.id}'); c.checked = !c.checked; window._toggleAnticipoVentaAplicar(${a.id}) }">
+            <td style="padding:8px 10px; text-align:center;">
+              <input type="checkbox" id="tvAntSel-${a.id}" onchange="window._toggleAnticipoVentaAplicar(${a.id})"
+                     style="width:18px; height:18px; margin:0; cursor:pointer; accent-color:var(--color-info);">
+            </td>
+            <td style="padding:8px 10px;"><strong>${_esc(a.referencia || '—')}</strong>
+              <div style="font-size:0.75rem; color:var(--text-secondary);">Factura de anticipo</div></td>
+            <td style="padding:8px 10px; white-space:nowrap;">${_esc(a.fecha || '')}</td>
+            <td style="padding:8px 10px; text-align:right; white-space:nowrap; font-weight:600;">${_esc(a.moneda)} ${fmt(a.saldo)}
+              ${a.moneda !== monedaVenta ? `<div style="font-size:0.72rem; color:var(--color-warning); font-weight:400;">Moneda distinta a la venta (${_esc(monedaVenta)})</div>` : ''}</td>
+            <td style="padding:8px 10px;">
+              <input type="number" id="tvAntMonto-${a.id}" step="0.01" min="0" max="${a.saldo}" value="${a.saldo.toFixed(2)}" disabled
+                     style="width:100%; text-align:right;">
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`
 }
 
 window._toggleAnticipoVentaAplicar = function (anticipoId) {

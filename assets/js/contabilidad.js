@@ -1485,7 +1485,7 @@ window.guardarNuevoAsiento = async function() {
       tipo_movimiento: 'Manual', tipo_documento: null,
       documento_referencia: docRef || null,
       origen_tipo: 'manual',
-      created_by: user?.id, lineas
+      created_by: user?.db_id, lineas
     })
 
     showToast('Asiento creado y confirmado', 'success')

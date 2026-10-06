@@ -688,7 +688,9 @@ export async function _aplicarRecepcionesAGuiaIngreso(guia, compra, compraId, re
     // convierte aquí con el tipo_cambio de la compra (PEN => tipo_cambio=1,
     // no cambia nada).
     const monedaCompra = compra?.currency || 'PEN'
-    const tipoCambioCompra = parseFloat(compra?.tipo_cambio) || 1
+    // Blindaje 2026-10-05: desde ahora una compra en SOLES guarda el T.C. SUNAT del día
+    // como referencia (≠ 1). Solo se CONVIERTE cuando la moneda es USD.
+    const tipoCambioCompra = monedaCompra === 'USD' ? (parseFloat(compra?.tipo_cambio) || 1) : 1
     const costoOriginal = parseFloat(l.precio_unitario) || 0
     const costoPen = parseFloat((costoOriginal * tipoCambioCompra).toFixed(4))
 
@@ -947,7 +949,8 @@ window.guardarGuiaIngresoCompra = async function () {
       rec.loteExistenteId = existente.id
 
       const costoExistente = parseFloat(existente.costo_unitario) || 0
-      const costoNuevo = parseFloat(((parseFloat(rec.precio_unitario) || 0) * (parseFloat(compra?.tipo_cambio) || 1)).toFixed(4))
+      const tcConv = (compra?.currency || 'PEN') === 'USD' ? (parseFloat(compra?.tipo_cambio) || 1) : 1 // PEN no convierte (blindaje 2026-10-05)
+      const costoNuevo = parseFloat(((parseFloat(rec.precio_unitario) || 0) * tcConv).toFixed(4))
       if (Math.abs(costoExistente - costoNuevo) >= 0.0001) {
         conflictosCosto.push({ rec, existente, costoExistente, costoNuevo })
       }
@@ -998,7 +1001,7 @@ window.guardarGuiaIngresoCompra = async function () {
           descripcion: `Guía de Remisión - Ingreso a almacén (${numeroGuia})`,
           contact_id: compra?.contact_id || null,
           fecha: fechaGuia,
-          userId: user?.id
+          userId: user?.db_id
         })
       } catch (errorAsiento) {
         console.error('Error generando asiento de guía de ingreso (compra doméstica):', errorAsiento)

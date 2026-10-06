@@ -14,6 +14,37 @@ import { _refrescarStockLoteEnVivo } from './helpers.js'
 import { _almacenes, _zonas } from './init.js'
 import { _guiaEstaVigente, _setEv } from './ventas-editar.js'
 import { renderVentas } from './ventas-lista.js'
+import { serieGuiaDeComprobante, serieDeNumeroGuia, registrarUsoGuia, montarNumeroConSerie } from '../series.js'
+export { _numGuiaDespacho }
+
+
+/** Destino de la venta en el kardex según la serie de la guía (T001 →
+ *  Partners/Customers, GN01 → Partners/90). Sin serie registrada o sin
+ *  destino configurado → Partners/Customers, como siempre. */
+async function _destinoKardexGuia(numeroGuia, customersZona) {
+  const sg = await serieDeNumeroGuia(numeroGuia)
+  return sg?.ubicacion_destino_id || customersZona?.id || null
+}
+
+/** N° de guía = [Serie ▾] + [Correlativo 🔒] (series.js montarNumeroConSerie).
+ *  La serie se propone según el comprobante de la venta (FFFI/BBOL → T001,
+ *  NV01 → GN01) y solo se puede elegir entre las series 09 activas. */
+function _numGuiaDespacho() { return montarNumeroConSerie('gdNumeroGuia', { tipo: '09' }) }
+
+async function _sugerirNumeroGuia(venta) {
+  if (S._guiaDespachoEditId) return
+  const sg = await serieGuiaDeComprobante(venta?.tipo_comprobante, venta?.serie)
+  await _numGuiaDespacho()?.preparar({ serie: sg?.serie || null })
+  const ancla = document.getElementById('gdNumeroGuia-serie')?.parentElement
+  let hint = document.getElementById('gdNumeroGuiaInfo')
+  if (!hint && ancla) {
+    hint = document.createElement('small')
+    hint.id = 'gdNumeroGuiaInfo'
+    hint.style.cssText = 'color:var(--text-secondary); font-size:0.8rem;'
+    ancla.insertAdjacentElement('afterend', hint)
+  }
+  if (hint) hint.textContent = sg ? `Serie ${sg.serie} según comprobante ${venta?.serie || ''}${sg.es_cpe ? '' : ' · física (no SUNAT)'}` : ''
+}
 
 // ============================================================================
 // TAB: GUÍAS DE DESPACHO DE VENTA (espejo exacto de Guías de Remisión en
@@ -86,6 +117,9 @@ window.abrirModalNuevaGuiaDespacho = async function () {
     S._guiaDespachoEditId = null
     const form = document.getElementById('formNuevaGuiaDespacho')
     if (form) form.reset()
+    await _numGuiaDespacho()?.preparar()   // T001 por defecto hasta elegir la venta
+    _numGuiaDespacho()?.bloquear(false)
+    const _hint = document.getElementById('gdNumeroGuiaInfo'); if (_hint) _hint.textContent = ''
     document.getElementById('gdInfoVenta').style.display = 'none'
     document.getElementById('gdFechaGuia').value = new Date().toISOString().split('T')[0]
     document.getElementById('tabla-detalle-guia-despacho').innerHTML =
@@ -152,6 +186,7 @@ window.onSeleccionarVentaGuiaDespacho = async function () {
       <strong>Fecha venta:</strong> ${venta?.fecha_emision || '-'} &nbsp;|&nbsp;
       <strong>Estado despacho:</strong> ${venta?.estado_despacho || 'pendiente'}
     `
+    await _sugerirNumeroGuia(venta)
 
     const almacenesMap = {}
     for (const a of (almacenes || [])) almacenesMap[a.id] = a
@@ -591,9 +626,12 @@ window.guardarGuiaDespachoVenta = async function () {
     })
 
     if (!guia?.id) { showToast('No se pudo registrar la guía de despacho', 'danger'); return }
+    await registrarUsoGuia(numeroGuia)
 
-    // Ubicación virtual "Partners/Customers": destino de TODA salida por venta en el Kardex.
+    // Destino de la salida en el Kardex: lo define la serie de la guía
+    // (T001 → Partners/Customers, GN01 → Partners/90). Fallback Customers.
     const customersZona = await getUbicacionCustomers()
+    const destinoKardexId = await _destinoKardexGuia(numeroGuia, customersZona)
 
     // Copia local de las filas de stock_ubicaciones tocadas, para decrementar
     // ACUMULATIVAMENTE cuando varios despachos comparten el mismo
@@ -670,7 +708,7 @@ window.guardarGuiaDespachoVenta = async function () {
         item_id:              d.item_id,
         lote_id:               d.lote_id,
         ubicacion_origen_id:   d.ubicacion_id,
-        ubicacion_destino_id:  customersZona?.id || null,
+        ubicacion_destino_id:  destinoKardexId,
         fecha:                 fechaGuia,
         tipo_movimiento:       'salida',
         concepto:              'Venta - salida de almacén (guía de despacho)',
@@ -833,6 +871,8 @@ window.guardarEdicionGuiaDespachoVenta = async function () {
     //       fila de guías_despacho_venta (ya existe, recién actualizada). ──
     await _refrescarStockLoteEnVivo()
     const customersZona = await getUbicacionCustomers()
+    const destinoKardexId = await _destinoKardexGuia(numeroGuia, customersZona)
+    await registrarUsoGuia(numeroGuia)
     const stockLocalPorFila = new Map()
     for (const su of (S._stockUbic || [])) stockLocalPorFila.set(su.id, { ...su })
 
@@ -869,7 +909,7 @@ window.guardarEdicionGuiaDespachoVenta = async function () {
         item_id:              d.item_id,
         lote_id:               d.lote_id,
         ubicacion_origen_id:   d.ubicacion_id,
-        ubicacion_destino_id:  customersZona?.id || null,
+        ubicacion_destino_id:  destinoKardexId,
         fecha:                 fechaGuia,
         tipo_movimiento:       'salida',
         concepto:              'Venta - salida de almacén (guía de despacho, editada)',

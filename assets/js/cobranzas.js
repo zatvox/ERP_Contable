@@ -8,22 +8,28 @@
 // ============================================================================
 
 import { getCurrentUser } from './auth-supabase.js'
+import { supabase } from './supabase-client.js'
+import { getTipoCambioDia } from './sunat-api.js'
 import {
   getCuentasCobrar, updateCuentaCobrar,
   getCuotasCobrar, updateCuotaCobrar, getAntiguedadCxC,
-  getCuotasPagar, updateCuotaPagar,
+  getCuotasPagar, updateCuotaPagar, deleteCuotaCobrar, deleteCuotaPagar,
   addTerminoPago, updateTerminoPago, deleteTerminoPago,
   addTerminoPagoCuota, deleteTerminoPagoCuota, getTerminosPagoCuotas,
   getCuentasPagar, updateCuentaPagar,
-  getCobros, addCobro, updateCobro,
-  getPagosProveedores, addPagoProveedor,
+  getCobros, addCobro, updateCobro, deleteCobro, getCobroById,
+  getPagosProveedores, addPagoProveedor, updatePagoProveedor, deletePagoProveedor, getPagoProveedorById,
+  getCuentaCobrarById, getCuentaPagarById, getBancoById,
+  getMovimientosBanco, deleteMovimientoBanco, updateMovimientoBanco, crearAsientoContable,
+  getJournalEntryByReferencia, getJournalEntryLinesByEntry, eliminarAsientoContable, getAccounts,
   getContacts,
   getBancos, updateBanco, addMovimientoBanco,
   getLetrasCambio, addLetraCambio, updateLetraCambio, deleteLetraCambio,
   getSuppliers, getCuentasGasto, addCompra, addCompraDetalle, addCuentaPagar,
-  generarAsientoCobroCliente, generarAsientoPagoProveedor
+  generarAsientoCobroCliente, generarAsientoPagoProveedor, crearAsientoCancelacionME,
+  subirAdjuntos, getAdjuntos, getConteoAdjuntos, getUrlAdjunto, eliminarAdjunto, eliminarAdjuntosDe, ADJ_CONCEPTOS
 } from './supabase-data.js'
-import { showToast, formatNumber } from './helpers.js'
+import { showToast, formatNumber, fechaDMY, hacerTablaOrdenable } from './helpers.js'
 import { initModuleNavDropdowns, initSubtabs } from './main.js'
 import { getModuloConfig, renderConfiguracionTab, aplicarPreferenciasVista } from './config-modulo.js'
 import { cacheado, invalidarVarios } from './data-cache.js'
@@ -66,6 +72,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     initSubtabs('#cob-subtabs-reportes', (panel) => construirReporte(panel))
 
     // Los selects de CxC/CxP listan un documento por línea y crecen rápido.
+    document.getElementById('cobroBanco')?.addEventListener('change', () => window._cpRecalc('cobro', 'banco'))
+    document.getElementById('pagoBanco')?.addEventListener('change', () => window._cpRecalc('pago', 'banco'))
     convertirVarios([
       { id: 'cobroSelectCxC',   placeholder: 'Escribe el cliente o el N° de comprobante...',   sinResultados: 'Sin cuentas por cobrar pendientes' },
       { id: 'pagoSelectCompra', placeholder: 'Escribe el proveedor o el N° de comprobante...', sinResultados: 'Sin cuentas por pagar pendientes' },
@@ -105,6 +113,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     await Promise.all([
       cargarCxC(), cargarCxP(), cargarCobrosRecientes(), cargarPagosRecientes(), cargarRetenciones()
     ])
+    // Columnas ordenables asc/desc en todos los listados del módulo
+    document.querySelectorAll('.tab-content:not(#tab-reportes) table').forEach(hacerTablaOrdenable)
     calcularKPIs()
   } catch (e) {
     console.error('cobranzas DOMContentLoaded:', e)
@@ -122,10 +132,15 @@ function initTabs() {
       btn.classList.add('active')
       const nombre = btn.getAttribute('data-tab')
       document.getElementById(`tab-${nombre}`)?.classList.add('active')
-      if (nombre === 'terminos') renderTerminosPago()
-      if (nombre === 'letras') window.cargarLetras()
+      if (nombre === 'terminos' || nombre === 'configuracion') renderTerminosPago()
+      if (nombre === 'letras') {
+        // "Letras por Cobrar" / "Letras por Pagar" comparten la vista; el botón fija el filtro.
+        const f = document.getElementById('let-filtro-tipo')
+        if (f && btn.dataset.letraTipo !== undefined) f.value = btn.dataset.letraTipo
+        window.cargarLetras()
+      }
       if (nombre === 'reportes') {
-        const activo = document.querySelector('#cob-subtabs-reportes .subtab.active')?.getAttribute('data-sub') || 'rep-antiguedad-cxc'
+        const activo = document.querySelector('#cob-subtabs-reportes .subtab.active')?.getAttribute('data-sub') || 'rep-estado-cuenta'
         construirReporte(activo)
       }
     })
@@ -255,6 +270,8 @@ function _filtrarCxC() {
 window.cargarCxC = async function() {
   try {
     _cxcList = await cacheado('cuentas_cobrar', getCuentasCobrar)
+    _cobrosList = await cacheado('cobros', getCobros)   // para los botones 👁 ✏️ ✕ de cada fila
+    _letrasCache = await cacheado('letras_cambio', getLetrasCambio)
     await _cargarCuotas()
     const lista = _filtrarCxC().sort((a, b) => (a.fecha_vencimiento || 'zzzz').localeCompare(b.fecha_vencimiento || 'zzzz'))
     const hoy = new Date().toISOString().split('T')[0]
@@ -308,15 +325,15 @@ window.cargarCxC = async function() {
       return `<tr ${vencida ? 'style="background:rgba(239,68,68,.06);"' : ''}>
         <td>${_esc(_nombreContacto(cxc.contact_id))}</td>
         <td>${_esc(`${cxc.tipo_comprobante || ''} ${cxc.serie || ''}-${cxc.numero_comprobante || ''}`)}${_htmlCuotas(cxc.id)}</td>
-        <td>${cxc.fecha_emision || '-'}</td>
-        <td>${cxc.fecha_vencimiento || '—'}</td>
+        <td>${fechaDMY(cxc.fecha_emision, '-')}</td>
+        <td>${fechaDMY(cxc.fecha_vencimiento, '—')}</td>
         <td>${dias === null ? '—' : (dias > 0 ? `<span class="badge badge-vencido">+${dias}</span>` : `<span class="badge badge-alcorriente">${dias}</span>`)}</td>
         <td>${cxc.moneda || 'PEN'}</td>
         <td style="text-align:right;">${formatNumber(total)}</td>
         <td style="text-align:right;">${formatNumber(cobrado)}${retenido > 0 ? `<br><small style="color:var(--color-warning);">+ret. ${formatNumber(retenido)}</small>` : ''}${notasCr > 0 ? `<br><small style="color:var(--color-danger);">−NC ${formatNumber(notasCr)}</small>` : ''}${notasDb > 0 ? `<br><small style="color:var(--color-success);">+ND ${formatNumber(notasDb)}</small>` : ''}${retPendienteSustentar > 0 ? `<br><span class="badge badge-warning" title="Retención de ${formatNumber(retPendienteSustentar)} aplicada al cobrar, sin N° de comprobante de retención del cliente todavía">⚠ pendiente sustentar ret.</span>` : ''}</td>
         <td style="text-align:right; font-weight:bold;">${formatNumber(pendiente)}</td>
         <td><span class="badge ${badge}">${cxc.estado}</span></td>
-        <td>${cxc.estado !== 'cobrado' ? `<button class="btn btn-small btn-primary" onclick="window.irARegistrarCobro(${cxc.id})">Cobrar</button>` : ''}</td>
+        <td style="white-space:nowrap;">${cxc.estado !== 'cobrado' ? `<button class="btn btn-small btn-primary" onclick="window.irARegistrarCobro(${cxc.id})">Cobrar</button> ` : ''}${_botonesDocCP('cxc', cxc.id)}</td>
       </tr>`
     }).join('')
 
@@ -363,11 +380,15 @@ function _poblarSelectCxC(lista) {
   refrescarBuscador(sel)
 }
 
-window.irARegistrarCobro = function(cxcId) {
-  window.irATab('cobros')
+// Registrar Cobro es un MODAL que flota sobre la tabla (patrón Nueva Venta).
+window.abrirRegistrarCobro = function(cxcId = null) {
   const sel = document.getElementById('cobroSelectCxC')
-  if (sel) { sel.value = cxcId; window.onSelectCxC() }
+  if (sel) { sel.value = cxcId || ''; refrescarBuscador('cobroSelectCxC'); window.onSelectCxC() }
+  const f = document.getElementById('cobroFecha'); if (f && !f.value) f.value = new Date().toISOString().split('T')[0]
+  _adjPendientes.cobro = []; _pintarAdjPendientes('cobro')
+  window.openModal('modal-registrar-cobro')
 }
+window.irARegistrarCobro = function(cxcId) { window.abrirRegistrarCobro(cxcId) }
 
 // ============================================================================
 // RETENCIÓN EN EL COBRO
@@ -389,9 +410,10 @@ window.onSelectCxC = function() {
   const chkRet    = document.getElementById('cobroAplicarRetencion')
 
   if (!cxcId) {
-    if (info) info.textContent = ''
+    if (info) { info.innerHTML = ''; info.style.display = 'none' }
     if (bloqueRet) bloqueRet.style.display = 'none'
     _cobroRetencionPendiente = 0
+    window._cpRecalc('cobro', 'doc')
     return
   }
 
@@ -402,10 +424,7 @@ window.onSelectCxC = function() {
   const saldoTotal = Math.max(0, _saldoCxC(cxc))
   const moneda    = cxc.moneda || 'PEN'
 
-  if (info) {
-    const venc = cxc.fecha_vencimiento ? ` · Vence ${cxc.fecha_vencimiento}` : ''
-    info.textContent = `Pendiente: ${moneda} ${formatNumber(saldoTotal)}${venc}`
-  }
+  if (info) { info.innerHTML = _cardDocCP(cxc, true, saldoTotal); info.style.display = 'block' }
 
   _cobroRetencionPendiente = contacto?.sujeto_retencion ? _calcularRetencionPendiente(cxc) : 0
 
@@ -419,6 +438,7 @@ window.onSelectCxC = function() {
   }
 
   _actualizarMontoCobroConRetencion(saldoTotal)
+  window._tcDefaultCP('cobro')
 }
 
 function _actualizarMontoCobroConRetencion(saldoTotal) {
@@ -427,6 +447,7 @@ function _actualizarMontoCobroConRetencion(saldoTotal) {
   const chkRet = document.getElementById('cobroAplicarRetencion')
   const aplica = chkRet && chkRet.checked && _cobroRetencionPendiente > 0
   montoInput.value = Math.max(0, aplica ? saldoTotal - _cobroRetencionPendiente : saldoTotal).toFixed(2)
+  window._cpRecalc('cobro', 'doc')
 }
 
 window.onToggleRetencionCobro = function() {
@@ -446,29 +467,51 @@ window.onToggleRetencionCobro = function() {
 // saldo. Si el registro del movimiento falla, el cobro NO se revierte (el
 // documento contable es lo crítico): solo se avisa.
 
-async function _registrarMovimientoBancario({ bancoId, tipo, fecha, concepto, referencia, monto, categoria }) {
-  if (!_cfg.autoMovBanco || !bancoId || !(monto > 0)) return
+async function _registrarMovimientoBancario({ bancoId, tipo, fecha, concepto, referencia, monto, categoria, cobroId = null, pagoId = null, asientoId = null, numeroOperacion = null, monedaMonto = null, tc = 1 }) {
+  if (!_cfg.autoMovBanco || !bancoId || !(monto > 0)) return null
   try {
-    const banco = _bancosMap[bancoId]
+    // Saldo fresco desde BD: el mapa en memoria puede estar desactualizado
+    // si otro cobro/pago o el módulo Bancos movió la cuenta.
+    const banco = (await getBancoById(bancoId)) || _bancosMap[bancoId]
+    // El movimiento va SIEMPRE en la moneda de la cuenta bancaria: una factura
+    // en USD cobrada en la cuenta de soles entra como soles (monto × T.C.).
+    if (monedaMonto && banco?.moneda && monedaMonto !== banco.moneda) {
+      const original = monto
+      monto = _r2(_convMoneda(monto, monedaMonto, banco.moneda, tc))
+      concepto = `${concepto} (${monedaMonto} ${formatNumber(original)} × T.C. ${tc})`
+    }
     const saldoPrevio = parseFloat(banco?.saldo_actual ?? banco?.saldo_inicial ?? 0)
     const saldoNuevo  = tipo === 'ingreso' ? saldoPrevio + monto : saldoPrevio - monto
 
-    await addMovimientoBanco({
+    const mov = await addMovimientoBanco({
       banco_id: bancoId, fecha, tipo, concepto,
       categoria: categoria || (tipo === 'ingreso' ? 'Cobranza clientes' : 'Pago proveedores'),
       referencia: referencia || null,
       monto,
       saldo_posterior: parseFloat(saldoNuevo.toFixed(2)),
-      reconciliado: !!_cfg.autoConciliar
+      reconciliado: !!_cfg.autoConciliar,
+      cobro_id: cobroId,
+      pago_proveedor_id: pagoId,
+      asiento_id: asientoId,
+      numero_operacion: numeroOperacion || referencia || null
     })
-    await updateBanco(bancoId, { saldo_actual: parseFloat(saldoNuevo.toFixed(2)) })
-    if (banco) banco.saldo_actual = parseFloat(saldoNuevo.toFixed(2))
+    // insert() devuelve null en error sin lanzar: no tocar el saldo si no se grabó.
+    if (!mov?.id) throw new Error('no se pudo insertar el movimiento')
+    // El saldo lo actualiza el TRIGGER trg_actualizar_saldo_banco (02_functions.sql)
+    // al insertar/borrar el movimiento. NO tocar saldo_actual aquí: se duplicaba.
+    const bFresco = await getBancoById(bancoId)
+    if (bFresco && _bancosMap[bancoId]) _bancosMap[bancoId].saldo_actual = bFresco.saldo_actual
     invalidarVarios(['bancos', 'movimientos_banco'])
+    return mov
   } catch (e) {
     console.warn('Movimiento bancario no registrado:', e.message)
     showToast('⚠️ El movimiento bancario no se registró: ' + e.message, 'warning')
+    return null
   }
 }
+
+/** N° único de registro del movimiento bancario (enlace Bancos ↔ Contabilidad). */
+const _numMB = id => `MB-${String(id).padStart(6, '0')}`
 
 // ============================================================================
 // REGISTRAR COBRO
@@ -477,14 +520,13 @@ async function _registrarMovimientoBancario({ bancoId, tipo, fecha, concepto, re
 window.registrarCobro = async function() {
   const btnTexto = '✅ Registrar Cobro y Generar Asiento'
   try {
-    const user       = getCurrentUser()
     const cxcId      = parseInt(document.getElementById('cobroSelectCxC')?.value || 0)
     const fecha      = document.getElementById('cobroFecha')?.value
     const monto      = parseFloat(document.getElementById('cobroMonto')?.value || 0)
     const medioPago  = document.getElementById('cobroMedioPago')?.value
     const bancoId    = document.getElementById('cobroBanco')?.value
     const referencia = document.getElementById('cobroReferencia')?.value?.trim()
-    const tipoCambio = parseFloat(document.getElementById('cobroTipoCambio')?.value || 1)
+    const tipoCambio = _tcEfectivoCP('cobro')   // 8 decimales: reproduce exacto el importe recibido
 
     if (!cxcId)     { showToast('Selecciona una Cuenta por Cobrar', 'warning'); return }
     if (!fecha)     { showToast('Ingresa la fecha del cobro', 'warning'); return }
@@ -515,40 +557,9 @@ window.registrarCobro = async function() {
     })
 
     if (cobro?.id) {
-      const descripcion = `Cobro ${cxc.tipo_comprobante || ''} ${cxc.serie || ''}-${cxc.numero_comprobante || ''}`
-      try {
-        await generarAsientoCobroCliente({
-          cobroId: cobro.id, monto, cxcId,
-          bancoId: bancoId ? parseInt(bancoId) : null,
-          medioPago, fecha, descripcion, userId: user?.id
-        })
-      } catch (eAsiento) {
-        console.warn('Cobro insertado pero asiento falló:', eAsiento.message)
-        showToast('Cobro registrado ⚠️ Asiento no generado: ' + eAsiento.message, 'warning')
-      }
-
-      await _registrarMovimientoBancario({
-        bancoId: bancoId ? parseInt(bancoId) : null,
-        tipo: 'ingreso', fecha,
-        concepto: `${descripcion} — ${_nombreContacto(cxc.contact_id)}`,
-        referencia, monto
-      })
-
-      const nuevoCobrado  = parseFloat((parseFloat(cxc.monto_cobrado || 0) + monto).toFixed(2))
-      const nuevoRetenido = parseFloat((parseFloat(cxc.monto_retenido || 0) + montoRetencion).toFixed(2))
-      const total = parseFloat(cxc.monto_total || 0)
-        + parseFloat(cxc.monto_notas_debito || 0) - parseFloat(cxc.monto_notas_credito || 0)
-      const aplicado = nuevoCobrado + nuevoRetenido + parseFloat(cxc.monto_canjeado || 0) + parseFloat(cxc.monto_anticipo_aplicado || 0)
-      const nuevoEstado = aplicado >= total - 0.01
-        ? 'cobrado'
-        : (aplicado > 0 ? 'parcial' : 'pendiente')
-      await updateCuentaCobrar(cxcId, { monto_cobrado: nuevoCobrado, monto_retenido: nuevoRetenido, estado: nuevoEstado })
-
-      // Imputación a cuotas: el cobro se reparte de la cuota más antigua a la
-      // más reciente. Sin esto, un 30/70 con la primera cuota pagada seguiría
-      // mostrando ambas como pendientes y la antigüedad seguiría mal.
-      await _cargarCuotas(true)
-      var _imputacion = await _imputarACuotas(cxcId, monto, montoRetencion)
+      // Asiento + movimiento bancario + CxC + cuotas (misma rutina que usa Editar)
+      var _imputacion = await _aplicarEfectosCobro(cobro, cxc)
+      await _subirAdjuntosPendientes('cobro', 'cobro', cobro.id)
     }
 
     const detalleCuotas = _describirImputacion(typeof _imputacion !== 'undefined' ? _imputacion.aplicaciones : [])
@@ -556,8 +567,10 @@ window.registrarCobro = async function() {
       ? `Cobro registrado ✅${detalleCuotas} — incluye S/ ${formatNumber(montoRetencion)} de retención IGV`
       : `Cobro registrado ✅${detalleCuotas}`, 'success')
 
+    window.closeModal('modal-registrar-cobro')
     document.getElementById('cobroSelectCxC').value  = ''
     document.getElementById('cobroMonto').value      = ''
+    document.getElementById('cobroMontoRecibido').value = ''
     document.getElementById('cobroReferencia').value = ''
     document.getElementById('cobro-cxc-info').textContent = ''
     document.getElementById('cobro-retencion-block').style.display = 'none'
@@ -579,6 +592,7 @@ window.registrarCobro = async function() {
 async function cargarCobrosRecientes() {
   try {
     _cobrosList = await cacheado('cobros', getCobros)
+    _adjConteo.cobro = await getConteoAdjuntos('cobro')
     window.filtrarCobrosRecientes()
   } catch (e) { console.error('cargarCobrosRecientes:', e) }
 }
@@ -598,15 +612,15 @@ window.filtrarCobrosRecientes = function() {
   }
 
   tbody.innerHTML = lista.map(c => `<tr>
-    <td>${c.fecha || '-'}</td>
+    <td>${fechaDMY(c.fecha, '-')}</td>
     <td>${_esc(_nombreContacto(c.contact_id))}</td>
     <td style="text-align:right; font-weight:bold;">${formatNumber(c.monto)}</td>
     <td style="text-align:right; color:var(--color-warning);">${parseFloat(c.monto_retencion || 0) > 0 ? formatNumber(c.monto_retencion) : '—'}</td>
     <td>${c.medio_pago || '-'}</td>
     <td>${_esc(_bancosMap[c.banco_id]?.nombre || '—')}</td>
-    <td>${_esc(c.referencia || '-')}</td>
+    <td>${_esc(c.referencia || '-')}${_clipAdjunto('cobro', c.id)}</td>
     <td>${c.asiento_id ? `AS-${String(c.asiento_id).padStart(6, '0')}` : '—'}</td>
-    <td></td>
+    <td style="white-space:nowrap;">${_botonesCP('cobro', c.id)}</td>
   </tr>`).join('')
 }
 
@@ -638,6 +652,8 @@ function _filtrarCxP() {
 window.cargarCxP = async function() {
   try {
     _cxpList = await cacheado('cuentas_pagar', getCuentasPagar)
+    _pagosList = await cacheado('pagos_proveedores', getPagosProveedores)
+    _letrasCache = await cacheado('letras_cambio', getLetrasCambio)
     const lista = _filtrarCxP().sort((a, b) => (a.fecha_emision || '').localeCompare(b.fecha_emision || ''))
 
     const tbody = document.getElementById('tbody-cxp')
@@ -669,15 +685,15 @@ window.cargarCxP = async function() {
       return `<tr>
         <td>${_esc(_nombreContacto(cxp.contact_id))}</td>
         <td>${_esc(`${cxp.tipo_comprobante || ''} ${cxp.serie || ''}-${cxp.numero_comprobante || ''}`)}</td>
-        <td>${cxp.fecha_emision || '-'}</td>
-        <td>${cxp.fecha_vencimiento || '—'}</td>
+        <td>${fechaDMY(cxp.fecha_emision, '-')}</td>
+        <td>${fechaDMY(cxp.fecha_vencimiento, '—')}</td>
         <td>${dias === null ? '—' : (dias > 0 ? `<span class="badge badge-vencido">+${dias}</span>` : `<span class="badge badge-alcorriente">${dias}</span>`)}</td>
         <td>${cxp.moneda || 'PEN'}</td>
         <td style="text-align:right;">${formatNumber(total)}</td>
         <td style="text-align:right;">${formatNumber(pagado)}${nCr > 0 ? `<br><small style="color:var(--color-danger);">−NC ${formatNumber(nCr)}</small>` : ''}${nDb > 0 ? `<br><small style="color:var(--color-success);">+ND ${formatNumber(nDb)}</small>` : ''}</td>
         <td style="text-align:right; font-weight:bold;">${formatNumber(pend)}</td>
         <td><span class="badge ${badge}">${cxp.estado || 'pendiente'}</span></td>
-        <td>${cxp.estado !== 'pagado' ? `<button class="btn btn-small btn-primary" onclick="window.irARegistrarPago(${cxp.id})">Pagar</button>` : ''}</td>
+        <td style="white-space:nowrap;">${cxp.estado !== 'pagado' ? `<button class="btn btn-small btn-primary" onclick="window.irARegistrarPago(${cxp.id})">Pagar</button> ` : ''}${_botonesDocCP('cxp', cxp.id)}</td>
       </tr>`
     }).join('')
 
@@ -721,26 +737,29 @@ function _poblarSelectCxP(lista) {
   refrescarBuscador(sel)
 }
 
-window.irARegistrarPago = function(cxpId) {
-  window.irATab('pagos-prov')
+window.abrirRegistrarPago = function(cxpId = null) {
   const sel = document.getElementById('pagoSelectCompra')
-  if (sel) { sel.value = cxpId; window.onSelectCompra() }
+  if (sel) { sel.value = cxpId || ''; refrescarBuscador('pagoSelectCompra'); window.onSelectCompra() }
+  const f = document.getElementById('pagoFecha'); if (f && !f.value) f.value = new Date().toISOString().split('T')[0]
+  _adjPendientes.pago = []; _pintarAdjPendientes('pago')
+  window.openModal('modal-registrar-pago')
 }
+window.irARegistrarPago = function(cxpId) { window.abrirRegistrarPago(cxpId) }
 
 window.onSelectCompra = function() {
-  const sel  = document.getElementById('pagoSelectCompra')
-  const opt  = sel?.selectedOptions[0]
-  const info = document.getElementById('pago-compra-info')
-  if (!opt || !opt.value) { if (info) info.textContent = ''; return }
-
-  const pendiente = opt.getAttribute('data-pendiente')
-  const moneda    = opt.getAttribute('data-moneda') || 'PEN'
-  if (info) info.textContent = `Saldo pendiente: ${moneda} ${formatNumber(pendiente)}`
-
-  const montoInput = document.getElementById('pagoMonto')
-  if (montoInput) montoInput.value = pendiente
-  const monedaSelect = document.getElementById('pagoMoneda')
-  if (monedaSelect) monedaSelect.value = moneda
+  const cxpId = parseInt(document.getElementById('pagoSelectCompra')?.value || 0)
+  const info  = document.getElementById('pago-compra-info')
+  const cxp   = _cxpList.find(c => c.id === cxpId)
+  if (!cxp) {
+    if (info) { info.innerHTML = ''; info.style.display = 'none' }
+    window._cpRecalc('pago', 'doc')
+    return
+  }
+  const pendiente = Math.max(0, _saldoCxP(cxp))
+  if (info) { info.innerHTML = _cardDocCP(cxp, false, pendiente); info.style.display = 'block' }
+  document.getElementById('pagoMonto').value = pendiente.toFixed(2)
+  window._cpRecalc('pago', 'doc')
+  window._tcDefaultCP('pago')
 }
 
 // ============================================================================
@@ -749,12 +768,10 @@ window.onSelectCompra = function() {
 
 window.registrarPagoProveedor = async function() {
   try {
-    const user       = getCurrentUser()
     const cxpId      = parseInt(document.getElementById('pagoSelectCompra')?.value || 0)
     const fecha      = document.getElementById('pagoFecha')?.value
     const monto      = parseFloat(document.getElementById('pagoMonto')?.value || 0)
-    const moneda     = document.getElementById('pagoMoneda')?.value || 'PEN'
-    const tipoCambio = parseFloat(document.getElementById('pagoTipoCambio')?.value || 1)
+    const tipoCambio = _tcEfectivoCP('pago')
     const medioPago  = document.getElementById('pagoMedioPago')?.value
     const bancoId    = document.getElementById('pagoBanco')?.value
     const referencia = document.getElementById('pagoReferencia')?.value?.trim()
@@ -765,6 +782,7 @@ window.registrarPagoProveedor = async function() {
 
     const cxp = _cxpList.find(c => c.id === cxpId)
     if (!cxp) { showToast('Cuenta por Pagar no encontrada', 'danger'); return }
+    const moneda = cxp.moneda || 'PEN'   // monto = importe aplicado en la moneda de la factura
 
     const saldo = _saldoCxP(cxp)
     if (monto > saldo + 0.01) {
@@ -780,35 +798,17 @@ window.registrarPagoProveedor = async function() {
     })
 
     if (pago?.id) {
-      const descripcion = `Pago proveedor ${cxp.tipo_comprobante || ''} ${cxp.serie || ''}-${cxp.numero_comprobante || ''}`
-      try {
-        await generarAsientoPagoProveedor({
-          pagoId: pago.id, monto, compraId: cxp.compra_id,
-          bancoId: bancoId ? parseInt(bancoId) : null,
-          moneda, fecha, descripcion, userId: user?.id
-        })
-      } catch (eAsiento) {
-        console.warn('Pago insertado pero asiento falló:', eAsiento.message)
-        showToast('Pago registrado ⚠️ Asiento no generado: ' + eAsiento.message, 'warning')
-      }
-
-      await _registrarMovimientoBancario({
-        bancoId: bancoId ? parseInt(bancoId) : null,
-        tipo: 'egreso', fecha,
-        concepto: `${descripcion} — ${_nombreContacto(cxp.contact_id)}`,
-        referencia, monto
-      })
-
-      const nuevoPagado = parseFloat((parseFloat(cxp.monto_pagado || 0) + monto).toFixed(2))
-      const nuevoEstado = nuevoPagado + parseFloat(cxp.monto_anticipo_aplicado || 0) >= parseFloat(cxp.monto_total || 0) - 0.01
-        ? 'pagado' : (nuevoPagado > 0 ? 'parcial' : 'pendiente')
-      await updateCuentaPagar(cxpId, { monto_pagado: nuevoPagado, estado: nuevoEstado })
+      // Asiento + movimiento bancario + CxP + cuotas (misma rutina que usa Editar)
+      await _aplicarEfectosPago(pago, cxp)
+      await _subirAdjuntosPendientes('pago', 'pago', pago.id)
     }
 
     showToast('Pago a proveedor registrado ✅', 'success')
 
+    window.closeModal('modal-registrar-pago')
     document.getElementById('pagoSelectCompra').value = ''
     document.getElementById('pagoMonto').value        = ''
+    document.getElementById('pagoMontoMoneda').value  = ''
     document.getElementById('pagoReferencia').value   = ''
     document.getElementById('pago-compra-info').textContent = ''
 
@@ -823,6 +823,7 @@ window.registrarPagoProveedor = async function() {
 async function cargarPagosRecientes() {
   try {
     _pagosList = await cacheado('pagos_proveedores', getPagosProveedores)
+    _adjConteo.pago = await getConteoAdjuntos('pago')
     window.filtrarPagosRecientes()
   } catch (e) { console.error('cargarPagosRecientes:', e) }
 }
@@ -842,14 +843,14 @@ window.filtrarPagosRecientes = function() {
   }
 
   tbody.innerHTML = lista.map(p => `<tr>
-    <td>${p.fecha || '-'}</td>
+    <td>${fechaDMY(p.fecha, '-')}</td>
     <td>${_esc(_nombreContacto(p.contact_id))}</td>
     <td style="text-align:right; font-weight:bold;">${formatNumber(p.monto)}</td>
     <td>${p.moneda || 'PEN'}</td>
     <td>${p.medio_pago || '-'}</td>
     <td>${_esc(_bancosMap[p.banco_id]?.nombre || '—')}</td>
-    <td>${_esc(p.referencia || '-')}</td>
-    <td></td>
+    <td>${_esc(p.referencia || '-')}${_clipAdjunto('pago', p.id)}</td>
+    <td style="white-space:nowrap;">${_botonesCP('pago', p.id)}</td>
   </tr>`).join('')
 }
 
@@ -887,12 +888,12 @@ window.cargarRetenciones = async function() {
       const monto = parseFloat(c.monto_retencion) || 0
       total += monto
       return `<tr>
-        <td>${c.fecha || '-'}</td>
+        <td>${fechaDMY(c.fecha, '-')}</td>
         <td>${_esc(_nombreContacto(c.contact_id))}</td>
         <td>${_esc(comprobante)}</td>
         <td style="text-align:right; font-weight:bold;">${formatNumber(monto)}</td>
-        <td><input type="text" id="ret-comp-${c.id}" value="${_esc(c.numero_comprobante_retencion || '')}" placeholder="Ej: R001-00001" style="width:150px;"></td>
-        <td><button class="btn btn-small btn-secondary" onclick="window.guardarComprobanteRetencion(${c.id})">Guardar N°</button></td>
+        <td>${c.numero_comprobante_retencion ? _esc(c.numero_comprobante_retencion) : '<span class="badge badge-warning" title="Edita el cobro (✏️) para registrar el N° del comprobante de retención">⚠ pendiente</span>'}</td>
+        <td style="white-space:nowrap;">${_botonesCP('cobro', c.id)}</td>
       </tr>`
     }).join('')
 
@@ -947,6 +948,7 @@ function construirReporte(panelId) {
 
   const hoy = new Date().toISOString().split('T')[0]
 
+  if (panelId === 'rep-estado-cuenta') { construirEstadoCuenta(); return }
   if (panelId === 'rep-antiguedad-cxc') { construirAntiguedadCxC(); return }
   if (panelId === '__rep-antiguedad-cxc-viejo') {
     const datos = _cxcList
@@ -1274,6 +1276,23 @@ async function _cargarCuotas(forzar = false) {
   return _cuotasCache
 }
 
+/**
+ * Refresca en caché SOLO las cuotas de un documento (1 consulta chica) en vez
+ * de descargar toda la tabla de cuotas en cada cobro/pago/letra.
+ */
+async function _refrescarCuotasDoc(esCobrar, docId) {
+  if (!docId) return
+  const tabla = esCobrar ? 'cuotas_cobrar' : 'cuotas_pagar'
+  const campo = esCobrar ? 'cxc_id' : 'cxp_id'
+  const { data, error } = await supabase.from(tabla).select('*').eq(campo, docId)
+  if (error) { console.warn('_refrescarCuotasDoc:', error.message); return }
+  const cache = esCobrar ? _cuotasCache : _cuotasPagarCache
+  const resto = cache.filter(q => Number(q[campo]) !== Number(docId))
+  const nuevo = resto.concat(data || [])
+  if (esCobrar) _cuotasCache = nuevo; else _cuotasPagarCache = nuevo
+  invalidarVarios([tabla])   // la próxima carga general trae la tabla actualizada
+}
+
 /** Cuotas de una CxC, ordenadas por vencimiento. */
 function _cuotasDe(cxcId) {
   return _cuotasCache
@@ -1353,7 +1372,7 @@ function _htmlCuotas(cxcId) {
     const saldo = saldoCuota(q)
     const vencida = saldo > 0.01 && q.fecha_vencimiento < hoy
     const color = saldo <= 0.01 ? 'var(--color-success)' : (vencida ? 'var(--color-danger)' : 'var(--text-secondary)')
-    return `<span class="badge badge-cuota" style="color:${color};" title="${q.hito ? _esc(q.hito) + ' — ' : ''}vence ${q.fecha_vencimiento}">
+    return `<span class="badge badge-cuota" style="color:${color};" title="${q.hito ? _esc(q.hito) + ' — ' : ''}vence ${fechaDMY(q.fecha_vencimiento)}">
       ${q.numero_cuota}/${cuotas.length}: ${formatNumber(saldo)} ${saldo <= 0.01 ? '✓' : ''}
     </span>`
   }).join(' ') + `</div>`
@@ -1507,13 +1526,15 @@ async function renderTerminosPago() {
               ${!cuadra ? `<div style="font-size:0.75rem; color:var(--color-danger);">⚠ suma ${suma}% en vez de 100%</div>` : ''}</td>
               <td style="text-align:center;">${t.cuotas.length}</td>
               <td style="white-space:nowrap;">
-                <button class="btn btn-small btn-secondary" onclick="window.abrirModalTerminoPago(${t.id})">Editar</button>
-                <button class="btn btn-small btn-danger" onclick="window.eliminarTerminoPago(${t.id})">✕</button>
+                <button class="btn btn-small btn-secondary" title="Ver detalle" onclick="window.verDetalleTerminoPago(${t.id})">👁</button>
+                <button class="btn btn-small btn-secondary" title="Editar" onclick="window.abrirModalTerminoPago(${t.id})">✏️</button>
+                <button class="btn btn-small btn-danger" title="Eliminar" onclick="window.eliminarTerminoPago(${t.id})">✕</button>
               </td>
             </tr>`
           }).join('')}
         </tbody>
       </table>`
+    hacerTablaOrdenable(cont.querySelector('table'))
   } catch (e) {
     cont.innerHTML = `<p class="reporte-vacio">No se pudieron cargar los términos: ${_esc(e.message)}<br><small>¿Corriste el script 36?</small></p>`
   }
@@ -1711,8 +1732,8 @@ window.cargarLetras = async function () {
         <td>${l.tipo === 'emitida' ? 'Por Cobrar' : 'Por Pagar'}</td>
         <td>${_esc(_nombreContacto(l.contact_id))}</td>
         <td>${_esc(comprobante)}${cuota ? ` <small style="color:var(--text-secondary);">(cuota ${cuota.numero_cuota})</small>` : ''}</td>
-        <td>${l.fecha_emision || '-'}</td>
-        <td>${l.fecha_vencimiento || '-'}</td>
+        <td>${fechaDMY(l.fecha_emision, '-')}</td>
+        <td>${fechaDMY(l.fecha_vencimiento, '-')}</td>
         <td style="text-align:right;">${formatNumber(parseFloat(l.monto || 0))} ${l.moneda || 'PEN'}</td>
         <td>${banco}</td>
         <td><span class="badge ${badgeEstado[l.estado] || 'badge-secondary'}">${l.estado}</span></td>
@@ -1726,16 +1747,19 @@ window.cargarLetras = async function () {
 }
 
 function _accionesLetra(l) {
-  if (l.estado === 'cartera') {
-    return `<button class="btn btn-small btn-secondary" onclick="window.abrirModalLetraBanco(${l.id})">A banco</button>
-            <button class="btn btn-small btn-primary" onclick="window.cambiarEstadoLetra(${l.id},'cobrada')">Cobrada</button>
-            <button class="btn btn-small btn-danger" onclick="window.eliminarLetra(${l.id})">✕</button>`
-  }
-  if (l.estado === 'banco' || l.estado === 'cobranza') {
-    return `<button class="btn btn-small btn-primary" onclick="window.cambiarEstadoLetra(${l.id},'cobrada')">Cobrada</button>
-            <button class="btn btn-small btn-danger" onclick="window.cambiarEstadoLetra(${l.id},'protestada')">Protestar</button>`
-  }
-  return '' // cobrada / protestada / refinanciada / anulada: histórico, sin acciones
+  // Estándar del sistema: acción principal del estado (Cobrar/Pagar) + 👁 ✏️ ✕.
+  // "A banco" y "Protestar" viven dentro del Ver detalle.
+  const abierta = ['cartera', 'banco', 'cobranza'].includes(l.estado)
+  const principal = abierta
+    ? `<button class="btn btn-small btn-primary" onclick="window.abrirCancelarLetra(${l.id})">${l.tipo === 'recibida' ? 'Pagar' : 'Cobrar'}</button> `
+    : ''
+  return principal + _botonesLetra(l.id)
+}
+
+function _botonesLetra(id) {
+  return `<button class="btn btn-small btn-secondary" title="Ver detalle" onclick="window.verDetalleLetra(${id})">👁</button>
+    <button class="btn btn-small btn-secondary" title="Editar" onclick="window.abrirEditarLetra(${id})">✏️</button>
+    <button class="btn btn-small btn-danger" title="Eliminar" onclick="window.eliminarLetra(${id})">✕</button>`
 }
 
 // ── Nueva letra (canje de una cuota) ──
@@ -1865,7 +1889,12 @@ window.guardarLetra = async function () {
       await updateCuotaPagar(cuota.id, { monto_canjeado: nuevoCanjeado, estado: estadoCuota(cuotaActualizada, false) })
     }
 
-    showToast(`Letra ${numero} registrada ✅`, 'success')
+    // El canje también baja el saldo del DOCUMENTO (CxC/CxP), no solo de la cuota.
+    await _aplicarCanjeDoc(tipo, tipo === 'emitida' ? cuota.cxc_id : cuota.cxp_id, monto)
+    const asCanje = await _asientoLetra('canje', letra, null)
+    if (asCanje?.id) await updateLetraCambio(letra.id, { asiento_emision_id: asCanje.id })
+
+    showToast(`Letra ${numero} registrada ✅${asCanje?.id ? ` — asiento ${asCanje.numero_asiento}` : ''}`, 'success')
     window.closeModal('modal-nueva-letra')
     _refrescarTodo()
     await window.cargarLetras()
@@ -2031,14 +2060,21 @@ window.cambiarEstadoLetra = async function (id, nuevoEstado) {
 window.eliminarLetra = async function (id) {
   const letra = _letrasCache.find(l => l.id === id)
   if (!letra) return
-  if (letra.estado === 'cobrada') {
-    showToast('No se puede eliminar una letra ya cobrada.', 'warning')
-    return
-  }
-  if (!confirm(`¿Eliminar la letra ${letra.numero_letra}?\n\nEsto libera de vuelta el monto canjeado al saldo de la cuota.`)) return
+  const cobrada = letra.estado === 'cobrada'
+  if (!confirm(`¿Eliminar la letra ${letra.numero_letra}?\n\n${cobrada ? 'Primero se revierte su cobro/pago (movimiento bancario + asiento) y luego ' : ''}se libera el monto canjeado al saldo de la cuota y del documento, y se borra el asiento de canje.`)) return
 
   try {
-    await deleteLetraCambio(id)
+    if (cobrada) {
+      const avisosRev = await _revertirCancelacionLetraCore(letra)
+      if (avisosRev.length) showToast('⚠️ ' + avisosRev.join('; '), 'warning')
+    }
+    // Primero el asiento de canje (la letra lo referencia por FK)
+    if (letra.asiento_emision_id) {
+      await updateLetraCambio(id, { asiento_emision_id: null })
+      try { await eliminarAsientoContable(letra.asiento_emision_id) } catch (e) { console.warn('Asiento de canje no eliminado:', e.message) }
+    }
+    const okDel = await deleteLetraCambio(id)
+    if (okDel === false) throw new Error('No se pudo eliminar la letra')
 
     // Revertir el canje: la cuota recupera el saldo que esta letra consumía.
     const cuota = letra.tipo === 'emitida'
@@ -2054,10 +2090,1581 @@ window.eliminarLetra = async function (id) {
       }
     }
 
-    showToast(`Letra ${letra.numero_letra} eliminada`, 'success')
+    await _aplicarCanjeDoc(letra.tipo, letra.tipo === 'emitida' ? letra.cxc_id : letra.cxp_id, -parseFloat(letra.monto || 0))
+
+    window.closeModal?.('modal-detalle-cp')
+    showToast(`Letra ${letra.numero_letra} eliminada ✅`, 'success')
     _refrescarTodo()
-    await window.cargarLetras()
+    await _recargarTrasLetra()
   } catch (e) {
     showToast('Error: ' + e.message, 'danger')
   }
+}
+
+// ============================================================================
+// VER DETALLE / EDITAR / ELIMINAR — COBROS Y PAGOS
+// ============================================================================
+// Un cobro/pago deja 5 huellas: (1) su fila, (2) el asiento contable
+// (COBRO-{id} / PAGO-{id}), (3) el movimiento bancario + saldo de la cuenta,
+// (4) importe y estado de la CxC/CxP y (5) la imputación a cuotas.
+// Eliminar revierte las 5. Editar = revertir + volver a aplicar sobre la MISMA
+// fila (el id no cambia, así la referencia del asiento sigue siendo válida).
+// Analogía: es como anular un voucher y volver a emitirlo con el mismo número.
+
+const _r2 = n => parseFloat((parseFloat(n) || 0).toFixed(2))
+
+const _MEDIOS_CP = {
+  cobro: [['transferencia', 'Transferencia'], ['deposito', 'Depósito'], ['efectivo', 'Efectivo'], ['cheque', 'Cheque'], ['detraccion', 'Detracción'], ['otro', 'Otro']],
+  pago:  [['transferencia', 'Transferencia'], ['cheque', 'Cheque'], ['efectivo', 'Efectivo'], ['deposito', 'Depósito'], ['detraccion', 'Detracción'], ['otro', 'Otro']]
+}
+
+function _botonesCP(tipo, id) {
+  return `<button class="btn btn-small btn-secondary" title="Ver detalle" onclick="window.verDetalleCP('${tipo}', ${id})">👁</button>
+    <button class="btn btn-small btn-secondary" title="Editar" onclick="window.abrirEditarCP('${tipo}', ${id})">✏️</button>
+    <button class="btn btn-small btn-danger" title="Eliminar" onclick="window.eliminarCP('${tipo}', ${id})">✕</button>`
+}
+
+function _estadoCxCCalc(cxc, cobrado, retenido) {
+  const total = parseFloat(cxc.monto_total || 0) + parseFloat(cxc.monto_notas_debito || 0) - parseFloat(cxc.monto_notas_credito || 0)
+  const aplicado = cobrado + retenido + parseFloat(cxc.monto_canjeado || 0) + parseFloat(cxc.monto_anticipo_aplicado || 0)
+  return aplicado >= total - 0.01 ? 'cobrado' : (aplicado > 0.01 ? 'parcial' : 'pendiente')
+}
+
+function _estadoCxPCalc(cxp, pagado) {
+  const total = parseFloat(cxp.monto_total || 0) + parseFloat(cxp.monto_notas_debito || 0) - parseFloat(cxp.monto_notas_credito || 0)
+  const aplicado = pagado + parseFloat(cxp.monto_canjeado || 0) + parseFloat(cxp.monto_anticipo_aplicado || 0)
+  return aplicado >= total - 0.01 ? 'pagado' : (aplicado > 0.01 ? 'parcial' : 'pendiente')
+}
+
+const _descDocCP = d => `${d?.tipo_comprobante || ''} ${d?.serie || ''}-${d?.numero_comprobante || ''}`.trim()
+
+// ── Aplicar efectos ─────────────────────────────────────────────────────────
+
+async function _aplicarEfectosCobro(cobro, cxc) {
+  const user     = getCurrentUser()
+  const monto    = _r2(cobro.monto)
+  const ret      = _r2(cobro.monto_retencion)
+  const bancoId  = cobro.banco_id ? parseInt(cobro.banco_id) : null
+  const descripcion = `Cobro ${_descDocCP(cxc)}`
+
+  let asientoId = null
+  try {
+    const asiento = await generarAsientoCobroCliente({
+      cobroId: cobro.id, monto, cxcId: cxc.id, bancoId,
+      medioPago: cobro.medio_pago, fecha: cobro.fecha, descripcion, userId: user?.db_id,
+      monedaDoc: cxc.moneda || 'PEN', tcDoc: parseFloat(cxc.tipo_cambio) || 1,
+      tcCobro: parseFloat(cobro.tipo_cambio) || parseFloat(cxc.tipo_cambio) || 1, contactId: cxc.contact_id
+    })
+    if (asiento?.id) { asientoId = asiento.id; await updateCobro(cobro.id, { asiento_id: asiento.id }) }
+  } catch (e) {
+    console.warn('Asiento de cobro no generado:', e.message)
+    showToast('⚠️ Asiento no generado: ' + e.message, 'warning')
+  }
+
+  await _registrarMovimientoBancario({
+    bancoId, tipo: 'ingreso', fecha: cobro.fecha,
+    concepto: `${descripcion} — ${_nombreContacto(cxc.contact_id)}`,
+    referencia: cobro.referencia, monto, cobroId: cobro.id, asientoId,
+    monedaMonto: cxc.moneda || 'PEN', tc: parseFloat(cobro.tipo_cambio) || 1
+  })
+
+  const cobrado  = _r2(parseFloat(cxc.monto_cobrado || 0) + monto)
+  const retenido = _r2(parseFloat(cxc.monto_retenido || 0) + ret)
+  await updateCuentaCobrar(cxc.id, { monto_cobrado: cobrado, monto_retenido: retenido, estado: _estadoCxCCalc(cxc, cobrado, retenido) })
+
+  await _refrescarCuotasDoc(true, cxc.id)
+  return await _imputarACuotas(cxc.id, monto, ret)
+}
+
+async function _aplicarEfectosPago(pago, cxp) {
+  const user     = getCurrentUser()
+  const monto    = _r2(pago.monto)
+  const bancoId  = pago.banco_id ? parseInt(pago.banco_id) : null
+  const descripcion = `Pago proveedor ${_descDocCP(cxp)}`
+
+  let asientoId = null
+  try {
+    const asiento = await generarAsientoPagoProveedor({
+      pagoId: pago.id, monto, compraId: cxp.compra_id, bancoId,
+      moneda: cxp.moneda || pago.moneda || 'PEN', fecha: pago.fecha, descripcion, userId: user?.db_id,
+      tcDoc: parseFloat(cxp.tipo_cambio) || 1,
+      tcPago: parseFloat(pago.tipo_cambio) || parseFloat(cxp.tipo_cambio) || 1, contactId: cxp.contact_id
+    })
+    if (asiento?.id) { asientoId = asiento.id; await updatePagoProveedor(pago.id, { asiento_id: asiento.id }) }
+  } catch (e) {
+    console.warn('Asiento de pago no generado:', e.message)
+    showToast('⚠️ Asiento no generado: ' + e.message, 'warning')
+  }
+
+  await _registrarMovimientoBancario({
+    bancoId, tipo: 'egreso', fecha: pago.fecha,
+    concepto: `${descripcion} — ${_nombreContacto(cxp.contact_id)}`,
+    referencia: pago.referencia, monto, pagoId: pago.id, asientoId,
+    monedaMonto: cxp.moneda || 'PEN', tc: parseFloat(pago.tipo_cambio) || 1
+  })
+
+  const pagado = _r2(parseFloat(cxp.monto_pagado || 0) + monto)
+  await updateCuentaPagar(cxp.id, { monto_pagado: pagado, estado: _estadoCxPCalc(cxp, pagado) })
+
+  return await _imputarACuotasPagar(cxp.id, monto)
+}
+
+/** Espejo de _imputarACuotas del lado CxP (antes los pagos no tocaban cuotas_pagar). */
+async function _imputarACuotasPagar(cxpId, monto) {
+  await _refrescarCuotasDoc(false, cxpId)
+  const cuotas = _cuotasPagarDe(cxpId)
+  if (!cuotas.length) return { aplicaciones: [], sobrante: monto }
+  const { aplicaciones, sobrante } = repartirEntreCuotas(cuotas, monto)
+  for (const { cuota, aplicado } of aplicaciones) {
+    const nueva = { ...cuota, monto_pagado: _r2(parseFloat(cuota.monto_pagado || 0) + aplicado) }
+    try { await updateCuotaPagar(cuota.id, { monto_pagado: nueva.monto_pagado, estado: estadoCuota(nueva, false) }) }
+    catch (e) { console.warn(`Cuota pagar ${cuota.numero_cuota} no actualizada:`, e.message) }
+  }
+  return { aplicaciones, sobrante }
+}
+
+// ── Buscar huellas ──────────────────────────────────────────────────────────
+
+/** Asiento del cobro/pago: por asiento_id o por referencia COBRO-{id}/PAGO-{id}. */
+async function _buscarAsientoCP(tipo, reg) {
+  const a = await getJournalEntryByReferencia(tipo === 'cobro' ? 'Cobro' : 'Pago Proveedor', `${tipo === 'cobro' ? 'COBRO' : 'PAGO'}-${reg.id}`)
+  if (a) return a
+  return reg.asiento_id ? { id: reg.asiento_id, numero_asiento: `AS-${String(reg.asiento_id).padStart(6, '0')}` } : null
+}
+
+/**
+ * Movimiento bancario del cobro/pago. Primero por vínculo (cobro_id /
+ * pago_proveedor_id); para registros antiguos sin vínculo, por coincidencia
+ * única de banco + fecha + tipo + monto + concepto.
+ */
+async function _buscarMovimientoCP(tipo, reg) {
+  if (!reg.banco_id) return { mov: null, modo: null }
+  const campo = tipo === 'cobro' ? 'cobro_id' : 'pago_proveedor_id'
+  // Consulta puntual por el vínculo (antes descargaba todos los movimientos del banco)
+  const { data: vincs } = await supabase.from('movimientos_banco').select('*').eq(campo, reg.id).limit(1)
+  if (vincs?.[0]) return { mov: vincs[0], modo: 'vinculado' }
+  // Registros antiguos sin vínculo: candidatos del mismo banco/fecha/monto
+  const { data: movs0 } = await supabase.from('movimientos_banco').select('*')
+    .eq('banco_id', reg.banco_id).eq('fecha', reg.fecha).eq('monto', reg.monto)
+  const movs = movs0 || []
+
+  const tipoMov = tipo === 'cobro' ? 'ingreso' : 'egreso'
+  const prefijo = tipo === 'cobro' ? 'Cobro' : 'Pago proveedor'
+  const cand = movs.filter(m => !m.cobro_id && !m.pago_proveedor_id
+    && m.tipo === tipoMov && String(m.fecha) === String(reg.fecha)
+    && Math.abs(parseFloat(m.monto) - parseFloat(reg.monto)) < 0.01
+    && String(m.concepto || '').startsWith(prefijo))
+  if (cand.length === 1) return { mov: cand[0], modo: 'coincidencia' }
+  return { mov: null, modo: cand.length > 1 ? 'ambiguo' : null }
+}
+
+// ── Revertir efectos ────────────────────────────────────────────────────────
+
+async function _eliminarMovimientoYSaldo(mov) {
+  const ok = await deleteMovimientoBanco(mov.id)
+  if (!ok) throw new Error('No se pudo eliminar el movimiento bancario')
+  // El saldo lo actualiza el TRIGGER trg_actualizar_saldo_banco (02_functions.sql)
+  // al insertar/borrar el movimiento. NO tocar saldo_actual aquí: se duplicaba.
+  const banco = await getBancoById(mov.banco_id)
+  if (banco && _bancosMap[mov.banco_id]) _bancosMap[mov.banco_id].saldo_actual = banco.saldo_actual
+  invalidarVarios(['bancos', 'movimientos_banco'])
+}
+
+/** Quita lo imputado a cuotas, de la cuota más reciente a la más antigua. */
+async function _desimputarCuotas(cuotas, efectivo, retencion, esCobrar) {
+  const campoEf = esCobrar ? 'monto_cobrado' : 'monto_pagado'
+  let restEf = _r2(efectivo), restRet = _r2(retencion)
+  const orden = [...cuotas].filter(c => c.estado !== 'anulado')
+    .sort((a, b) => String(b.fecha_vencimiento).localeCompare(String(a.fecha_vencimiento)) || b.numero_cuota - a.numero_cuota)
+
+  for (const c of orden) {
+    if (restEf <= 0.01 && restRet <= 0.01) break
+    const quitaEf  = Math.min(parseFloat(c[campoEf] || 0), restEf)
+    const quitaRet = esCobrar ? Math.min(parseFloat(c.monto_retenido || 0), restRet) : 0
+    if (quitaEf <= 0 && quitaRet <= 0) continue
+    restEf  = _r2(restEf - quitaEf)
+    restRet = _r2(restRet - quitaRet)
+
+    const nueva = { ...c, [campoEf]: _r2(parseFloat(c[campoEf] || 0) - quitaEf) }
+    if (esCobrar) nueva.monto_retenido = _r2(parseFloat(c.monto_retenido || 0) - quitaRet)
+    const datos = { [campoEf]: nueva[campoEf], estado: estadoCuota(nueva, esCobrar) }
+    if (esCobrar) datos.monto_retenido = nueva.monto_retenido
+    try { esCobrar ? await updateCuotaCobrar(c.id, datos) : await updateCuotaPagar(c.id, datos) }
+    catch (e) { console.warn(`Cuota ${c.numero_cuota} no revertida:`, e.message) }
+  }
+}
+
+/**
+ * Revierte movimiento bancario, cuotas y CxC/CxP. El asiento se devuelve
+ * (no se borra aquí) porque la fila lo referencia por FK: quien llama decide
+ * si primero borra la fila (Eliminar) o la desvincula (Editar).
+ */
+async function _revertirEfectosCP(tipo, reg) {
+  const avisos = []
+  const esCobro = tipo === 'cobro'
+  const monto = _r2(reg.monto)
+  const ret   = esCobro ? _r2(reg.monto_retencion) : 0
+
+  const { mov, modo } = await _buscarMovimientoCP(tipo, reg)
+  if (mov) await _eliminarMovimientoYSaldo(mov)
+  else if (reg.banco_id && _cfg.autoMovBanco) avisos.push(modo === 'ambiguo'
+    ? 'hay varios movimientos bancarios parecidos: revisa el módulo Bancos'
+    : 'no se encontró movimiento bancario')
+
+  if (esCobro && reg.cxc_id) {
+    await _refrescarCuotasDoc(true, reg.cxc_id)
+    await _desimputarCuotas(_cuotasDe(reg.cxc_id), monto, ret, true)
+    const cxc = await getCuentaCobrarById(reg.cxc_id)
+    if (cxc) {
+      const cobrado  = Math.max(0, _r2(parseFloat(cxc.monto_cobrado || 0) - monto))
+      const retenido = Math.max(0, _r2(parseFloat(cxc.monto_retenido || 0) - ret))
+      await updateCuentaCobrar(cxc.id, { monto_cobrado: cobrado, monto_retenido: retenido, estado: _estadoCxCCalc(cxc, cobrado, retenido) })
+    }
+  } else if (!esCobro && reg.cxp_id) {
+    await _refrescarCuotasDoc(false, reg.cxp_id)
+    await _desimputarCuotas(_cuotasPagarDe(reg.cxp_id), monto, 0, false)
+    const cxp = await getCuentaPagarById(reg.cxp_id)
+    if (cxp) {
+      const pagado = Math.max(0, _r2(parseFloat(cxp.monto_pagado || 0) - monto))
+      await updateCuentaPagar(cxp.id, { monto_pagado: pagado, estado: _estadoCxPCalc(cxp, pagado) })
+    }
+  }
+
+  const asiento = await _buscarAsientoCP(tipo, reg)
+  return { avisos, asiento }
+}
+
+async function _recargarTrasCambioCP() {
+  _refrescarTodo()
+  invalidarVarios(['movimientos_banco', 'journal_entries'])
+  await Promise.all([cargarCxC(), cargarCxP(), cargarCobrosRecientes(), cargarPagosRecientes(), cargarRetenciones()])
+  calcularKPIs()
+}
+
+async function _getRegCP(tipo, id) {
+  return tipo === 'cobro' ? await getCobroById(id) : await getPagoProveedorById(id)
+}
+
+// ── ELIMINAR ────────────────────────────────────────────────────────────────
+
+window.eliminarCP = async function(tipo, id) {
+  try {
+    const esCobro = tipo === 'cobro'
+    const reg = await _getRegCP(tipo, id)
+    if (!reg) { showToast('Registro no encontrado', 'danger'); return }
+
+    const { mov } = await _buscarMovimientoCP(tipo, reg)
+    const extras = []
+    if (esCobro && reg.numero_comprobante_retencion) extras.push(`⚠️ Tiene comprobante de retención N° ${reg.numero_comprobante_retencion}.`)
+    if (mov?.reconciliado) extras.push('⚠️ El movimiento bancario ya está CONCILIADO.')
+
+    const msg = `¿Eliminar el ${esCobro ? 'cobro' : 'pago'} de ${formatNumber(reg.monto)} del ${fechaDMY(reg.fecha)} (${_nombreContacto(reg.contact_id)})?\n\n`
+      + `Se revertirá:\n• ${esCobro ? 'CxC' : 'CxP'}: importe ${esCobro ? 'cobrado' : 'pagado'} y estado\n• Imputación a cuotas`
+      + (esCobro && parseFloat(reg.monto_retencion || 0) > 0 ? `\n• Retención IGV de ${formatNumber(reg.monto_retencion)}` : '')
+      + `\n• Movimiento bancario y saldo del banco\n• Asiento contable\n\n${extras.join('\n')}\nEsta acción no se puede deshacer.`
+    if (!confirm(msg)) return
+
+    const { avisos, asiento } = await _revertirEfectosCP(tipo, reg)
+    const ok = esCobro ? await deleteCobro(id) : await deletePagoProveedor(id)
+    if (!ok) throw new Error('Efectos revertidos, pero la fila no se pudo eliminar. NO reintentes: avisa para corregirlo por SQL.')
+    await eliminarAdjuntosDe(tipo, id)
+    if (asiento?.id) {
+      try { await eliminarAsientoContable(asiento.id) }
+      catch (e) { avisos.push('asiento no eliminado: ' + e.message) }
+    }
+
+    window.closeModal?.('modal-detalle-cp')
+    showToast(`${esCobro ? 'Cobro' : 'Pago'} eliminado ✅${avisos.length ? ' — ⚠️ ' + avisos.join('; ') : ''}`, avisos.length ? 'warning' : 'success')
+    await _recargarTrasCambioCP()
+  } catch (e) {
+    console.error('eliminarCP:', e)
+    showToast('Error al eliminar: ' + e.message, 'danger')
+  }
+}
+
+// ── VER DETALLE ─────────────────────────────────────────────────────────────
+
+let _planCuentasMap = null
+
+window.verDetalleCP = async function(tipo, id) {
+  const body = document.getElementById('detalle-cp-body')
+  if (!body) return
+  const esCobro = tipo === 'cobro'
+  document.getElementById('detalle-cp-titulo').textContent = esCobro ? `Detalle del Cobro #${id}` : `Detalle del Pago #${id}`
+  document.getElementById('detalle-cp-acciones').innerHTML = `
+    <button class="btn btn-secondary" onclick="window.closeModal('modal-detalle-cp')">Cerrar</button>
+    <button class="btn btn-secondary" onclick="window.closeModal('modal-detalle-cp'); window.abrirEditarCP('${tipo}', ${id})">✏️ Editar</button>
+    <button class="btn btn-danger" onclick="window.eliminarCP('${tipo}', ${id})">✕ Eliminar</button>`
+  body.innerHTML = '<p style="text-align:center;">Cargando...</p>'
+  window.openModal('modal-detalle-cp')
+
+  try {
+    const reg = await _getRegCP(tipo, id)
+    if (!reg) { body.innerHTML = '<p>Registro no encontrado.</p>'; return }
+    const doc = esCobro
+      ? (reg.cxc_id ? await getCuentaCobrarById(reg.cxc_id) : null)
+      : (reg.cxp_id ? await getCuentaPagarById(reg.cxp_id) : null)
+
+    if (doc) await _refrescarCuotasDoc(esCobro, doc.id)
+    const cuotas = doc ? (esCobro ? _cuotasDe(doc.id) : _cuotasPagarDe(doc.id)) : []
+
+    const [asiento, movRes, adjuntos] = await Promise.all([_buscarAsientoCP(tipo, reg), _buscarMovimientoCP(tipo, reg), getAdjuntos(tipo, reg.id)])
+    let lineas = []
+    if (asiento?.id) {
+      lineas = (await getJournalEntryLinesByEntry(asiento.id)) || []
+      if (!_planCuentasMap) {
+        _planCuentasMap = {}
+        ;((await cacheado('plan_cuentas', getAccounts)) || []).forEach(a => { _planCuentasMap[a.id] = a })
+      }
+    }
+
+    const fila = (k, v) => `<tr><td style="color:var(--text-secondary); width:40%;">${k}</td><td>${v}</td></tr>`
+    const saldoDoc = doc ? (esCobro ? _saldoCxC(doc) : _saldoCxP(doc)) : 0
+    const mov = movRes.mov
+
+    body.innerHTML = `
+      <h4 style="margin:0 0 6px;">Datos del ${esCobro ? 'cobro' : 'pago'}</h4>
+      <table class="table-compact" style="width:100%;">
+        ${fila('Fecha', fechaDMY(reg.fecha))}
+        ${fila(esCobro ? 'Cliente' : 'Proveedor', _esc(_nombreContacto(reg.contact_id)))}
+        ${fila('Monto', `<b>${reg.moneda || 'PEN'} ${formatNumber(reg.monto)}</b>`)}
+        ${esCobro ? fila('Retención IGV', parseFloat(reg.monto_retencion || 0) > 0 ? formatNumber(reg.monto_retencion) : '—') : ''}
+        ${esCobro && reg.numero_comprobante_retencion ? fila('Comprobante retención', _esc(reg.numero_comprobante_retencion)) : ''}
+        ${fila('Tipo de cambio', reg.tipo_cambio ?? '—')}
+        ${fila('Medio de pago', reg.medio_pago || '—')}
+        ${fila('Banco', _esc(_bancosMap[reg.banco_id]?.nombre || '—'))}
+        ${fila('Referencia / N° operación', _esc(reg.referencia || reg.numero_operacion || '—'))}
+        ${fila('Observaciones', _esc(reg.observaciones || '—'))}
+        ${fila('📎 Archivos adjuntos', _htmlAdjuntos(tipo, reg.id, adjuntos, false))}
+        ${fila('Registrado', reg.created_at ? new Date(reg.created_at).toLocaleString('es-PE') : '—')}
+      </table>
+
+      <h4 style="margin:16px 0 6px;">Documento ${esCobro ? 'CxC' : 'CxP'}</h4>
+      ${doc ? `<table class="table-compact" style="width:100%;">
+        ${fila('Comprobante', _esc(_descDocCP(doc)))}
+        ${fila('Total', `${doc.moneda || 'PEN'} ${formatNumber(doc.monto_total)}`)}
+        ${fila(esCobro ? 'Cobrado' : 'Pagado', formatNumber(esCobro ? doc.monto_cobrado : doc.monto_pagado))}
+        ${esCobro ? fila('Retenido', formatNumber(doc.monto_retenido || 0)) : ''}
+        ${fila('Saldo', `<b>${formatNumber(saldoDoc)}</b>`)}
+        ${fila('Estado', doc.estado || '—')}
+      </table>` : '<p style="color:var(--text-secondary);">Sin documento vinculado.</p>'}
+
+      ${cuotas.length ? `<h4 style="margin:16px 0 6px;">Cuotas del documento</h4>
+      <table class="table-compact" style="width:100%;">
+        <thead><tr><th>N°</th><th>Vence</th><th style="text-align:right;">Monto</th><th style="text-align:right;">${esCobro ? 'Cobrado' : 'Pagado'}</th>${esCobro ? '<th style="text-align:right;">Retenido</th>' : ''}<th style="text-align:right;">Saldo</th><th>Estado</th></tr></thead>
+        <tbody>${cuotas.map(q => `<tr><td>${q.numero_cuota}</td><td>${fechaDMY(q.fecha_vencimiento)}</td>
+          <td style="text-align:right;">${formatNumber(q.monto)}</td>
+          <td style="text-align:right;">${formatNumber(esCobro ? q.monto_cobrado : q.monto_pagado)}</td>
+          ${esCobro ? `<td style="text-align:right;">${formatNumber(q.monto_retenido || 0)}</td>` : ''}
+          <td style="text-align:right;">${formatNumber(saldoCuota(q))}</td><td>${q.estado}</td></tr>`).join('')}</tbody>
+      </table>` : ''}
+
+      <h4 style="margin:16px 0 6px;">Asiento contable</h4>
+      ${asiento?.id ? `<p style="margin:0 0 6px;"><b>${_esc(asiento.numero_asiento || '')}</b> — ${_esc(asiento.descripcion || '')}</p>
+      <table class="table-compact" style="width:100%;">
+        <thead><tr><th>Cuenta</th><th style="text-align:right;">Debe</th><th style="text-align:right;">Haber</th></tr></thead>
+        <tbody>${lineas.map(l => { const a = _planCuentasMap?.[l.account_id]; return `<tr>
+          <td>${_esc(a ? `${a.codigo} ${a.nombre}` : (l.descripcion || l.account_id))}</td>
+          <td style="text-align:right;">${parseFloat(l.debe || 0) ? formatNumber(l.debe) : ''}</td>
+          <td style="text-align:right;">${parseFloat(l.haber || 0) ? formatNumber(l.haber) : ''}</td></tr>` }).join('')}</tbody>
+      </table>` : '<p style="color:var(--text-secondary);">Sin asiento generado.</p>'}
+
+      <h4 style="margin:16px 0 6px;">Movimiento bancario</h4>
+      ${mov ? `<table class="table-compact" style="width:100%;">
+        ${fila('N° Registro', `<b>${_numMB(mov.id)}</b>`)}
+        ${fila('Cuenta', _esc(_bancosMap[mov.banco_id]?.nombre || mov.banco_id))}
+        ${fila('Concepto', _esc(mov.concepto))}
+        ${fila('Monto', `${mov.tipo} ${formatNumber(mov.monto)}`)}
+        ${fila('Saldo posterior', mov.saldo_posterior != null ? formatNumber(mov.saldo_posterior) : '—')}
+        ${fila('Conciliado', mov.reconciliado ? 'Sí' : 'No')}
+        ${fila('Vínculo', movRes.modo === 'vinculado' ? 'Directo' : 'Por coincidencia (registro antiguo)')}
+      </table>` : `<p style="color:var(--text-secondary);">${movRes.modo === 'ambiguo' ? 'Varios movimientos coinciden: revisa Bancos.' : 'Sin movimiento bancario.'}</p>`}`
+  } catch (e) {
+    console.error('verDetalleCP:', e)
+    body.innerHTML = `<p style="color:var(--color-danger);">Error: ${_esc(e.message)}</p>`
+  }
+}
+
+// ── EDITAR ──────────────────────────────────────────────────────────────────
+
+let _edicionCP = null   // { tipo, reg, doc }
+
+window.abrirEditarCP = async function(tipo, id) {
+  try {
+    const esCobro = tipo === 'cobro'
+    const reg = await _getRegCP(tipo, id)
+    if (!reg) { showToast('Registro no encontrado', 'danger'); return }
+    const doc = esCobro
+      ? (reg.cxc_id ? await getCuentaCobrarById(reg.cxc_id) : null)
+      : (reg.cxp_id ? await getCuentaPagarById(reg.cxp_id) : null)
+    _edicionCP = { tipo, reg, doc }
+
+    const $ = i => document.getElementById(i)
+    $('ecp-titulo').textContent = esCobro ? `Editar Cobro #${id}` : `Editar Pago #${id}`
+    $('ecpFecha').value      = reg.fecha || ''
+    $('ecpMonto').value      = reg.monto
+    $('ecpRetencion').value  = reg.monto_retencion || 0
+    $('ecpTC').value         = reg.tipo_cambio ?? 1
+    $('ecpReferencia').value = reg.referencia || ''
+    $('ecpObs').value        = reg.observaciones || ''
+    $('ecpCompRet').value    = reg.numero_comprobante_retencion || ''
+    $('ecpMedio').innerHTML  = _MEDIOS_CP[tipo].map(([v, t]) => `<option value="${v}">${t}</option>`).join('')
+    $('ecpMedio').value      = reg.medio_pago || 'transferencia'
+    $('ecpBanco').innerHTML  = '<option value="">-- Sin banco --</option>' + _bancos.map(b =>
+      `<option value="${b.id}">${_esc(b.nombre)} — ${_esc(b.numero_cuenta || '')} (${b.moneda || ''})</option>`).join('')
+    $('ecpBanco').value      = reg.banco_id || ''
+    document.querySelectorAll('.ecp-solo-cobro').forEach(el => { el.style.display = esCobro ? '' : 'none' })
+    $('ecpArchivo').value = ''
+    _adjPendientes.ecp = []; _pintarAdjPendientes('ecp')
+    $('ecp-adjunto').innerHTML = _htmlAdjuntos(tipo, reg.id, await getAdjuntos(tipo, reg.id), true)
+
+    const disponible = doc ? _r2((esCobro ? _saldoCxC(doc) : _saldoCxP(doc)) + _r2(reg.monto) + (esCobro ? _r2(reg.monto_retencion) : 0)) : null
+    $('ecp-info').textContent = doc
+      ? `${_descDocCP(doc)} — máximo aplicable (saldo + este ${esCobro ? 'cobro' : 'pago'}): ${doc.moneda || 'PEN'} ${formatNumber(disponible)}`
+      : 'Sin documento vinculado.'
+    window.openModal('modal-editar-cp')
+  } catch (e) {
+    console.error('abrirEditarCP:', e)
+    showToast('Error: ' + e.message, 'danger')
+  }
+}
+
+window.guardarEdicionCP = async function() {
+  if (!_edicionCP) return
+  const { tipo } = _edicionCP
+  const esCobro = tipo === 'cobro'
+  const $ = i => document.getElementById(i)
+  try {
+    // Releer: el registro pudo cambiar desde que se abrió el modal.
+    const reg = await _getRegCP(tipo, _edicionCP.reg.id)
+    if (!reg) { showToast('El registro ya no existe', 'danger'); return }
+
+    const nuevo = {
+      fecha:        $('ecpFecha').value,
+      monto:        _r2($('ecpMonto').value),
+      medio_pago:   $('ecpMedio').value,
+      banco_id:     $('ecpBanco').value ? parseInt($('ecpBanco').value) : null,
+      tipo_cambio:  parseFloat($('ecpTC').value || 1),
+      referencia:   $('ecpReferencia').value.trim() || null,
+      numero_operacion: $('ecpReferencia').value.trim() || null,
+      observaciones: $('ecpObs').value.trim() || null
+    }
+    if (esCobro) {
+      nuevo.monto_retencion = _r2($('ecpRetencion').value)
+      nuevo.numero_comprobante_retencion = $('ecpCompRet').value.trim() || null
+    }
+    if (!nuevo.fecha)      { showToast('Ingresa la fecha', 'warning'); return }
+    if (nuevo.monto <= 0)  { showToast('El monto debe ser mayor a 0', 'warning'); return }
+    if (esCobro && nuevo.monto_retencion < 0) { showToast('La retención no puede ser negativa', 'warning'); return }
+
+    // ¿Cambió algo que afecta dinero/contabilidad? → revertir + re-aplicar.
+    nuevo.tipo_cambio = Math.round((parseFloat(nuevo.tipo_cambio) || 1) * 1e8) / 1e8
+    // Asiento generado antes del 2026-10-03 (documento en USD sin importe en
+    // moneda extranjera) → se regenera aunque no cambies nada, para pasarlo a soles.
+    const asientoViejo = await _asientoSinME(reg)
+    const cambioMonetario = nuevo.fecha !== reg.fecha
+      || nuevo.monto !== _r2(reg.monto)
+      || (nuevo.banco_id || null) !== (reg.banco_id || null)
+      || nuevo.medio_pago !== reg.medio_pago
+      || Math.abs(nuevo.tipo_cambio - (parseFloat(reg.tipo_cambio) || 1)) > 1e-9
+      || (esCobro && nuevo.monto_retencion !== _r2(reg.monto_retencion))
+      || asientoViejo
+
+    await _subirAdjuntosPendientes('ecp', tipo, reg.id)
+
+    if (!cambioMonetario) {
+      const r = esCobro ? await updateCobro(reg.id, nuevo) : await updatePagoProveedor(reg.id, nuevo)
+      if (!r) throw new Error('No se pudo actualizar')
+      window.closeModal('modal-editar-cp')
+      showToast('Datos actualizados ✅', 'success')
+      await _recargarTrasCambioCP()
+      return
+    }
+
+    // Validación contra el saldo del documento (sumando lo que este registro ya aplicaba).
+    const docId = esCobro ? reg.cxc_id : reg.cxp_id
+    if (docId) {
+      const doc = esCobro ? await getCuentaCobrarById(docId) : await getCuentaPagarById(docId)
+      const disponible = _r2((esCobro ? _saldoCxC(doc) : _saldoCxP(doc)) + _r2(reg.monto) + (esCobro ? _r2(reg.monto_retencion) : 0))
+      const aplica = nuevo.monto + (esCobro ? nuevo.monto_retencion : 0)
+      if (aplica > disponible + 0.01) {
+        showToast(`El nuevo importe (${formatNumber(aplica)}) supera lo disponible (${formatNumber(disponible)})`, 'warning')
+        return
+      }
+    }
+
+    if (!confirm('Este cambio afecta importes/banco/fecha.\n\nSe revertirán el asiento, el movimiento bancario, la CxC/CxP y las cuotas, y se volverán a generar con los nuevos datos.\n\n¿Continuar?')) return
+
+    // 1) Revertir efectos (mov. banco, cuotas, CxC/CxP)
+    const { avisos, asiento } = await _revertirEfectosCP(tipo, reg)
+    // 2) Desvincular y borrar el asiento anterior
+    const desvinc = esCobro ? await updateCobro(reg.id, { asiento_id: null }) : await updatePagoProveedor(reg.id, { asiento_id: null })
+    if (!desvinc) avisos.push('no se pudo desvincular el asiento anterior')
+    if (asiento?.id) {
+      try { await eliminarAsientoContable(asiento.id) }
+      catch (e) { avisos.push('asiento anterior no eliminado: ' + e.message) }
+    }
+    // 3) Guardar nuevos datos en la misma fila
+    const actualizado = esCobro ? await updateCobro(reg.id, nuevo) : await updatePagoProveedor(reg.id, nuevo)
+    if (!actualizado) throw new Error('Efectos revertidos pero la fila no se actualizó. Revisa el registro antes de reintentar.')
+    const regNuevo = { ...reg, ...nuevo }
+
+    // 4) Re-aplicar con el documento fresco
+    if (docId) {
+      const docFresco = esCobro ? await getCuentaCobrarById(docId) : await getCuentaPagarById(docId)
+      if (esCobro) await _aplicarEfectosCobro(regNuevo, docFresco)
+      else         await _aplicarEfectosPago(regNuevo, docFresco)
+    }
+
+    window.closeModal('modal-editar-cp')
+    showToast(`${esCobro ? 'Cobro' : 'Pago'} actualizado ✅${avisos.length ? ' — ⚠️ ' + avisos.join('; ') : ''}`, avisos.length ? 'warning' : 'success')
+    await _recargarTrasCambioCP()
+  } catch (e) {
+    console.error('guardarEdicionCP:', e)
+    showToast('Error al editar: ' + e.message, 'danger')
+  }
+}
+
+// ============================================================================
+// ACCIONES EN LAS TABLAS CxC / CxP (2026-09-30)
+// ============================================================================
+// Cada fila es un DOCUMENTO que puede tener 0, 1 o varios cobros/pagos:
+//  👁 Ver detalle → documento + lista de sus cobros/pagos (cada uno con 👁 ✏️ ✕).
+//  ✏️ / ✕ → si hay 1 solo cobro/pago actúa directo; si hay varios abre el
+//           detalle para elegir cuál; si no hay ninguno, avisa.
+
+function _movsDeDoc(tipoDoc, docId) {
+  return tipoDoc === 'cxc'
+    ? _cobrosList.filter(c => Number(c.cxc_id) === Number(docId))
+    : _pagosList.filter(p => Number(p.cxp_id) === Number(docId))
+}
+
+function _letrasDeDoc(tipoDoc, docId) {
+  return (_letrasCache || []).filter(l => tipoDoc === 'cxc'
+    ? l.tipo === 'emitida' && Number(l.cxc_id) === Number(docId)
+    : l.tipo === 'recibida' && Number(l.cxp_id) === Number(docId))
+}
+
+function _botonesDocCP(tipoDoc, docId) {
+  const n = _movsDeDoc(tipoDoc, docId).length + _letrasDeDoc(tipoDoc, docId).length
+  const nombre = tipoDoc === 'cxc' ? 'cobro' : 'pago'
+  const dis = n ? '' : `disabled title="Sin ${nombre}s ni letras registrados"`
+  return `<button class="btn btn-small btn-secondary" title="Ver detalle" onclick="window.accionDocCP('${tipoDoc}', ${docId}, 'ver')">👁</button>
+    <button class="btn btn-small btn-secondary" ${dis || `title="Editar ${nombre}"`} onclick="window.accionDocCP('${tipoDoc}', ${docId}, 'editar')">✏️</button>
+    <button class="btn btn-small btn-danger" ${dis || `title="Eliminar ${nombre}"`} onclick="window.accionDocCP('${tipoDoc}', ${docId}, 'eliminar')">✕</button>`
+}
+
+window.accionDocCP = async function(tipoDoc, docId, accion) {
+  const lista = _movsDeDoc(tipoDoc, docId)
+  const letras = _letrasDeDoc(tipoDoc, docId)
+  const tipo = tipoDoc === 'cxc' ? 'cobro' : 'pago'
+  const total = lista.length + letras.length
+  if (accion !== 'ver' && total === 0) { showToast(`Este documento no tiene ${tipo}s ni letras registrados`, 'info'); return }
+  if (total === 1 && accion === 'editar')   return lista.length ? window.abrirEditarCP(tipo, lista[0].id) : window.abrirEditarLetra(letras[0].id)
+  if (total === 1 && accion === 'eliminar') return lista.length ? window.eliminarCP(tipo, lista[0].id) : window.eliminarLetra(letras[0].id)
+  if (accion !== 'ver') showToast(`Tiene ${total} registros (${tipo}s/letras): elige cuál en el detalle`, 'info')
+  await _verDetalleDocCP(tipoDoc, docId)
+}
+
+async function _verDetalleDocCP(tipoDoc, docId) {
+  const esCxC = tipoDoc === 'cxc'
+  const tipo  = esCxC ? 'cobro' : 'pago'
+  const body  = document.getElementById('detalle-cp-body')
+  if (!body) return
+  body.innerHTML = '<p style="text-align:center;">Cargando...</p>'
+  window.openModal('modal-detalle-cp')
+  try {
+    const doc = esCxC ? await getCuentaCobrarById(docId) : await getCuentaPagarById(docId)
+    if (!doc) { body.innerHTML = '<p>Documento no encontrado.</p>'; return }
+    const pendiente = esCxC ? _saldoCxC(doc) : _saldoCxP(doc)
+    document.getElementById('detalle-cp-titulo').textContent = `${esCxC ? 'CxC' : 'CxP'} ${_descDocCP(doc)}`
+    document.getElementById('detalle-cp-acciones').innerHTML = `
+      <button class="btn btn-secondary" onclick="window.closeModal('modal-detalle-cp')">Cerrar</button>
+      ${pendiente > 0.01 ? `<button class="btn btn-primary" onclick="window.closeModal('modal-detalle-cp'); window.${esCxC ? 'irARegistrarCobro' : 'irARegistrarPago'}(${docId})">${esCxC ? 'Cobrar' : 'Pagar'}</button>` : ''}`
+
+    await _refrescarCuotasDoc(esCxC, docId)
+    const cuotas = esCxC ? _cuotasDe(docId) : _cuotasPagarDe(docId)
+    const movs = _movsDeDoc(tipoDoc, docId).sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)) || a.id - b.id)
+    const letrasDoc = _letrasDeDoc(tipoDoc, docId).sort((a, b) => String(a.fecha_vencimiento).localeCompare(String(b.fecha_vencimiento)))
+    const fila = (k, v) => `<tr><td style="color:var(--text-secondary); width:40%;">${k}</td><td>${v}</td></tr>`
+    const aplicadoSinMov = (esCxC ? parseFloat(doc.monto_canjeado || 0) + parseFloat(doc.monto_anticipo_aplicado || 0)
+                                  : parseFloat(doc.monto_canjeado || 0) + parseFloat(doc.monto_anticipo_aplicado || 0))
+
+    body.innerHTML = `
+      <div style="padding:12px 14px; background:var(--bg-secondary); border-radius:var(--radius-md); border-left:3px solid var(--color-info); font-size:0.88rem; line-height:1.6;">
+        <div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">${esCxC ? 'Cuenta por cobrar' : 'Cuenta por pagar'}</div>
+        <div style="font-weight:600; font-size:1.05rem; margin-top:2px;">${_esc(_descDocCP(doc))}</div>
+        <div style="font-size:0.85rem; color:var(--text-secondary); margin-top:2px;">${_esc(_nombreContacto(doc.contact_id))} · Emisión ${fechaDMY(doc.fecha_emision, '—')} · Vence ${fechaDMY(doc.fecha_vencimiento, '—')}</div>
+      </div>
+      <table class="table-compact" style="width:100%; margin-top:10px;">
+        ${fila('Total', `${doc.moneda || 'PEN'} ${formatNumber(doc.monto_total)}`)}
+        ${fila(esCxC ? 'Cobrado' : 'Pagado', formatNumber(esCxC ? doc.monto_cobrado : doc.monto_pagado))}
+        ${esCxC ? fila('Retenido', formatNumber(doc.monto_retenido || 0)) : ''}
+        ${aplicadoSinMov > 0 ? fila('Anticipo / canje aplicado', formatNumber(aplicadoSinMov)) : ''}
+        ${fila('Pendiente', `<b>${formatNumber(pendiente)}</b>`)}
+        ${fila('Estado', doc.estado || '—')}
+      </table>
+
+      <h4 style="margin:16px 0 6px;">${esCxC ? 'Cobros' : 'Pagos'} registrados (${movs.length})</h4>
+      ${movs.length ? `<div style="border:1px solid var(--border-color); border-radius:var(--radius-md); overflow:hidden; overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse; margin:0;">
+          <thead><tr style="background:var(--bg-secondary);"><th>Fecha</th><th style="text-align:right;">Monto</th>${esCxC ? '<th style="text-align:right;">Retención</th>' : ''}<th>Medio</th><th>Banco</th><th>Referencia</th><th></th></tr></thead>
+          <tbody>${movs.map(m => `<tr style="border-top:1px solid var(--border-color);">
+            <td>${fechaDMY(m.fecha)}</td><td style="text-align:right;">${formatNumber(m.monto)}</td>
+            ${esCxC ? `<td style="text-align:right;">${parseFloat(m.monto_retencion || 0) > 0 ? formatNumber(m.monto_retencion) : '—'}</td>` : ''}
+            <td>${m.medio_pago || '—'}</td><td>${_esc(_bancosMap[m.banco_id]?.nombre || '—')}</td><td>${_esc(m.referencia || '—')}</td>
+            <td style="white-space:nowrap;">${_botonesCP(tipo, m.id)}</td></tr>`).join('')}</tbody>
+        </table></div>`
+      : `<p style="color:var(--text-secondary);">Sin ${tipo}s registrados.${(esCxC ? doc.estado === 'cobrado' : doc.estado === 'pagado') && aplicadoSinMov < 0.01 ? ` ⚠️ Figura como ${doc.estado} sin ${tipo}s: revisar el origen del estado.` : ''}</p>`}
+
+      ${letrasDoc.length ? `<h4 style="margin:16px 0 6px;">Letras (canje) (${letrasDoc.length})</h4>
+      <div style="border:1px solid var(--border-color); border-radius:var(--radius-md); overflow:hidden; overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse; margin:0;">
+          <thead><tr style="background:var(--bg-secondary);"><th>N° Letra</th><th>Vence</th><th style="text-align:right;">Monto</th><th>Estado</th><th></th></tr></thead>
+          <tbody>${letrasDoc.map(l => `<tr style="border-top:1px solid var(--border-color);">
+            <td>${_esc(l.numero_letra)}</td><td>${fechaDMY(l.fecha_vencimiento)}</td><td style="text-align:right;">${formatNumber(l.monto)}</td><td>${l.estado}</td>
+            <td style="white-space:nowrap;">${_botonesLetra(l.id)}</td></tr>`).join('')}</tbody>
+        </table></div>` : ''}
+
+      ${cuotas.length ? `<h4 style="margin:16px 0 6px;">Cuotas</h4>
+      <table class="table-compact" style="width:100%;">
+        <thead><tr><th>N°</th><th>Vence</th><th style="text-align:right;">Monto</th><th style="text-align:right;">Saldo</th><th>Estado</th><th></th></tr></thead>
+        <tbody>${cuotas.map(q => `<tr><td>${q.numero_cuota}</td><td>${fechaDMY(q.fecha_vencimiento)}</td><td style="text-align:right;">${formatNumber(q.monto)}</td><td style="text-align:right;">${formatNumber(saldoCuota(q))}</td><td>${q.estado}</td>
+          <td style="white-space:nowrap;">${_botonesCuota(tipoDoc, q.id)}</td></tr>`).join('')}</tbody>
+      </table>` : ''}`
+  } catch (e) {
+    console.error('_verDetalleDocCP:', e)
+    body.innerHTML = `<p style="color:var(--color-danger);">Error: ${_esc(e.message)}</p>`
+  }
+}
+
+// ============================================================================
+// LETRAS — CANJE Y CANCELACIÓN CON EFECTO EN DOCUMENTO, BANCO Y CONTABILIDAD
+// ============================================================================
+// Canje   : la letra reemplaza a la factura → baja el saldo de la CxC/CxP
+//           (monto_canjeado) + asiento 12131↔1211x (emitida) / 4211x↔42131
+//           (recibida). No mueve banco: no entra ni sale dinero.
+// Cancelar: el cliente paga la letra (o le pagamos al proveedor) → movimiento
+//           bancario con N° de registro MB-xxxxxx + asiento banco↔letra.
+//           Referencia del movimiento = "LETRA <n°>" (n° de letra es UNIQUE)
+//           para poder revertirlo exacto.
+
+async function _aplicarCanjeDoc(tipoLetra, docId, delta) {
+  if (!docId) return
+  const esCxC = tipoLetra === 'emitida'
+  const doc = esCxC ? await getCuentaCobrarById(docId) : await getCuentaPagarById(docId)
+  if (!doc) return
+  const canjeado = Math.max(0, _r2(parseFloat(doc.monto_canjeado || 0) + parseFloat(delta || 0)))
+  const d2 = { ...doc, monto_canjeado: canjeado }
+  if (esCxC) await updateCuentaCobrar(docId, { monto_canjeado: canjeado, estado: _estadoCxCCalc(d2, parseFloat(doc.monto_cobrado || 0), parseFloat(doc.monto_retenido || 0)) })
+  else       await updateCuentaPagar(docId,  { monto_canjeado: canjeado, estado: _estadoCxPCalc(d2, parseFloat(doc.monto_pagado || 0)) })
+}
+
+/** Asiento de una letra. etapa: 'canje' | 'cancelacion'. Nunca lanza: avisa y devuelve null. */
+async function _asientoLetra(etapa, letra, bancoId, fecha = null, tcCancel = null) {
+  try {
+    const user = getCurrentUser()
+    const m = _r2(letra.monto)
+    const moneda = letra.moneda || 'PEN'
+    const usd = moneda === 'USD'
+    const emitida = letra.tipo === 'emitida'
+    const tcDoc = parseFloat(letra.tipo_cambio) || 1
+    const base = {
+      fecha: fecha || letra.fecha_emision, contactId: letra.contact_id, userId: user?.db_id || null,
+      monto: m, moneda
+    }
+    if (etapa === 'canje') {
+      // Canje: ambos lados al T.C. de la factura (no hay diferencia de cambio)
+      return await crearAsientoCancelacionME({
+        ...base, descripcion: `Canje ${emitida ? 'factura por letra' : 'letra aceptada'} ${letra.numero_letra}`,
+        documentoReferencia: `LETRA-${letra.id}`, tipoMovimiento: 'Canje Letra',
+        cuentaDebe: emitida ? '12131' : (usd ? '42122' : '42111'), cuentaHaber: emitida ? (usd ? '12112' : '12111') : '42131',
+        tcDebe: tcDoc, tcHaber: tcDoc,
+        descDebe: emitida ? 'Letras por cobrar' : 'Canje de factura', descHaber: emitida ? 'Canje de factura' : 'Letras por pagar'
+      })
+    }
+    // Cobro/pago de la letra: banco al T.C. del día, letra al T.C. de la factura → 776/676
+    const banco = bancoId ? await getBancoById(bancoId) : null
+    const ctaBanco = banco?.cuenta_contable_codigo || '10411'
+    const tcC = parseFloat(tcCancel) || tcDoc
+    return await crearAsientoCancelacionME({
+      ...base, descripcion: `${emitida ? 'Cobro' : 'Pago'} letra ${letra.numero_letra}`,
+      documentoReferencia: `LETRA-CANC-${letra.id}`, tipoMovimiento: emitida ? 'Cobro Letra' : 'Pago Letra',
+      cuentaDebe: emitida ? ctaBanco : '42131', cuentaHaber: emitida ? '12131' : ctaBanco,
+      tcDebe: emitida ? tcC : tcDoc, tcHaber: emitida ? tcDoc : tcC,
+      descDebe: emitida ? 'Cobro de letra' : 'Cancelación letra por pagar', descHaber: emitida ? 'Cancelación letra por cobrar' : 'Pago de letra'
+    })
+  } catch (e) {
+    console.warn(`Asiento de letra (${etapa}) no generado:`, e.message)
+    showToast(`⚠️ Asiento de ${etapa} no generado: ${e.message}`, 'warning', 6000)
+    return null
+  }
+}
+
+window.abrirCancelarLetra = function (id) {
+  const l = _letrasCache.find(x => x.id === id)
+  if (!l) return
+  const emitida = l.tipo === 'emitida'
+  document.getElementById('clet-titulo').textContent = `${emitida ? 'Cobrar' : 'Pagar'} letra ${l.numero_letra}`
+  document.getElementById('clet-info').innerHTML = `
+    <div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">${emitida ? 'Letra por cobrar' : 'Letra por pagar'}</div>
+    <div style="font-weight:600; font-size:1.05rem; margin-top:2px;">${_esc(l.numero_letra)} — ${l.moneda || 'PEN'} ${formatNumber(l.monto)}</div>
+    <div style="font-size:0.85rem; color:var(--text-secondary); margin-top:2px;">${_esc(_nombreContacto(l.contact_id))} · Vence ${fechaDMY(l.fecha_vencimiento)}</div>`
+  document.getElementById('cletId').value = id
+  document.getElementById('cletFecha').value = new Date().toISOString().split('T')[0]
+  document.getElementById('cletNumOp').value = ''
+  const sel = document.getElementById('cletBanco')
+  sel.innerHTML = '<option value="">-- Selecciona --</option>' + _bancos
+    .map(b => `<option value="${b.id}">${_esc(b.nombre)} — ${_esc(b.numero_cuenta || '')} (${b.moneda || ''})</option>`).join('')
+  // Sugerir la cuenta de la misma moneda (o la del banco donde está la letra)
+  sel.value = l.banco_id || (_bancos.find(b => b.moneda === (l.moneda || 'PEN'))?.id ?? '')
+  const g = document.getElementById('cletTCGroup')
+  if (g) g.style.display = (l.moneda || 'PEN') === 'USD' ? '' : 'none'
+  document.getElementById('cletTC').value = l.tipo_cambio || ''
+  window._tcDefaultLetra(l)
+  window.openModal('modal-cancelar-letra')
+}
+
+/** Núcleo: cobra/paga la letra (asiento banco↔letra + movimiento MB + estado). */
+async function _aplicarCancelacionLetra(l, bancoId, fecha, numOp, tcCancel = null) {
+  const emitida = l.tipo === 'emitida'
+  const tcC = parseFloat(tcCancel) || parseFloat(l.tipo_cambio) || 1
+  const asiento = await _asientoLetra('cancelacion', l, bancoId, fecha, tcC)
+  const mov = await _registrarMovimientoBancario({
+    bancoId, tipo: emitida ? 'ingreso' : 'egreso', fecha,
+    concepto: `${emitida ? 'Cobro' : 'Pago'} letra ${l.numero_letra} — ${_nombreContacto(l.contact_id)}`,
+    categoria: emitida ? 'Cobranza letras' : 'Pago letras',
+    referencia: `LETRA ${l.numero_letra}`, numeroOperacion: numOp,
+    monto: _r2(l.monto), asientoId: asiento?.id || null,
+    monedaMonto: l.moneda || 'PEN', tc: tcC
+  })
+  const upd = await updateLetraCambio(l.id, {
+    estado: 'cobrada', banco_id: bancoId, numero_operacion: numOp,
+    asiento_cobro_id: asiento?.id || null, updated_at: new Date().toISOString()
+  })
+  if (!upd) throw new Error('No se pudo actualizar la letra')
+  Object.assign(l, { estado: 'cobrada', banco_id: bancoId, numero_operacion: numOp, asiento_cobro_id: asiento?.id || null })
+  return { mov, asiento }
+}
+
+window.confirmarCancelarLetra = async function () {
+  const id = parseInt(document.getElementById('cletId').value || 0)
+  const l = _letrasCache.find(x => x.id === id)
+  if (!l) return
+  const bancoId = parseInt(document.getElementById('cletBanco').value || 0)
+  const fecha = document.getElementById('cletFecha').value
+  const numOp = document.getElementById('cletNumOp').value.trim() || null
+  if (!bancoId) { showToast('Selecciona la cuenta bancaria', 'warning'); return }
+  if (!fecha)   { showToast('Ingresa la fecha', 'warning'); return }
+  const btn = document.getElementById('cletBtnOk')
+  if (btn.disabled) return
+  btn.disabled = true
+  try {
+    const tcC = parseFloat(document.getElementById('cletTC')?.value) || parseFloat(l.tipo_cambio) || 1
+    const { mov, asiento } = await _aplicarCancelacionLetra(l, bancoId, fecha, numOp, tcC)
+    window.closeModal('modal-cancelar-letra')
+    showToast(`Letra ${l.numero_letra} ${l.tipo === 'emitida' ? 'cobrada' : 'pagada'} ✅${mov?.id ? ` — ${_numMB(mov.id)}` : ''}${asiento?.id ? ` / ${asiento.numero_asiento}` : ''}`, 'success', 6000)
+    _refrescarTodo()
+    await _recargarTrasLetra()
+  } catch (e) {
+    console.error('confirmarCancelarLetra:', e)
+    showToast('Error: ' + e.message, 'danger')
+  } finally { btn.disabled = false }
+}
+
+/** Deshace el cobro/pago de una letra (mov. bancario + saldo + asiento) y la deja en cartera. */
+async function _revertirCancelacionLetraCore(l) {
+    const avisos = []
+    if (l.banco_id) {
+      const mov = await _movDeLetra(l)
+      if (mov) await _eliminarMovimientoYSaldo(mov)
+      else avisos.push('no se encontró el movimiento bancario')
+    }
+    const asId = l.asiento_cobro_id
+    const upd = await updateLetraCambio(l.id, { estado: 'cartera', banco_id: null, numero_operacion: null, asiento_cobro_id: null, updated_at: new Date().toISOString() })
+    if (!upd) throw new Error('No se pudo actualizar la letra')
+    if (asId) { try { await eliminarAsientoContable(asId) } catch (e) { avisos.push('asiento no eliminado: ' + e.message) } }
+    l.estado = 'cartera'; l.banco_id = null; l.asiento_cobro_id = null
+    return avisos
+}
+
+// ============================================================================
+// LETRAS — VER DETALLE / EDITAR (estándar 👁 ✏️ ✕)
+// ============================================================================
+
+async function _recargarTrasLetra() {
+  invalidarVarios(['letras_cambio', 'cuentas_cobrar', 'cuentas_pagar', 'cuotas_cobrar', 'cuotas_pagar', 'movimientos_banco', 'bancos'])
+  await window.cargarLetras()
+  await Promise.all([cargarCxC(), cargarCxP()])
+  calcularKPIs()
+}
+
+async function _getLetra(id) {
+  _letrasCache = await cacheado('letras_cambio', getLetrasCambio)
+  return _letrasCache.find(x => Number(x.id) === Number(id))
+}
+
+async function _movDeLetra(l) {
+  if (!l.banco_id) return null
+  const { data } = await supabase.from('movimientos_banco').select('*')
+    .eq('banco_id', l.banco_id).eq('referencia', `LETRA ${l.numero_letra}`).limit(1)
+  return data?.[0] || null
+}
+
+async function _numeroAsiento(asId) {
+  if (!asId) return '—'
+  const { supabase } = await import('./supabase-client.js')
+  const { data } = await supabase.from('journal_entries').select('numero_asiento').eq('id', asId).maybeSingle()
+  return data?.numero_asiento || `#${asId}`
+}
+
+window.verDetalleLetra = async function (id) {
+  const body = document.getElementById('detalle-cp-body')
+  body.innerHTML = '<p style="text-align:center;">Cargando...</p>'
+  window.openModal('modal-detalle-cp')
+  try {
+    const l = await _getLetra(id)
+    if (!l) { body.innerHTML = '<p>Letra no encontrada.</p>'; return }
+    const emitida = l.tipo === 'emitida'
+    const abierta = ['cartera', 'banco', 'cobranza'].includes(l.estado)
+    document.getElementById('detalle-cp-titulo').textContent = `Letra ${l.numero_letra}`
+    document.getElementById('detalle-cp-acciones').innerHTML = `
+      <button class="btn btn-secondary" onclick="window.closeModal('modal-detalle-cp')">Cerrar</button>
+      ${l.estado === 'cartera' ? `<button class="btn btn-secondary" onclick="window.closeModal('modal-detalle-cp'); window.abrirModalLetraBanco(${id})">A banco</button>` : ''}
+      ${(l.estado === 'banco' || l.estado === 'cobranza') ? `<button class="btn btn-secondary" onclick="window.closeModal('modal-detalle-cp'); window.cambiarEstadoLetra(${id},'protestada')">Protestar</button>` : ''}
+      ${abierta ? `<button class="btn btn-primary" onclick="window.closeModal('modal-detalle-cp'); window.abrirCancelarLetra(${id})">${emitida ? 'Cobrar' : 'Pagar'}</button>` : ''}
+      <button class="btn btn-secondary" onclick="window.closeModal('modal-detalle-cp'); window.abrirEditarLetra(${id})">✏️ Editar</button>
+      <button class="btn btn-danger" onclick="window.eliminarLetra(${id})">✕ Eliminar</button>`
+
+    const doc = emitida ? (l.cxc_id ? await getCuentaCobrarById(l.cxc_id) : null) : (l.cxp_id ? await getCuentaPagarById(l.cxp_id) : null)
+    const [mov, asCanje, asCobro] = await Promise.all([_movDeLetra(l), _numeroAsiento(l.asiento_emision_id), _numeroAsiento(l.asiento_cobro_id)])
+    const fila = (k, v) => `<tr><td style="color:var(--text-secondary); width:40%;">${k}</td><td>${v}</td></tr>`
+
+    body.innerHTML = `
+      <div style="padding:12px 14px; background:var(--bg-secondary); border-radius:var(--radius-md); border-left:3px solid var(--color-info); font-size:0.88rem; line-height:1.6;">
+        <div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">${emitida ? 'Letra por cobrar' : 'Letra por pagar'} · ${l.estado}</div>
+        <div style="font-weight:600; font-size:1.05rem; margin-top:2px;">${_esc(l.numero_letra)} — ${l.moneda || 'PEN'} ${formatNumber(l.monto)}</div>
+        <div style="font-size:0.85rem; color:var(--text-secondary); margin-top:2px;">${_esc(_nombreContacto(l.contact_id))} · Canjea ${_esc(doc ? _descDocCP(doc) : '—')}</div>
+      </div>
+      <table class="table-compact" style="width:100%; margin-top:10px;">
+        ${fila('F. Emisión', fechaDMY(l.fecha_emision))}
+        ${fila('F. Vencimiento', fechaDMY(l.fecha_vencimiento))}
+        ${fila('Banco', _esc(l.banco_id ? (_bancosMap[l.banco_id]?.nombre || l.banco_id) : '—'))}
+        ${fila('N° Operación', _esc(l.numero_operacion || '—'))}
+        ${fila('Asiento de canje', asCanje)}
+        ${fila(emitida ? 'Asiento de cobro' : 'Asiento de pago', asCobro)}
+        ${fila('Observaciones', _esc(l.observaciones || '—'))}
+      </table>
+      <h4 style="margin:16px 0 6px;">Movimiento bancario</h4>
+      ${mov ? `<table class="table-compact" style="width:100%;">
+        ${fila('N° Registro', `<b>${_numMB(mov.id)}</b>`)}
+        ${fila('Fecha', fechaDMY(mov.fecha))}
+        ${fila('Cuenta', _esc(_bancosMap[mov.banco_id]?.nombre || mov.banco_id))}
+        ${fila('Monto', `${mov.tipo} ${formatNumber(mov.monto)}`)}
+        ${fila('Saldo posterior', mov.saldo_posterior != null ? formatNumber(mov.saldo_posterior) : '—')}
+      </table>` : `<p style="color:var(--text-secondary);">${l.estado === 'cobrada' ? 'No se encontró el movimiento.' : 'Aún no cobrada/pagada.'}</p>`}`
+  } catch (e) {
+    console.error('verDetalleLetra:', e)
+    body.innerHTML = `<p style="color:var(--color-danger);">Error: ${_esc(e.message)}</p>`
+  }
+}
+
+let _edicionLetra = null   // { letra, mov, maxMonto }
+
+window.abrirEditarLetra = async function (id) {
+  try {
+    const l = await _getLetra(id)
+    if (!l) { showToast('Letra no encontrada', 'danger'); return }
+    const emitida = l.tipo === 'emitida'
+    await _refrescarCuotasDoc(emitida, emitida ? l.cxc_id : l.cxp_id)
+    const cuota = emitida ? _cuotasCache.find(q => q.id === l.cuota_cobrar_id) : _cuotasPagarCache.find(q => q.id === l.cuota_pagar_id)
+    const maxMonto = _r2((cuota ? saldoCuota(cuota) : 0) + parseFloat(l.monto || 0))
+    const mov = l.estado === 'cobrada' ? await _movDeLetra(l) : null
+    _edicionLetra = { letra: l, mov, maxMonto }
+
+    const $ = i => document.getElementById(i)
+    $('elet-titulo').textContent = `Editar letra ${l.numero_letra}`
+    $('eletNumero').value = l.numero_letra
+    $('eletFechaEmision').value = l.fecha_emision || ''
+    $('eletFechaVenc').value = l.fecha_vencimiento || ''
+    $('eletMonto').value = l.monto
+    $('eletObs').value = l.observaciones || ''
+    $('elet-info').textContent = `Canjea la cuota ${cuota?.numero_cuota ?? '—'} — monto máximo: ${l.moneda || 'PEN'} ${formatNumber(maxMonto)}`
+    const cobrada = l.estado === 'cobrada'
+    $('elet-cobro').style.display = cobrada ? '' : 'none'
+    $('elet-cobro-titulo').textContent = emitida ? 'Cobro de la letra' : 'Pago de la letra'
+    if (cobrada) {
+      $('eletBanco').innerHTML = '<option value="">-- Selecciona --</option>' + _bancos.map(b => `<option value="${b.id}">${_esc(b.nombre)} (${b.moneda || ''})</option>`).join('')
+      $('eletBanco').value = l.banco_id || ''
+      $('eletFechaCobro').value = mov?.fecha || ''
+      $('eletNumOp').value = l.numero_operacion || ''
+      $('eletTC').value = await _tcCancelLetra(l)
+    }
+    $('eletTCGroup').style.display = cobrada && (l.moneda || 'PEN') === 'USD' ? '' : 'none'
+    window.openModal('modal-editar-letra')
+  } catch (e) {
+    console.error('abrirEditarLetra:', e)
+    showToast('Error: ' + e.message, 'danger')
+  }
+}
+
+window.guardarEdicionLetra = async function () {
+  if (!_edicionLetra) return
+  const $ = i => document.getElementById(i)
+  const btn = $('eletBtnOk')
+  if (btn.disabled) return
+  btn.disabled = true
+  try {
+    const l = await _getLetra(_edicionLetra.letra.id)
+    if (!l) throw new Error('La letra ya no existe')
+    const emitida = l.tipo === 'emitida'
+    const nuevo = {
+      numero_letra: $('eletNumero').value.trim(),
+      fecha_emision: $('eletFechaEmision').value,
+      fecha_vencimiento: $('eletFechaVenc').value,
+      monto: _r2($('eletMonto').value),
+      observaciones: $('eletObs').value.trim() || null
+    }
+    if (!nuevo.numero_letra) { showToast('Ingresa el N° de letra', 'warning'); return }
+    if (!nuevo.fecha_emision || !nuevo.fecha_vencimiento) { showToast('Ingresa ambas fechas', 'warning'); return }
+    if (!(nuevo.monto > 0)) { showToast('El monto debe ser mayor a 0', 'warning'); return }
+    if (nuevo.monto > _edicionLetra.maxMonto + 0.01) { showToast(`El monto supera el máximo de la cuota (${formatNumber(_edicionLetra.maxMonto)})`, 'warning'); return }
+
+    const cobrada = l.estado === 'cobrada'
+    const cobro = cobrada ? { bancoId: parseInt($('eletBanco').value || 0), fecha: $('eletFechaCobro').value, numOp: $('eletNumOp').value.trim() || null, tc: parseFloat($('eletTC').value) || parseFloat(l.tipo_cambio) || 1 } : null
+    const tcCancelPrevio = cobrada ? parseFloat(await _tcCancelLetra(l)) || 0 : 0
+    if (cobrada && (!cobro.bancoId || !cobro.fecha)) { showToast('Indica banco y fecha del cobro/pago', 'warning'); return }
+
+    const delta = _r2(nuevo.monto - parseFloat(l.monto || 0))
+    const cambioCanje = delta !== 0 || nuevo.numero_letra !== l.numero_letra || nuevo.fecha_emision !== l.fecha_emision
+    const cambioCobro = cobrada && (cambioCanje
+      || cobro.bancoId !== Number(l.banco_id) || cobro.fecha !== (_edicionLetra.mov?.fecha || '') || (cobro.numOp || null) !== (l.numero_operacion || null)
+      || Math.abs(cobro.tc - tcCancelPrevio) > 1e-9)
+
+    if ((cambioCanje || cambioCobro) && !confirm('Este cambio regenera los asientos de la letra' + (cambioCobro ? ' y su movimiento bancario' : '') + (delta ? ' y ajusta el canje de la cuota y del documento' : '') + '.\n\n¿Continuar?')) return
+
+    // 1) Cobrada + cambio contable: deshacer el cobro/pago (mov. MB + saldo + asiento)
+    if (cambioCobro) {
+      const av = await _revertirCancelacionLetraCore(l)
+      if (av.length) showToast('⚠️ ' + av.join('; '), 'warning')
+    }
+    // 2) Canje: ajustar cuota + documento y rehacer el asiento de canje
+    if (cambioCanje) {
+      if (l.asiento_emision_id) {
+        await updateLetraCambio(l.id, { asiento_emision_id: null })
+        try { await eliminarAsientoContable(l.asiento_emision_id) } catch (e) { console.warn('Asiento de canje no eliminado:', e.message) }
+      }
+      if (delta) {
+        const cuota = emitida ? _cuotasCache.find(q => q.id === l.cuota_cobrar_id) : _cuotasPagarCache.find(q => q.id === l.cuota_pagar_id)
+        if (cuota) {
+          const canj = Math.max(0, _r2(parseFloat(cuota.monto_canjeado || 0) + delta))
+          const qa = { ...cuota, monto_canjeado: canj }
+          if (emitida) await updateCuotaCobrar(cuota.id, { monto_canjeado: canj, estado: estadoCuota(qa, true) })
+          else         await updateCuotaPagar(cuota.id,  { monto_canjeado: canj, estado: estadoCuota(qa, false) })
+        }
+        await _aplicarCanjeDoc(l.tipo, emitida ? l.cxc_id : l.cxp_id, delta)
+      }
+    }
+    // 3) Datos de la letra
+    const upd = await updateLetraCambio(l.id, { ...nuevo, updated_at: new Date().toISOString() })
+    if (!upd) throw new Error('No se pudo actualizar la letra (¿N° de letra duplicado?)')
+    const lNueva = { ...l, ...nuevo }
+    if (cambioCanje) {
+      const as = await _asientoLetra('canje', lNueva, null)
+      if (as?.id) await updateLetraCambio(l.id, { asiento_emision_id: as.id })
+    }
+    // 4) Rehacer el cobro/pago con los datos nuevos
+    if (cambioCobro) await _aplicarCancelacionLetra(lNueva, cobro.bancoId, cobro.fecha, cobro.numOp, cobro.tc)
+
+    window.closeModal('modal-editar-letra')
+    showToast(`Letra ${nuevo.numero_letra} actualizada ✅`, 'success')
+    _refrescarTodo()
+    await _recargarTrasLetra()
+  } catch (e) {
+    console.error('guardarEdicionLetra:', e)
+    showToast('Error al editar: ' + e.message, 'danger')
+  } finally { btn.disabled = false }
+}
+
+// ============================================================================
+// CUOTAS — VER DETALLE / EDITAR / ELIMINAR (estándar 👁 ✏️ ✕)
+// ============================================================================
+// Una cuota es una parte del cronograma del documento: la suma de cuotas debe
+// seguir igual al total. Por eso:
+//  ✏️ cambiar el monto compensa la diferencia en OTRA cuota (la última con
+//     saldo suficiente); nunca por debajo de lo ya aplicado (cobrado/canjeado).
+//  ✕ solo si la cuota no tiene nada aplicado ni letras; su monto pasa a la cuota
+//     anterior (o a la siguiente si era la primera) y se renumeran.
+
+const _esCxcDoc = t => t === 'cxc'
+
+function _botonesCuota(tipoDoc, id) {
+  return `<button class="btn btn-small btn-secondary" title="Ver detalle" onclick="window.verDetalleCuota('${tipoDoc}', ${id})">👁</button>
+    <button class="btn btn-small btn-secondary" title="Editar" onclick="window.abrirEditarCuota('${tipoDoc}', ${id})">✏️</button>
+    <button class="btn btn-small btn-danger" title="Eliminar" onclick="window.eliminarCuota('${tipoDoc}', ${id})">✕</button>`
+}
+
+/** Refresca SOLO las cuotas del documento de esa cuota (no toda la tabla). */
+async function _cuotasFrescas(tipoDoc, cuotaId) {
+  const esC = _esCxcDoc(tipoDoc)
+  const { data } = await supabase.from(esC ? 'cuotas_cobrar' : 'cuotas_pagar').select(esC ? 'cxc_id' : 'cxp_id').eq('id', cuotaId).maybeSingle()
+  const docId = data ? (esC ? data.cxc_id : data.cxp_id) : null
+  if (docId) await _refrescarCuotasDoc(esC, docId)
+  return esC ? _cuotasCache : _cuotasPagarCache
+}
+const _docIdDeCuota = (tipoDoc, q) => _esCxcDoc(tipoDoc) ? q.cxc_id : q.cxp_id
+const _aplicadoCuota = (tipoDoc, q) => _r2(parseFloat(_esCxcDoc(tipoDoc) ? q.monto_cobrado : q.monto_pagado) + parseFloat(q.monto_retenido || 0) + parseFloat(q.monto_canjeado || 0))
+const _updCuota = (tipoDoc, id, d) => _esCxcDoc(tipoDoc) ? updateCuotaCobrar(id, d) : updateCuotaPagar(id, d)
+const _letrasDeCuota = (tipoDoc, qid) => (_letrasCache || []).filter(l => Number(_esCxcDoc(tipoDoc) ? l.cuota_cobrar_id : l.cuota_pagar_id) === Number(qid))
+
+/** Vencimiento del documento = el de su última cuota (igual que al crear la venta/compra). */
+async function _sincronizarVencimientoDoc(tipoDoc, docId) {
+  const cuotas = (_esCxcDoc(tipoDoc) ? _cuotasCache : _cuotasPagarCache).filter(q => Number(_docIdDeCuota(tipoDoc, q)) === Number(docId) && q.estado !== 'anulado')
+  if (!cuotas.length) return
+  const ult = cuotas.map(q => String(q.fecha_vencimiento)).sort().pop()
+  if (_esCxcDoc(tipoDoc)) await updateCuentaCobrar(docId, { fecha_vencimiento: ult })
+  else                    await updateCuentaPagar(docId,  { fecha_vencimiento: ult })
+}
+
+window.verDetalleCuota = async function (tipoDoc, id) {
+  const body = document.getElementById('detalle-cp-body')
+  body.innerHTML = '<p style="text-align:center;">Cargando...</p>'
+  window.openModal('modal-detalle-cp')
+  try {
+    const cuotas = await _cuotasFrescas(tipoDoc, id)
+    const q = cuotas.find(x => Number(x.id) === Number(id))
+    if (!q) { body.innerHTML = '<p>Cuota no encontrada.</p>'; return }
+    const docId = _docIdDeCuota(tipoDoc, q)
+    const doc = _esCxcDoc(tipoDoc) ? await getCuentaCobrarById(docId) : await getCuentaPagarById(docId)
+    _letrasCache = await cacheado('letras_cambio', getLetrasCambio)
+    const letras = _letrasDeCuota(tipoDoc, id)
+    document.getElementById('detalle-cp-titulo').textContent = `Cuota ${q.numero_cuota} — ${_descDocCP(doc)}`
+    document.getElementById('detalle-cp-acciones').innerHTML = `
+      <button class="btn btn-secondary" onclick="window.accionDocCP('${tipoDoc}', ${docId}, 'ver')">← Documento</button>
+      <button class="btn btn-secondary" onclick="window.closeModal('modal-detalle-cp'); window.abrirEditarCuota('${tipoDoc}', ${id})">✏️ Editar</button>
+      <button class="btn btn-danger" onclick="window.eliminarCuota('${tipoDoc}', ${id})">✕ Eliminar</button>`
+    const fila = (k, v) => `<tr><td style="color:var(--text-secondary); width:40%;">${k}</td><td>${v}</td></tr>`
+    body.innerHTML = `
+      <div style="padding:12px 14px; background:var(--bg-secondary); border-radius:var(--radius-md); border-left:3px solid var(--color-info); font-size:0.88rem; line-height:1.6;">
+        <div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">Cuota del cronograma · ${q.estado}</div>
+        <div style="font-weight:600; font-size:1.05rem; margin-top:2px;">Cuota ${q.numero_cuota} — ${doc?.moneda || 'PEN'} ${formatNumber(q.monto)}</div>
+        <div style="font-size:0.85rem; color:var(--text-secondary); margin-top:2px;">${_esc(_descDocCP(doc))} · ${_esc(_nombreContacto(doc?.contact_id))}</div>
+      </div>
+      <table class="table-compact" style="width:100%; margin-top:10px;">
+        ${fila('Vencimiento', fechaDMY(q.fecha_vencimiento))}
+        ${fila(_esCxcDoc(tipoDoc) ? 'Cobrado' : 'Pagado', formatNumber(_esCxcDoc(tipoDoc) ? q.monto_cobrado : q.monto_pagado))}
+        ${_esCxcDoc(tipoDoc) ? fila('Retenido', formatNumber(q.monto_retenido || 0)) : ''}
+        ${fila('Canjeado en letras', formatNumber(q.monto_canjeado || 0))}
+        ${fila('Saldo', `<b>${formatNumber(saldoCuota(q))}</b>`)}
+        ${q.hito ? fila('Hito', _esc(q.hito)) : ''}
+        ${fila('Observaciones', _esc(q.observaciones || '—'))}
+      </table>
+      ${letras.length ? `<h4 style="margin:16px 0 6px;">Letras que canjean esta cuota</h4>
+      <table class="table-compact" style="width:100%;"><tbody>${letras.map(l => `<tr><td>${_esc(l.numero_letra)}</td><td>${fechaDMY(l.fecha_vencimiento)}</td><td style="text-align:right;">${formatNumber(l.monto)}</td><td>${l.estado}</td><td style="white-space:nowrap;">${_botonesLetra(l.id)}</td></tr>`).join('')}</tbody></table>` : ''}`
+  } catch (e) {
+    console.error('verDetalleCuota:', e)
+    body.innerHTML = `<p style="color:var(--color-danger);">Error: ${_esc(e.message)}</p>`
+  }
+}
+
+let _edicionCuota = null   // { tipoDoc, id }
+
+window.abrirEditarCuota = async function (tipoDoc, id) {
+  try {
+    const cuotas = await _cuotasFrescas(tipoDoc, id)
+    const q = cuotas.find(x => Number(x.id) === Number(id))
+    if (!q) { showToast('Cuota no encontrada', 'danger'); return }
+    const hermanas = cuotas.filter(x => Number(_docIdDeCuota(tipoDoc, x)) === Number(_docIdDeCuota(tipoDoc, q)) && x.id !== q.id && x.estado !== 'anulado')
+    _edicionCuota = { tipoDoc, id }
+    document.getElementById('ecu-titulo').textContent = `Editar cuota ${q.numero_cuota}`
+    document.getElementById('ecuFecha').value = q.fecha_vencimiento || ''
+    document.getElementById('ecuMonto').value = q.monto
+    document.getElementById('ecuMonto').readOnly = hermanas.length === 0
+    document.getElementById('ecuObs').value = q.observaciones || ''
+    document.getElementById('ecu-info').textContent = hermanas.length
+      ? `Ya aplicado: ${formatNumber(_aplicadoCuota(tipoDoc, q))} (mínimo). Si cambias el monto, la diferencia se compensa en otra cuota para que el total no cambie.`
+      : 'Es la única cuota: su monto es el total del documento y no se puede cambiar aquí.'
+    window.openModal('modal-editar-cuota')
+  } catch (e) { showToast('Error: ' + e.message, 'danger') }
+}
+
+window.guardarEdicionCuota = async function () {
+  if (!_edicionCuota) return
+  const { tipoDoc, id } = _edicionCuota
+  const btn = document.getElementById('ecuBtnOk')
+  if (btn.disabled) return
+  btn.disabled = true
+  try {
+    const cuotas = await _cuotasFrescas(tipoDoc, id)
+    const q = cuotas.find(x => Number(x.id) === Number(id))
+    if (!q) throw new Error('La cuota ya no existe')
+    const docId = _docIdDeCuota(tipoDoc, q)
+    const fecha = document.getElementById('ecuFecha').value
+    const monto = _r2(document.getElementById('ecuMonto').value)
+    const obs = document.getElementById('ecuObs').value.trim() || null
+    if (!fecha) { showToast('Ingresa el vencimiento', 'warning'); return }
+    if (!(monto > 0)) { showToast('El monto debe ser mayor a 0', 'warning'); return }
+    const aplicado = _aplicadoCuota(tipoDoc, q)
+    if (monto < aplicado - 0.01) { showToast(`El monto no puede ser menor a lo ya aplicado (${formatNumber(aplicado)})`, 'warning'); return }
+
+    const delta = _r2(monto - parseFloat(q.monto))
+    let compensa = null
+    if (delta !== 0) {
+      // La otra cuota que absorbe la diferencia: la de vencimiento más lejano que lo soporte.
+      const hermanas = cuotas.filter(x => Number(_docIdDeCuota(tipoDoc, x)) === Number(docId) && x.id !== q.id && x.estado !== 'anulado')
+        .sort((a, b) => String(b.fecha_vencimiento).localeCompare(String(a.fecha_vencimiento)) || b.numero_cuota - a.numero_cuota)
+      compensa = hermanas.find(x => _r2(parseFloat(x.monto) - delta) >= _aplicadoCuota(tipoDoc, x) && _r2(parseFloat(x.monto) - delta) > 0)
+      if (!compensa) { showToast('No hay otra cuota con saldo suficiente para compensar la diferencia', 'warning'); return }
+      if (!confirm(`La cuota ${compensa.numero_cuota} pasará de ${formatNumber(compensa.monto)} a ${formatNumber(_r2(parseFloat(compensa.monto) - delta))} para que el total no cambie.\n\n¿Continuar?`)) return
+    }
+
+    const qNueva = { ...q, monto }
+    const r = await _updCuota(tipoDoc, q.id, { fecha_vencimiento: fecha, monto, observaciones: obs, estado: estadoCuota(qNueva, _esCxcDoc(tipoDoc)) })
+    if (!r) throw new Error('No se pudo actualizar la cuota')
+    if (compensa) {
+      const cNueva = { ...compensa, monto: _r2(parseFloat(compensa.monto) - delta) }
+      await _updCuota(tipoDoc, compensa.id, { monto: cNueva.monto, estado: estadoCuota(cNueva, _esCxcDoc(tipoDoc)) })
+    }
+    await _refrescarCuotasDoc(_esCxcDoc(tipoDoc), docId)
+    await _sincronizarVencimientoDoc(tipoDoc, docId)
+    window.closeModal('modal-editar-cuota')
+    showToast(`Cuota ${q.numero_cuota} actualizada ✅`, 'success')
+    _refrescarTodo()
+    await Promise.all([cargarCxC(), cargarCxP()])
+  } catch (e) {
+    console.error('guardarEdicionCuota:', e)
+    showToast('Error: ' + e.message, 'danger')
+  } finally { btn.disabled = false }
+}
+
+window.eliminarCuota = async function (tipoDoc, id) {
+  try {
+    const cuotas = await _cuotasFrescas(tipoDoc, id)
+    const q = cuotas.find(x => Number(x.id) === Number(id))
+    if (!q) return
+    const docId = _docIdDeCuota(tipoDoc, q)
+    const hermanas = cuotas.filter(x => Number(_docIdDeCuota(tipoDoc, x)) === Number(docId) && x.id !== q.id && x.estado !== 'anulado')
+      .sort((a, b) => a.numero_cuota - b.numero_cuota)
+    _letrasCache = await cacheado('letras_cambio', getLetrasCambio)
+    if (!hermanas.length) { showToast('Es la única cuota del documento: no se puede eliminar.', 'warning'); return }
+    if (_aplicadoCuota(tipoDoc, q) > 0.01 || _letrasDeCuota(tipoDoc, id).length) {
+      showToast('La cuota tiene cobros/pagos o letras aplicados: elimínalos primero (o edita el monto).', 'warning', 6000); return
+    }
+    const destino = [...hermanas].reverse().find(x => x.numero_cuota < q.numero_cuota) || hermanas[0]
+    if (!confirm(`¿Eliminar la cuota ${q.numero_cuota} (${formatNumber(q.monto)})?\n\nSu monto pasa a la cuota ${destino.numero_cuota} para que el total del documento no cambie, y las cuotas se renumeran.`)) return
+
+    const dNueva = { ...destino, monto: _r2(parseFloat(destino.monto) + parseFloat(q.monto)) }
+    await _updCuota(tipoDoc, destino.id, { monto: dNueva.monto, estado: estadoCuota(dNueva, _esCxcDoc(tipoDoc)) })
+    const ok = _esCxcDoc(tipoDoc) ? await deleteCuotaCobrar(q.id) : await deleteCuotaPagar(q.id)
+    if (ok === false) throw new Error('No se pudo eliminar la cuota')
+    // Renumerar en orden ascendente (los números solo bajan: no chocan con el UNIQUE)
+    let n = 1
+    for (const x of hermanas) { if (x.numero_cuota !== n) await _updCuota(tipoDoc, x.id, { numero_cuota: n }); n++ }
+    await _refrescarCuotasDoc(_esCxcDoc(tipoDoc), docId)
+    await _sincronizarVencimientoDoc(tipoDoc, docId)
+    window.closeModal?.('modal-detalle-cp')
+    showToast(`Cuota eliminada ✅ — monto sumado a la cuota ${destino.numero_cuota < q.numero_cuota ? destino.numero_cuota : destino.numero_cuota - 1}`, 'success')
+    _refrescarTodo()
+    await Promise.all([cargarCxC(), cargarCxP()])
+  } catch (e) {
+    console.error('eliminarCuota:', e)
+    showToast('Error: ' + e.message, 'danger')
+  }
+}
+
+// ============================================================================
+// TÉRMINOS DE PAGO — VER DETALLE (✏️ y ✕ ya existían)
+// ============================================================================
+window.verDetalleTerminoPago = async function (id) {
+  const body = document.getElementById('detalle-cp-body')
+  body.innerHTML = '<p style="text-align:center;">Cargando...</p>'
+  window.openModal('modal-detalle-cp')
+  try {
+    const t = (await getTerminosConCuotas(true)).find(x => Number(x.id) === Number(id))
+    if (!t) { body.innerHTML = '<p>Término no encontrado.</p>'; return }
+    document.getElementById('detalle-cp-titulo').textContent = `Término: ${t.nombre}`
+    document.getElementById('detalle-cp-acciones').innerHTML = `
+      <button class="btn btn-secondary" onclick="window.closeModal('modal-detalle-cp')">Cerrar</button>
+      <button class="btn btn-secondary" onclick="window.closeModal('modal-detalle-cp'); window.abrirModalTerminoPago(${id})">✏️ Editar</button>
+      <button class="btn btn-danger" onclick="window.closeModal('modal-detalle-cp'); window.eliminarTerminoPago(${id})">✕ Eliminar</button>`
+    const suma = t.cuotas.reduce((s, c) => s + (parseFloat(c.porcentaje) || 0), 0)
+    body.innerHTML = `
+      <div style="padding:12px 14px; background:var(--bg-secondary); border-radius:var(--radius-md); border-left:3px solid var(--color-info); font-size:0.88rem; line-height:1.6;">
+        <div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">${t.tipo} · ${t.aplica_a === 'ambos' ? 'Ventas y compras' : t.aplica_a === 'venta' ? 'Solo ventas' : 'Solo compras'}</div>
+        <div style="font-weight:600; font-size:1.05rem; margin-top:2px;">${_esc(t.nombre)}</div>
+        <div style="font-size:0.85rem; color:var(--text-secondary); margin-top:2px;">${_esc(t.descripcion || '')}</div>
+      </div>
+      <h4 style="margin:16px 0 6px;">Cronograma (${t.cuotas.length} cuota(s) · suma ${suma}%)</h4>
+      <table class="table-compact" style="width:100%;">
+        <thead><tr><th>Orden</th><th style="text-align:right;">%</th><th style="text-align:right;">Días</th><th>Hito</th></tr></thead>
+        <tbody>${t.cuotas.map(c => `<tr><td>${c.orden}</td><td style="text-align:right;">${parseFloat(c.porcentaje)}%</td><td style="text-align:right;">${c.dias}</td><td>${_esc(c.hito || '—')}</td></tr>`).join('')}</tbody>
+      </table>`
+  } catch (e) { body.innerHTML = `<p style="color:var(--color-danger);">Error: ${_esc(e.message)}</p>` }
+}
+
+// ============================================================================
+// REPORTE — ESTADO DE CUENTA POR CLIENTE / PROVEEDOR (motor crearReporte)
+// ============================================================================
+// Cada fila es un movimiento del documento: cargo (lo que aumenta la deuda) o
+// abono (lo que la baja). Saldo = cargo − abono → agrupado por contacto da lo
+// que te debe cada cliente (o lo que debes a cada proveedor).
+//   Cargos : factura/boleta, ND, letra (al canjear, reemplaza a la factura)
+//   Abonos : NC, cobro/pago, retención IGV, anticipo aplicado, canje a letra,
+//            cobro/pago de letra.
+// Canje = abono en la factura + cargo en la letra (neto 0): la deuda sigue
+// hasta que la letra se cobra.
+async function construirEstadoCuenta() {
+  try {
+    // Asegura datos frescos de las 5 fuentes (usa la caché compartida)
+    ;[_cxcList, _cxpList, _cobrosList, _pagosList, _letrasCache] = await Promise.all([
+      cacheado('cuentas_cobrar', getCuentasCobrar), cacheado('cuentas_pagar', getCuentasPagar),
+      cacheado('cobros', getCobros), cacheado('pagos_proveedores', getPagosProveedores),
+      cacheado('letras_cambio', getLetrasCambio)
+    ])
+    const filas = []
+    const push = (lado, contactId, moneda, fecha, tipo, documento, referencia, cargo, abono) => {
+      if (!(cargo > 0.004) && !(abono > 0.004)) return
+      filas.push({
+        lado, contacto: _nombreContacto(contactId), moneda: moneda || 'PEN',
+        fecha: fecha || '', mes: nombreMes(String(fecha || '').slice(0, 7)),
+        tipo, documento, referencia: referencia || '',
+        cargo: _r2(cargo), abono: _r2(abono), saldo: _r2(cargo - abono)
+      })
+    }
+    const cxcMap = {}, cxpMap = {}
+    for (const c of _cxcList) {
+      if (c.estado === 'anulado') continue
+      cxcMap[c.id] = c
+      const doc = _descDocCP(c)
+      push('Por cobrar', c.contact_id, c.moneda, c.fecha_emision, '1 · Comprobante', doc, c.fecha_vencimiento ? `Vence ${fechaDMY(c.fecha_vencimiento)}` : '', parseFloat(c.monto_total || 0), 0)
+      push('Por cobrar', c.contact_id, c.moneda, c.fecha_emision, '2 · Nota de débito', doc, '', parseFloat(c.monto_notas_debito || 0), 0)
+      push('Por cobrar', c.contact_id, c.moneda, c.fecha_emision, '3 · Nota de crédito', doc, '', 0, parseFloat(c.monto_notas_credito || 0))
+      push('Por cobrar', c.contact_id, c.moneda, c.fecha_emision, '6 · Anticipo aplicado', doc, '', 0, parseFloat(c.monto_anticipo_aplicado || 0))
+    }
+    for (const c of _cxpList) {
+      if (c.estado === 'anulado') continue
+      cxpMap[c.id] = c
+      const doc = _descDocCP(c)
+      push('Por pagar', c.contact_id, c.moneda, c.fecha_emision, '1 · Comprobante', doc, c.fecha_vencimiento ? `Vence ${fechaDMY(c.fecha_vencimiento)}` : '', parseFloat(c.monto_total || 0), 0)
+      push('Por pagar', c.contact_id, c.moneda, c.fecha_emision, '2 · Nota de débito', doc, '', parseFloat(c.monto_notas_debito || 0), 0)
+      push('Por pagar', c.contact_id, c.moneda, c.fecha_emision, '3 · Nota de crédito', doc, '', 0, parseFloat(c.monto_notas_credito || 0))
+      push('Por pagar', c.contact_id, c.moneda, c.fecha_emision, '6 · Anticipo aplicado', doc, '', 0, parseFloat(c.monto_anticipo_aplicado || 0))
+    }
+    for (const k of _cobrosList) {
+      const c = cxcMap[k.cxc_id]; if (!c) continue
+      push('Por cobrar', k.contact_id, c.moneda, k.fecha, '4 · Cobro', _descDocCP(c), k.referencia, 0, parseFloat(k.monto || 0))
+      push('Por cobrar', k.contact_id, c.moneda, k.fecha, '5 · Retención IGV', _descDocCP(c), k.numero_comprobante_retencion || 'sin comprobante', 0, parseFloat(k.monto_retencion || 0))
+    }
+    for (const p of _pagosList) {
+      const c = cxpMap[p.cxp_id]; if (!c) continue
+      push('Por pagar', p.contact_id, c.moneda, p.fecha, '4 · Pago', _descDocCP(c), p.referencia, 0, parseFloat(p.monto || 0))
+    }
+    for (const l of (_letrasCache || [])) {
+      if (l.estado === 'anulada') continue
+      const emitida = l.tipo === 'emitida'
+      const c = emitida ? cxcMap[l.cxc_id] : cxpMap[l.cxp_id]; if (!c) continue
+      const lado = emitida ? 'Por cobrar' : 'Por pagar'
+      const m = parseFloat(l.monto || 0)
+      push(lado, l.contact_id, l.moneda || c.moneda, l.fecha_emision, '7 · Canje a letra', _descDocCP(c), l.numero_letra, 0, m)
+      push(lado, l.contact_id, l.moneda || c.moneda, l.fecha_emision, '8 · Letra', `Letra ${l.numero_letra}`, `Vence ${fechaDMY(l.fecha_vencimiento)} · ${l.estado}`, m, 0)
+      if (l.estado === 'cobrada') push(lado, l.contact_id, l.moneda || c.moneda, String(l.updated_at || l.fecha_vencimiento).slice(0, 10),
+        emitida ? '9 · Cobro de letra' : '9 · Pago de letra', `Letra ${l.numero_letra}`, l.numero_operacion, 0, m)
+    }
+    filas.sort((a, b) => a.contacto.localeCompare(b.contacto) || a.fecha.localeCompare(b.fecha))
+
+    crearReporte('rep-estado-cuenta', {
+      id: 'rep-estado-cuenta',
+      titulo: 'Estado de cuenta por cliente / proveedor',
+      descripcion: 'Todos los movimientos de cada contacto: comprobantes, notas, cobros/pagos, retenciones y letras. Saldo = cargos − abonos. Filtra una moneda para que los totales no mezclen PEN y USD.',
+      datos: filas,
+      dimensiones: [
+        { key: 'contacto', label: 'Cliente / Proveedor' }, { key: 'lado', label: 'Por cobrar / pagar' },
+        { key: 'moneda', label: 'Moneda' }, { key: 'documento', label: 'Documento' },
+        { key: 'tipo', label: 'Tipo de movimiento' }, { key: 'mes', label: 'Mes' }
+      ],
+      medidas: [
+        { key: 'cargo', label: 'Cargos', agg: 'sum', formato: 'money' },
+        { key: 'abono', label: 'Abonos', agg: 'sum', formato: 'money' },
+        { key: 'saldo', label: 'Saldo', agg: 'sum', formato: 'money', semaforo: true }
+      ],
+      filtros: [
+        { key: 'contacto', label: 'Cliente / Proveedor', tipo: 'texto', campos: ['contacto', 'documento', 'referencia'], placeholder: 'Nombre, comprobante o referencia...' },
+        { key: 'lado', label: 'Lado', tipo: 'select', opciones: ['Por cobrar', 'Por pagar'] },
+        { key: 'moneda', label: 'Moneda', tipo: 'select', opciones: ['PEN', 'USD'] },
+        { key: 'tipo', label: 'Tipo', tipo: 'select', opciones: [...new Set(filas.map(f => f.tipo))].sort() },
+        { key: 'rango', label: 'Fecha', tipo: 'rango', campo: 'fecha' }
+      ],
+      agruparPorDefecto: ['contacto', 'documento'],
+      medidasPorDefecto: ['cargo', 'abono', 'saldo'],
+      kpis: (fs) => {
+        const cargo = fs.reduce((s, f) => s + f.cargo, 0)
+        const abono = fs.reduce((s, f) => s + f.abono, 0)
+        const monedas = new Set(fs.map(f => f.moneda))
+        return [
+          { label: 'Cargos', valor: cargo, formato: 'money' },
+          { label: 'Abonos', valor: abono, formato: 'money', color: 'var(--color-success)' },
+          { label: monedas.size > 1 ? 'Saldo (⚠ mezcla PEN+USD)' : 'Saldo', valor: cargo - abono, formato: 'money', color: 'var(--color-warning)' },
+          { label: 'Contactos', valor: new Set(fs.map(f => f.contacto)).size, formato: 'int' },
+          { label: 'Movimientos', valor: fs.length, formato: 'int' }
+        ]
+      }
+    })
+  } catch (e) {
+    console.error('construirEstadoCuenta:', e)
+    const el = document.getElementById('rep-estado-cuenta')
+    if (el) el.innerHTML = `<p class="reporte-vacio">No se pudo armar el estado de cuenta: ${_esc(e.message)}</p>`
+  }
+}
+
+// ============================================================================
+// REGISTRAR COBRO / PAGO — MONEDAS (factura en una moneda, dinero en otra)
+// ============================================================================
+// "Se aplica a la factura" (cobroMonto / pagoMonto) es SIEMPRE la moneda del
+// documento: es lo que baja el saldo de la CxC/CxP y de sus cuotas.
+// "Importe recibido/pagado" es la moneda en que se movió el dinero (la de la
+// cuenta bancaria). T.C. = soles por 1 dólar. Se puede digitar cualquiera de
+// los dos importes y el otro se recalcula.
+
+/** USD→PEN multiplica por T.C.; PEN→USD divide. Misma moneda: igual. */
+function _convMoneda(monto, de, a, tc) {
+  monto = parseFloat(monto) || 0
+  if (!de || !a || de === a) return monto
+  const t = parseFloat(tc) || 1
+  return de === 'USD' ? monto * t : monto / t
+}
+
+const _CP_IDS = {
+  cobro: { sel: 'cobroSelectCxC', banco: 'cobroBanco', moneda: 'cobroMonedaCobro', tc: 'cobroTipoCambio', tcGroup: 'cobroTCGroup',
+           mov: 'cobroMontoRecibido', apl: 'cobroMonto', aplGroup: 'cobroAplicadoGroup', lblMov: 'cobroLblRecibido', lblApl: 'cobroLblAplicado',
+           resumen: 'cobro-resumen', verbo: 'recibido', doc: () => _cxcList.find(c => c.id === parseInt(document.getElementById('cobroSelectCxC')?.value || 0)), saldo: d => _saldoCxC(d) },
+  pago:  { sel: 'pagoSelectCompra', banco: 'pagoBanco', moneda: 'pagoMoneda', tc: 'pagoTipoCambio', tcGroup: 'pagoTCGroup',
+           mov: 'pagoMontoMoneda', apl: 'pagoMonto', aplGroup: 'pagoAplicadoGroup', lblMov: 'pagoLblRecibido', lblApl: 'pagoLblAplicado',
+           resumen: 'pago-resumen', verbo: 'pagado', doc: () => _cxpList.find(c => c.id === parseInt(document.getElementById('pagoSelectCompra')?.value || 0)), saldo: d => _saldoCxP(d) }
+}
+
+/** Tarjeta del documento (estándar info-card). */
+function _cardDocCP(doc, esCxC, pendiente) {
+  const m = doc.moneda || 'PEN'
+  return `<div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">${esCxC ? 'Cliente' : 'Proveedor'} · Factura en ${m}</div>
+    <div style="font-weight:600; font-size:1.05rem; margin-top:2px;">${_esc(_nombreContacto(doc.contact_id))}</div>
+    <div style="font-size:0.85rem; color:var(--text-secondary); margin-top:2px;">${_esc(_descDocCP(doc))} · Total ${m} ${formatNumber(doc.monto_total)} · <b style="color:var(--color-warning);">Pendiente ${m} ${formatNumber(pendiente)}</b>${doc.fecha_vencimiento ? ` · Vence ${fechaDMY(doc.fecha_vencimiento)}` : ''}</div>`
+}
+
+window._cpRecalc = function (tipo, origen) {
+  const k = _CP_IDS[tipo]
+  const $ = id => document.getElementById(id)
+  const doc = k.doc()
+  const monDoc = doc?.moneda || 'PEN'
+
+  // La moneda del dinero la define la cuenta bancaria (si hay una elegida)
+  const banco = _bancosMap[parseInt($(k.banco)?.value || 0)]
+  if (banco?.moneda) { $(k.moneda).value = banco.moneda; $(k.moneda).disabled = true }
+  else $(k.moneda).disabled = false
+  if (origen === 'doc' && !banco) $(k.moneda).value = monDoc
+  const monMov = $(k.moneda).value || monDoc
+  const distinta = monMov !== monDoc
+
+  // Editar el importe recibido/pagado recalcula el T.C. (el importe aplicado a
+  // la factura se mantiene): T.C. = soles ÷ dólares. Así los 3 campos quedan
+  // ligados en ambos sentidos — T.C. o aplicado → recalcula el recibido;
+  // recibido → recalcula el T.C. Si aún no hay importe aplicado, se usa el T.C.
+  const aplPrevio = parseFloat($(k.apl).value) || 0
+  const movNuevo  = parseFloat($(k.mov).value) || 0
+  if (origen === 'recibido' && distinta && aplPrevio > 0 && movNuevo > 0) {
+    const tcCalc = monMov === 'PEN' ? movNuevo / aplPrevio : aplPrevio / movNuevo
+    $(k.tc).value = tcCalc.toFixed(4)
+    origen = 'tc-calculado'
+  }
+  const tc = parseFloat($(k.tc).value) || 0
+
+  $(k.tcGroup).style.visibility = (distinta || monDoc === 'USD' || monMov === 'USD') ? 'visible' : 'hidden'
+  $(k.aplGroup).style.display = distinta ? 'grid' : 'none'
+  $(k.lblMov).textContent = `Importe ${k.verbo} (${monMov}) *`
+  $(k.lblApl).textContent = `Se aplica a la factura (${monDoc})`
+
+  if (distinta && !(tc > 0)) { $(k.resumen).innerHTML = '<span style="grid-column:1/-1; color:var(--color-warning);">Ingresa el tipo de cambio</span>'; return }
+
+  // Recalcular el importe que NO se está digitando
+  if (origen === 'tc-calculado') {
+    // el T.C. ya se derivó de los dos importes: no se toca ninguno
+  } else if (origen === 'recibido') {
+    $(k.apl).value = $(k.mov).value === '' ? '' : _r2(_convMoneda($(k.mov).value, monMov, monDoc, tc)).toFixed(2)
+  } else {
+    $(k.mov).value = $(k.apl).value === '' ? '' : _r2(_convMoneda($(k.apl).value, monDoc, monMov, tc)).toFixed(2)
+  }
+
+  // Resumen: lo que entra/sale del banco, lo que se aplica y el saldo que queda
+  const apl = parseFloat($(k.apl).value) || 0
+  const mov = parseFloat($(k.mov).value) || 0
+  const pend = doc ? Math.max(0, k.saldo(doc)) : 0
+  const ret = tipo === 'cobro' && $('cobroAplicarRetencion')?.checked && _cobroRetencionPendiente > 0 ? _cobroRetencionPendiente : 0
+  const queda = _r2(pend - apl - ret)
+  const celda = (lbl, val, color = 'var(--text-primary)') => `<div><div style="font-size:11px; color:var(--text-secondary);">${lbl}</div><div style="font-size:16px; font-weight:600; color:${color};">${val}</div></div>`
+  $(k.resumen).innerHTML = doc
+    ? celda(tipo === 'cobro' ? 'Entra al banco' : 'Sale del banco', `${monMov} ${formatNumber(mov)}`)
+      + celda('Se aplica a la factura', `${monDoc} ${formatNumber(apl + ret)}${ret ? ` <small style="font-size:11px;">(incl. ret. ${formatNumber(ret)})</small>` : ''}`)
+      + celda('Saldo después', `${monDoc} ${formatNumber(queda)}`, queda < -0.01 ? 'var(--color-danger)' : (queda <= 0.01 ? 'var(--color-success)' : 'var(--color-warning)'))
+    : '<span style="grid-column:1/-1; color:var(--text-secondary);">Selecciona el documento</span>'
+}
+
+// ============================================================================
+// ARCHIVOS ADJUNTOS (voucher / recibo / otro) — tabla `adjuntos` (script 60)
+// ============================================================================
+// Hasta 3 archivos por vez, cada uno con su concepto. Se eligen en el modal
+// (quedan "pendientes" en memoria) y se suben al guardar el cobro/pago.
+const _adjPendientes = { cobro: [], pago: [], ecp: [] }
+const _adjConteo = { cobro: {}, pago: {} }
+const _ADJ_MAX_VEZ = 3
+
+window._adjSeleccionar = function (pref) {
+  const input = document.getElementById(`${pref}Archivo`)
+  const nuevos = [...(input?.files || [])]
+  const libres = _ADJ_MAX_VEZ - _adjPendientes[pref].length
+  if (nuevos.length > libres) showToast(`Máximo ${_ADJ_MAX_VEZ} archivos por vez: se tomaron los primeros ${Math.max(0, libres)}`, 'warning')
+  for (const f of nuevos.slice(0, Math.max(0, libres))) {
+    // Sugerencia de concepto por el nombre del archivo
+    const n = f.name.toLowerCase()
+    _adjPendientes[pref].push({ file: f, concepto: /recib/.test(n) ? 'recibo' : (/vouch|constan|transf|deposit/.test(n) ? 'voucher' : 'voucher') })
+  }
+  input.value = ''   // permite volver a elegir el mismo archivo
+  _pintarAdjPendientes(pref)
+}
+
+window._adjConcepto = function (pref, i, valor) { if (_adjPendientes[pref][i]) _adjPendientes[pref][i].concepto = valor }
+window._adjQuitarPendiente = function (pref, i) { _adjPendientes[pref].splice(i, 1); _pintarAdjPendientes(pref) }
+
+function _pintarAdjPendientes(pref) {
+  const cont = document.getElementById(`${pref}-adj-lista`)
+  if (!cont) return
+  const opts = v => Object.entries(ADJ_CONCEPTOS).map(([k, t]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${t}</option>`).join('')
+  cont.innerHTML = _adjPendientes[pref].map((a, i) => `
+    <div style="display:grid; grid-template-columns:130px 1fr auto; gap:8px; align-items:center; padding:6px 8px; background:var(--bg-secondary); border-radius:var(--radius-sm);">
+      <select onchange="window._adjConcepto('${pref}', ${i}, this.value)" style="padding:4px 6px;">${opts(a.concepto)}</select>
+      <span style="font-size:0.82rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${_esc(a.file.name)}">📄 ${_esc(a.file.name)} <small style="color:var(--text-secondary);">(${(a.file.size / 1024).toFixed(0)} KB)</small></span>
+      <button type="button" class="btn btn-small btn-danger" onclick="window._adjQuitarPendiente('${pref}', ${i})" title="Quitar">✕</button>
+    </div>`).join('')
+  const input = document.getElementById(`${pref}Archivo`)
+  if (input) input.disabled = _adjPendientes[pref].length >= _ADJ_MAX_VEZ
+}
+
+/** Sube los pendientes del modal. Nunca rompe el registro: solo avisa si algo falla. */
+async function _subirAdjuntosPendientes(pref, entidad, id) {
+  const items = _adjPendientes[pref]
+  if (!items.length) return
+  try {
+    const { ok, errores } = await subirAdjuntos(entidad, id, items, getCurrentUser()?.db_id || null)
+    if (errores.length) showToast(`⚠️ ${ok} archivo(s) subido(s). No se subieron: ${errores.join(' · ')}`, 'warning', 8000)
+  } catch (e) {
+    showToast('⚠️ Registro guardado, pero los archivos no se subieron: ' + e.message, 'warning', 7000)
+  } finally {
+    _adjPendientes[pref] = []
+    _pintarAdjPendientes(pref)
+  }
+}
+
+function _htmlAdjuntos(entidad, id, adjuntos, conQuitar) {
+  if (!adjuntos?.length) return '<span style="color:var(--text-secondary);">Sin archivos adjuntos.</span>'
+  return adjuntos.map(a => `<div>
+      <span class="badge badge-info" style="font-size:0.7rem;">${ADJ_CONCEPTOS[a.concepto] || a.concepto}</span>
+      <a href="#" onclick="window.verAdjunto(${a.id}, '${a.path}'); return false;">${_esc(a.nombre)}</a>
+      ${conQuitar ? `· <a href="#" style="color:var(--color-danger);" onclick="window.quitarAdjunto('${entidad}', ${id}, ${a.id}); return false;">Quitar</a>` : ''}
+    </div>`).join('')
+}
+
+function _clipAdjunto(entidad, id) {
+  const n = _adjConteo[entidad]?.[id] || 0
+  return n ? ` <a href="#" title="${n} archivo(s) adjunto(s)" onclick="window.verDetalleCP('${entidad}', ${id}); return false;" style="text-decoration:none;">📎${n > 1 ? n : ''}</a>` : ''
+}
+
+window.verAdjunto = async function (adjId, path) {
+  const w = window.open('', '_blank')   // antes del await: si no, el navegador lo bloquea
+  try {
+    const url = await getUrlAdjunto(path)
+    if (!url) throw new Error('Archivo no encontrado')
+    if (w) w.location.href = url; else window.open(url, '_blank')
+  } catch (e) { if (w) w.close(); showToast('Error: ' + e.message, 'danger') }
+}
+
+window.quitarAdjunto = async function (entidad, id, adjId) {
+  if (!confirm('¿Quitar este archivo adjunto?')) return
+  try {
+    await eliminarAdjunto(adjId)
+    document.getElementById('ecp-adjunto').innerHTML = _htmlAdjuntos(entidad, id, await getAdjuntos(entidad, id), true)
+    showToast('Archivo eliminado', 'success')
+    await Promise.all([cargarCobrosRecientes(), cargarPagosRecientes()])
+  } catch (e) { showToast('Error: ' + e.message, 'danger') }
+}
+
+// ============================================================================
+// TIPO DE CAMBIO — 8 decimales + valor por defecto (2026-10-03)
+// ============================================================================
+/**
+ * T.C. que se GUARDA en el cobro/pago. Si el dinero entró en otra moneda, se
+ * deriva de los dos importes (recibido ÷ aplicado) con 8 decimales, para que
+ * el movimiento bancario reproduzca exacto el importe del voucher.
+ */
+function _tcEfectivoCP(tipo) {
+  const k = _CP_IDS[tipo]
+  const $ = id => document.getElementById(id)
+  const doc = k.doc()
+  const monDoc = doc?.moneda || 'PEN'
+  const monMov = $(k.moneda).value || monDoc
+  const apl = parseFloat($(k.apl).value) || 0
+  const mov = parseFloat($(k.mov).value) || 0
+  let tc = parseFloat($(k.tc).value) || parseFloat(doc?.tipo_cambio) || 1
+  if (monMov !== monDoc && apl > 0 && mov > 0) tc = monMov === 'PEN' ? mov / apl : apl / mov
+  return Math.round(tc * 1e8) / 1e8
+}
+
+/**
+ * T.C. por defecto al elegir documento o cambiar la fecha: el de SUNAT del día
+ * guardado en caché (sin gastar crédito de Decolecta) con el mismo criterio
+ * del documento (cobros → venta, pagos → compra). Si no hay, el T.C. de la
+ * factura → mismo día y mismo T.C. = sin diferencia de cambio.
+ */
+window._tcDefaultCP = async function (tipo) {
+  const k = _CP_IDS[tipo]
+  const $ = id => document.getElementById(id)
+  const doc = k.doc()
+  if (!doc) return
+  const fecha = $(tipo === 'cobro' ? 'cobroFecha' : 'pagoFecha')?.value
+  let tc = parseFloat(doc.tipo_cambio) || 0
+  let fuente = 'T.C. de la factura'
+  try {
+    const r = await getTipoCambioDia(fecha, { permitirApi: false })
+    const v = tipo === 'cobro' ? r?.venta : r?.compra
+    if (v > 0) { tc = v; fuente = `SUNAT ${tipo === 'cobro' ? 'venta' : 'compra'} del ${fecha}` }
+  } catch (e) { /* sin caché: queda el de la factura */ }
+  if (tc > 0) {
+    $(k.tc).value = tc
+    $(k.tc).title = fuente
+    window._cpRecalc(tipo, 'tc')
+  }
+}
+
+/** T.C. con que se cobró/pagó una letra (lo guarda la línea de banco de su asiento). */
+async function _tcCancelLetra(l) {
+  if (!l.asiento_cobro_id) return l.tipo_cambio || ''
+  const { data } = await supabase.from('journal_entry_lines').select('tipo_cambio, importe_original')
+    .eq('journal_entry_id', l.asiento_cobro_id)
+  const tcs = (data || []).map(x => parseFloat(x.tipo_cambio)).filter(v => v > 0)
+  const distinto = tcs.find(v => Math.abs(v - parseFloat(l.tipo_cambio || 0)) > 1e-9)
+  return distinto || tcs[0] || l.tipo_cambio || ''
+}
+
+window._tcDefaultLetra = async function (l) {
+  if ((l.moneda || 'PEN') !== 'USD') return
+  try {
+    const fecha = document.getElementById('cletFecha')?.value
+    const r = await getTipoCambioDia(fecha, { permitirApi: false })
+    const v = l.tipo === 'emitida' ? r?.venta : r?.compra
+    if (v > 0) document.getElementById('cletTC').value = v
+  } catch (e) { /* queda el de la letra */ }
+}
+
+/** true si el registro es de un documento en USD y su asiento aún está en formato viejo (sin importe ME). */
+async function _asientoSinME(reg) {
+  if ((reg.moneda || 'PEN') !== 'USD' || !reg.asiento_id) return false
+  const { data } = await supabase.from('journal_entry_lines').select('importe_original').eq('journal_entry_id', reg.asiento_id)
+  return !(data || []).some(l => parseFloat(l.importe_original) > 0)
 }

@@ -321,7 +321,9 @@ window.guardarEdicionCompra = async function () {
     // con el TC nuevo — si no, queda desincronizado con la cabecera.
     let recosteo = null
     let recosteoError = null
-    if ((monedaCambio || tcCambio) && c.guiasCompra.length > 0) {
+    // En SOLES el T.C. es solo referencia (no convierte el costo): recostear
+    // solo si cambió la moneda o el T.C. de una compra en USD (2026-10-05).
+    if ((monedaCambio || (tcCambio && moneda === 'USD')) && c.guiasCompra.length > 0) {
       try {
         const user = await getCurrentUser()
         const compraParaCosteo = { ...c.compra, currency: moneda, tipo_cambio: tipoCambio }

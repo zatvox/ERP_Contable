@@ -7,7 +7,7 @@
   <title>JHIRO ERP - Inventario</title>
   <link rel="stylesheet" href="assets/css/styles.css">
 </head>
-<body>
+<body class="mod-inventario">
   <div class="app-container">
     <aside class="sidebar">
       <div class="sidebar-logo">JHIRO</div>
@@ -43,9 +43,7 @@
             <button type="button" class="module-nav-group-toggle">Catálogo</button>
             <div class="module-nav-dropdown">
               <button class="tab-btn active" data-tab="productos">Productos</button>
-              <button class="tab-btn" data-tab="categorias">Categorías</button>
-              <button class="tab-btn" data-tab="marcas">Marcas</button>
-              <button class="tab-btn" data-tab="partidas">Partidas</button>
+              <button class="tab-btn" data-tab="atributos">Familias y atributos</button>
             </div>
           </div>
           <div class="module-nav-group">
@@ -60,7 +58,6 @@
           <div class="module-nav-group">
             <button type="button" class="module-nav-group-toggle">Reportes</button>
             <div class="module-nav-dropdown">
-              <button class="tab-btn" data-tab="reportes">Stock por Partida</button>
               <button class="tab-btn" data-tab="reportes-gerenciales">📊 Reportes gerenciales</button>
             </div>
           </div>
@@ -73,7 +70,6 @@
       </header>
 
       <main class="content">
-        <h1 class="page-title">Módulo Inventario</h1>
 
         <!-- TAB PRODUCTOS -->
         <div id="tab-productos" class="tab-content active">
@@ -184,6 +180,12 @@
                   <option value="">Todos</option>
                 </select>
               </div>
+              <div class="form-group" id="filtroResumenFamiliaWrap" style="margin:0;" hidden>
+                <label style="font-size:0.8rem;">Vista</label>
+                <label style="display:flex; align-items:center; gap:6px; height:38px; cursor:pointer; white-space:nowrap;" title="Agrupa en una sola fila los lotes que pertenecen a una misma familia (Familias y atributos › Familias)">
+                  <input type="checkbox" id="chkAgruparFamilia" style="width:auto;" onchange="window.aplicarFiltrosResumenStock()"> Agrupar por familia
+                </label>
+              </div>
               <div class="form-group" id="filtroResumenZonaWrap" style="margin:0; min-width:220px;" hidden>
                 <label style="font-size:0.8rem;">Zona</label>
                 <select id="filtroZonaStock" onchange="window.aplicarFiltrosResumenStock()">
@@ -197,8 +199,38 @@
           </div>
         </div>
 
-        <!-- TAB CATEGORÍAS -->
-        <div id="tab-categorias" class="tab-content">
+        <div id="tab-kardex" class="tab-content">
+          <div id="content-kardex" class="card">Cargando...</div>
+        </div>
+
+        <div id="tab-historial" class="tab-content">
+          <div id="content-historial" class="card">Cargando...</div>
+        </div>
+
+        <!-- TAB FAMILIAS Y ATRIBUTOS (2026-10-05): agrupa los datos maestros de
+             clasificación — Familias, Categorías, Marcas y Partidas — en un
+             solo botón del menú con subtabs internos. -->
+        <div id="tab-atributos" class="tab-content">
+          <div class="subtab-bar" id="inv-subtabs-atributos">
+            <button class="subtab active" data-sub="atr-familias">Familias</button>
+            <button class="subtab" data-sub="atr-categorias">Categorías</button>
+            <button class="subtab" data-sub="atr-marcas">Marcas</button>
+            <button class="subtab" data-sub="atr-partidas">Partidas</button>
+          </div>
+          <div id="atr-familias" class="subtab-panel active">
+          <div class="card">
+            <div class="card-header solo-acciones">
+              <div style="display:flex; gap:8px; align-items:center; flex:1;">
+                <input type="text" id="buscarFamilias" placeholder="Buscar familia..." oninput="window.renderFamilias()" style="max-width:320px;">
+              </div>
+              <button class="btn btn-primary btn-small" onclick="window.abrirFamilia(null, 'nuevo')">+ Nueva Familia</button>
+            </div>
+            <div id="tabla-familias" class="table-container">
+              <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Cargando...</p>
+            </div>
+          </div>
+          </div>
+          <div id="atr-categorias" class="subtab-panel">
           <div class="card">
             <div class="card-header">
               <h3 class="card-title">Categorías de Productos</h3>
@@ -208,10 +240,8 @@
               <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Cargando...</p>
             </div>
           </div>
-        </div>
-
-        <!-- TAB MARCAS -->
-        <div id="tab-marcas" class="tab-content">
+          </div>
+          <div id="atr-marcas" class="subtab-panel">
           <div class="card">
             <div class="card-header">
               <h3 class="card-title">Marcas de Productos</h3>
@@ -221,39 +251,15 @@
               <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Cargando...</p>
             </div>
           </div>
-        </div>
-
-        <!-- TAB PARTIDAS -->
-        <div id="tab-partidas" class="tab-content">
-          <div class="card">
-            <div class="card-header">
-              <h3 class="card-title">Partidas de Productos</h3>
-              <button class="btn btn-primary btn-small" onclick="openModal('modal-nueva-partida')">+ Nueva Partida</button>
-            </div>
-            <div id="tabla-partidas" class="table-container">
-              <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Cargando...</p>
-            </div>
           </div>
-        </div>
-
-        <div id="tab-kardex" class="tab-content">
-          <div id="content-kardex" class="card">Cargando...</div>
-        </div>
-
-        <div id="tab-historial" class="tab-content">
-          <div id="content-historial" class="card">Cargando...</div>
-        </div>
-
-        <!-- TAB REPORTES: bloque de reportes del módulo, se arranca con
-             Stock por Partida (agrupa los lotes de una misma partida). -->
-        <div id="tab-reportes" class="tab-content">
+          <div id="atr-partidas" class="subtab-panel">
           <div class="card">
             <div class="col-menu card-corner-menu" id="stockPartidaColMenu">
               <button type="button" class="card-menu-btn" onclick="window._colMenuToggle('stock-partida', 'stockPartidaColMenu', 'stockPartidaColMenuDropdown')" title="Elegir qué columnas mostrar">⋮</button>
               <div class="col-menu-dropdown" id="stockPartidaColMenuDropdown"></div>
             </div>
             <div class="card-header" style="padding-right:34px;">
-              <h3 class="card-title">Stock por Partida</h3>
+              <h3 class="card-title">Partidas</h3>
             </div>
             <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; padding:12px 16px; border-bottom:1px solid var(--border-color, #e0e0e0);">
               <div class="form-group" style="margin:0; min-width:220px; flex:1;">
@@ -277,6 +283,7 @@
             <div id="tabla-reporte-partidas" class="table-container">
               <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Cargando...</p>
             </div>
+          </div>
           </div>
         </div>
 
@@ -567,6 +574,62 @@
   </div>
 
   <!-- MODAL NUEVA MARCA -->
+  <!-- MODAL FAMILIA (2026-10-05): Nueva / Ver / Editar. Lotes = Producto +
+       N° de Lote (mismo nivel que Resumen de Stock › Por Ubicación), solo
+       los que tienen stock > 0. Un lote pertenece a una sola familia. -->
+  <div id="modal-familia" class="modal">
+    <div class="modal-content" style="width:min(96vw, 1100px); max-width:min(96vw, 1100px); max-height:calc(100vh - 48px); overflow-y:auto;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="famTitulo">Nueva Familia</h3>
+        <button class="modal-close" onclick="closeModal('modal-familia')">✕</button>
+      </div>
+      <div id="famAvisoLectura" hidden style="padding:8px 12px; border-left:3px solid var(--color-warning, #f59e0b); background:var(--bg-secondary); border-radius:var(--radius-md); font-size:0.85rem; margin-bottom:12px;">Solo lectura — usa ✏️ Editar para modificar.</div>
+
+      <strong style="display:block; font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em; color:var(--text-secondary); margin-bottom:8px;">Datos</strong>
+      <div style="display:grid; grid-template-columns:1fr 2fr; gap:12px;">
+        <div class="form-group" style="margin:0;">
+          <label>Nombre *</label>
+          <input type="text" id="famNombre" placeholder="Ej: 10/1 Spun colores">
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label>Descripción</label>
+          <input type="text" id="famDescripcion" placeholder="Opcional">
+        </div>
+      </div>
+
+      <div style="border-top:1px solid var(--border-color); margin:16px 0 10px;"></div>
+      <strong style="display:block; font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em; color:var(--text-secondary); margin-bottom:8px;">Lotes de la familia</strong>
+      <div id="famFiltros" style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:10px;">
+        <div class="form-group" style="margin:0; flex:1; min-width:220px;">
+          <label style="font-size:0.8rem;">Buscar</label>
+          <input type="text" id="famBuscar" placeholder="Producto, SKU, lote o marca..." oninput="window._famPintarLotes()">
+        </div>
+        <div class="form-group" style="margin:0; min-width:180px;">
+          <label style="font-size:0.8rem;">Categoría</label>
+          <select id="famCategoria" onchange="window._famPintarLotes()"><option value="">Todas</option></select>
+        </div>
+        <div class="form-group" style="margin:0; min-width:180px;">
+          <label style="font-size:0.8rem;">Mostrar</label>
+          <select id="famMostrar" onchange="window._famPintarLotes()">
+            <option value="disponibles" selected>Disponibles + seleccionados</option>
+            <option value="seleccionados">Solo seleccionados</option>
+            <option value="todos">Todos (incluye de otras familias)</option>
+          </select>
+        </div>
+      </div>
+      <div style="border:1px solid var(--border-color); border-radius:var(--radius-md); overflow:hidden; overflow-x:auto; max-height:46vh; overflow-y:auto;">
+        <table style="width:100%; border-collapse:collapse; margin:0;" id="famTablaLotes"></table>
+      </div>
+      <div id="famResumen" style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; margin-top:12px; padding:10px; background:var(--bg-secondary); border-radius:var(--radius-md);"></div>
+
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal('modal-familia')">Cancelar</button>
+        <button class="btn btn-secondary" id="famBtnEditar" hidden onclick="window.abrirFamilia(window._famActual?.id, 'editar')">✏️ Editar</button>
+        <button class="btn btn-primary" id="famBtnGuardar" onclick="window.conCarga(this, window.guardarFamilia)">💾 Guardar Familia</button>
+      </div>
+    </div>
+  </div>
+
   <div id="modal-nueva-marca" class="modal">
     <div class="modal-content">
       <div class="modal-header">

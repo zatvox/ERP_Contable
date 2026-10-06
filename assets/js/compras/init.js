@@ -4,7 +4,7 @@
 // ============================================================================
 import { getCurrentUser } from '../auth-supabase.js'
 import { getTipoDocumentosMap } from '../supabase-data.js'
-import { getTCCompra, attachConsultaDocumento } from '../sunat-api.js'
+import { getTCCompra, attachConsultaDocumento, textoAvisoTC } from '../sunat-api.js'
 import { showToast } from '../helpers.js'
 import { initModuleNavDropdowns, initSubtabs } from '../main.js'
 import { renderConfiguracionTab, aplicarPreferenciasVista } from '../config-modulo.js'
@@ -22,22 +22,30 @@ import { construirReporteCompras } from './reportes.js'
  * Consulta el TC COMPRA SBS para la fecha indicada y llena #ccTipoCambio.
  * Usar en compras/importaciones en USD (Art. 61° LIR).
  */
-export async function _autoFetchTCCompra(fecha = null) {
+export async function _autoFetchTCCompra(fecha = null, permitirApi = false) {
   const campo = document.getElementById('ccTipoCambio')
   const aviso = document.getElementById('ccTCAviso')
   if (!campo) return
 
-  if (aviso) aviso.textContent = 'Consultando SBS...'
-  const result = await getTCCompra(fecha)
+  if (aviso) aviso.textContent = permitirApi ? 'Consultando TC SUNAT...' : 'Buscando TC guardado...'
+  const result = await getTCCompra(fecha, { permitirApi })
 
   if (result.error) {
     if (aviso) aviso.textContent = `⚠️ ${result.error} — ingresa TC manualmente`
-    showToast('No se pudo obtener el TC de SUNAT. Ingresa el tipo de cambio manualmente.', 'warning')
+    if (!result.sinCache) showToast('No se pudo obtener el TC de SUNAT. Ingresa el tipo de cambio manualmente.', 'warning')
     return
   }
 
   campo.value = result.tc.toFixed(3)
-  if (aviso) aviso.textContent = `TC Compra SBS ${result.fecha}: S/. ${result.tc.toFixed(3)} — Art. 61° LIR`
+  if (aviso) aviso.textContent = textoAvisoTC(result, 'compra')
+}
+
+/** Botón "🔎 Consultar" del modal Confirmar Compra (antes llamaba al de Nueva Compra por error). */
+window.consultarTCConfirmarCompra = async function () {
+  const btn = document.getElementById('btnAutoTCCompra')
+  if (btn) btn.disabled = true
+  try { await _autoFetchTCCompra(document.getElementById('ccFecha')?.value || null, true) }
+  finally { if (btn) btn.disabled = false }
 }
 
 // 2026-09-25 (reorganización): aquí había una 1ª definición de

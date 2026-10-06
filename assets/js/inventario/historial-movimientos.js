@@ -410,7 +410,11 @@ window.guardarTrasladoInterno = async function () {
         cantidad_unidades_entrada: unidades,
         cantidad_unidades_salida:  unidades,
         costo_unitario:       costoUnitario,
-        valor_entrada:        0,
+        // Traslado = sale de la zona origen y entra a la destino AL MISMO
+        // COSTO (criterio SUNAT, Tabla 12 op. 11): valor_entrada =
+        // valor_salida, neto de valor 0. Antes valor_entrada=0 inflaba
+        // "Valor salidas" como si fuera costo de venta (2026-10-01).
+        valor_entrada:        parseFloat((linea.cantidad * costoUnitario).toFixed(2)),
         valor_salida:         parseFloat((linea.cantidad * costoUnitario).toFixed(2)),
         moneda:               lote?.moneda || 'PEN',
         tipo_cambio:           parseFloat(lote?.tipo_cambio) || 1,

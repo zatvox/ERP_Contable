@@ -132,6 +132,20 @@ function _asegurarModal() {
             </div>
           </div>
 
+          <!-- 2026-09-28: moneda y T.C. del comprobante de origen, solo
+               lectura — la nota SIEMPRE va en la misma moneda que el
+               documento que modifica (los importes de abajo están en ella). -->
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+            <div class="form-group">
+              <label>Moneda (del comprobante)</label>
+              <input type="text" id="notaMoneda" readonly style="background:var(--bg-tertiary);">
+            </div>
+            <div class="form-group" id="notaTCGrupo">
+              <label>Tipo de cambio (del comprobante)</label>
+              <input type="text" id="notaTC" readonly style="background:var(--bg-tertiary);">
+            </div>
+          </div>
+
           <!-- Los 3 importes están enlazados: editar cualquiera de los tres
                recalcula los otros dos usando el % de IGV vigente. Cuando el
                llamador activa "modo detalle" (ej. detalle por ítem en
@@ -194,6 +208,8 @@ function _asegurarModal() {
  *   serieSugerida  string
  *   numeroSugerido string
  *   bloqueos    string[]
+ *   moneda      'PEN' | 'USD' del comprobante de origen (solo lectura en el modal)
+ *   tipoCambio  T.C. del comprobante de origen (se muestra si moneda ≠ PEN)
  *   onEmitir    async ({ motivo, motivoTexto, fecha, serie, numero, importe, igv, base, descripcion, anulaTotal }) => void
  */
 export async function abrirModalNota(o) {
@@ -235,9 +251,20 @@ export async function abrirModalNota(o) {
     .join('')
 
   _valor('notaFecha', new Date().toISOString().split('T')[0])
+  // Serie: si el llamador pasa las series válidas (Ventas: series 07/08 de la
+  // tabla según Factura/Boleta de origen) es un SELECTOR — no se escribe. En
+  // Compras la serie es la del proveedor (documento externo) → texto libre.
+  _prepararCampoSerieNota(o)
   _valor('notaSerie', o.serieSugerida || (esNC ? 'FC01' : 'FD01'))
   _valor('notaNumero', o.numeroSugerido || '')
   _valor('notaDescripcion', '')
+  const monedaNota = o.moneda || 'PEN'
+  _valor('notaMoneda', monedaNota === 'USD' ? 'USD — Dólares' : monedaNota === 'PEN' ? 'PEN — Soles' : monedaNota)
+  const tcNota = parseFloat(o.tipoCambio) || 0
+  _valor('notaTC', tcNota > 0 ? tcNota.toFixed(3) : '')
+  const grupoTC = document.getElementById('notaTCGrupo')
+  if (grupoTC) grupoTC.style.visibility = (monedaNota !== 'PEN' && tcNota > 0) ? 'visible' : 'hidden'
+  document.getElementById('modal-nota-cd').dataset.moneda = monedaNota
   _valor('notaImporte', '')
   _valor('notaIgv', '')
   _valor('notaBase', '')
@@ -454,6 +481,30 @@ export function badgeTipoDocumento(tipo) {
   if (t === TIPO_NC) return '<span class="badge badge-danger" title="Nota de Crédito: resta del comprobante que referencia">N. Crédito</span>'
   if (t === TIPO_ND) return '<span class="badge badge-warning" title="Nota de Débito: suma al comprobante que referencia">N. Débito</span>'
   return nombreTipoComprobante(t)
+}
+
+function _prepararCampoSerieNota(o) {
+  const actual = document.getElementById('notaSerie')
+  if (!actual) return
+  const quiereSelect = Array.isArray(o.seriesOpciones) && o.seriesOpciones.length > 0
+  let el = actual
+  if (quiereSelect && actual.tagName !== 'SELECT') {
+    el = document.createElement('select'); el.id = 'notaSerie'; actual.replaceWith(el)
+  } else if (!quiereSelect && actual.tagName === 'SELECT') {
+    el = document.createElement('input'); el.type = 'text'; el.id = 'notaSerie'; el.placeholder = 'Ej: FC01'; actual.replaceWith(el)
+  }
+  if (quiereSelect) {
+    const lista = [...o.seriesOpciones]
+    if (o.serieSugerida && !lista.includes(o.serieSugerida)) lista.unshift(o.serieSugerida)
+    el.innerHTML = lista.map(s => `<option value="${_esc(s)}">${_esc(s)}</option>`).join('')
+    el.onchange = async () => {
+      if (typeof o.onCambiarSerie !== 'function') return
+      const n = await o.onCambiarSerie(el.value)
+      if (n) _valor('notaNumero', n)
+    }
+  } else {
+    el.onchange = null
+  }
 }
 
 function _valor(id, v) { const el = document.getElementById(id); if (el) el.value = v }

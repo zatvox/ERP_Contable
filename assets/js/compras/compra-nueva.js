@@ -2,6 +2,7 @@
 // compras/compra-nueva.js — parte de compras.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
+import { vincularTCEnVivo } from '../tc-en-vivo.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { getCompraById, addCompra, addCompraDetalle, getSuppliers, getContactById, generarAsientoCompra, subirAdjuntoCompra, getUrlAdjuntoCompra, eliminarAdjuntoCompra } from '../supabase-data.js'
 import { ASIENTOS_AUTO_COMPRAS_ACTIVO } from '../config-asientos-auto.js'
@@ -115,6 +116,8 @@ window.abrirModalNuevaCompra = function () {
   // form.reset() devuelve el <select> a su opción `selected` del HTML y deja
   // el bloque del T.C. como estaba; hay que re-aplicar la regla a mano.
   window.onCambiarMonedaCompra()
+  // T.C. COMPRA automático según la fecha (en vivo, candado 🔒)
+  vincularTCEnVivo({ idFecha: 'nqFecha', idMoneda: 'nqMoneda', idTC: 'nqTipoCambio', idAviso: 'nqTCAviso', tipo: 'compra' }).reiniciar()
   _renderTablaDetalleCompra()
   _cronogramaCompraListo = false
   _prepararCronogramaCompra(true)
@@ -448,9 +451,9 @@ window.guardarCompraMercaderia = async function () {
     const nroComprobante  = document.getElementById('nqNumeroComprobante')?.value?.trim() || null
     // PEN siempre es 1. En USD se usa el valor del campo (manual o el que
     // trajo el botón "↻ Auto" desde la SBS).
-    const tipoCambio = moneda === 'USD'
-      ? (parseFloat(document.getElementById('nqTipoCambio')?.value || 0) || 1)
-      : 1
+    // 2026-10-05: en SOLES también se guarda el T.C. SUNAT del día como referencia
+    // (reportes / registro). Solo CONVIERTE montos cuando la moneda es USD.
+    const tipoCambio = parseFloat(document.getElementById('nqTipoCambio')?.value || 0) || 1
 
     if (!contactId) { showToast('Selecciona un proveedor', 'warning'); return }
     // Un T.C. de 1 en una compra en dólares dejaría el costo del lote en

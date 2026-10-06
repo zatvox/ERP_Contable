@@ -1,0 +1,279 @@
+// ============================================================================
+// SERIES.JS — Series y correlativos de documentos de Ventas (2026-09-30)
+// ============================================================================
+// Fuente única: tabla public.series_documentos (ver sql/59_series_documentos_y_packing.sql).
+// Antes las series vivían en el navegador (localStorage, jhiro_config_ventas):
+// cada PC podía sugerir una serie distinta. Ahora son de la BD.
+//
+// Regla del correlativo (igual en todos los documentos):
+//   siguiente = MAYOR(ultimo_correlativo, correlativo_inicial - 1, maxUsado) + 1
+// maxUsado = el mayor número que ya existe en la tabla del documento (ventas o
+// packing). Así, aunque alguien escriba un número a mano, nunca se repite, y
+// una serie nueva con correlativo inicial 18642 arranca exactamente ahí.
+// ============================================================================
+import { supabase, getAll, insert, update, deleteRecord } from './supabase-client.js'
+
+let _seriesPromise = null
+
+export function invalidarSeries() { _seriesPromise = null }
+
+export async function getSeries(forzar = false) {
+  if (forzar || !_seriesPromise) _seriesPromise = getAll('series_documentos').then(r => r || [])
+  return await _seriesPromise
+}
+
+/** Series activas de un tipo ('PK','01','03','07','08'); para NC/ND se puede filtrar por aplica_a ('01'/'03'). */
+export async function seriesDeTipo(tipo, aplicaA = null) {
+  const todas = await getSeries()
+  return todas
+    .filter(s => s.activo && s.tipo_documento === tipo && (!aplicaA || !s.aplica_a || s.aplica_a === aplicaA))
+    .sort((a, b) => (b.por_defecto - a.por_defecto) || a.serie.localeCompare(b.serie))
+}
+
+/** Serie por defecto del tipo (o la primera activa). null si la tabla aún no existe / está vacía. */
+export async function serieDefault(tipo, aplicaA = null) {
+  try {
+    const lista = await seriesDeTipo(tipo, aplicaA)
+    return lista.find(s => s.por_defecto && (!aplicaA || s.aplica_a === aplicaA)) || lista[0] || null
+  } catch { return null }
+}
+
+export async function getSerie(tipo, serie) {
+  const todas = await getSeries()
+  return todas.find(s => s.tipo_documento === tipo && s.serie === serie) || null
+}
+
+export function siguienteCorrelativo(serieRow, maxUsado = 0) {
+  if (!serieRow) return (parseInt(maxUsado) || 0) + 1
+  return Math.max(parseInt(serieRow.ultimo_correlativo) || 0, (parseInt(serieRow.correlativo_inicial) || 1) - 1, parseInt(maxUsado) || 0) + 1
+}
+
+export function formatearNumero(serieRow, correlativo, serieTexto = null) {
+  const dig = parseInt(serieRow?.digitos) || 8
+  return `${serieRow?.serie || serieTexto || ''}-${String(correlativo).padStart(dig, '0')}`
+}
+
+/** Tras guardar un documento: sube ultimo_correlativo si el usado es mayor. No falla la operación principal si la tabla no existe. */
+export async function registrarUsoSerie(tipo, serie, correlativo) {
+  try {
+    const s = await getSerie(tipo, serie)
+    const n = parseInt(correlativo) || 0
+    if (!s || n <= (parseInt(s.ultimo_correlativo) || 0)) return
+    await update('series_documentos', s.id, { ultimo_correlativo: n, updated_at: new Date().toISOString() })
+    s.ultimo_correlativo = n
+  } catch (e) { console.warn('registrarUsoSerie:', e.message) }
+}
+
+/** ¿La serie se envía a NUBEFACT? Si no está registrada, se asume que sí (comportamiento de siempre). */
+export async function serieEsCPE(tipo, serie) {
+  try { const s = await getSerie(tipo, serie); return s ? s.es_cpe !== false : true } catch { return true }
+}
+
+/**
+ * Llena un <select> con las series ACTIVAS de un tipo (tabla series_documentos).
+ * Patrón del sistema (2026-10-02): los campos que dependen de una
+ * configuración se ELIGEN de una lista, no se escriben — así un dato
+ * inválido (ej. serie de Boleta en una Factura) no puede ni ingresarse.
+ *   preferida     → serie a dejar seleccionada si existe en la lista
+ *   incluirActual → serie histórica a conservar aunque ya no esté activa
+ *   fallback      → única opción si la tabla aún no tiene series del tipo
+ * Devuelve la serie que quedó seleccionada.
+ */
+export async function poblarSelectSeries(sel, tipo, { preferida = null, incluirActual = null, fallback = null } = {}) {
+  if (!sel) return ''
+  let lista = []
+  try { lista = await seriesDeTipo(tipo) } catch { /* tabla no disponible */ }
+  const esc = v => String(v ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+  const opts = lista.map(s => ({ v: s.serie, l: `${s.serie}${s.es_cpe ? '' : ' · física'}`, t: s.descripcion || '', d: s.por_defecto }))
+  if (incluirActual && !opts.some(o => o.v === incluirActual)) opts.unshift({ v: incluirActual, l: `${incluirActual} (no registrada)`, t: 'Serie histórica: no está activa en Configuración → Series' })
+  if (!opts.length && fallback) opts.push({ v: fallback, l: fallback, t: '' })
+  sel.innerHTML = opts.map(o => `<option value="${esc(o.v)}" title="${esc(o.t)}">${esc(o.l)}</option>`).join('')
+  const elegida = [preferida, incluirActual].find(x => x && opts.some(o => o.v === x)) || (opts.find(o => o.d) || opts[0])?.v || ''
+  sel.value = elegida
+  return elegida
+}
+
+/**
+ * Tipos de comprobante válidos según el documento del cliente (SUNAT):
+ *   DNI (8 dígitos)  → solo Boleta (03)
+ *   RUC (11 dígitos) → Factura (01) preferida; Boleta permitida
+ *   Exterior (VAT, pasaporte…) / sin dato → ambos
+ */
+export function tiposComprobantePorCliente(contacto) {
+  if (!contacto) return { permitidos: ['01', '03'], preferido: null, motivo: '' }
+  const doc = String(contacto.nro_documento || '').replace(/\D/g, '')
+  const td = String(contacto.tipo_documento || '').toUpperCase()
+  if (td === 'DNI' || (td !== 'RUC' && doc.length === 8)) return { permitidos: ['03'], preferido: '03', motivo: 'Cliente con DNI: solo Boleta' }
+  if (td === 'RUC' || doc.length === 11) return { permitidos: ['01', '03'], preferido: '01', motivo: '' }
+  return { permitidos: ['01', '03'], preferido: null, motivo: '' }
+}
+
+/**
+ * Aplica esa regla a un <select> de Tipo (01/03): deshabilita lo no permitido
+ * y, si `cambiarValor`, mueve la selección al tipo preferido del cliente.
+ * Devuelve true si cambió el valor (para que el llamador rehaga la Serie).
+ */
+export function aplicarTiposPorCliente(sel, contacto, { cambiarValor = true } = {}) {
+  if (!sel) return false
+  const { permitidos, preferido, motivo } = tiposComprobantePorCliente(contacto)
+  for (const o of sel.options) {
+    if (o.value !== '01' && o.value !== '03') continue
+    o.disabled = !permitidos.includes(o.value)
+    o.title = o.disabled ? motivo : ''
+  }
+  const antes = sel.value
+  if (cambiarValor && preferido && sel.value !== preferido) sel.value = preferido
+  else if (!permitidos.includes(sel.value) && cambiarValor) sel.value = permitidos[0]
+  return sel.value !== antes
+}
+
+// ============================================================================
+// N° DE DOCUMENTO = [Serie ▾] + [Correlativo 🔒]  (2026-10-02)
+// ----------------------------------------------------------------------------
+// Convierte un <input id="X"> de "número completo" (ej. T001-00000123) en
+// un selector de serie + correlativo automático con candado. El input
+// original queda como <input type="hidden"> con el valor compuesto, así el
+// código que ya lee/escribe document.getElementById('X').value sigue igual.
+//   api.preparar({ serie })   → nuevo documento: serie preferida + siguiente N°
+//   api.establecer(numero)    → documento existente: muestra su serie/N° tal cual
+//   api.bloquear(true|false)  → modo solo lectura
+// ============================================================================
+const _numerosConSerie = new Map()
+
+export function montarNumeroConSerie(idInput, { tipo = '09', maxUsado = null, onCambio = null } = {}) {
+  if (_numerosConSerie.has(idInput) && document.getElementById(`${idInput}-serie`)) return _numerosConSerie.get(idInput)
+  const hidden = document.getElementById(idInput)
+  if (!hidden) return null
+  hidden.type = 'hidden'
+  const wrap = document.createElement('div')
+  wrap.style.cssText = 'display:grid; grid-template-columns:0.9fr 1.1fr; gap:6px;'
+  const sel = document.createElement('select')
+  sel.id = `${idInput}-serie`
+  sel.title = 'Series activas (Configuración → Series y correlativos)'
+  const box = document.createElement('div')
+  box.className = 'input-con-candado'
+  const corr = document.createElement('input')
+  corr.type = 'text'; corr.id = `${idInput}-corr`; corr.readOnly = true; corr.inputMode = 'numeric'
+  const btn = document.createElement('button')
+  btn.type = 'button'; btn.className = 'btn-candado'; btn.textContent = '🔒'
+  btn.title = 'Número automático — abrir para editarlo a mano'
+  box.append(corr, btn)
+  wrap.append(sel, box)
+  hidden.parentNode.insertBefore(wrap, hidden)
+
+  let manual = false, fijo = null, digitos = 8, seq = 0
+  const sync = () => {
+    const n = String(corr.value || '').replace(/\D/g, '')
+    hidden.value = sel.value && n ? `${sel.value}-${n.padStart(digitos, '0')}` : ''
+    onCambio?.(hidden.value)
+  }
+  const cerrarCandado = () => { manual = false; corr.readOnly = true; btn.textContent = '🔒'; btn.classList.remove('abierto') }
+
+  async function proponer() {
+    if (manual) return
+    const mio = ++seq
+    const fila = await getSerie(tipo, sel.value).catch(() => null)
+    digitos = parseInt(fila?.digitos) || 8
+    if (fijo && sel.value === fijo.serie) { corr.value = fijo.corr; sync(); return }
+    const max = maxUsado ? await maxUsado(sel.value) : await maxCorrelativoGuia(sel.value)
+    if (mio !== seq) return
+    corr.value = String(siguienteCorrelativo(fila, max)).padStart(digitos, '0')
+    sync()
+  }
+
+  sel.addEventListener('change', proponer)
+  corr.addEventListener('input', sync)
+  btn.addEventListener('click', () => {
+    if (corr.disabled) return
+    if (manual) { cerrarCandado(); proponer() }
+    else { manual = true; corr.readOnly = false; btn.textContent = '🔓'; btn.classList.add('abierto'); corr.focus(); corr.select() }
+  })
+
+  const api = {
+    async preparar({ serie = null } = {}) {
+      fijo = null; cerrarCandado()
+      await poblarSelectSeries(sel, tipo, { preferida: serie })
+      await proponer()
+    },
+    async establecer(numero) {
+      const txt = String(numero || '').trim()
+      const i = txt.lastIndexOf('-')
+      const serie = i > 0 ? txt.slice(0, i).toUpperCase() : ''
+      fijo = { serie, corr: i > 0 ? txt.slice(i + 1) : txt }
+      cerrarCandado()
+      await poblarSelectSeries(sel, tipo, { incluirActual: serie || null })
+      const filaE = await getSerie(tipo, sel.value).catch(() => null)
+      digitos = parseInt(filaE?.digitos) || Math.max(fijo.corr.length, 1)
+      corr.value = fijo.corr
+      hidden.value = txt
+    },
+    bloquear(b) { sel.disabled = !!b; corr.disabled = !!b; btn.disabled = !!b },
+    serie: () => sel.value
+  }
+  _numerosConSerie.set(idInput, api)
+  return api
+}
+
+export async function addSerie(d)        { const r = await insert('series_documentos', d); invalidarSeries(); return r }
+export async function updateSerie(id, d) { const r = await update('series_documentos', id, d); invalidarSeries(); return r }
+export async function deleteSerie(id)    { const r = await deleteRecord('series_documentos', id); invalidarSeries(); return r }
+
+export const NOMBRE_TIPO_SERIE = { PK: 'Packing / Cotización', '01': 'Factura', '03': 'Boleta', '07': 'Nota de Crédito', '08': 'Nota de Débito', '09': 'Guía de Remisión' }
+
+// ============================================================================
+// GUÍAS DE REMISIÓN (tipo 09) — 2026-10-02, ver sql/62_series_guias_remision.sql
+// ----------------------------------------------------------------------------
+// Cada serie de comprobante (01/03) dice qué serie de guía genera
+// (serie_guia: FFFI→T001, NV01→GN01) y cada serie de guía dice a qué
+// ubicación virtual va la venta en el kardex (ubicacion_destino_id:
+// T001→Partners/Customers, GN01→Partners/90). T001 la comparten las guías
+// de venta y las de devolución a proveedor → el máximo usado mira ambas.
+// ============================================================================
+
+/** Separa 'T001-00000123' → { serie: 'T001', correlativo: 123 }. */
+export function parseNumeroGuia(numero) {
+  const txt = String(numero || '').trim()
+  const i = txt.lastIndexOf('-')
+  if (i <= 0) return { serie: null, correlativo: 0 }
+  return { serie: txt.slice(0, i).toUpperCase(), correlativo: parseInt(txt.slice(i + 1).replace(/\D/g, '')) || 0 }
+}
+
+/** Mayor correlativo ya emitido con esa serie (guías de venta + devoluciones a proveedor). */
+export async function maxCorrelativoGuia(serie) {
+  let max = 0
+  for (const tabla of ['guias_despacho_venta', 'guias_devolucion_compra']) {
+    try {
+      const { data } = await supabase.from(tabla).select('numero_guia').ilike('numero_guia', `${serie}-%`)
+      for (const g of (data || [])) { const n = parseNumeroGuia(g.numero_guia).correlativo; if (n > max) max = n }
+    } catch { /* tabla aún no creada */ }
+  }
+  return max
+}
+
+/** Serie de guía (fila tipo 09) que genera un comprobante. Sin enlace → la 09 por defecto. */
+export async function serieGuiaDeComprobante(tipoComprobante, serieComprobante) {
+  try {
+    const comp = await getSerie(tipoComprobante, serieComprobante)
+    if (comp?.serie_guia) { const g = await getSerie('09', comp.serie_guia); if (g) return g }
+    return await serieDefault('09')
+  } catch { return null }
+}
+
+/** Próximo número completo de una serie de guía, ej. 'T001-00000124'. */
+export async function siguienteNumeroGuia(serieGuiaRow) {
+  if (!serieGuiaRow) return ''
+  return formatearNumero(serieGuiaRow, siguienteCorrelativo(serieGuiaRow, await maxCorrelativoGuia(serieGuiaRow.serie)))
+}
+
+/** Fila tipo 09 a partir de un número de guía ya escrito ('GN01-00000005' → serie GN01). */
+export async function serieDeNumeroGuia(numero) {
+  const { serie } = parseNumeroGuia(numero)
+  if (!serie) return null
+  try { return await getSerie('09', serie) } catch { return null }
+}
+
+/** Tras guardar una guía: sube ultimo_correlativo de su serie (si está registrada). */
+export async function registrarUsoGuia(numero) {
+  const { serie, correlativo } = parseNumeroGuia(numero)
+  if (serie && correlativo) await registrarUsoSerie('09', serie, correlativo)
+}

@@ -610,6 +610,44 @@ export async function deletePartida(id) {
 }
 
 // ============================================================================
+// FAMILIAS (SQL 66) — agrupación comercial libre de lotes (solo vista)
+// ============================================================================
+// Un lote de familia = item_id + numero_lote (texto), igual que la fila de
+// Resumen de Stock › Por Ubicación. Un lote pertenece a una sola familia.
+export async function getFamilias() {
+  return (await getAll('familias')) || []
+}
+
+export async function getFamiliaLotes() {
+  return (await getAll('familia_lotes')) || []
+}
+
+export async function addFamilia(data) {
+  return await insert('familias', data)
+}
+
+export async function updateFamilia(id, data) {
+  return await update('familias', id, { ...data, updated_at: new Date().toISOString() })
+}
+
+export async function deleteFamilia(id) {
+  // familia_lotes se borra en cascada (FK ON DELETE CASCADE).
+  return await deleteRecord('familias', id)
+}
+
+// Reemplaza la lista de lotes de una familia: borra los que salieron e
+// inserta los nuevos. lotes = [{ item_id, numero_lote }]
+export async function setLotesFamilia(familiaId, lotes) {
+  const { error: eDel } = await supabase.from('familia_lotes').delete().eq('familia_id', familiaId)
+  if (eDel) throw new Error('No se pudieron limpiar los lotes de la familia: ' + eDel.message)
+  if (!lotes.length) return true
+  const filas = lotes.map(l => ({ familia_id: familiaId, item_id: l.item_id, numero_lote: l.numero_lote }))
+  const { error } = await supabase.from('familia_lotes').insert(filas)
+  if (error) throw new Error(error.code === '23505' ? 'Algún lote ya pertenece a otra familia' : error.message)
+  return true
+}
+
+// ============================================================================
 // PLAN DE CUENTAS
 // ============================================================================
 
@@ -622,8 +660,11 @@ export async function getAccountById(id) {
 }
 
 export async function getAccountByCode(code) {
-  const accounts = await getAccounts()
+  // Consulta puntual (antes descargaba TODO el plan de cuentas por cada línea de asiento)
   const codeStr = String(code).trim()
+  const { data, error } = await supabase.from('plan_cuentas').select('*').eq('codigo', codeStr).limit(1)
+  if (!error && data?.length) return data[0]
+  const accounts = await getAccounts()   // respaldo: códigos guardados con espacios
   return accounts.find(a => String(a.codigo || '').trim() === codeStr)
 }
 
@@ -808,6 +849,94 @@ export async function eliminarAdjuntoCompra(compraId) {
   if (!compra?.adjunto_url) return
   await supabase.storage.from(ADJUNTOS_BUCKET).remove([compra.adjunto_url]).catch(() => {})
   await updateCompra(compraId, { adjunto_url: null, adjunto_nombre: null })
+}
+
+// ============================================================================
+// ADJUNTOS (voucher / recibo / otro) — tabla `adjuntos` + bucket privado (script 60)
+// ============================================================================
+// Archivo en Storage (`tesoreria-adjuntos`), datos en la tabla `adjuntos`
+// (1 fila por archivo, con entidad + entidad_id + concepto). Se abren con URL
+// firmada temporal: el bucket es privado.
+const ADJ_BUCKET = 'tesoreria-adjuntos'
+export const ADJ_CONCEPTOS = { voucher: 'Voucher', recibo: 'Recibo', otro: 'Otro' }
+const _ADJ_MIME = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+
+export function validarArchivoAdjunto(file) {
+  if (!_ADJ_MIME.includes(file.type)) return `${file.name}: solo PDF, JPG, PNG o WEBP`
+  if (file.size > 10 * 1024 * 1024) return `${file.name}: supera 10 MB`
+  return null
+}
+
+/**
+ * Sube varios archivos a un registro. items = [{ file, concepto }].
+ * Devuelve { ok: n, errores: [texto] } — un archivo que falla no frena a los demás.
+ */
+export async function subirAdjuntos(entidad, entidadId, items, userDbId = null) {
+  const errores = []
+  let ok = 0
+  for (const [i, { file, concepto }] of (items || []).entries()) {
+    const err = validarArchivoAdjunto(file)
+    if (err) { errores.push(err); continue }
+    const ext = (file.name.split('.').pop() || 'pdf').toLowerCase()
+    const path = `${entidad}-${entidadId}/${Date.now()}-${i}.${ext}`
+    const { error } = await supabase.storage.from(ADJ_BUCKET).upload(path, file, { upsert: false })
+    if (error) {
+      errores.push(/bucket not found/i.test(error.message) ? 'Falta correr assets/sql/60_adjuntos_cobros_pagos.sql' : `${file.name}: ${error.message}`)
+      continue
+    }
+    const fila = await insert('adjuntos', {
+      entidad, entidad_id: entidadId, concepto: ADJ_CONCEPTOS[concepto] ? concepto : 'otro',
+      nombre: file.name, path, mime: file.type, tamano: file.size, created_by: userDbId
+    })
+    if (!fila) {
+      await supabase.storage.from(ADJ_BUCKET).remove([path]).catch(() => {})
+      errores.push(`${file.name}: no se pudo registrar (¿falta correr el script 60?)`)
+      continue
+    }
+    ok++
+  }
+  return { ok, errores }
+}
+
+export async function getAdjuntos(entidad, entidadId) {
+  const { data, error } = await supabase.from('adjuntos').select('*')
+    .eq('entidad', entidad).eq('entidad_id', entidadId).order('created_at')
+  if (error) { console.warn('getAdjuntos:', error.message); return [] }
+  return data || []
+}
+
+/** { entidad_id: cantidad } — para pintar 📎N en los listados con 1 sola consulta liviana. */
+export async function getConteoAdjuntos(entidad) {
+  const { data, error } = await supabase.from('adjuntos').select('entidad_id').eq('entidad', entidad)
+  if (error) return {}
+  const m = {}
+  for (const r of data || []) m[r.entidad_id] = (m[r.entidad_id] || 0) + 1
+  return m
+}
+
+/** URL firmada temporal. `descargarComo` (nombre de archivo) fuerza la descarga
+ *  (Content-Disposition: attachment) — el atributo download de <a> no sirve
+ *  entre dominios, por eso se pide a Supabase. Sin él, el archivo se muestra. */
+export async function getUrlAdjunto(path, expiresIn = 3600, descargarComo = null) {
+  if (!path) return null
+  const { data, error } = await supabase.storage.from(ADJ_BUCKET).createSignedUrl(path, expiresIn, descargarComo ? { download: descargarComo } : undefined)
+  if (error) throw new Error(`No se pudo generar el enlace: ${error.message}`)
+  return data?.signedUrl || null
+}
+
+export async function eliminarAdjunto(adjId) {
+  const adj = await getById('adjuntos', adjId)
+  if (!adj) return
+  await supabase.storage.from(ADJ_BUCKET).remove([adj.path]).catch(() => {})
+  await deleteRecord('adjuntos', adjId)
+}
+
+/** Borra todos los adjuntos de un registro (al eliminar el cobro/pago/letra). */
+export async function eliminarAdjuntosDe(entidad, entidadId) {
+  const adjs = await getAdjuntos(entidad, entidadId)
+  if (!adjs.length) return
+  await supabase.storage.from(ADJ_BUCKET).remove(adjs.map(a => a.path)).catch(() => {})
+  await supabase.from('adjuntos').delete().eq('entidad', entidad).eq('entidad_id', entidadId)
 }
 
 // ============================================================================
@@ -1580,7 +1709,9 @@ export async function aplicarModelo({ tipoMovimiento, tipoDocumento, moneda, nom
  * Genera el siguiente número de asiento contable (AS-000001, AS-000002, ...).
  */
 export async function generarNumeroAsiento() {
-  const entries = await getJournalEntries()
+  // Solo la columna necesaria (antes traía todas las columnas de todo el diario)
+  const { data: entries, error } = await supabase.from('journal_entries').select('numero_asiento')
+  if (error) throw new Error('No se pudo leer la numeración de asientos: ' + error.message)
   let max = 0
   entries.forEach(e => {
     const match = String(e.numero_asiento || '').match(/(\d+)$/)
@@ -1655,7 +1786,11 @@ export async function crearAsientoContable({
       descripcion: linea.descripcion || descripcion,
       contact_id: linea.contact_id || null,
       referencia_doc: linea.referencia_doc || null,
-      fecha_vencimiento: linea.fecha_vencimiento || null
+      fecha_vencimiento: linea.fecha_vencimiento || null,
+      // Moneda extranjera (opcional, por línea): importe en USD y su T.C.
+      importe_original: linea.importe_original ?? null,
+      moneda_original: linea.moneda_original ?? null,
+      tipo_cambio: linea.tipo_cambio ?? null
     })
   }
 
@@ -1694,7 +1829,9 @@ export async function crearAsientoContable({
       haber: linea.haber,
       descripcion: linea.descripcion || null,
       fecha: fechaAsiento,
-      tipo_cambio: tipoCambioLinea,
+      tipo_cambio: linea.tipo_cambio ?? tipoCambioLinea,
+      importe_original: linea.importe_original ?? null,
+      moneda_original: linea.moneda_original ?? null,
       contact_id: linea.contact_id,
       referencia_doc: linea.referencia_doc,
       fecha_vencimiento: linea.fecha_vencimiento
@@ -1869,6 +2006,11 @@ export async function generarAsientoCompra(compraId, userId) {
     ? `${compra.periodo_ano}-${String(compra.periodo_mes).padStart(2, '0')}`
     : (compra.fecha_emision || '').slice(0, 7)
 
+  // Compra en USD: asiento en soles al T.C. de la compra (cuenta 42122)
+  const lineasFinales = (compra.currency === 'USD')
+    ? _convertirLineasModeloUSD(lineas, compra.tipo_cambio, { '42111': '42122' })
+    : lineas
+
   const entry = await crearAsientoContable({
     fecha:                compra.fecha_emision,
     descripcion:           `Compra ${compra.numero || compra.referencia || ''} — ${compra.proveedor_nombre || ''}`.trim(),
@@ -1877,8 +2019,9 @@ export async function generarAsientoCompra(compraId, userId) {
     tipo_movimiento:       'Compra',
     tipo_documento:        compra.tipo_comprobante || '01',
     contact_id:            compra.contact_id,
+    tipo_cambio:           compra.currency === 'USD' ? compra.tipo_cambio : null,
     created_by:            userId,
-    lineas
+    lineas:                lineasFinales
   })
 
   await updateCompra(compraId, { asiento_id: entry.id })
@@ -2412,13 +2555,31 @@ export async function getPagoProveedorById(id) { return await getById('pagos_pro
 export async function getPagosProveedoresByCompra(compraId) { return await query('pagos_proveedores', { compra_id: compraId }) }
 export async function getPagosProveedoresByCxP(cxpId) { return await query('pagos_proveedores', { cxp_id: cxpId }) }
 export async function addPagoProveedor(pago) { return await insert('pagos_proveedores', pago) }
+export async function updatePagoProveedor(id, data) { return await update('pagos_proveedores', id, data) }
 export async function deletePagoProveedor(id) { return await deleteRecord('pagos_proveedores', id) }
 
 // ============================================================================
 // KARDEX
 // ============================================================================
 
-export async function getKardex() { return await getAll('kardex') }
+// Paginado: Supabase devuelve máx. 1000 filas por consulta. El kardex ya
+// supera/superará ese tope y getAll lo cortaba en silencio (reportes y
+// costo de ventas incompletos). Se trae en bloques de 1000 ordenado por id.
+export async function getKardex() {
+  const porPagina = 1000
+  let desde = 0, todo = []
+  try {
+    for (;;) {
+      const { data, error } = await supabase.from('kardex').select('*')
+        .order('id', { ascending: true }).range(desde, desde + porPagina - 1)
+      if (error) { console.error('Error getKardex:', error); return todo }
+      todo = todo.concat(data || [])
+      if (!data || data.length < porPagina) break
+      desde += porPagina
+    }
+  } catch (e) { console.error('Error en getKardex:', e) }
+  return todo
+}
 export async function getKardexById(id) { return await getById('kardex', id) }
 export async function getKardexByItem(itemId) { return await query('kardex', { item_id: itemId }) }
 export async function getKardexByCompra(compraId) { return await query('kardex', { compra_id: compraId }) }
@@ -2500,6 +2661,11 @@ export async function generarAsientoVenta(ventaId, userId) {
     datos: { subtotal, igv, total, monto: total }
   })
 
+  // Venta en USD: el asiento va en soles al T.C. de la factura (cuenta 12112)
+  const lineasFinales = (venta.moneda === 'USD')
+    ? _convertirLineasModeloUSD(lineasContables, venta.tipo_cambio, { '12111': '12112' })
+    : lineasContables
+
   const entry = await crearAsientoContable({
     fecha:               venta.fecha_emision,
     descripcion:         `Venta ${venta.numero} — ${venta.tipo_comprobante === '01' ? 'Factura' : 'Boleta'}`,
@@ -2510,8 +2676,9 @@ export async function generarAsientoVenta(ventaId, userId) {
     contact_id:          venta.contact_id,
     origen_tipo:         'venta',
     origen_id:           venta.id,
+    tipo_cambio:         venta.moneda === 'USD' ? venta.tipo_cambio : null,
     created_by:          userId,
-    lineas:              lineasContables
+    lineas:              lineasFinales
   })
 
   // Asiento de costo de ventas (si hay ítems con costo)
@@ -2545,26 +2712,86 @@ export async function generarAsientoVenta(ventaId, userId) {
 }
 
 // ============================================================================
+// MULTIMONEDA — asientos SIEMPRE en soles (2026-10-03)
+// ============================================================================
+// Todo asiento se registra en S/. Una línea en USD guarda además su importe
+// original (importe_original), la moneda y el T.C. usado.
+// Diferencia de cambio (Reglamento LIR art. 61 / NIC 21): solo aparece al
+// CANCELAR (cobro/pago/letra) cuando el T.C. del pago ≠ T.C. del documento:
+//   cobro: debe banco (USD × T.C. cobro)  vs  haber CxC (USD × T.C. factura)
+//   pago : debe CxP   (USD × T.C. compra) vs  haber banco (USD × T.C. pago)
+// La diferencia va a 776111 (ganancia) o 6761111 (pérdida). Mismo T.C. → nada.
+export const CTA_DIF_CAMBIO_GANANCIA = '776111'
+export const CTA_DIF_CAMBIO_PERDIDA  = '6761111'
+const _r2s = n => Math.round((parseFloat(n) || 0) * 100) / 100
+
+/** Línea en soles a partir de un importe en moneda del documento. */
+function _lineaMoneda(cuenta, lado, montoDoc, moneda, tc, descripcion) {
+  const usd = moneda === 'USD'
+  const soles = _r2s(usd ? montoDoc * (parseFloat(tc) || 1) : montoDoc)
+  return {
+    cuenta_codigo: cuenta, debe: lado === 'debe' ? soles : 0, haber: lado === 'haber' ? soles : 0, descripcion,
+    ...(usd ? { importe_original: _r2s(montoDoc), moneda_original: 'USD', tipo_cambio: parseFloat(tc) || 1 } : {})
+  }
+}
+
+/** Agrega la línea de diferencia de cambio que cuadra el asiento (si hace falta). */
+function _agregarDiferenciaCambio(lineas) {
+  const d = _r2s(lineas.reduce((t, l) => t + (l.debe || 0), 0) - lineas.reduce((t, l) => t + (l.haber || 0), 0))
+  if (Math.abs(d) < 0.005) return lineas
+  // Debe > Haber → falta haber → ganancia; Haber > Debe → falta debe → pérdida
+  lineas.push(d > 0
+    ? { cuenta_codigo: CTA_DIF_CAMBIO_GANANCIA, debe: 0, haber: d, descripcion: 'Ganancia por diferencia de cambio' }
+    : { cuenta_codigo: CTA_DIF_CAMBIO_PERDIDA, debe: -d, haber: 0, descripcion: 'Pérdida por diferencia de cambio' })
+  return lineas
+}
+
+/**
+ * Convierte a soles las líneas de un modelo de diario (venta/compra en USD):
+ * multiplica por el T.C., guarda el importe original, cambia las cuentas PEN
+ * por sus pares USD (ej. 12111→12112) y cuadra el redondeo en la cuenta por
+ * cobrar/pagar (nunca genera diferencia de cambio: es el registro inicial).
+ */
+function _convertirLineasModeloUSD(lineas, tc, mapaCuentas) {
+  const t = parseFloat(tc) || 1
+  const out = lineas.map(l => ({
+    ...l,
+    cuenta_codigo: mapaCuentas[l.cuenta_codigo] || l.cuenta_codigo,
+    debe: _r2s((l.debe || 0) * t), haber: _r2s((l.haber || 0) * t),
+    importe_original: _r2s((l.debe || 0) + (l.haber || 0)), moneda_original: 'USD', tipo_cambio: t
+  }))
+  const d = _r2s(out.reduce((s, l) => s + l.debe, 0) - out.reduce((s, l) => s + l.haber, 0))
+  if (Math.abs(d) >= 0.005) {
+    const ctas = Object.values(mapaCuentas)
+    const ancla = out.find(l => ctas.includes(l.cuenta_codigo)) || out[0]
+    if (ancla.debe) ancla.debe = _r2s(ancla.debe - d); else ancla.haber = _r2s(ancla.haber + d)
+  }
+  return out
+}
+
+// ============================================================================
 // ASIENTOS AUTOMÁTICOS — COBRO A CLIENTE
 // ============================================================================
 
-export async function generarAsientoCobroCliente({ cobroId, monto, cxcId, bancoId, medioPago, fecha, descripcion, userId }) {
+export async function generarAsientoCobroCliente({ cobroId, monto, cxcId, bancoId, medioPago, fecha, descripcion, userId, monedaDoc = 'PEN', tcDoc = 1, tcCobro = 1, contactId = null }) {
   const cuentaBanco = bancoId
     ? ((await getBancoById(bancoId))?.cuenta_contable_codigo || '10411')
     : (medioPago === 'efectivo' ? '10111' : '10411')
-
+  const usd = monedaDoc === 'USD'
+  // Banco al T.C. del cobro; CxC al T.C. de la factura; la diferencia → 776/676
+  const lineas = _agregarDiferenciaCambio([
+    _lineaMoneda(cuentaBanco, 'debe', monto, monedaDoc, tcCobro, 'Cobro a cliente'),
+    _lineaMoneda(usd ? '12112' : '12111', 'haber', monto, monedaDoc, tcDoc, 'Cancelación CxC')
+  ])
   return await crearAsientoContable({
     fecha:               fecha || new Date().toISOString().split('T')[0],
     descripcion:         descripcion || 'Cobro a cliente',
     documento_referencia: cobroId ? `COBRO-${cobroId}` : null,
     tipo_movimiento:     'Cobro',
-    origen_tipo:         'cobro',
-    origen_id:           cobroId,
+    contact_id:          contactId,
+    tipo_cambio:         usd ? tcCobro : null,
     created_by:          userId,
-    lineas: [
-      { cuenta_codigo: cuentaBanco, debe: parseFloat(monto), haber: 0,              descripcion: 'Cobro a cliente' },
-      { cuenta_codigo: '12111',     debe: 0,              haber: parseFloat(monto), descripcion: 'Cancelación CxC' }
-    ]
+    lineas
   })
 }
 
@@ -2572,25 +2799,38 @@ export async function generarAsientoCobroCliente({ cobroId, monto, cxcId, bancoI
 // ASIENTOS AUTOMÁTICOS — PAGO A PROVEEDOR
 // ============================================================================
 
-export async function generarAsientoPagoProveedor({ pagoId, monto, compraId, bancoId, moneda, fecha, descripcion, userId }) {
+export async function generarAsientoPagoProveedor({ pagoId, monto, compraId, bancoId, moneda, fecha, descripcion, userId, tcDoc = 1, tcPago = 1, contactId = null }) {
   const cuentaBanco = bancoId
     ? ((await getBancoById(bancoId))?.cuenta_contable_codigo || '10411')
     : '10411'
-
-  const cuentaProveedor = moneda === 'USD' ? '42122' : '42111'
-
+  const usd = moneda === 'USD'
+  // CxP al T.C. de la compra; banco al T.C. del pago; la diferencia → 776/676
+  const lineas = _agregarDiferenciaCambio([
+    _lineaMoneda(usd ? '42122' : '42111', 'debe', monto, moneda, tcDoc, 'Cancelación CxP'),
+    _lineaMoneda(cuentaBanco, 'haber', monto, moneda, tcPago, 'Pago a proveedor')
+  ])
   return await crearAsientoContable({
     fecha:               fecha || new Date().toISOString().split('T')[0],
     descripcion:         descripcion || 'Pago a proveedor',
     documento_referencia: pagoId ? `PAGO-${pagoId}` : null,
     tipo_movimiento:     'Pago Proveedor',
-    origen_tipo:         'pago_proveedor',
-    origen_id:           pagoId,
+    contact_id:          contactId,
+    tipo_cambio:         usd ? tcPago : null,
     created_by:          userId,
-    lineas: [
-      { cuenta_codigo: cuentaProveedor, debe: parseFloat(monto), haber: 0,                  descripcion: 'Cancelación CxP' },
-      { cuenta_codigo: cuentaBanco,     debe: 0,                 haber: parseFloat(monto),  descripcion: 'Pago a proveedor' }
-    ]
+    lineas
+  })
+}
+
+/** Asiento genérico de cancelación en dos monedas (lo usan las letras). */
+export async function crearAsientoCancelacionME({ fecha, descripcion, documentoReferencia, tipoMovimiento, contactId, userId,
+  cuentaDebe, cuentaHaber, monto, moneda, tcDebe, tcHaber, descDebe, descHaber }) {
+  const lineas = _agregarDiferenciaCambio([
+    _lineaMoneda(cuentaDebe, 'debe', monto, moneda, tcDebe, descDebe),
+    _lineaMoneda(cuentaHaber, 'haber', monto, moneda, tcHaber, descHaber)
+  ])
+  return await crearAsientoContable({
+    fecha, descripcion, documento_referencia: documentoReferencia, tipo_movimiento: tipoMovimiento,
+    contact_id: contactId, tipo_cambio: moneda === 'USD' ? tcDebe : null, created_by: userId, lineas
   })
 }
 

@@ -415,9 +415,9 @@
             <div class="form-group" id="nqTipoCambioGroup">
               <label>
                 Tipo de Cambio (USD → PEN)
-                <span style="font-size:0.75rem; font-weight:600; color:var(--color-info);">COMPRA SBS</span>
-                <button type="button" id="btnAutoTCNuevaCompra" onclick="window.autoFetchTCCompra()" title="Obtener el TC COMPRA del día (SBS)"
-                        style="margin-left:4px; background:none; border:1px solid var(--border-color); border-radius:4px; padding:1px 6px; font-size:0.72rem; cursor:pointer; color:var(--color-info);">↻ Auto</button>
+                <span style="font-size:0.75rem; font-weight:600; color:var(--color-info);">COMPRA SUNAT</span>
+                <button type="button" id="btnAutoTCNuevaCompra" hidden onclick="window.autoFetchTCCompra()" title="Consultar TC COMPRA SUNAT de la fecha (guardado = sin consumo; nuevo = 1 crédito Decolecta)"
+                        style="margin-left:4px; background:none; border:1px solid var(--border-color); border-radius:4px; padding:1px 6px; font-size:0.72rem; cursor:pointer; color:var(--color-info);">🔎 Consultar</button>
               </label>
               <input type="number" step="0.001" id="nqTipoCambio" placeholder="Ej: 3.750" value="1">
               <small id="nqTCAviso" style="color:var(--text-secondary); font-size:0.72rem;">Art. 61° LIR: las compras en USD se registran al T.C. COMPRA del día.</small>
@@ -1243,8 +1243,8 @@
           </div>
           <div class="form-group">
             <label>
-              T.C. <span style="font-size:0.78rem; font-weight:600; color:var(--color-warning);">COMPRA SBS</span>
-              <button type="button" id="btnAutoTCCompra" onclick="window.autoFetchTCCompra()" title="Obtener TC COMPRA del día (SBS)" style="margin-left:6px; background:none; border:1px solid var(--border-color); border-radius:4px; padding:1px 6px; font-size:0.75rem; cursor:pointer; color:var(--color-info);">↻ Auto</button>
+              T.C. <span style="font-size:0.78rem; font-weight:600; color:var(--color-warning);">COMPRA SUNAT</span>
+              <button type="button" id="btnAutoTCCompra" onclick="window.consultarTCConfirmarCompra()" title="Consultar TC COMPRA SUNAT de la fecha (guardado = sin consumo; nuevo = 1 crédito Decolecta)" style="margin-left:6px; background:none; border:1px solid var(--border-color); border-radius:4px; padding:1px 6px; font-size:0.75rem; cursor:pointer; color:var(--color-info);">🔎 Consultar</button>
             </label>
             <input type="number" id="ccTipoCambio" step="0.001" min="0" placeholder="1.000" value="1.000">
             <small id="ccTCAviso" style="color:var(--color-muted); font-size:0.75rem;"></small>

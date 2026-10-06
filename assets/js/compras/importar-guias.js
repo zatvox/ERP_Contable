@@ -35,7 +35,7 @@ window.abrirModalImportarGuias = function () {
 }
 
 window.descargarPlantillaGuiasCompra = async function () {
-  const { descargarCSV } = await import('./reportes.js')
+  const { descargarCSV } = await import('../reportes.js')
   descargarCSV('plantilla_guias_ingreso.csv', [
     ['numero_guia', 'fecha_guia', 'compra_numero', 'sku', 'cantidad', 'numero_unidades',
      'numero_lote', 'marca', 'codigo_partida', 'almacen', 'zona', 'observaciones'],
@@ -276,7 +276,8 @@ window.procesarImportacionGuias = async function () {
         if (!guia?.id) throw new Error('no se pudo crear la cabecera de la guía')
 
         const monedaCompra = g.compra.currency || 'PEN'
-        const tcCompra = parseFloat(g.compra.tipo_cambio) || 1
+        // Solo USD convierte; PEN = 1 aunque la compra guarde el T.C. SUNAT de referencia (2026-10-05)
+        const tcCompra = monedaCompra === 'USD' ? (parseFloat(g.compra.tipo_cambio) || 1) : 1
 
         for (const l of g.lineas) {
           const costoOriginal = parseFloat(l.detalleCompra?.precio_unitario) || 0

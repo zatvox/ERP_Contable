@@ -5,13 +5,15 @@
 import { S } from './state.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { getCustomers, getContactsByType, getLotes, getItems, getTipoDocumentosMap, getAlmacenes, getUbicaciones, getStockUbicaciones } from '../supabase-data.js'
-import { attachRucAutocomplete, attachConsultaDocumento, getTCVenta } from '../sunat-api.js'
+import { attachRucAutocomplete, attachConsultaDocumento, getTCVenta, textoAvisoTC } from '../sunat-api.js'
 import { showToast } from '../helpers.js'
 import { initModuleNavDropdowns, initSubtabs } from '../main.js'
 import { convertirEnBuscador } from '../buscador-select.js'
 import { renderConfiguracionTab, aplicarPreferenciasVista } from '../config-modulo.js'
 import { renderClientes } from './clientes.js'
 import { renderCotizaciones } from './cotizaciones.js'
+import { renderPacking } from './packing.js'
+import { renderSeriesConfig } from './series-config.js'
 import { renderGuiasDespachoVenta } from './guias-despacho-lista.js'
 import { _poblarSelectClientes, _poblarSelectItems, _poblarSelectLotes, _poblarSelectVendedores } from './helpers.js'
 import { construirReporteVentas } from './reportes.js'
@@ -145,26 +147,26 @@ async function _actualizarTCVenta() {
   if (moneda !== 'USD') {
     campo.value = '1.000'
     if (aviso) aviso.textContent = ''
-    if (badge) { badge.textContent = '—'; badge.style.color = 'var(--color-muted)' }
     return
   }
 
   const fecha = document.getElementById('ventaFechaEmision')?.value || null
-  if (aviso) aviso.textContent = 'Consultando SBS...'
+  if (aviso) aviso.textContent = 'Consultando TC SUNAT...'
 
-  const result = await getTCVenta(fecha)
+  // Botón "Consultar": caché tipos_cambio → si no está, Decolecta (1 crédito)
+  const result = await getTCVenta(fecha, { permitirApi: true })
   if (result.error) {
     if (aviso) aviso.textContent = `⚠️ ${result.error} — ingresa TC manualmente`
-    showToast('No se pudo obtener el TC de SUNAT. Ingresa el tipo de cambio manualmente.', 'warning')
+    showToast(`No se pudo obtener el TC: ${result.error}`, 'warning')
     return
   }
 
   campo.value = result.tc.toFixed(3)
-  if (badge) { badge.textContent = 'VENTA SBS'; badge.style.color = 'var(--color-info)' }
-  if (aviso) aviso.textContent = `TC Venta SBS ${result.fecha}: S/. ${result.tc.toFixed(3)} — Art. 61° LIR`
+  if (badge) { badge.textContent = 'VENTA SUNAT'; badge.style.color = 'var(--color-info)' }
+  if (aviso) aviso.textContent = textoAvisoTC(result, 'venta')
 }
 
-/** Botón "↻ Auto" en el formulario de venta */
+/** Botón "🔎 Consultar" del T.C. en el formulario de venta */
 window.autoFetchTCVenta = async function () {
   const btn = document.getElementById('btnAutoTC')
   if (btn) btn.disabled = true
@@ -189,8 +191,9 @@ function initTabsVentas() {
       if (tab === 'ventas')       await renderVentas()
       if (tab === 'guias-despacho') await renderGuiasDespachoVenta()
       if (tab === 'cotizaciones') await renderCotizaciones()
+      if (tab === 'packing')      await renderPacking(true)
       if (tab === 'clientes')     await renderClientes()
-      if (tab === 'configuracion') renderConfiguracionTab('ventas', 'tab-configuracion')
+      if (tab === 'configuracion') { renderConfiguracionTab('ventas', 'tab-configuracion'); await renderSeriesConfig('tab-configuracion') }
       if (tab === 'reportes') {
         const activo = document.querySelector('#ven-subtabs-reportes .subtab.active')?.getAttribute('data-sub') || 'repv-evolucion'
         await construirReporteVentas(activo)

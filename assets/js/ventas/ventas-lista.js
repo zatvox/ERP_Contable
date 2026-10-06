@@ -9,7 +9,8 @@ import { menuAccionesFila } from '../main.js'
 import { estaAnulado, badgeAnulado, ESTILO_FILA_ANULADA } from '../anulacion.js'
 import { esNota, signoDocumento, badgeTipoDocumento } from '../notas.js'
 import { _nombreCliente, _nombreVendedor } from './helpers.js'
-import { _ventaRevertidaPorNC } from './ventas-editar.js'
+import { _ventaRevertidaPorNC, _guiaEstaVigente } from './ventas-editar.js'
+import { getSeries } from '../series.js'
 
 // ============================================================================
 // TAB: VENTAS (Facturas / Boletas + NUBEFACT CPE)
@@ -45,6 +46,7 @@ registrarColumnas('ventas', [
   { key: 'igv',         label: 'IGV' },
   { key: 'total',       label: 'Total' },
   { key: 'cpe',         label: 'CPE' },
+  { key: 'despacho',    label: 'Guía de despacho' },
   { key: 'acciones',    label: 'Acciones' }
 ])
 
@@ -65,6 +67,7 @@ function _valorOrdenVenta({ v, cliente, vendedor }, campo) {
     case 'igv':          return parseFloat(v.igv) || 0
     case 'total':        return parseFloat(v.total) || 0
     case 'cpe':          return v.cpe_estado || ''
+    case 'despacho':     return _ORDEN_DESPACHO[_estadoDespachoVenta(v)] ?? 9
     default: return ''
   }
 }
@@ -87,13 +90,43 @@ window.ordenarVentas = function (campo) {
 // lista principal (mismo patrón que aplicadoPorAnticipoCompra en compras.js).
 let _aplicadoPorAnticipoVentaCache = new Map()
 
+// ── Columna "Guía de despacho" (2026-09-28) ─────────────────────────────────
+// Estado = ventas.estado_despacho (lo recalcula _recalcularEstadoDespachoVenta
+// al emitir/editar/anular guías). Solo aplica a Factura/Boleta de mercadería
+// vigentes: NC/ND, anticipos y anuladas no se despachan → 'na' (—).
+// Debajo se listan los N° de las guías VIGENTES de esa venta.
+let _guiasPorVentaCache = new Map() // venta_id -> ['T001-00000743', ...]
+let _seriesNoCPE = new Set()        // 'tipo|serie' de series físicas (es_cpe=false): no se envían a NUBEFACT
+const _ORDEN_DESPACHO = { pendiente: 0, parcial: 1, despachado: 2, na: 3 }
+
+function _estadoDespachoVenta(v) {
+  if (estaAnulado(v) || esNota(v.tipo_comprobante) || v.tipo_venta === 'anticipo') return 'na'
+  return v.estado_despacho || 'pendiente'
+}
+
+function _badgeDespachoVenta(v) {
+  const est = _estadoDespachoVenta(v)
+  if (est === 'na') return '<span style="color:var(--text-secondary);">—</span>'
+  const badge = est === 'despachado' ? '<span class="badge badge-success">Despachado</span>'
+    : est === 'parcial' ? '<span class="badge badge-warning">Parcial</span>'
+    : '<span class="badge badge-danger">Pendiente</span>'
+  const guias = _guiasPorVentaCache.get(v.id) || []
+  return badge + (guias.length ? `<br><small style="color:var(--text-secondary);">${guias.join('<br>')}</small>` : '')
+}
+
 export async function renderVentas(forzar = false) {
   try {
     const container = document.getElementById('content-ventas')
     if (!container) return
 
     if (!_ventasListaEnriquecida || forzar) {
-      const [ventas, anticiposAplicadosTodos] = await Promise.all([getVentas(), getTodosVentasAnticiposAplicados()])
+      const [ventas, anticiposAplicadosTodos, guiasDespacho] = await Promise.all([getVentas(), getTodosVentasAnticiposAplicados(), getGuiasDespachoVenta(true)])
+      _guiasPorVentaCache = new Map()
+      try { _seriesNoCPE = new Set((await getSeries(true)).filter(s => s.es_cpe === false).map(s => `${s.tipo_comprobante || s.tipo_documento}|${s.serie}`)) } catch { _seriesNoCPE = new Set() }
+      for (const g of (guiasDespacho || []).filter(_guiaEstaVigente).sort((a, b) => a.id - b.id)) {
+        if (!_guiasPorVentaCache.has(g.venta_id)) _guiasPorVentaCache.set(g.venta_id, [])
+        _guiasPorVentaCache.get(g.venta_id).push(g.numero_guia)
+      }
       _aplicadoPorAnticipoVentaCache = new Map()
       for (const a of (anticiposAplicadosTodos || [])) {
         _aplicadoPorAnticipoVentaCache.set(a.venta_anticipo_id, (_aplicadoPorAnticipoVentaCache.get(a.venta_anticipo_id) || 0) + (parseFloat(a.monto_aplicado) || 0))
@@ -135,6 +168,13 @@ export async function renderVentas(forzar = false) {
             <option value="todos">Vigentes y anulados</option>
             <option value="anulados">Solo anulados</option>
           </select>
+          <select id="filtroDespachoVentas" onchange="window.filtrarVentas()" style="max-width:190px;" title="Estado de emisión de la guía de despacho">
+            <option value="">Despacho: todos</option>
+            <option value="pendiente">Pendiente</option>
+            <option value="parcial">Parcial</option>
+            <option value="despachado">Despachado</option>
+            <option value="na">No aplica (NC/ND/anticipo)</option>
+          </select>
         </div>
         <div class="table-container">
           <table>
@@ -151,6 +191,7 @@ export async function renderVentas(forzar = false) {
                 ${_thOrdenableVentas('IGV', 'igv')}
                 ${_thOrdenableVentas('Total', 'total')}
                 ${_thOrdenableVentas('CPE', 'cpe')}
+                ${_thOrdenableVentas('Guía', 'despacho')}
                 <th data-col-tabla="ventas" data-col="acciones"${colStyle('ventas','acciones')}>Acciones</th>
               </tr>
             </thead>
@@ -188,6 +229,7 @@ function _pintarFilasVentas() {
     // El estado de anulación manda sobre el estado CPE: una factura anulada
     // no debe verse como "CPE OK" aunque haya sido aceptada en su momento.
     if (estaAnulado(v)) return badgeAnulado(v)
+    if (_seriesNoCPE.has(`${v.tipo_comprobante}|${v.serie}`)) return '<span class="badge badge-secondary" title="Serie física: no se envía a NUBEFACT">📄 Físico</span>'
     const cpe = v.cpe_estado
     if (cpe === 'aceptado')  return '<span class="badge badge-success">CPE OK</span>'
     if (cpe === 'rechazado') return '<span class="badge badge-danger">CPE Error</span>'
@@ -199,12 +241,14 @@ function _pintarFilasVentas() {
   const busqueda = (document.getElementById('buscarVenta')?.value || '').trim().toLowerCase()
   const modoAnul = document.getElementById('filtroAnuladasVentas')?.value || 'activos'
   const fTipo = document.getElementById('filtroTipoComprobanteVentas')?.value || ''
+  const fDesp = document.getElementById('filtroDespachoVentas')?.value || ''
 
   let listaFiltrada = (_ventasListaEnriquecida || []).filter(({ v }) => {
     const anul = estaAnulado(v)
     if (modoAnul === 'activos'  && anul) return false
     if (modoAnul === 'anulados' && !anul) return false
     if (fTipo && String(v.tipo_comprobante) !== fTipo) return false
+    if (fDesp && _estadoDespachoVenta(v) !== fDesp) return false
     return true
   })
 
@@ -224,7 +268,7 @@ function _pintarFilasVentas() {
   }
 
   if (listaFiltrada.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="12" style="text-align:center;">${busqueda ? 'Sin resultados para la búsqueda' : (modoAnul === 'anulados' ? 'No hay comprobantes anulados' : 'Sin ventas registradas')}</td></tr>`
+    tbody.innerHTML = `<tr><td colspan="13" style="text-align:center;">${busqueda ? 'Sin resultados para la búsqueda' : (modoAnul === 'anulados' ? 'No hay comprobantes anulados' : 'Sin ventas registradas')}</td></tr>`
     return
   }
 
@@ -255,6 +299,7 @@ function _pintarFilasVentas() {
       <td data-col-tabla="ventas" data-col="igv" style="text-align:right;${estiloMonto}${colStyle('ventas','igv') ? ' display:none;' : ''}">${formatNumber(igv)}</td>
       <td data-col-tabla="ventas" data-col="total" style="text-align:right; font-weight:bold;${estiloMonto}${colStyle('ventas','total') ? ' display:none;' : ''}">${formatNumber(tot)}</td>
       <td data-col-tabla="ventas" data-col="cpe"${colStyle('ventas','cpe')}>${statusBadge(v)}${revertida ? ` <span class="badge badge-warning" title="Sus Notas de Crédito ya cubrieron el 100% del importe — sigue aceptado en SUNAT, no está anulado">REVERTIDO</span>` : ''}</td>
+      <td data-col-tabla="ventas" data-col="despacho"${colStyle('ventas','despacho')}>${_badgeDespachoVenta(v)}</td>
       <td data-col-tabla="ventas" data-col="acciones" class="col-acciones" style="text-decoration:none; opacity:1;${colStyle('ventas','acciones') ? ' display:none;' : ''}">
         ${menuAccionesFila([
           esNota(v.tipo_comprobante) && { label: 'Ver detalle', icono: '📋', onclick: `window.verDetalleNotaVenta(${v.id})` },
@@ -263,7 +308,7 @@ function _pintarFilasVentas() {
                 { label: 'Ver motivo de anulación', icono: 'ℹ️', onclick: `window.verMotivoAnulacion('venta', ${v.id})` }
               ]
             : [
-                (!v.cpe_estado || v.cpe_estado === 'no_enviado') && (esNota(v.tipo_comprobante)
+                (!v.cpe_estado || v.cpe_estado === 'no_enviado') && !_seriesNoCPE.has(`${v.tipo_comprobante}|${v.serie}`) && (esNota(v.tipo_comprobante)
                   ? { label: 'Emitir Nota (SUNAT)', icono: '📤', onclick: `window.emitirNotaVenta(${v.id})` }
                   : { label: 'Emitir CPE', icono: '📤', onclick: `window.emitirCPEVenta(${v.id})` }),
                 v.nubefact_enlace && { label: 'Ver PDF', icono: '📄', href: v.nubefact_enlace },

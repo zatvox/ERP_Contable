@@ -187,7 +187,7 @@ window.verMotivoAnulacion = async function (tipo, id) {
 }
 
 export function _invalidarCacheVentas() {
-  import('./data-cache.js').then(({ invalidarVarios }) => {
+  import('../data-cache.js').then(({ invalidarVarios }) => {
     invalidarVarios(['ventas', 'detalle_ventas', 'cuentas_cobrar', 'lotes', 'stock_ubicaciones', 'kardex'])
   }).catch(() => {})
   Object.keys(_repVentasListos).forEach(k => { _repVentasListos[k] = false })

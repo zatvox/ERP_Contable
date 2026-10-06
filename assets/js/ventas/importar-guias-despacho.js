@@ -3,6 +3,7 @@
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
 import { getCurrentUser } from '../auth-supabase.js'
+import { serieDeNumeroGuia, registrarUsoGuia } from '../series.js'
 import { getLotes, getLoteById, updateLote, getItems, getVentas, getDetalleVentas, getAlmacenes, getUbicaciones, getStockUbicaciones, getStockUbicacionesByLote, updateStockUbicacion, getUbicacionCustomers, addKardexMovimiento, getGuiasDespachoVenta, addGuiaDespachoVenta, getDetalleGuiasDespachoVenta, addDetalleGuiaDespachoVenta } from '../supabase-data.js'
 import { showToast, formatQty } from '../helpers.js'
 import { estaAnulado } from '../anulacion.js'
@@ -37,7 +38,7 @@ window.abrirModalImportarGuiasDespacho = function () {
 }
 
 window.descargarPlantillaGuiasDespacho = async function () {
-  const { descargarCSV } = await import('./reportes.js')
+  const { descargarCSV } = await import('../reportes.js')
   descargarCSV('plantilla_guias_despacho.csv', [
     ['numero_guia', 'fecha_guia', 'venta_numero', 'sku', 'cantidad', 'numero_unidades',
      'numero_lote', 'almacen', 'zona', 'observaciones'],
@@ -288,6 +289,9 @@ window.procesarImportacionGuiasDespacho = async function () {
           observaciones: g.observaciones, created_by: user.db_id
         })
         if (!guia?.id) throw new Error('no se pudo crear la cabecera de la guía')
+        // Destino según la serie de la guía (T001 → Customers, GN01 → Partners/90)
+        const destinoId = (await serieDeNumeroGuia(g.numeroGuia))?.ubicacion_destino_id || zonaClientes?.id || null
+        await registrarUsoGuia(g.numeroGuia)
 
         for (const l of g.lineas) {
           const loteFresco = await getLoteById(l.lote.id)
@@ -313,7 +317,7 @@ window.procesarImportacionGuiasDespacho = async function () {
           await addKardexMovimiento({
             item_id: l.item.id, lote_id: l.lote.id,
             ubicacion_origen_id: l.zona.id,
-            ubicacion_destino_id: zonaClientes?.id || null,
+            ubicacion_destino_id: destinoId,
             fecha: g.fechaGuia, tipo_movimiento: 'salida',
             concepto: 'Venta - despacho a cliente (importado)',
             documento_referencia: g.numeroGuia,

@@ -206,7 +206,7 @@ window.guardarAjusteKardex = async function () {
 }
 
 function _invalidarCacheInventario() {
-  import('./data-cache.js').then(({ invalidarVarios }) => {
+  import('../data-cache.js').then(({ invalidarVarios }) => {
     invalidarVarios(['lotes', 'kardex', 'stock_ubicaciones', 'items'])
   }).catch(() => {})
   Object.keys(_repInvListos).forEach(k => { _repInvListos[k] = false })

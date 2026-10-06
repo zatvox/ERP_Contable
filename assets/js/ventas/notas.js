@@ -2,7 +2,7 @@
 // ventas/notas.js — parte de ventas.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
-import { getLoteById, updateLote, getItemById, addVenta, getVentas, getVentaById, getCuentasCobrarByVenta, updateCuentaCobrar, generarNumeroVenta, getStockUbicacionesByLote, addStockUbicacion, updateStockUbicacion, getUbicacionCustomers, addKardexMovimiento, getGuiasDespachoVenta, updateGuiaDespachoVenta, getDetalleGuiasDespachoVentaByVenta, recalcularLoteDesdeBultos, getLoteBultosByLote, reingresarBultosPorNotaCredito, addNotaCreditoVentaDetalle, getNotaCreditoVentaDetalleByNota } from '../supabase-data.js'
+import { getLoteById, updateLote, getItemById, addVenta, getVentas, getVentaById, getCuentasCobrarByVenta, updateCuentaCobrar, generarNumeroVenta, getStockUbicacionesByLote, addStockUbicacion, updateStockUbicacion, getUbicacionCustomers, getKardexByVenta, addKardexMovimiento, getGuiasDespachoVenta, updateGuiaDespachoVenta, getDetalleGuiasDespachoVentaByVenta, recalcularLoteDesdeBultos, getLoteBultosByLote, reingresarBultosPorNotaCredito, addNotaCreditoVentaDetalle, getNotaCreditoVentaDetalleByNota, getDetalleVentas } from '../supabase-data.js'
 import { showToast, formatNumber, formatQty } from '../helpers.js'
 import { estaAnulado } from '../anulacion.js'
 import { abrirModalNota, TIPO_NC, TIPO_ND, esNota, nombreTipoComprobante } from '../notas.js'
@@ -12,6 +12,7 @@ import { _recalcularEstadoDespachoVenta } from './guias-despacho-lista.js'
 import { _nombreCliente } from './helpers.js'
 import { _guiaEstaVigente } from './ventas-editar.js'
 import { renderVentas } from './ventas-lista.js'
+import { serieDefault, getSerie, siguienteCorrelativo, registrarUsoSerie, seriesDeTipo } from '../series.js'
 
 // ============================================================================
 // NOTAS DE CRÉDITO Y DÉBITO — EMITIDAS AL CLIENTE
@@ -42,6 +43,7 @@ window.abrirModalNotaDebito  = function (ventaId) { _abrirNotaVenta(ventaId, TIP
 // pesa exactamente igual al repesarlo en recepción.
 let _ncDevLineas = []       // líneas de despacho de la venta con algo pendiente de devolver
 let _ncDevTieneDespacho = false
+let _ncDevMoneda = 'PEN'       // moneda de la venta origen (precios de las líneas)
 
 /** Arma _ncDevLineas a partir de las guías de despacho (no anuladas) de la venta. Cada línea de peso variable trae sus bultos vendidos aún reingresables (no devueltos antes); las de peso fijo traen la cantidad despachada como tope. */
 async function _prepararDevolucionStockNota(ventaId) {
@@ -49,7 +51,15 @@ async function _prepararDevolucionStockNota(ventaId) {
   if (guiasVenta.length === 0) { _ncDevTieneDespacho = false; _ncDevLineas = []; return }
   const guiaPorId = new Map(guiasVenta.map(g => [g.id, g.numero_guia || `#${g.id}`]))
 
-  const detalles = await getDetalleGuiasDespachoVentaByVenta(ventaId)
+  const [detalles, detallesVenta] = await Promise.all([getDetalleGuiasDespachoVentaByVenta(ventaId), getDetalleVentas(ventaId)])
+  // Precio de venta por línea (2026-09-28): detalle_ventas.precio_unitario es
+  // SIN IGV (ver venta-nueva.js). Cada línea de guía apunta a su línea de
+  // venta por detalle_venta_id — de ahí sale el precio y el % de IGV.
+  const dvPorId = new Map((detallesVenta || []).map(d => [d.id, d]))
+  const precioDe = (dg) => {
+    const dv = dvPorId.get(dg.detalle_venta_id)
+    return { precioUnit: parseFloat(dv?.precio_unitario) || 0, igvPct: dv ? (parseFloat(dv.igv_porcentaje) || 0) : 18 }
+  }
   const lineas = []
   for (const dg of (detalles || [])) {
     if (!dg.lote_id) continue
@@ -64,14 +74,16 @@ async function _prepararDevolucionStockNota(ventaId) {
       lineas.push({
         detalleGuiaId: dg.id, itemId: dg.item_id, nombre: item?.nombre || `Item #${dg.item_id}`,
         loteId: lote.id, numeroLote: lote.numero_lote, ubicacionId: dg.ubicacion_id, guiaNumero, guiaId: dg.guia_id,
-        unidadMedida: lote.unidad_medida || 'KG', esPesoVariable: true,
+        unidadMedida: lote.unidad_medida || 'KG', esPesoVariable: true, ...precioDe(dg),
         bultos: vendidos.map(b => ({ id: b.id, peso: parseFloat(b.peso) || 0 }))
       })
     } else {
       lineas.push({
         detalleGuiaId: dg.id, itemId: dg.item_id, nombre: item?.nombre || `Item #${dg.item_id}`,
         loteId: dg.lote_id, numeroLote: dg.numero_lote, ubicacionId: dg.ubicacion_id, guiaNumero, guiaId: dg.guia_id,
-        unidadMedida: item?.unidad_medida || 'KG', esPesoVariable: false,
+        unidadMedida: item?.unidad_medida || 'KG', esPesoVariable: false, ...precioDe(dg),
+        pesoPorUnidad: parseFloat(lote.peso_por_unidad) || 0,
+        unidadesDespachadas: parseFloat(dg.cantidad_unidades) || 0,
         cantidadDespachada: parseFloat(dg.cantidad) || 0
       })
     }
@@ -96,11 +108,15 @@ function _renderDevolucionStockNota() {
           <label for="ncDev-${idx}-b${bIdx}-chk" style="min-width:70px;">Bulto #${b.id}</label>
           <span style="color:var(--text-secondary); font-size:0.78rem;">vendido: ${b.peso.toFixed(2)} ${l.unidadMedida}</span>
           <span style="font-size:0.78rem;">devuelto:</span>
-          <input type="number" id="ncDev-${idx}-b${bIdx}-peso" value="${b.peso}" step="0.01" min="0.01" style="width:80px;" disabled>
+          <input type="number" id="ncDev-${idx}-b${bIdx}-peso" value="${b.peso}" step="0.01" min="0.01" style="width:80px;" disabled oninput="window._recalcularImporteDevolucionNota()">
         </div>`).join('')
       return `
         <div style="border:1px solid var(--border-color); border-radius:var(--radius-md); padding:10px 12px; margin-bottom:8px;">
           <strong>${l.nombre}</strong> <span style="color:var(--text-secondary); font-size:0.8rem;">— lote ${l.numeroLote} (peso variable)</span>
+          <div style="font-size:0.78rem; color:var(--text-secondary); margin:4px 0;">
+            Precio de venta (sin IGV): <strong>${_ncDevMoneda} ${_fmtPrecioNC(l.precioUnit)}</strong> / ${l.unidadMedida}
+            · Subtotal devuelto: <strong id="ncDev-${idx}-subtotal">${_ncDevMoneda} 0.00</strong>
+          </div>
           ${bultosHtml}
         </div>`
     }
@@ -108,8 +124,14 @@ function _renderDevolucionStockNota() {
       <div style="border:1px solid var(--border-color); border-radius:var(--radius-md); padding:10px 12px; margin-bottom:8px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
         <div><strong>${l.nombre}</strong> <span style="color:var(--text-secondary); font-size:0.8rem;">— lote ${l.numeroLote}</span></div>
         <span style="color:var(--text-secondary); font-size:0.78rem;">despachado: ${l.cantidadDespachada} ${l.unidadMedida}</span>
-        <label style="font-size:0.78rem;">Cantidad a devolver:</label>
-        <input type="number" id="ncDev-${idx}-cantidad" value="0" step="0.01" min="0" max="${l.cantidadDespachada}" style="width:90px;" oninput="window._actualizarAvisoMotivoIncorrectoNota()">
+        <span style="color:var(--text-secondary); font-size:0.78rem;">precio de venta (sin IGV): <strong>${_ncDevMoneda} ${_fmtPrecioNC(l.precioUnit)}</strong></span>
+        <div style="flex-basis:100%; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <label style="font-size:0.78rem;">Cantidad a devolver (${l.unidadMedida}):</label>
+          <input type="number" id="ncDev-${idx}-cantidad" value="0" step="0.01" min="0" max="${l.cantidadDespachada}" style="width:90px;" oninput="window._onCambiarCantidadDevNota(${idx})">
+          <label style="font-size:0.78rem;">N° de unidades:</label>
+          <input type="number" id="ncDev-${idx}-unidades" value="0" step="1" min="0" style="width:80px;" oninput="this.dataset.manual='1'" title="Se sugiere kg ÷ peso por unidad del lote${l.pesoPorUnidad ? ' (' + l.pesoPorUnidad + ')' : ''}; puedes corregirlo. Es lo que entra al Kardex.">
+          <span style="font-size:0.78rem; margin-left:auto;">Subtotal: <strong id="ncDev-${idx}-subtotal">${_ncDevMoneda} 0.00</strong></span>
+        </div>
       </div>`
   }).join('')
 
@@ -123,7 +145,7 @@ function _renderDevolucionStockNota() {
     <div style="margin-top:10px;">
       <strong style="display:block; margin-bottom:6px; font-size:0.85rem;">📦 Devolución de mercadería (esta venta tiene guía de despacho)</strong>
       <small style="display:block; margin-bottom:8px; color:var(--text-secondary);">
-        Marca/ingresa lo que el cliente realmente devuelve. Se reingresa a la MISMA zona de donde salió (se puede reubicar después con un Traslado Interno). El importe de la nota se sigue ingresando arriba: no se calcula solo, tú decides cuánto vale la devolución.
+        Marca/ingresa lo que el cliente realmente devuelve. Se reingresa a la MISMA zona de donde salió (se puede reubicar después con un Traslado Interno). El importe de la nota se calcula solo (cantidad × precio de venta + IGV) y puedes corregirlo abajo si acordaste otro valor.
       </small>
       ${filas}
     </div>`
@@ -138,6 +160,68 @@ function _renderDevolucionStockNota() {
 // decirle que "no va a pasar nada" (antes decía eso y era falso). Caso que
 // originó este checklist: BBOL-00000012, motivo 01 sin nada marcado a mano
 // — ver project_historial_movimientos_correlativo.md.
+// ── Precio / unidades / importe automático de la devolución (2026-09-28) ──
+// Decisión de Luis: el precio de venta es SOLO LECTURA (se valoriza al mismo
+// precio facturado); las unidades se prellenan con kg ÷ peso_por_unidad y
+// son editables; el importe de la NC se AUTOCALCULA (Σ cantidad × precio +
+// IGV de cada línea) pero sigue siendo editable abajo.
+function _fmtPrecioNC(n) {
+  return (parseFloat(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
+}
+
+function _unidadesSugeridasNC(l, cantidad) {
+  if (!(cantidad > 0)) return 0
+  if (l.pesoPorUnidad > 0) return Math.round(cantidad / l.pesoPorUnidad)
+  // Sin peso_por_unidad: proporción de lo despachado (si se despacharon unidades)
+  if (l.unidadesDespachadas > 0 && l.cantidadDespachada > 0) return Math.round(cantidad * l.unidadesDespachadas / l.cantidadDespachada)
+  return 0
+}
+
+/** Cantidad (kg) devuelta en la línea idx según lo que hay en el DOM. */
+function _cantidadDevueltaLineaNC(l, idx) {
+  if (l.esPesoVariable) {
+    return l.bultos.reduce((s, b, bIdx) => {
+      if (!document.getElementById(`ncDev-${idx}-b${bIdx}-chk`)?.checked) return s
+      return s + (parseFloat(document.getElementById(`ncDev-${idx}-b${bIdx}-peso`)?.value || 0) || 0)
+    }, 0)
+  }
+  const c = parseFloat(document.getElementById(`ncDev-${idx}-cantidad`)?.value || 0) || 0
+  return Math.min(c, l.cantidadDespachada)
+}
+
+function _pintarSubtotalLineaNC(idx) {
+  const l = _ncDevLineas[idx]; if (!l) return
+  const el = document.getElementById(`ncDev-${idx}-subtotal`)
+  if (el) el.textContent = `${_ncDevMoneda} ${formatNumber(_cantidadDevueltaLineaNC(l, idx) * (l.precioUnit || 0))}`
+}
+
+window._onCambiarCantidadDevNota = function (idx) {
+  const l = _ncDevLineas[idx]
+  const inpU = document.getElementById(`ncDev-${idx}-unidades`)
+  if (l && inpU && inpU.dataset.manual !== '1') {
+    inpU.value = _unidadesSugeridasNC(l, _cantidadDevueltaLineaNC(l, idx))
+  }
+  window._actualizarAvisoMotivoIncorrectoNota()
+  window._recalcularImporteDevolucionNota()
+}
+
+window._recalcularImporteDevolucionNota = function () {
+  let base = 0, igv = 0
+  _ncDevLineas.forEach((l, idx) => {
+    _pintarSubtotalLineaNC(idx)
+    const b = _cantidadDevueltaLineaNC(l, idx) * (l.precioUnit || 0)
+    base += b
+    igv  += b * (l.igvPct || 0) / 100
+  })
+  // Motivo que anula TODO: el importe ya lo fija notas.js (= total del
+  // comprobante), no se pisa con la suma de líneas.
+  const sel = document.getElementById('notaMotivo')
+  if (sel?.selectedOptions?.[0]?.getAttribute('data-anula') === '1') return
+  if (base <= 0) return // nada marcado: no se toca lo que el usuario haya escrito
+  base = parseFloat(base.toFixed(2)); igv = parseFloat(igv.toFixed(2))
+  window.setTotalesNotaDesdeDetalle?.({ base, igv, importe: base + igv })
+}
+
 window._actualizarAvisoMotivoIncorrectoNota = function () {
   const aviso = document.getElementById('ncDev-motivo-incorrecto-aviso')
   if (!aviso) return
@@ -154,6 +238,7 @@ window.toggleBultoDevolucionNota = function (idx, bIdx) {
   const inp = document.getElementById(`ncDev-${idx}-b${bIdx}-peso`)
   if (inp) inp.disabled = !chk?.checked
   window._actualizarAvisoMotivoIncorrectoNota()
+  window._recalcularImporteDevolucionNota()
 }
 
 /** Marca Y BLOQUEA todas las líneas del checklist de devolución al 100% —
@@ -181,6 +266,13 @@ function _ncDevMarcarTodo(bloquear) {
         inp.value = bloquear ? l.cantidadDespachada : 0
         inp.disabled = bloquear
       }
+      const inpU = document.getElementById(`ncDev-${idx}-unidades`)
+      if (inpU) {
+        inpU.value = bloquear ? _unidadesSugeridasNC(l, l.cantidadDespachada) : 0
+        inpU.disabled = bloquear
+        delete inpU.dataset.manual
+      }
+      _pintarSubtotalLineaNC(idx)
     }
   })
   window._actualizarAvisoMotivoIncorrectoNota()
@@ -201,7 +293,8 @@ function _leerDevolucionStockNota() {
       if (bultos.length > 0) seleccion.push({ ...l, bultos })
     } else {
       const cantidad = parseFloat(document.getElementById(`ncDev-${idx}-cantidad`)?.value || 0)
-      if (cantidad > 0) seleccion.push({ ...l, cantidadDevuelta: Math.min(cantidad, l.cantidadDespachada) })
+      const unidadesInput = parseFloat(document.getElementById(`ncDev-${idx}-unidades`)?.value || 0)
+      if (cantidad > 0) seleccion.push({ ...l, cantidadDevuelta: Math.min(cantidad, l.cantidadDespachada), unidadesDevueltas: Math.max(0, unidadesInput || 0) })
     }
   })
   return seleccion
@@ -253,14 +346,19 @@ async function _abrirNotaVenta(ventaId, tipoNota) {
     // Boleta. Antes se usaba siempre la serie de Factura (FC01/FD01) sin
     // importar el origen.
     const esBoletaOrigen = String(venta.tipo_comprobante) === '03'
-    const serieSugerida = tipoNota === TIPO_NC
+    // 2026-09-30: primero la tabla series_documentos (tipo 07/08 + aplica_a);
+    // la configuración del navegador queda solo de respaldo.
+    const serieTabla = await serieDefault(tipoNota, esBoletaOrigen ? '03' : '01')
+    const serieSugerida = serieTabla?.serie || (tipoNota === TIPO_NC
       ? (esBoletaOrigen ? (cfg.serieNotaCreditoBoleta || 'BC01') : (cfg.serieNotaCredito || 'FC01'))
-      : (esBoletaOrigen ? (cfg.serieNotaDebitoBoleta  || 'BD01') : (cfg.serieNotaDebito  || 'FD01'))
-    const correlativo = await generarNumeroVenta(tipoNota, serieSugerida)
+      : (esBoletaOrigen ? (cfg.serieNotaDebitoBoleta  || 'BD01') : (cfg.serieNotaDebito  || 'FD01')))
+    const correlativo = siguienteCorrelativo(serieTabla || await getSerie(tipoNota, serieSugerida).catch(() => null),
+      (await generarNumeroVenta(tipoNota, serieSugerida)) - 1)
 
     // Devolución de mercadería: solo tiene sentido en una NC (una ND nunca
     // "devuelve" stock, suma valor). Se arma ANTES de abrir el modal para
     // que la sección ya esté lista si el motivo elegido es de devolución.
+    _ncDevMoneda = venta.moneda || 'PEN'
     if (tipoNota === TIPO_NC) {
       await _prepararDevolucionStockNota(ventaId)
     } else {
@@ -270,6 +368,7 @@ async function _abrirNotaVenta(ventaId, tipoNota) {
 
     await abrirModalNota({
       tipoNota, contexto: 'venta',
+      moneda: venta.moneda || 'PEN', tipoCambio: venta.tipo_cambio,
       documento: `${nombreTipoComprobante(venta.tipo_comprobante)} ${numeroOrigen}`,
       detalle: `${cliente} · ${venta.fecha_emision || ''} · ${venta.moneda || 'PEN'} ${formatNumber(totalOrigen)}`,
       totalOrigen: disponibleNC,
@@ -277,6 +376,13 @@ async function _abrirNotaVenta(ventaId, tipoNota) {
       igvPorcentaje: parseFloat(cfg.igvDefault) || 18,
       serieSugerida,
       numeroSugerido: String(correlativo).padStart(8, '0'),
+      // Selector: solo series 07/08 activas que aplican a Factura o Boleta según el origen
+      seriesOpciones: (await seriesDeTipo(tipoNota, esBoletaOrigen ? '03' : '01').catch(() => []))
+        .filter(x => !x.aplica_a || x.aplica_a === (esBoletaOrigen ? '03' : '01')).map(x => x.serie),
+      onCambiarSerie: async (s) => {
+        const fila = await getSerie(tipoNota, s).catch(() => null)
+        return String(siguienteCorrelativo(fila, (await generarNumeroVenta(tipoNota, s)) - 1)).padStart(8, '0')
+      },
       bloqueos,
       // Modal ancho + detalle de mercadería ARRIBA de los importes cuando hay
       // guía de despacho de por medio — mismo estándar que Compras, salvo que
@@ -303,6 +409,7 @@ async function _abrirNotaVenta(ventaId, tipoNota) {
         // dejar mercadería marcada por accidente si el usuario cambia de
         // opinión sobre el motivo.
         if (_ncDevTieneDespacho) _ncDevMarcarTodo(anulaTotal)
+        if (_ncDevTieneDespacho) window._recalcularImporteDevolucionNota()
 
         window._actualizarAvisoMotivoIncorrectoNota()
       },
@@ -397,6 +504,7 @@ async function _abrirNotaVenta(ventaId, tipoNota) {
           motivo_nota_texto: d.motivoTexto,
           created_by: d.usuarioId
         })
+        if (nota?.id) await registrarUsoSerie(tipoNota, d.serie, parseInt(String(d.numero || '').replace(/\D/g, '')) || 0)
 
         // 1.5. Reingreso de stock por devolución (si el usuario marcó algo)
         if (_ncDevTieneDespacho) {
@@ -428,9 +536,9 @@ async function _abrirNotaVenta(ventaId, tipoNota) {
                   // pero sí un peso_por_unidad confiable del lote. Antes esto
                   // se ignoraba por completo: el peso volvía al lote pero las
                   // unidades se quedaban desfasadas.
-                  const unidadesDevueltas = (lote?.peso_por_unidad && lote.peso_por_unidad > 0)
-                    ? parseFloat((linea.cantidadDevuelta / lote.peso_por_unidad).toFixed(2))
-                    : 0
+                  // 2026-09-28: ahora SÍ se declara por línea (campo "N° de
+                  // unidades", prellenado con kg ÷ peso_por_unidad y editable).
+                  const unidadesDevueltas = parseFloat(linea.unidadesDevueltas) || 0
                   const nuevaUnidadesLote = parseFloat(((parseFloat(lote?.cantidad_unidades) || 0) + unidadesDevueltas).toFixed(4))
                   await updateLote(linea.loteId, { cantidad: nuevaCantidadLote, cantidad_unidades: nuevaUnidadesLote })
 
@@ -464,7 +572,15 @@ async function _abrirNotaVenta(ventaId, tipoNota) {
               // Kardex: un movimiento 'entrada' por línea devuelta, desde la
               // zona virtual Partners/Customers (espejo exacto de la salida
               // que hizo la guía de despacho) hacia la zona real de recepción.
+              // Origen = DESTINO de la salida original de la factura amarrada
+              // (guía T001 → Partners/Customers, GN01 → Partners/90…): se
+              // busca en el kardex de esa venta la salida del mismo lote;
+              // si no hay, cualquier salida de la venta; si tampoco, Customers.
               const customersZona = await getUbicacionCustomers()
+              const salidasVenta = ((await getKardexByVenta(ventaId)) || [])
+                .filter(k => k.tipo_movimiento === 'salida' && k.ubicacion_destino_id)
+              const _origenDevolucion = (loteId) =>
+                (salidasVenta.find(k => k.lote_id === loteId) || salidasVenta[0])?.ubicacion_destino_id || customersZona?.id || null
               for (const linea of seleccion) {
                 const loteActual = await getLoteById(linea.loteId)
                 const costoUnitLote = parseFloat(loteActual?.costo_unitario || 0)
@@ -481,12 +597,10 @@ async function _abrirNotaVenta(ventaId, tipoNota) {
                 // se deriva de peso_por_unidad, igual que arriba.
                 const unidadesLinea = linea.esPesoVariable
                   ? linea.bultos.length
-                  : ((loteActual?.peso_por_unidad && loteActual.peso_por_unidad > 0)
-                      ? parseFloat((cantidadLinea / loteActual.peso_por_unidad).toFixed(2))
-                      : 0)
+                  : (parseFloat(linea.unidadesDevueltas) || 0)
                 await addKardexMovimiento({
                   item_id: linea.itemId, lote_id: linea.loteId,
-                  ubicacion_origen_id: customersZona?.id || null, ubicacion_destino_id: linea.ubicacionId,
+                  ubicacion_origen_id: _origenDevolucion(linea.loteId), ubicacion_destino_id: linea.ubicacionId,
                   fecha: d.fecha, tipo_movimiento: 'entrada', concepto: 'Devolución de cliente (Nota de Crédito)',
                   documento_referencia: `${d.serie}-${d.numero}`,
                   cantidad_entrada: cantidadLinea, cantidad_salida: 0,

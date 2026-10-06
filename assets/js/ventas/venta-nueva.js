@@ -13,6 +13,10 @@ import { _actualizarAvisoRetencionVenta, _actualizarAvisoStockLineaVenta, _pobla
 import { _aplicarAnticiposVentaSeleccionados } from './venta-anticipo.js'
 import { _setEv } from './ventas-editar.js'
 import { renderVentas } from './ventas-lista.js'
+import { vincularTCEnVivo } from '../tc-en-vivo.js'
+import { serieDefault, seriesDeTipo, getSerie, siguienteCorrelativo, registrarUsoSerie, getSeries, NOMBRE_TIPO_SERIE, poblarSelectSeries } from '../series.js'
+import { refrescarBuscador as _refrescarBuscadorPK } from '../buscador-select.js'
+import { marcarPackingFacturado } from './packing.js'
 
 // ============================================================================
 // MODAL: NUEVA VENTA
@@ -20,6 +24,9 @@ import { renderVentas } from './ventas-lista.js'
 
 window.abrirModalNuevaVenta = async function() {
   try {
+    S._packingOrigen = null   // se fija DESPUÉS, solo si se abre desde "Facturar" un PK
+    const avisoPk = document.getElementById('ventaAvisoPacking')
+    if (avisoPk) avisoPk.remove()
     S._ventaLineas = []
     document.getElementById('ventaLineas').innerHTML = ''
     document.getElementById('ventaTotalCantidad').textContent = '0'
@@ -51,9 +58,12 @@ window.abrirModalNuevaVenta = async function() {
     if (monedaSel) monedaSel.value = cfgVentas.monedaDefault || 'PEN'
     const tipoCompSel = document.getElementById('ventaTipoComp')
     const serieEl = document.getElementById('ventaSerie')
-    if (serieEl && !serieEl.value) {
-      serieEl.value = tipoCompSel?.value === '03' ? (cfgVentas.serieBoleta || 'B001') : (cfgVentas.serieFactura || 'F001')
-    }
+    // 2026-09-30: la serie por defecto sale de la tabla series_documentos
+    // (Configuración → Series y correlativos); la de localStorage queda de respaldo.
+    // Serie = SELECTOR con las series activas del tipo (ya no texto libre).
+    // Al abrir se vacía para que quede la serie POR DEFECTO del tipo.
+    if (serieEl) serieEl.innerHTML = ''
+    await _poblarDatalistSeriesVenta()
 
     // Candados cerrados, campos opcionales plegados y correlativo sugerido
     // según la serie que quedó arriba.
@@ -64,9 +74,11 @@ window.abrirModalNuevaVenta = async function() {
     _cronogramaVentaListo = false
     await _prepararCronogramaVenta(true)
 
-    // T.C. oculto salvo que la moneda sea USD (igual que en Compras).
+    // T.C. siempre visible (2026-10-05): en soles queda como referencia SUNAT.
     const tcGroup = document.getElementById('ventaTipoCambioGroup')
-    if (tcGroup) tcGroup.style.display = monedaSel?.value === 'USD' ? 'block' : 'none'
+    if (tcGroup) tcGroup.style.display = 'block'
+    // T.C. VENTA automático según la fecha de emisión (en vivo, candado 🔒)
+    vincularTCEnVivo({ idFecha: 'ventaFechaEmision', idMoneda: 'ventaMoneda', idTC: 'ventaTipoCambio', idAviso: 'ventaTCAviso', tipo: 'venta' }).reiniciar()
 
     // Refrescar stock/lotes: el aviso de stock total se arma con esto, para
     // no ofrecer stock que ya no existe.
@@ -389,15 +401,42 @@ window.guardarNuevaVenta = async function() {
     const moneda        = document.getElementById('ventaMoneda')?.value || 'PEN'
     // PEN siempre es 1 (igual que en Compras); en USD se usa el valor del
     // campo (manual o el que dejó el botón "↻ Auto").
-    const tipoCambio = moneda === 'USD'
-      ? (parseFloat(document.getElementById('ventaTipoCambio')?.value || 0) || 1)
-      : 1
+    // 2026-10-05: en SOLES también se guarda el T.C. SUNAT del día como referencia
+    // (reportes / registro). Solo CONVIERTE montos cuando la moneda es USD.
+    const tipoCambio = parseFloat(document.getElementById('ventaTipoCambio')?.value || 0) || 1
     const periodo       = document.getElementById('ventaPeriodo')?.value
     const vendedorId    = parseInt(document.getElementById('ventaVendedor')?.value || 0) || null
     const descripcion   = document.getElementById('ventaDescripcion')?.value?.trim() || null
     const observaciones = document.getElementById('ventaObservaciones')?.value?.trim() || null
 
     if (!contactId)           { showToast('Selecciona un cliente', 'warning'); return }
+
+    // ── Validación Tipo ↔ Serie ↔ Cliente (2026-10-02) ────────────────────
+    // Caso real: BBOL-00000041 se guardó como Factura (tipo 01) porque la
+    // serie es texto libre. La serie DEBE pertenecer al tipo elegido según
+    // Configuración → Series y correlativos.
+    {
+      const seriesTipo = await seriesDeTipo(tipoComp).catch(() => null)
+      const serieOk = seriesTipo?.some(x => x.serie === serie.toUpperCase())
+      if (seriesTipo && seriesTipo.length && !serieOk) {
+        const otra = (await getSeries().catch(() => [])).find(x => x.serie === serie.toUpperCase())
+        showToast(otra
+          ? `La serie ${serie} es de ${NOMBRE_TIPO_SERIE[otra.tipo_documento] || otra.tipo_documento}, no de ${NOMBRE_TIPO_SERIE[tipoComp] || tipoComp}. Cambia el Tipo de comprobante o la serie.`
+          : `La serie ${serie} no está registrada para ${NOMBRE_TIPO_SERIE[tipoComp] || tipoComp} (Configuración → Series).`, 'danger', 8000)
+        return
+      }
+      // Factura exige RUC (11 dígitos); con DNI corresponde Boleta.
+      const cli = await getContactById(contactId)
+      const docCli = String(cli?.nro_documento || '').replace(/\D/g, '')
+      // (Clientes del exterior con VAT/pasaporte sí pueden llevar factura de exportación)
+      const esDNI = String(cli?.tipo_documento || '').toUpperCase() === 'DNI' || docCli.length === 8
+      if (tipoComp === '01' && esDNI) {
+        showToast('Una Factura no se emite a DNI: el cliente necesita RUC. Con DNI emite Boleta.', 'danger', 8000)
+        return
+      }
+      if (tipoComp === '03' && docCli.length === 11 &&
+          !confirm('El cliente tiene RUC y estás emitiendo BOLETA (no le sirve para crédito fiscal).\n\n¿Continuar como Boleta?')) return
+    }
 
     // Si el contacto no tiene el tipo 'cliente' (ej. solo proveedor), se informa
     // y se agrega 'cliente' a su lista tipo_contacto para futuras ventas.
@@ -530,10 +569,16 @@ window.guardarNuevaVenta = async function() {
       observaciones,
       termino_pago_id:  cronograma?.terminoId || null,
       cronograma_personalizado: !!cronograma?.personalizado,
+      packing_id:       S._packingOrigen?.id || null,
       created_by:       user?.db_id
     })
 
     if (!venta?.id) throw new Error('No se pudo crear la venta')
+    await registrarUsoSerie(tipoComp, serie, correlativo)
+    if (S._packingOrigen?.id) {
+      await marcarPackingFacturado(S._packingOrigen.id, venta.id)
+      S._packingOrigen = null
+    }
 
     // La venta SOLO registra el comprobante — NO mueve stock ni kardex
     // (eso lo hace la Guía de Despacho, paso separado, ver TAB: GUÍAS DE
@@ -713,7 +758,9 @@ async function _sugerirCorrelativoVenta() {
   try {
     const tipo  = document.getElementById('ventaTipoComp')?.value || '01'
     const serie = document.getElementById('ventaSerie')?.value?.trim() || (tipo === '03' ? 'B001' : 'F001')
-    const n = await generarNumeroVenta(tipo, serie)
+    const maxUsado = (await generarNumeroVenta(tipo, serie)) - 1
+    const serieRow = await getSerie(tipo, serie).catch(() => null)
+    const n = siguienteCorrelativo(serieRow, maxUsado)
     input.value = String(n).padStart(8, '0')
     input.dataset.valorAutomatico = input.value
   } catch (e) {
@@ -721,29 +768,33 @@ async function _sugerirCorrelativoVenta() {
   }
 }
 
-window.onCambiarTipoCompVenta = function () {
-  const tipo = document.getElementById('ventaTipoComp')?.value
-  const serieEl = document.getElementById('ventaSerie')
+window.onCambiarTipoCompVenta = async function () {
+  // Al cambiar el tipo, el selector de Serie se rehace solo con las series
+  // de ese tipo: es imposible dejar una serie de Boleta en una Factura.
+  await _poblarDatalistSeriesVenta()
+  await _sugerirCorrelativoVenta()
+}
+
+/** Selector de Serie: series activas del tipo elegido (tabla series_documentos).
+ *  Conserva la serie elegida si sigue siendo válida para el tipo. */
+async function _poblarDatalistSeriesVenta() {
+  const sel = document.getElementById('ventaSerie')
+  if (!sel) return
+  const tipo = document.getElementById('ventaTipoComp')?.value || '01'
   const cfg = getModuloConfig('ventas')
-  // La serie sigue al tipo salvo que el usuario ya la haya escrito a mano.
-  if (serieEl && !serieEl.dataset.manual) {
-    serieEl.value = tipo === '03' ? (cfg.serieBoleta || 'B001') : (cfg.serieFactura || 'F001')
-  }
-  _sugerirCorrelativoVenta()
+  await poblarSelectSeries(sel, tipo, {
+    preferida: sel.value || null,
+    fallback: tipo === '03' ? (cfg.serieBoleta || 'B001') : (cfg.serieFactura || 'F001')
+  })
 }
 
 window.onCambiarSerieVenta = function () {
-  const serieEl = document.getElementById('ventaSerie')
-  if (serieEl) serieEl.dataset.manual = '1'
-  clearTimeout(window._tSerieVenta)
-  window._tSerieVenta = setTimeout(_sugerirCorrelativoVenta, 350)
+  _sugerirCorrelativoVenta()
 }
 
 window._prepararCamposVenta = async function () {
   _resetearCandados()
   _resetearCamposOpcionales()
-  const serieEl = document.getElementById('ventaSerie')
-  if (serieEl) delete serieEl.dataset.manual
   await _sugerirCorrelativoVenta()
 }
 
@@ -807,14 +858,35 @@ window.onCambiarFechaEmisionVenta = function () {
 }
 
 /** Se llama al abrir el modal y cada vez que cambia el total de la venta. */
-export async function _prepararCronogramaVenta(forzarRender = false) {
+// Render del cronograma en curso: varios disparadores (abrir modal, cambiar
+// cliente, cargar líneas desde un PK) lo llaman sin await. Si un render
+// forzado arranca con total 0 y termina DESPUÉS de cargar las líneas, pisa
+// las cuotas con importe 0 (bug al facturar desde PK, 2026-10-02). Ahora
+// cada render forzado espera al anterior y lee el total al momento de pintar.
+let _cronoEnCurso = Promise.resolve()
+
+export async function _prepararCronogramaVenta(forzarRender = false, terminoIdForzado = null) {
   const cont = document.getElementById('venta-cronograma')
   if (!cont) return
+  if (!_cronogramaVentaListo || forzarRender) {
+    const previo = _cronoEnCurso
+    _cronoEnCurso = (async () => {
+      try { await previo } catch { /* */ }
+      await _renderCronogramaVenta(terminoIdForzado)
+    })()
+    return await _cronoEnCurso
+  }
+  const total = parseFloat((document.getElementById('ventaTotalFinal')?.textContent || '0').replace(/,/g, '')) || 0
+  const fechaEmision = document.getElementById('ventaFechaEmision')?.value || new Date().toISOString().slice(0, 10)
+  actualizarCronograma('venta-cronograma', { total, fechaEmision })
+}
+
+async function _renderCronogramaVenta(terminoIdForzado = null) {
 
   const total = parseFloat((document.getElementById('ventaTotalFinal')?.textContent || '0').replace(/,/g, '')) || 0
   const fechaEmision = document.getElementById('ventaFechaEmision')?.value || new Date().toISOString().slice(0, 10)
 
-  if (!_cronogramaVentaListo || forzarRender) {
+  {
     // El término del cliente solo PRECARGA el selector: la condición real se
     // negocia por operación, así que la venta guarda la suya y nunca se
     // reescribe la ficha del contacto desde aquí.
@@ -823,7 +895,7 @@ export async function _prepararCronogramaVenta(forzarRender = false) {
 
     await renderEditorCronograma('venta-cronograma', {
       total, fechaEmision, aplicaA: 'venta',
-      terminoId: cliente?.termino_pago_id || null,
+      terminoId: terminoIdForzado || cliente?.termino_pago_id || null,
       onCambio: (crono) => {
         // La fecha de vencimiento del comprobante = última cuota.
         const ultima = crono?.cuotas?.[crono.cuotas.length - 1]
@@ -832,8 +904,9 @@ export async function _prepararCronogramaVenta(forzarRender = false) {
       }
     })
     _cronogramaVentaListo = true
-  } else {
-    actualizarCronograma('venta-cronograma', { total, fechaEmision })
+    // El total pudo cambiar mientras se pintaba (líneas cargadas desde PK): re-sincronizar.
+    const totalAhora = parseFloat((document.getElementById('ventaTotalFinal')?.textContent || '0').replace(/,/g, '')) || 0
+    if (totalAhora !== total) actualizarCronograma('venta-cronograma', { total: totalAhora, fechaEmision })
   }
 }
 
@@ -888,7 +961,7 @@ export async function _avisarCreditoCliente() {
   if (linea <= 0) return   // 0 = sin límite definido
 
   try {
-    const { cacheado } = await import('./data-cache.js')
+    const { cacheado } = await import('../data-cache.js')
     const cxcs = await cacheado('cuentas_cobrar', getCuentasCobrar)
     const deuda = (cxcs || [])
       .filter(c => c.contact_id === contactId && c.estado !== 'cobrado' && c.estado !== 'anulado')
@@ -914,3 +987,50 @@ export async function _avisarCreditoCliente() {
 }
 
 void getCuentasCobrar
+
+
+// ============================================================================
+// FACTURAR DESDE PACKING (PK) — 2026-09-30
+// ============================================================================
+// Abre "Nueva Venta" normal y la precarga con el PK: cliente, moneda, T.C.,
+// vendedor y líneas (precio SIN IGV igual que detalle_ventas). Todo lo demás
+// (serie editable FFFI/NV01/BBOL…, cronograma, CxC, anticipos, asiento) es el
+// flujo de siempre. Al guardar, guardarNuevaVenta enlaza ventas.packing_id y
+// marca el PK como 'facturado'. Lote/zona NO se eligen aquí: los define la
+// Guía de Despacho (que es la que mueve kardex).
+window.abrirNuevaVentaDesdePacking = async function (pk, lineasPk) {
+  await window.abrirModalNuevaVenta()
+  S._packingOrigen = { id: pk.id, numero: pk.numero }
+  const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v }
+
+  set('ventaTipoComp', '01')
+  window.onCambiarTipoCompVenta()
+  set('ventaContactId', pk.contact_id)
+  _refrescarBuscadorPK('ventaContactId')
+  window.onCambiarClienteVenta?.()
+  set('ventaMoneda', pk.moneda)
+  document.getElementById('ventaMoneda')?.dispatchEvent(new Event('change', { bubbles: true }))
+  if (pk.moneda === 'USD' && parseFloat(pk.tipo_cambio) > 1) set('ventaTipoCambio', pk.tipo_cambio)
+  if (pk.vendedor_id) { set('ventaVendedor', pk.vendedor_id); _refrescarBuscadorPK('ventaVendedor') }
+
+  S._ventaLineas = lineasPk.map(l => ({
+    item_id: l.item_id, descripcion: l.descripcion + (l.nota ? ` — ${l.nota}` : ''),
+    cantidad: +l.cantidad, cantidad_unidades: +l.cantidad_unidades || 0,
+    precio_unitario: +l.precio_unitario, subtotal: +l.subtotal, tipo_base: l.tipo_base,
+    igv_porcentaje: +l.igv_porcentaje, igv_monto: +l.igv_monto, total_linea: +l.total_linea,
+    unidad_medida: l.unidad_medida, ubicacion_id: null, lote_id: null, stock_ubicacion_id: null, numero_lote: null,
+    costo_unitario: parseFloat(_costoPromedioFIFO(_stockTotalPorItem(l.item_id).lotes || [], +l.cantidad).toFixed(4)) || 0
+  }))
+  _renderLineasVenta()
+  // Cronograma con el total ya cargado y el término de pago del PK (si tiene)
+  await _prepararCronogramaVenta(true, pk.termino_pago_id || null)
+
+  const cont = document.querySelector('#modal-nueva-venta .modal-header')
+  if (cont && !document.getElementById('ventaAvisoPacking')) {
+    const av = document.createElement('div')
+    av.id = 'ventaAvisoPacking'
+    av.style.cssText = 'margin:10px 20px 0; padding:8px 12px; border-radius:var(--radius-md); background:rgba(59,130,246,.12); color:var(--color-info); font-size:0.85rem;'
+    av.textContent = `📦 Facturando ${pk.numero}: revisa serie (FFFI / NV01 / BBOL…), cronograma y líneas antes de guardar. Al guardar, el PK queda "Facturado".`
+    cont.after(av)
+  }
+}

@@ -14,7 +14,93 @@
 // lo que mover un filtro NO golpea la base de datos.
 // ============================================================================
 
-import { formatNumber, formatQty } from './helpers.js'
+import { formatNumber, formatQty, showToast } from './helpers.js'
+
+// ============================================================================
+// VISTA GUARDADA POR USUARIO (2026-10-06, SQL 69_preferencias_reporte.sql)
+// ============================================================================
+// "⭐ Guardar vista" guarda el estado completo del reporte (filtros incluidas
+// fechas, agrupar por, columnas, orden, granularidad) en Supabase, por
+// usuario + id de reporte. Al abrir el reporte se aplica sola; "↺ Limpiar"
+// vuelve a la vista guardada y "✕ Quitar vista" la borra (vuelve al diseño
+// original del reporte). Imports dinámicos para no crear dependencias
+// circulares con auth/supabase en este motor genérico.
+const _vistas = new Map()          // reporteId -> estado guardado
+let _vistasPromesa = null
+
+function _cargarVistas() {
+  if (!_vistasPromesa) {
+    _vistasPromesa = (async () => {
+      try {
+        const [{ supabase }, { getCurrentUser }] = await Promise.all([import('./supabase-client.js'), import('./auth-supabase.js')])
+        const uid = getCurrentUser()?.db_id
+        if (!uid) { _vistasPromesa = null; return }
+        const { data, error } = await supabase.from('preferencias_reporte').select('reporte_id, estado').eq('user_id', uid)
+        if (error) { console.warn('preferencias_reporte (¿falta correr el SQL 69?):', error.message); return }
+        ;(data || []).forEach(r => _vistas.set(r.reporte_id, r.estado))
+      } catch (e) { console.warn('No se pudieron cargar las vistas guardadas:', e) }
+    })()
+  }
+  return _vistasPromesa
+}
+
+// Aplica una vista guardada sobre la config actual, descartando dimensiones
+// o columnas que ya no existan en el reporte.
+function _estadoDesdeVista(config, v, base) {
+  const dims = new Set((config.dimensiones || []).map(d => d.key))
+  const meds = new Set((config.medidas || []).map(m => m.key))
+  const agrupar = (v.agrupar || []).filter(k => dims.has(k))
+  const medidas = (v.medidas || []).filter(k => meds.has(k))
+  return {
+    ...base,
+    filtros:  { ...(v.filtros || {}) },
+    agrupar:  agrupar.length || (v.agrupar || []).length === 0 ? agrupar : base.agrupar,
+    medidas:  medidas.length ? medidas : base.medidas,
+    ordenKey: v.ordenKey ?? base.ordenKey,
+    ordenDir: v.ordenDir || base.ordenDir,
+    limite:   v.limite ?? base.limite,
+    gran:     { ...base.gran, ...(v.gran || {}) }
+  }
+}
+
+async function _guardarVista(id) {
+  const reg = _registro.get(id)
+  if (!reg) return
+  try {
+    const [{ supabase }, { getCurrentUser }] = await Promise.all([import('./supabase-client.js'), import('./auth-supabase.js')])
+    const uid = getCurrentUser()?.db_id
+    if (!uid) { showToast('No hay usuario en sesión', 'warning'); return }
+    const estado = JSON.parse(JSON.stringify(reg.estado))
+    const { error } = await supabase.from('preferencias_reporte')
+      .upsert({ user_id: uid, reporte_id: id, estado, updated_at: new Date().toISOString() }, { onConflict: 'user_id,reporte_id' })
+    if (error) throw new Error(error.message)
+    _vistas.set(id, estado)
+    showToast('Vista guardada ⭐ — este reporte abrirá siempre así', 'success')
+    crearReporte(reg.containerId, reg.config)
+  } catch (e) {
+    console.error('_guardarVista:', e)
+    showToast('No se pudo guardar la vista (¿falta correr el SQL 69?): ' + e.message, 'danger')
+  }
+}
+
+async function _quitarVista(id) {
+  const reg = _registro.get(id)
+  if (!reg) return
+  if (!confirm('¿Quitar la vista guardada de este reporte?\nVolverá a abrir con el diseño original.')) return
+  try {
+    const [{ supabase }, { getCurrentUser }] = await Promise.all([import('./supabase-client.js'), import('./auth-supabase.js')])
+    const uid = getCurrentUser()?.db_id
+    const { error } = await supabase.from('preferencias_reporte').delete().eq('user_id', uid).eq('reporte_id', id)
+    if (error) throw new Error(error.message)
+    _vistas.delete(id)
+    _registro.delete(id)
+    showToast('Vista guardada eliminada', 'success')
+    crearReporte(reg.containerId, reg.config)
+  } catch (e) {
+    console.error('_quitarVista:', e)
+    showToast('No se pudo quitar la vista: ' + e.message, 'danger')
+  }
+}
 
 // ============================================================================
 // AGREGACIÓN
@@ -26,22 +112,44 @@ const AGREGADORES = {
   avg:   (vals) => (vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0),
   min:   (vals) => (vals.length ? Math.min(...vals) : 0),
   max:   (vals) => (vals.length ? Math.max(...vals) : 0),
-  distinct: (vals) => new Set(vals).size
+  distinct: (vals) => new Set(vals.filter(v => v !== null && v !== undefined && v !== '')).size
 }
 
 /** Agrupa `datos` por las claves indicadas y calcula las medidas. */
-export function agrupar(datos, claves, medidas) {
+export function agrupar(datos, claves, medidas, resolver = null) {
   if (!claves || claves.length === 0) {
     return [{ _claves: [], _etiqueta: 'Total', _filas: datos, ...calcularMedidas(datos, medidas) }]
   }
   const mapa = new Map()
   datos.forEach(fila => {
-    const valores = claves.map(k => _valorDim(fila, k))
+    const valores = claves.map(k => resolver ? resolver(fila, k) : _valorDim(fila, k))
     const id = valores.join(' ▸ ')
     if (!mapa.has(id)) mapa.set(id, { _claves: valores, _etiqueta: id, _filas: [] })
     mapa.get(id)._filas.push(fila)
   })
   return Array.from(mapa.values()).map(g => ({ ...g, ...calcularMedidas(g._filas, medidas) }))
+}
+
+// Dimensión de FECHA con granularidad elegible (Año / Mes / Día) — 2026-10-02.
+// Se declara en config.dimensiones como { key, label, tipo: 'fecha', campo?, granularidad? }.
+const _GRAN = { anio: 'Año', mes: 'Mes', dia: 'Día' }
+function _valorFecha(iso, gran) {
+  const f = String(iso || '').slice(0, 10)
+  if (!/^\d{4}-\d{2}/.test(f)) return '(sin fecha)'
+  if (gran === 'anio') return f.slice(0, 4)
+  if (gran === 'dia') return f.length === 10 ? `${f.slice(8, 10)}/${f.slice(5, 7)}/${f.slice(0, 4)}` : f
+  return nombreMes(f.slice(0, 7))
+}
+/** Resuelve el valor de agrupación según config/estado (fechas granulares). */
+function _resolverDims(config, estado) {
+  const fechas = {}
+  ;(config.dimensiones || []).forEach(d => { if (d.tipo === 'fecha') fechas[d.key] = d })
+  if (!Object.keys(fechas).length) return null
+  return (fila, k) => {
+    const d = fechas[k]
+    if (!d) return _valorDim(fila, k)
+    return _valorFecha(fila[d.campo || d.key], estado.gran?.[k] || d.granularidad || 'mes')
+  }
 }
 
 function _valorDim(fila, clave) {
@@ -53,6 +161,14 @@ function _valorDim(fila, clave) {
 function calcularMedidas(filas, medidas) {
   const out = {}
   medidas.forEach(m => {
+    // agg 'ratio': Σ num / Σ den (promedio PONDERADO, p.ej. costo unitario
+    // = Σ(costo×kg) / Σ kg). num/den son funciones fila → número.
+    if (m.agg === 'ratio') {
+      let n = 0, d = 0
+      filas.forEach(f => { n += parseFloat(m.num(f)) || 0; d += parseFloat(m.den(f)) || 0 })
+      out[m.key] = d ? n / d : 0
+      return
+    }
     const vals = filas.map(f => {
       const v = m.calc ? m.calc(f) : f[m.key]
       const n = parseFloat(v)
@@ -73,6 +189,7 @@ export function formatearMedida(valor, formato) {
   switch (formato) {
     case 'money':   return formatNumber(n, 2)
     case 'money4':  return formatNumber(n, 4)
+    case 'tc':      return n ? formatNumber(n, 3) : '—'
     case 'qty':     return formatQty(n)
     case 'int':     return Math.round(n).toLocaleString('en-US')
     case 'pct':     return formatNumber(n, 1) + ' %'
@@ -94,6 +211,19 @@ function _htmlFiltro(id, f, valorActual) {
     }).join('')
     return `<select id="${base}" data-filtro="${f.key}"><option value="">${f.placeholderTodos || 'Todos'}</option>${opts}</select>`
   }
+  if (f.tipo === 'multi') {
+    // Selección múltiple con chips: valorActual = array de valores incluidos
+    // (undefined = todos). Sirve p.ej. para sacar traslados del kardex.
+    const sel = Array.isArray(valorActual) ? valorActual : (f.opciones || []).map(o => typeof o === 'object' ? o.value : o)
+    return `<div class="reporte-chips" data-rp-multi-box="${f.key}">
+      ${(f.opciones || []).map(o => {
+        const val = typeof o === 'object' ? o.value : o
+        const lab = typeof o === 'object' ? o.label : o
+        return `<button type="button" class="reporte-chip ${sel.includes(val) ? 'on' : ''}" data-rp-multi="${_esc(f.key)}" data-rp-val="${_esc(val)}">${_esc(lab)}</button>`
+      }).join('')}
+      <button type="button" class="reporte-chip" data-rp-multi-todos="${_esc(f.key)}" title="Marcar / desmarcar todos">✓ Todos</button>
+    </div>`
+  }
   if (f.tipo === 'mes')   return `<input type="month" id="${base}" data-filtro="${f.key}" value="${valorActual ?? ''}">`
   if (f.tipo === 'fecha') return `<input type="date"  id="${base}" data-filtro="${f.key}" value="${valorActual ?? ''}">`
   if (f.tipo === 'rango') {
@@ -111,6 +241,11 @@ function aplicarFiltros(datos, filtros, estado) {
     for (const f of filtros) {
       const val = estado[f.key]
       if (val === undefined || val === null || val === '' ) continue
+      if (f.tipo === 'multi') {
+        if (!Array.isArray(val)) continue
+        if (!val.includes(String(fila[f.campo || f.key] ?? ''))) return false
+        continue
+      }
       if (f.tipo === 'rango') {
         if (!val.desde && !val.hasta) continue
         const v = String(fila[f.campo || f.key] || '')
@@ -165,14 +300,18 @@ export function crearReporte(containerId, config) {
   if (!cont) return
 
   const id = config.id || containerId
-  const estado = _registro.get(id)?.estado || {
+  const previo = _registro.get(id)?.estado
+  const porDefecto = {
     filtros:  {},
     agrupar:  (config.agruparPorDefecto || (config.dimensiones[0] ? [config.dimensiones[0].key] : [])).slice(),
     medidas:  (config.medidasPorDefecto || config.medidas.map(m => m.key)).slice(),
     ordenKey: config.orden?.key || null,
     ordenDir: config.orden?.dir || 'desc',
-    limite:   config.limite || 0
+    limite:   config.limite || 0,
+    gran:     Object.fromEntries((config.dimensiones || []).filter(d => d.tipo === 'fecha').map(d => [d.key, d.granularidad || 'mes']))
   }
+  const vista = _vistas.get(id)
+  const estado = previo || (vista ? _estadoDesdeVista(config, vista, porDefecto) : porDefecto)
   // valores por defecto de filtros declarados
   ;(config.filtros || []).forEach(f => {
     if (estado.filtros[f.key] === undefined && f.valorDefecto !== undefined) estado.filtros[f.key] = f.valorDefecto
@@ -188,8 +327,10 @@ export function crearReporte(containerId, config) {
           ${config.descripcion ? `<div class="reporte-desc">${_esc(config.descripcion)}</div>` : ''}
         </div>
         <div style="display:flex; gap:8px;">
-          <button class="btn btn-secondary btn-small" data-rp-accion="csv" data-rp-id="${id}">⬇ CSV</button>
-          <button class="btn btn-secondary btn-small" data-rp-accion="limpiar" data-rp-id="${id}">↺ Limpiar</button>
+          <button class="btn btn-secondary btn-small" data-rp-accion="guardar-vista" data-rp-id="${id}" title="Guarda filtros, fechas, agrupación, columnas y orden: el reporte abrirá siempre así (solo para tu usuario)">⭐ ${vista ? 'Actualizar vista' : 'Guardar vista'}</button>
+          ${vista ? `<button class="btn btn-secondary btn-small" data-rp-accion="quitar-vista" data-rp-id="${id}" title="Borra la vista guardada y vuelve al diseño original del reporte">✕ Quitar vista</button>` : ''}
+          <button class="btn btn-secondary btn-small" data-rp-accion="excel" data-rp-id="${id}">⬇ Excel</button>
+          <button class="btn btn-secondary btn-small" data-rp-accion="limpiar" data-rp-id="${id}" title="${vista ? 'Vuelve a tu vista guardada' : 'Vuelve al diseño original del reporte'}">↺ Limpiar</button>
         </div>
       </div>
 
@@ -203,7 +344,14 @@ export function crearReporte(containerId, config) {
         <div class="reporte-filtro">
           <label>Agrupar por</label>
           <div class="reporte-chips" id="rp-dims-${id}">
-            ${config.dimensiones.map(d => `
+            ${config.dimensiones.map(d => d.tipo === 'fecha' ? `
+              <span role="button" tabindex="0" class="reporte-chip ${estado.agrupar.includes(d.key) ? 'on' : ''}"
+                    data-rp-dim="${_esc(d.key)}" data-rp-id="${id}" style="display:inline-flex; align-items:center; gap:6px;">${_esc(d.label)}
+                <select class="reporte-chip-gran" data-rp-gran="${_esc(d.key)}" title="Agrupar la fecha por"
+                        onclick="event.stopPropagation()" onmousedown="event.stopPropagation()"
+                        style="width:auto; padding:1px 4px; font-size:0.78rem; border-radius:6px; background:var(--bg-primary); color:var(--text-primary); border:1px solid var(--border-color);">
+                  ${Object.entries(_GRAN).map(([v, l]) => `<option value="${v}" ${(estado.gran?.[d.key] || d.granularidad || 'mes') === v ? 'selected' : ''}>${l}</option>`).join('')}
+                </select></span>` : `
               <button type="button" class="reporte-chip ${estado.agrupar.includes(d.key) ? 'on' : ''}"
                       data-rp-dim="${_esc(d.key)}" data-rp-id="${id}">${_esc(d.label)}</button>`).join('')}
           </div>
@@ -227,6 +375,20 @@ export function crearReporte(containerId, config) {
 
   _bindEventos(id)
   refrescarReporte(id)
+
+  // Primera apertura: si las vistas guardadas aún no se cargaron, se
+  // consultan y, si hay una para este reporte y el usuario no tocó nada
+  // todavía, se vuelve a pintar con ella.
+  if (!previo && !vista) {
+    const foto = JSON.stringify(estado)
+    _cargarVistas().then(() => {
+      const reg = _registro.get(id)
+      if (_vistas.has(id) && reg && JSON.stringify(reg.estado) === foto) {
+        _registro.delete(id)
+        crearReporte(containerId, config)
+      }
+    })
+  }
 }
 
 /** Reemplaza los datos de un reporte ya creado sin perder los filtros. */
@@ -246,7 +408,7 @@ export function refrescarReporte(id) {
   const medidasSel = config.medidas.filter(m => estado.medidas.includes(m.key))
   const medidasUsar = medidasSel.length ? medidasSel : config.medidas
 
-  let grupos = agrupar(filtrados, estado.agrupar, medidasUsar)
+  let grupos = agrupar(filtrados, estado.agrupar, medidasUsar, _resolverDims(config, estado))
 
   const ordenKey = estado.ordenKey || medidasUsar[0]?.key
   if (ordenKey) {
@@ -348,8 +510,14 @@ export function refrescarReporte(id) {
   }
 }
 
-function _labelDim(config, key) {
-  return config.dimensiones.find(d => d.key === key)?.label || key
+function _labelDim(config, key, estado = null) {
+  const d = config.dimensiones.find(x => x.key === key)
+  if (!d) return key
+  if (d.tipo === 'fecha') {
+    const g = (estado || _registro.get(config.id)?.estado)?.gran?.[key] || d.granularidad || 'mes'
+    return `${d.label} (${_GRAN[g].toLowerCase()})`
+  }
+  return d.label
 }
 
 function _flecha(estado, key) {
@@ -411,6 +579,46 @@ function _bindEventos(id) {
       })
     })
 
+    const _opcionesMulti = (key) => ((config.filtros || []).find(f => f.key === key)?.opciones || [])
+      .map(o => String(typeof o === 'object' ? o.value : o))
+    cajaFiltros.querySelectorAll('[data-rp-multi]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.getAttribute('data-rp-multi')
+        const val = btn.getAttribute('data-rp-val')
+        const actual = Array.isArray(estado.filtros[key]) ? estado.filtros[key].slice() : _opcionesMulti(key)
+        const i = actual.indexOf(val)
+        if (i >= 0) actual.splice(i, 1); else actual.push(val)
+        estado.filtros[key] = actual
+        btn.classList.toggle('on', i < 0)
+        refrescarReporte(id)
+      })
+    })
+    cajaFiltros.querySelectorAll('[data-rp-multi-todos]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.getAttribute('data-rp-multi-todos')
+        const todas = _opcionesMulti(key)
+        const actual = Array.isArray(estado.filtros[key]) ? estado.filtros[key] : todas
+        const marcarTodo = actual.length < todas.length
+        estado.filtros[key] = marcarTodo ? todas : []
+        cajaFiltros.querySelectorAll(`[data-rp-multi="${key}"]`).forEach(b => b.classList.toggle('on', marcarTodo))
+        refrescarReporte(id)
+      })
+    })
+
+    cajaFiltros.querySelectorAll('[data-rp-gran]').forEach(sel => {
+      sel.addEventListener('change', (ev) => {
+        ev.stopPropagation()
+        const k = sel.getAttribute('data-rp-gran')
+        estado.gran = { ...(estado.gran || {}), [k]: sel.value }
+        // Elegir granularidad implica querer agrupar por esa fecha
+        if (!estado.agrupar.includes(k)) {
+          estado.agrupar.push(k)
+          sel.closest('[data-rp-dim]')?.classList.add('on')
+        }
+        refrescarReporte(id)
+      })
+    })
+
     cajaFiltros.querySelectorAll('[data-rp-dim]').forEach(btn => {
       btn.addEventListener('click', () => {
         const k = btn.getAttribute('data-rp-dim')
@@ -429,6 +637,13 @@ function _bindEventos(id) {
         else if (i < 0) estado.medidas.push(k)
         else return
         btn.classList.toggle('on')
+        // Medida que necesita una dimensión para tener sentido (p.ej. Costo
+        // unitario → Lote): al activarla se agrega esa agrupación sola.
+        const req = config.medidas.find(m => m.key === k)?.requiereDim
+        if (i < 0 && req && !estado.agrupar.includes(req)) {
+          estado.agrupar.push(req)
+          cajaFiltros.querySelector(`[data-rp-dim="${req}"]`)?.classList.add('on')
+        }
         refrescarReporte(id)
       })
     })
@@ -438,6 +653,9 @@ function _bindEventos(id) {
     btn.addEventListener('click', () => {
       const accion = btn.getAttribute('data-rp-accion')
       if (accion === 'csv')     exportarCSV(id)
+      if (accion === 'excel')   exportarExcel(id)
+      if (accion === 'guardar-vista') _guardarVista(id)
+      if (accion === 'quitar-vista')  _quitarVista(id)
       if (accion === 'limpiar') {
         // Reset completo de la vista: filtros, agrupación, columnas y orden
         // vuelven a como estaba el reporte recién abierto. Se borra la entrada
@@ -454,21 +672,75 @@ function _bindEventos(id) {
 // EXPORTAR
 // ============================================================================
 
-export function exportarCSV(id) {
+/** Arma la matriz exportable: UNA columna por dimensión de agrupación (antes
+ *  iban todas pegadas en una celda "Mes | Producto | Tipo"), N° registros y
+ *  una columna por medida con el número crudo (no texto). */
+function _matrizExport(id) {
   const reg = _registro.get(id)
-  if (!reg) return
+  if (!reg) return null
   const { config, estado } = reg
   const filtrados = aplicarFiltros(config.datos || [], config.filtros || [], estado.filtros)
-  const medidasUsar = config.medidas.filter(m => estado.medidas.includes(m.key))
-  const grupos = agrupar(filtrados, estado.agrupar, medidasUsar.length ? medidasUsar : config.medidas)
+  const medidasSel = config.medidas.filter(m => estado.medidas.includes(m.key))
+  const medidas = medidasSel.length ? medidasSel : config.medidas
+  let grupos = agrupar(filtrados, estado.agrupar, medidas, _resolverDims(config, estado))
+  // mismo orden que la tabla en pantalla (por etiqueta asc si no hay otro)
+  const ok = estado.ordenKey || medidas[0]?.key || '_etiqueta'
+  const dir = estado.ordenDir === 'asc' ? 1 : -1
+  grupos.sort((a, b) => {
+    if (ok === '_etiqueta') {
+      const pa = a._claves.map(_valorOrdenable), pb = b._claves.map(_valorOrdenable)
+      for (let i = 0; i < pa.length; i++) {
+        if (pa[i] === pb[i]) continue
+        if (typeof pa[i] === 'number' && typeof pb[i] === 'number') return (pa[i] - pb[i]) * dir
+        return String(pa[i]).localeCompare(String(pb[i])) * dir
+      }
+      return 0
+    }
+    return ((a[ok] ?? 0) - (b[ok] ?? 0)) * dir
+  })
+  const dims = estado.agrupar.length ? estado.agrupar.map(k => _labelDim(config, k)) : ['Total']
+  const dec = (m) => (m.formato === 'money4' ? 4 : (m.formato === 'int' ? 0 : ((m.formato === 'qty' || m.formato === 'tc') ? 3 : 2)))
+  const num = (m, v) => { const n = parseFloat(v) || 0; const p = 10 ** dec(m); return Math.round(n * p) / p }
+  const cab = [...dims, 'N° registros', ...medidas.map(m => m.label)]
+  const filas = grupos.map(g => [...(g._claves.length ? g._claves : ['Total']), g._filas.length, ...medidas.map(m => num(m, g[m.key]))])
+  const tot = calcularMedidas(filtrados, medidas)
+  const filaTotal = ['TOTAL', ...dims.slice(1).map(() => ''), filtrados.length, ...medidas.map(m => num(m, tot[m.key]))]
+  return { config, cab, filas, filaTotal, medidas, nDims: dims.length }
+}
 
-  const cab = [estado.agrupar.map(k => _labelDim(config, k)).join(' | ') || 'Total', 'N° registros',
-               ...(medidasUsar.length ? medidasUsar : config.medidas).map(m => m.label)]
-  const filas = grupos.map(g => [
-    g._etiqueta, g._filas.length,
-    ...(medidasUsar.length ? medidasUsar : config.medidas).map(m => (parseFloat(g[m.key]) || 0).toFixed(2))
-  ])
-  descargarCSV(`${(config.titulo || 'reporte').replace(/[^\w]+/g, '_')}_${new Date().toISOString().slice(0, 10)}.csv`, [cab, ...filas])
+function _nombreArchivo(config, ext) {
+  return `${(config.titulo || 'reporte').replace(/[^\w]+/g, '_')}_${new Date().toISOString().slice(0, 10)}.${ext}`
+}
+
+export function exportarCSV(id) {
+  const mx = _matrizExport(id)
+  if (!mx) return
+  descargarCSV(_nombreArchivo(mx.config, 'csv'), [mx.cab, ...mx.filas, mx.filaTotal])
+}
+
+/** Exporta a .xlsx real (SheetJS, mismo import que usa importar-compras.js).
+ *  Si el CDN no carga, cae al CSV para no dejar al usuario sin archivo. */
+export async function exportarExcel(id) {
+  const mx = _matrizExport(id)
+  if (!mx) return
+  let XLSX
+  try { XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm') }
+  catch (e) { console.error('No cargó SheetJS, exporto CSV:', e); exportarCSV(id); return }
+  const aoa = [mx.cab, ...mx.filas, mx.filaTotal]
+  const ws = XLSX.utils.aoa_to_sheet(aoa)
+  // formato numérico por columna de medida
+  const fmt = (m) => m.formato === 'money4' ? '#,##0.0000' : (m.formato === 'int' ? '#,##0' : (m.formato === 'qty' ? '#,##0.###' : (m.formato === 'tc' ? '0.000' : '#,##0.00')))
+  for (let r = 1; r < aoa.length; r++) {
+    mx.medidas.forEach((m, j) => {
+      const ref = XLSX.utils.encode_cell({ r, c: mx.nDims + 1 + j })
+      if (ws[ref] && typeof ws[ref].v === 'number') ws[ref].z = fmt(m)
+    })
+  }
+  ws['!cols'] = mx.cab.map((h, c) => ({ wch: Math.min(60, Math.max(String(h).length + 2, ...aoa.map(f => String(f[c] ?? '').length + 2))) }))
+  ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: aoa.length - 2, c: mx.cab.length - 1 } }) }
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, (mx.config.titulo || 'Reporte').replace(/[\\/?*\[\]:]/g, '').slice(0, 31))
+  XLSX.writeFile(wb, _nombreArchivo(mx.config, 'xlsx'))
 }
 
 export function descargarCSV(nombre, filas) {
@@ -528,6 +800,9 @@ export function nombreMes(ym) {
  *  Producto, Lote, "(sin fecha)", etc.) devuelve el valor tal cual, así
  *  sigue ordenando alfabéticamente como antes. */
 function _valorOrdenable(valor) {
+  const d = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(valor)            // DD/MM/AAAA (fecha por día)
+  if (d) return parseInt(d[3] + d[2] + d[1], 10)
+  if (/^\d{4}$/.test(valor)) return parseInt(valor, 10) * 10000     // AAAA (fecha por año)
   const m = /^([A-Za-z]{3})\s(\d{4})$/.exec(valor)
   if (!m) return valor
   const idx = _MESES_ABREV.indexOf(m[1])

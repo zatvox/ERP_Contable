@@ -377,8 +377,8 @@ export function renderConfiguracionTab(modulo, containerId, opciones = {}) {
       <div class="cfg-body">
         <div class="cfg-fila">
           <div class="cfg-fila-texto">
-            <label>Consultas RUC/DNI este mes (Decolecta)</label>
-            <div class="cfg-hint">Decolecta es la fuente principal; si falla o se acaba la cuota, cae automáticamente a APIs.pe. Decolecta no expone un endpoint de cuota oficial — este conteo lo lleva el ERP.</div>
+            <label>Consultas RUC/DNI/T.C. este mes (Decolecta)</label>
+            <div class="cfg-hint">Decolecta es la fuente principal; si falla o se acaba la cuota, cae automáticamente a APIs.pe. Los T.C. ya consultados se guardan (tabla tipos_cambio) y no vuelven a consumir. Decolecta no expone un endpoint de cuota oficial — este conteo lo lleva el ERP.</div>
           </div>
           <div id="decolecta-usage-${modulo}" style="min-width:180px; text-align:right; color:var(--text-secondary);">Cargando…</div>
         </div>

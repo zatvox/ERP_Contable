@@ -33,8 +33,8 @@ export async function renderReportePartidas() {
     const container = document.getElementById('tabla-reporte-partidas')
     if (!container) return
 
-    const [lotes, items, categorias, zonas, almacenes] = await Promise.all([
-      getLotes(), getItems(), getCategorias(), getUbicaciones(), getAlmacenes()
+    const [lotes, items, categorias, zonas, almacenes, stockUbic] = await Promise.all([
+      getLotes(), getItems(), getCategorias(), getUbicaciones(), getAlmacenes(), getStockUbicaciones()
     ])
 
     _poblarFiltroCategoriaReportePartidas(categorias || [])
@@ -55,9 +55,18 @@ export async function renderReportePartidas() {
     const fCat = document.getElementById('filtroReportePartidaCategoria')?.value || ''
     const fBusqueda = (document.getElementById('buscarReportePartida')?.value || '').trim().toLowerCase()
 
-    // Agrupar por producto + código de partida.
+    // Agrupar por producto + código de partida. Cantidades desde kardex
+    // (vista stock_ubicaciones, la fuente de verdad — igual que Resumen de
+    // Stock), NO desde lotes.cantidad, que puede estar desincronizado: por
+    // eso salían partidas con 0.00 (2026-10-05). Solo partidas con stock > 0.
+    const loteMap = {}
+    ;(lotes || []).forEach(l => { loteMap[l.id] = l })
     const grupos = new Map()
-    for (const l of (lotes || [])) {
+    for (const su of (stockUbic || [])) {
+      const cant = parseFloat(su.cantidad) || 0
+      if (cant <= 0) continue
+      const l = loteMap[su.lote_id]
+      if (!l) continue
       const partida = (l.codigo_partida || '').trim()
       if (soloConPartida && !partida) continue
 
@@ -65,16 +74,16 @@ export async function renderReportePartidas() {
       if (fCat && String(item?.categoria_id) !== fCat) continue
 
       const clave = `${l.item_id}||${partida}`
-      const acc = grupos.get(clave) || { item_id: l.item_id, partida, lotes: 0, cantidad: 0, valor: 0, zonas: new Set() }
-      acc.lotes += 1
-      acc.cantidad += parseFloat(l.cantidad) || 0
-      acc.valor += (parseFloat(l.cantidad) || 0) * (parseFloat(l.costo_unitario) || 0)
-      const zn = nombreZona(l.ubicacion_id)
+      const acc = grupos.get(clave) || { item_id: l.item_id, partida, lotesSet: new Set(), cantidad: 0, valor: 0, zonas: new Set() }
+      acc.lotesSet.add(String(l.numero_lote || l.id).trim().toLowerCase())
+      acc.cantidad += cant
+      acc.valor += cant * (parseFloat(l.costo_unitario) || 0)
+      const zn = nombreZona(su.ubicacion_id)
       if (zn) acc.zonas.add(zn)
       grupos.set(clave, acc)
     }
 
-    let filas = [...grupos.values()]
+    let filas = [...grupos.values()].map(g => ({ ...g, lotes: g.lotesSet.size }))
 
     if (fBusqueda) {
       filas = filas.filter(g => {
@@ -295,48 +304,90 @@ export async function construirReporteInv(panelId) {
 
     if (panelId === 'repi-rotacion' || panelId === 'repi-kardex') {
       const kardex = await cacheado('kardex', getKardex)
+      const loteMap = {}; (lotes || []).forEach(l => { loteMap[l.id] = l.numero_lote || `#${l.id}` })
+
+      // Clase de movimiento (solo vista, la BD no cambia): tipo_movimiento
+      // mezcla casos que contablemente son distintos — una devolución a
+      // proveedor también es 'salida' y una NC de cliente también es
+      // 'entrada'. Se separan por el concepto que graba cada flujo.
+      const _clase = (k) => {
+        const t = k.tipo_movimiento || k.tipo || ''
+        const c = String(k.concepto || '')
+        if (t === 'traslado_interno') return 'Traslado'
+        if (t === 'ajuste_entrada') return 'Ajuste (+)'
+        if (t === 'ajuste_salida') return 'Ajuste (−)'
+        if (/devoluci[oó]n de cliente/i.test(c)) return 'Devolución cliente'
+        if (/devoluci[oó]n a proveedor/i.test(c)) return 'Devolución proveedor'
+        if (/^correcci[oó]n/i.test(c)) return 'Corrección compra'
+        if (/^venta/i.test(c)) return 'Venta'
+        if (/^compra/i.test(c)) return 'Compra'
+        if (t === 'salida') return 'Salida (otra)'
+        if (t === 'entrada') return 'Entrada (otra)'
+        return t || '(sin tipo)'
+      }
+
       const filasK = (kardex || []).map(k => {
         const it = itemMap[k.item_id] || {}
         const entrada = parseFloat(k.cantidad_entrada || 0) || 0
         const salida  = parseFloat(k.cantidad_salida || 0) || 0
+        const vEnt = parseFloat(k.valor_entrada || 0) || 0
+        const vSal = parseFloat(k.valor_salida || 0) || 0
+        const clase = _clase(k)
+        // Cantidad "del movimiento" (traslado: entrada = salida, se cuenta una vez)
+        const cantMov = Math.max(entrada, salida)
+        const costoU = parseFloat(k.costo_unitario) || (cantMov ? Math.max(vEnt, vSal) / cantMov : 0)
         return {
           producto: _prod(k.item_id),
           sku: it.sku || '—',
           categoria: catMap[it.categoria_id] || '(sin categoría)',
-          tipo: k.tipo_movimiento || k.tipo || '(sin tipo)',
+          lote: k.lote_id ? (loteMap[k.lote_id] || `#${k.lote_id}`) : '(sin lote)',
+          tipo: clase,
           mes: nombreMes((k.fecha || '').slice(0, 7)),
           fecha: k.fecha || '',
           entrada, salida,
-          valor_entrada: parseFloat(k.valor_entrada || 0) || 0,
-          valor_salida: parseFloat(k.valor_salida || 0) || 0,
-          neto: entrada - salida
+          valor_entrada: vEnt,
+          valor_salida: vSal,
+          neto: entrada - salida,
+          neto_valor: vEnt - vSal,
+          costo_venta: clase === 'Venta' ? vSal : (clase === 'Devolución cliente' ? -vEnt : 0),
+          _cant_mov: cantMov,
+          _costo_u: costoU
         }
       })
 
       if (panelId === 'repi-kardex') {
+        const ORDEN_CLASES = ['Compra', 'Venta', 'Devolución cliente', 'Devolución proveedor', 'Corrección compra', 'Traslado', 'Ajuste (+)', 'Ajuste (−)', 'Entrada (otra)', 'Salida (otra)']
+        const clases = Array.from(new Set(filasK.map(f => f.tipo)))
+          .sort((a, b) => (ORDEN_CLASES.indexOf(a) + 1 || 99) - (ORDEN_CLASES.indexOf(b) + 1 || 99))
         crearReporte('repi-kardex', {
           id: 'repi-kardex',
           titulo: 'Kardex resumido (valorizado)',
-          descripcion: 'Entradas y salidas por producto, tipo de movimiento y mes, con su valorización.',
+          descripcion: 'Entradas y salidas por producto, lote, tipo de movimiento y mes, con su valorización. Costo de ventas = salidas por venta − devoluciones de clientes.',
           datos: filasK,
           dimensiones: [
             { key: 'mes', label: 'Mes' }, { key: 'producto', label: 'Producto' },
+            { key: 'lote', label: 'Lote' },
             { key: 'tipo', label: 'Tipo de movimiento' }, { key: 'categoria', label: 'Categoría' }
           ],
           medidas: [
             { key: 'entrada', label: 'Entradas (cant.)', agg: 'sum', formato: 'qty' },
             { key: 'salida', label: 'Salidas (cant.)', agg: 'sum', formato: 'qty' },
+            { key: 'neto', label: 'Neto (cant.)', agg: 'sum', formato: 'qty', semaforo: true },
             { key: 'valor_entrada', label: 'Valor entradas', agg: 'sum', formato: 'money' },
             { key: 'valor_salida', label: 'Valor salidas', agg: 'sum', formato: 'money' },
-            { key: 'neto', label: 'Neto (cant.)', agg: 'sum', formato: 'qty', semaforo: true }
+            { key: 'neto_valor', label: 'Neto (valor)', agg: 'sum', formato: 'money', semaforo: true },
+            // Ponderado por kg: Σ(costo × kg) / Σ kg. Con 1 lote = su costo exacto.
+            { key: 'costo_unitario', label: 'Costo unitario', agg: 'ratio', formato: 'money4',
+              num: f => f._costo_u * f._cant_mov, den: f => f._cant_mov, requiereDim: 'lote' },
+            { key: 'costo_venta', label: 'Costo de ventas', agg: 'sum', formato: 'money' }
           ],
           filtros: [
-            { key: 'buscar', label: 'Buscar', tipo: 'texto', campos: ['producto', 'sku'], placeholder: 'Producto o SKU...' },
-            { key: 'tipo', label: 'Tipo', tipo: 'select', opciones: Array.from(new Set(filasK.map(f => f.tipo))).sort() },
-            { key: 'rango', label: 'Fecha', tipo: 'rango', campo: 'fecha' }
+            { key: 'buscar', label: 'Buscar', tipo: 'texto', campos: ['producto', 'sku', 'lote'], placeholder: 'Producto, SKU o lote...' },
+            { key: 'rango', label: 'Fecha', tipo: 'rango', campo: 'fecha' },
+            { key: 'tipo', label: 'Tipo de movimiento', tipo: 'multi', opciones: clases }
           ],
           agruparPorDefecto: ['mes'], orden: { key: '_etiqueta', dir: 'asc' },
-          medidasPorDefecto: ['entrada', 'salida', 'valor_salida']
+          medidasPorDefecto: ['entrada', 'salida', 'valor_entrada', 'valor_salida', 'neto_valor', 'costo_venta']
         })
       }
 
@@ -348,7 +399,7 @@ export async function construirReporteInv(panelId) {
         // — contarlo aquí inflaba "Salidas históricas" y podía marcar como
         // "con rotación" un producto que en realidad nunca se vendió.
         const salidaPorProducto = {}
-        filasK.filter(k => k.tipo === 'salida').forEach(k => {
+        filasK.filter(k => k.tipo === 'Venta').forEach(k => {
           salidaPorProducto[k.producto] = (salidaPorProducto[k.producto] || 0) + k.salida
         })
         const stockPorProducto = {}
@@ -358,7 +409,7 @@ export async function construirReporteInv(panelId) {
           stockPorProducto[l.producto] = (stockPorProducto[l.producto] || 0) + l.cantidad
           valorPorProducto[l.producto] = (valorPorProducto[l.producto] || 0) + l.valor
         })
-        filasK.filter(k => k.tipo === 'salida' && k.salida > 0).forEach(k => {
+        filasK.filter(k => k.tipo === 'Venta' && k.salida > 0).forEach(k => {
           if (!ultimaSalida[k.producto] || k.fecha > ultimaSalida[k.producto]) ultimaSalida[k.producto] = k.fecha
         })
 

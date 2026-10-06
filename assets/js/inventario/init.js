@@ -14,7 +14,8 @@ import { cargarCategoriasSelect, cargarMarcasSelect, cargarProductosSelect } fro
 import { renderHistorialMovimientos } from './historial-movimientos.js'
 import { renderKardex } from './kardex.js'
 import { renderLotes } from './lotes.js'
-import { renderPartidas } from './partidas.js'
+import './partidas.js'  // tabla legacy `partidas` — ya no tiene tab (ver Familias y atributos › Partidas)
+import { renderFamilias } from './familias.js'
 import { renderProductos } from './productos.js'
 import { construirReporteInv, renderReportePartidas } from './reportes.js'
 
@@ -36,6 +37,7 @@ registrarColumnas('lotes', [
 registrarColumnas('resumen-stock', [
   { key: 'sku',             label: 'SKU' },
   { key: 'producto',        label: 'Producto' },
+  { key: 'categoria',       label: 'Categoría' },
   { key: 'lotes',           label: 'N° Lote' },
   { key: 'stock_total',     label: 'Stock Total' },
   { key: 'total_unidades',  label: 'Total Unidades' },
@@ -49,12 +51,17 @@ registrarColumnas('stock-zonas', [
   { key: 'sel',       label: 'Seleccionar' },
   { key: 'codigo',    label: 'Código' },
   { key: 'producto',  label: 'Producto' },
+  { key: 'categoria', label: 'Categoría' },
   { key: 'lote',      label: 'N° Lote' },
   { key: 'marca',     label: 'Marca' },
   { key: 'zona',      label: 'Almacén — Zona' },
   { key: 'cantidad',  label: 'Cantidad' },
   { key: 'unidades',  label: 'Unidades' },
   { key: 'peso_unidad', label: 'Peso/Unidad' },
+  { key: 'moneda',    label: 'Moneda' },
+  { key: 'tc',        label: 'T.C.' },
+  { key: 'costo_orig', label: 'Costo Orig.' },
+  { key: 'costo',     label: 'Costo S/.' },
   { key: 'acciones',  label: 'Acciones' }
 ])
 
@@ -138,12 +145,9 @@ function initTabsInventario() {
       if (tab === 'productos')  await renderProductos()
       if (tab === 'lotes')      await renderLotes()
       if (tab === 'resumen') await window.renderResumenStockUnificado()
-      if (tab === 'categorias') await renderCategorias()
-      if (tab === 'marcas')     await renderMarcas()
-      if (tab === 'partidas')   await renderPartidas()
+      if (tab === 'atributos')  await _renderSubtabAtributos()
       if (tab === 'kardex')     await renderKardex()
       if (tab === 'historial')  await renderHistorialMovimientos()
-      if (tab === 'reportes')   await renderReportePartidas()
       if (tab === 'reportes-gerenciales') {
         const activo = document.querySelector('#inv-subtabs-reportes .subtab.active')?.getAttribute('data-sub') || 'repi-valorizacion'
         await construirReporteInv(activo)
@@ -159,6 +163,10 @@ function initTabsInventario() {
   })
 
   initSubtabs('#inv-subtabs-reportes', (panel) => construirReporteInv(panel))
+
+  // Familias y atributos (2026-10-05): Familias · Categorías · Marcas ·
+  // Partidas en subtabs internos de un solo botón del menú Catálogo.
+  initSubtabs('#inv-subtabs-atributos', () => _renderSubtabAtributos())
 
   // Resumen Stock: ya no son 2 subtabs con 2 tablas — es una sola tabla-vista
   // con un botón de agrupamiento (window.setModoResumenStock), ver bloque
@@ -176,4 +184,12 @@ function initTabsInventario() {
   // en un submenú desplegable estilo Odoo. No reemplaza el listener de arriba,
   // solo agrega abrir/cerrar y resaltar el grupo activo.
   initModuleNavDropdowns('#inventarioTabs')
+}
+
+async function _renderSubtabAtributos() {
+  const activo = document.querySelector('#inv-subtabs-atributos .subtab.active')?.getAttribute('data-sub') || 'atr-familias'
+  if (activo === 'atr-familias')   await renderFamilias()
+  if (activo === 'atr-categorias') await renderCategorias()
+  if (activo === 'atr-marcas')     await renderMarcas()
+  if (activo === 'atr-partidas')   await renderReportePartidas()
 }

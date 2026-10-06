@@ -39,6 +39,7 @@
         </div>
 
         <nav class="module-nav" id="ventasTabs">
+          <button type="button" class="tab-btn" data-tab="packing">Packing (PK)</button>
           <button type="button" class="tab-btn active" data-tab="ventas">Ventas (CPE)</button>
           <button type="button" class="tab-btn" data-tab="guias-despacho">Guías de Despacho</button>
           <!-- Cotizaciones en standby: quitar este comentario para reactivar el tab.
@@ -55,6 +56,11 @@
       </header>
 
       <main class="content">
+
+        <!-- TAB: PACKING (PK) — cotización / orden de venta (ver assets/js/ventas/packing.js) -->
+        <div id="tab-packing" class="tab-content">
+          <div id="content-packing" class="card">Cargando...</div>
+        </div>
 
         <!-- TAB: VENTAS con CPE -->
         <div id="tab-ventas" class="tab-content active">
@@ -121,6 +127,7 @@
             <button class="subtab" data-sub="repv-clientes">Por cliente</button>
             <button class="subtab" data-sub="repv-productos">Por producto</button>
             <button class="subtab" data-sub="repv-margen">Margen bruto</button>
+            <button class="subtab" data-sub="repv-vendedor">Por vendedor</button>
             <button class="subtab" data-sub="repv-lote">Rentabilidad por lote</button>
             <button class="subtab" data-sub="repv-despacho">Estado de despacho</button>
           </div>
@@ -128,6 +135,7 @@
           <div id="repv-clientes"  class="subtab-panel"></div>
           <div id="repv-productos" class="subtab-panel"></div>
           <div id="repv-margen"    class="subtab-panel"></div>
+          <div id="repv-vendedor"  class="subtab-panel"></div>
           <div id="repv-lote"      class="subtab-panel"></div>
           <div id="repv-despacho"  class="subtab-panel"></div>
         </div>
@@ -297,7 +305,7 @@
           </div>
           <div class="form-group">
             <label>Serie</label>
-            <input type="text" id="ventaSerie" placeholder="F001 / B001" maxlength="4" oninput="window.onCambiarSerieVenta()">
+            <select id="ventaSerie" onchange="window.onCambiarSerieVenta()" title="Series activas del tipo elegido (Configuración → Series y correlativos)"></select>
           </div>
           <div class="form-group">
             <label>N° Comprobante</label>
@@ -350,8 +358,8 @@
           </div>
           <div class="form-group" id="ventaTipoCambioGroup" style="display:none;">
             <label>
-              T.C. <span id="ventaTCTipo" style="font-size:0.75rem; font-weight:600; color:var(--color-info);">VENTA SBS</span>
-              <button type="button" id="btnAutoTC" onclick="window.autoFetchTCVenta()" title="Obtener TC VENTA del día (SBS)" style="margin-left:4px; background:none; border:1px solid var(--border-color); border-radius:4px; padding:1px 6px; font-size:0.72rem; cursor:pointer; color:var(--color-info);">↻ Auto</button>
+              T.C. <span id="ventaTCTipo" style="font-size:0.75rem; font-weight:600; color:var(--color-info);">VENTA SUNAT</span>
+              <button type="button" id="btnAutoTC" hidden onclick="window.autoFetchTCVenta()" title="Consultar TC VENTA SUNAT de la fecha de emisión (guardado = sin consumo; nuevo = 1 crédito Decolecta)" style="margin-left:4px; background:none; border:1px solid var(--border-color); border-radius:4px; padding:1px 6px; font-size:0.72rem; cursor:pointer; color:var(--color-info);">🔎 Consultar</button>
             </label>
             <input type="number" id="ventaTipoCambio" step="0.001" value="1.000">
             <small id="ventaTCAviso" style="color:var(--color-muted); font-size:0.72rem;"></small>
@@ -606,14 +614,11 @@
         <div style="display:grid; grid-template-columns:1fr .8fr 1fr 1fr; gap:12px;">
           <div class="form-group">
             <label>Tipo</label>
-            <input type="text" id="evTipoComp" readonly title="El tipo de comprobante no se cambia: define la serie y la numeración">
+            <select id="evTipoComp" onchange="window._onCambiarTipoEdicionVenta()" title="Factura ↔ Boleta: se valida contra la serie y el documento del cliente"></select>
           </div>
           <div class="form-group">
             <label>Serie</label>
-            <div class="input-con-candado">
-              <input type="text" id="evSerie" readonly maxlength="4">
-              <button type="button" class="btn-candado" id="btnCandadoEvSerie" onclick="window.toggleCandado('evSerie','btnCandadoEvSerie','aviso-ev-serie')" title="Editar la serie">🔒</button>
-            </div>
+            <select id="evSerie" onchange="window._onCambiarSerieEdicionVenta()" title="Series activas del tipo (Configuración → Series y correlativos)"></select>
             <small id="aviso-ev-serie" class="campo-editable-aviso">Cambiar la serie altera la correlatividad.</small>
           </div>
           <div class="form-group">

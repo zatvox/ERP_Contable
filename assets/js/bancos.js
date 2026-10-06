@@ -395,7 +395,7 @@ window.cargarMovimientos = function() {
   if (mes)     movs = movs.filter(m => (m.fecha || '').startsWith(mes))
   if (tipo)    movs = movs.filter(m => m.tipo === tipo)
   if (conc)    movs = movs.filter(m => conc === 'si' ? !!m.reconciliado : !m.reconciliado)
-  if (buscar)  movs = movs.filter(m => `${m.concepto || ''} ${m.categoria || ''} ${m.referencia || ''}`.toLowerCase().includes(buscar))
+  if (buscar)  movs = movs.filter(m => `${_numMB(m.id)} ${m.concepto || ''} ${m.categoria || ''} ${m.referencia || ''} ${m.numero_operacion || ''}`.toLowerCase().includes(buscar))
 
   movs.sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '') || b.id - a.id)
   _movFiltrados = movs
@@ -417,8 +417,8 @@ window.cargarMovimientos = function() {
       <table>
         <thead>
           <tr>
-            <th>Fecha</th>${bancoId ? '' : '<th>Cuenta</th>'}<th>Tipo</th><th>Concepto</th><th>Categoría</th>
-            <th>Referencia</th>
+            <th>N° Registro</th><th>Fecha</th>${bancoId ? '' : '<th>Cuenta</th>'}<th>Tipo</th><th>Concepto</th><th>Categoría</th>
+            <th>Referencia</th><th>Origen / Asiento</th>
             <th style="text-align:right;">Ingreso</th>
             <th style="text-align:right;">Egreso</th>
             <th style="text-align:right;">Saldo Post.</th>
@@ -427,16 +427,19 @@ window.cargarMovimientos = function() {
         </thead>
         <tbody>
           ${movs.length === 0
-            ? `<tr><td colspan="${bancoId ? 10 : 11}" style="text-align:center; padding:30px; color:var(--text-secondary);">Sin movimientos para estos filtros.</td></tr>`
+            ? `<tr><td colspan="${bancoId ? 12 : 13}" style="text-align:center; padding:30px; color:var(--text-secondary);">Sin movimientos para estos filtros.</td></tr>`
             : movs.map(m => {
                 const esIngreso = m.tipo === 'ingreso'
+                const origen = _origenMov(m)
                 return `<tr>
+                  <td style="font-family:monospace; font-weight:600;">${_numMB(m.id)}</td>
                   <td>${m.fecha || '-'}</td>
                   ${bancoId ? '' : `<td>${_esc(_bancosMap[m.banco_id]?.nombre || '—')}</td>`}
                   <td><span class="badge ${esIngreso ? 'badge-success' : 'badge-danger'}">${m.tipo}</span></td>
                   <td>${_esc(m.concepto || '-')}</td>
                   <td>${_esc(m.categoria || '-')}</td>
-                  <td>${_esc(m.referencia || '-')}</td>
+                  <td>${_esc(m.referencia || '-')}${m.numero_operacion && m.numero_operacion !== m.referencia ? `<br><small style="color:var(--text-secondary);">Op. ${_esc(m.numero_operacion)}</small>` : ''}</td>
+                  <td>${origen ? `<span class="badge badge-info">${_esc(origen)}</span>` : '<span style="color:var(--text-secondary);">Manual</span>'}${m.asiento_id ? `<br><small style="color:var(--text-secondary);">Asiento #${m.asiento_id}</small>` : ''}</td>
                   <td style="text-align:right; color:var(--color-success);">${esIngreso ? formatNumber(m.monto) : ''}</td>
                   <td style="text-align:right; color:var(--color-danger);">${!esIngreso ? formatNumber(m.monto) : ''}</td>
                   <td style="text-align:right; font-weight:bold;">${m.saldo_posterior !== null && m.saldo_posterior !== undefined ? formatNumber(m.saldo_posterior) : '—'}</td>
@@ -495,7 +498,8 @@ window.guardarMovimiento = async function() {
       monto, saldo_posterior: parseFloat(saldoNuevo.toFixed(2)),
       reconciliado: !!_cfg.autoConciliar
     })
-    await updateBanco(bancoId, { saldo_actual: parseFloat(saldoNuevo.toFixed(2)) })
+    // El saldo lo actualiza el TRIGGER trg_actualizar_saldo_banco (02_functions.sql)
+    // al insertar/borrar el movimiento. NO tocar saldo_actual aquí: se duplicaba.
 
     showToast('Movimiento registrado ✅', 'success')
     window.closeModal('modal-movimiento-banco')
@@ -515,16 +519,28 @@ window.reconciliarMovimiento = async function(movId) {
   } catch (e) { showToast('Error: ' + e.message, 'danger') }
 }
 
+/** N° único de registro del movimiento (enlace Bancos ↔ Contabilidad). */
+function _numMB(id) { return `MB-${String(id).padStart(6, '0')}` }
+
+/** Documento que originó el movimiento (cobro, pago o letra); null = manual. */
+function _origenMov(m) {
+  if (m.cobro_id) return `Cobro #${m.cobro_id}`
+  if (m.pago_proveedor_id) return `Pago #${m.pago_proveedor_id}`
+  if (String(m.referencia || '').startsWith('LETRA ')) return String(m.referencia)
+  return null
+}
+
 window.eliminarMovimiento = async function(movId) {
   const mov = _movimientos.find(m => m.id === movId)
   if (!mov) return
+  // Si lo generó un cobro/pago/letra, borrarlo aquí desincroniza el documento y
+  // su asiento: se revierte desde Cobranzas, que deshace todo junto.
+  const origen = _origenMov(mov)
+  if (origen) { showToast(`${_numMB(mov.id)} viene de ${origen}: elimínalo/reviértelo desde Cobranzas para que se revierta todo junto.`, 'warning', 7000); return }
   if (!confirm(`¿Eliminar el movimiento "${mov.concepto}" de ${formatNumber(mov.monto)}?\n\nEl saldo de la cuenta se ajustará en sentido contrario.`)) return
   try {
-    const banco = _bancosMap[mov.banco_id]
-    if (banco) {
-      const ajuste = mov.tipo === 'ingreso' ? -parseFloat(mov.monto || 0) : parseFloat(mov.monto || 0)
-      await updateBanco(mov.banco_id, { saldo_actual: parseFloat((_saldo(banco) + ajuste).toFixed(2)) })
-    }
+    // El saldo lo actualiza el TRIGGER trg_actualizar_saldo_banco (02_functions.sql)
+    // al insertar/borrar el movimiento. NO tocar saldo_actual aquí: se duplicaba.
     await deleteMovimientoBanco(movId)
     showToast('Movimiento eliminado', 'success')
     await _recargarDatos()
@@ -599,8 +615,8 @@ window.registrarTransferencia = async function() {
       categoria: 'Transferencia interna', referencia: referencia || null,
       monto, saldo_posterior: nuevoDestino, reconciliado: !!_cfg.autoConciliar
     })
-    await updateBanco(origenId,  { saldo_actual: nuevoOrigen })
-    await updateBanco(destinoId, { saldo_actual: nuevoDestino })
+    // El saldo lo actualiza el TRIGGER trg_actualizar_saldo_banco (02_functions.sql)
+    // al insertar/borrar el movimiento. NO tocar saldo_actual aquí: se duplicaba.
 
     showToast('Transferencia registrada ✅', 'success')
     _valor('trfMonto', ''); _valor('trfConcepto', ''); _valor('trfReferencia', '')

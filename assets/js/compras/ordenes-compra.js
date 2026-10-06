@@ -384,7 +384,8 @@ window.ejecutarConfirmarCompra = async function () {
     }
 
     const moneda     = oc.currency || 'PEN'
-    const tipoCambio = tipoCambioVal ? parseFloat(tipoCambioVal) : 1
+    // Solo USD convierte (blindaje 2026-10-05)
+    const tipoCambio = (moneda === 'USD' && tipoCambioVal) ? parseFloat(tipoCambioVal) : 1
 
     const cantidadTotal = detalles.reduce((s, d) => s + (parseFloat(d.cantidad) || 0), 0) || 1
     const subtotalC = parseFloat(oc.total_subtotal || 0)

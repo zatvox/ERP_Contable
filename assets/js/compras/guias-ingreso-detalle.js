@@ -428,7 +428,7 @@ export async function _guardarEdicionGuiaIngreso() {
           descripcion: `Guía de Remisión - Edición (${numeroGuia})`,
           contact_id: compra?.contact_id || null,
           fecha: fechaGuia,
-          userId: user?.id
+          userId: user?.db_id
         })
       } catch (errorAsiento) {
         console.error('Error generando asiento tras editar guía de ingreso:', errorAsiento)

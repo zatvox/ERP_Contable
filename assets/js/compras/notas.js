@@ -331,6 +331,7 @@ async function _abrirNotaCompra(compraId, tipoNota) {
 
     await abrirModalNota({
       tipoNota, contexto: 'compra',
+      moneda: compra.currency || 'PEN', tipoCambio: compra.tipo_cambio,
       documento: `${compra.tipo_comprobante || ''} ${numeroOrigen}`.trim(),
       detalle: `${compra.proveedor_nombre || ''} · ${compra.fecha_emision || ''} · ${compra.currency || 'PEN'} ${formatNumber(totalOrigen)}`,
       totalOrigen: disponibleNC,

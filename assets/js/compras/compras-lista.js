@@ -309,7 +309,7 @@ window.filtrarCompras = async function () {
 
 window.editarCompra = async function (id) {
   try {
-    const { getById } = await import('./supabase-client.js')
+    const { getById } = await import('../supabase-client.js')
     const [c, detalles, cxps, guiasTodas, todasCompras, items] = await Promise.all([
       getById('compras', id),
       getCompraDetalles(id),
