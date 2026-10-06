@@ -81,14 +81,6 @@ export function formatCurrency(value, currency = 'PEN') {
 // Helper único de formato numérico para todo el sistema: separador de
 // miles + decimales fijos (para montos/precios/costos). decimals=2 por
 // defecto; usar 4 para costos unitarios (S/. 0.xxxx), etc.
-/** Precio / costo UNITARIO: estándar del sistema = hasta 4 decimales
- *  (mínimo 2 para que 5.5 se vea 5.50). Totales siguen con formatNumber (2). */
-export function formatPrecio(value) {
-  const num = parseFloat(value)
-  return (isNaN(num) ? 0 : num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
-}
-window.formatPrecio = formatPrecio
-
 export function formatNumber(value, decimals = 2) {
   const num = parseFloat(value)
   return (isNaN(num) ? 0 : num).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })

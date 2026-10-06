@@ -118,7 +118,7 @@ window.verOC = async function (id) {
         const item = await getItemById(d.item_id)
         const nombreProducto = item ? (item.nombre || item.name) : `#${d.item_id}`
         return `producto: ${nombreProducto}
-          ${(parseFloat(d.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} kg x ${(parseFloat(d.precio_unitario) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${oc.currency} = ${(parseFloat(d.total) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${oc.currency}`
+          ${(parseFloat(d.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} kg x ${(parseFloat(d.precio_unitario) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${oc.currency} = ${(parseFloat(d.total) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${oc.currency}`
       })
       const detallesArray = await Promise.all(detallesPromises)
       detallesText = detallesArray.join('\n')
@@ -683,7 +683,7 @@ function _renderTablaDetalleOC() {
           <td>${d.nombre || `Item #${d.item_id}`}</td>
           <td>${formatQty(d.cantidad)}</td>
           <td>${d.unidad_medida}</td>
-          <td style="text-align:right;">${(parseFloat(d.precio_unitario) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+          <td style="text-align:right;">${formatNumber(d.precio_unitario)}</td>
           <td style="text-align:right;">${formatNumber(d.subtotal)}</td>
           <td style="text-align:right;">${formatNumber(d.igv_monto)}</td>
           <td style="text-align:right; font-weight:bold;">${formatNumber(d.total)}</td>

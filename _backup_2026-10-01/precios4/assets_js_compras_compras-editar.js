@@ -88,7 +88,7 @@ export function _pintarLineasEdicionCompra() {
       <td style="text-align:right;">${(parseFloat(d.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 3 })}</td>
       <td>${d.unidad_medida || '-'}</td>
       <td style="text-align:right;">
-        <input type="number" step="0.0001" min="0.0001" value="${parseFloat(d.precio_unitario || 0)}"
+        <input type="number" step="0.01" min="0.01" value="${parseFloat(d.precio_unitario || 0)}"
           id="ecLineaPrecio-${idx}" style="width:100px; text-align:right;" ${(S._ecModoVista || c.bloqueos.precios) ? 'disabled' : ''}
           oninput="window.onCambiarLineaPrecioEdicionCompra(${idx})">
       </td>

@@ -341,7 +341,7 @@ function _pintarLineasEdicionVenta() {
       <td style="text-align:right;">${(parseFloat(d.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 3 })}</td>
       <td>${_esc(d.unidad_medida || '-')}</td>
       <td style="text-align:right;">
-        <input type="number" step="0.0001" min="0.0001" value="${parseFloat(d.precio_unitario || 0)}"
+        <input type="number" step="0.01" min="0.01" value="${parseFloat(d.precio_unitario || 0)}"
           id="evLineaPrecio-${idx}" style="width:100px; text-align:right;" ${(_evModoVista || c.bloqueos.precios) ? 'disabled' : ''}
           oninput="window.onCambiarLineaPrecioEdicion(${idx})">
       </td>

@@ -40,7 +40,6 @@ let _pkLineas = []
 let _pkEditId = null
 let _pkTerminos = []
 let _pkVentasMap = new Map()
-const _pkCurados = new Set()   // PK ya auto-recalculados en esta sesión
 
 // ─── Datos ──────────────────────────────────────────────────────────────────
 async function _getPackings() {
@@ -57,7 +56,7 @@ async function _getDetalle(packingId) {
 // Facturado por línea del PK = Σ cantidad de las líneas de facturas VIGENTES
 // que la referencian (detalle_ventas.detalle_packing_id). No se guarda: se
 // calcula — anular una factura devuelve su cantidad a "pendiente" sola.
-const _TOL = 0.005
+const _TOL = 0.0005
 async function _facturacionPK(packingId) {
   const lineas = await _getDetalle(packingId)
   const porLinea = {}
@@ -73,20 +72,6 @@ async function _facturacionPK(packingId) {
     }
     for (const d of (dvs || [])) {
       if (vigentes.has(d.venta_id)) porLinea[d.detalle_packing_id] = (porLinea[d.detalle_packing_id] || 0) + (parseFloat(d.cantidad) || 0)
-    }
-    // Parche 2026-10-06: facturas del PK cuyas líneas NO quedaron enlazadas
-    // (emitidas antes del sql/70 o enlazadas a medias) se reparten por
-    // producto entre las líneas del PK, llenando primero la que tenga saldo.
-    const { data: vsPk } = await supabase.from('ventas').select('id, estado, comprobante_anulado, estado_comprobante').eq('packing_id', packingId)
-    const vigPk = (vsPk || []).filter(v => !estaAnulado(v)).map(v => v.id)
-    if (vigPk.length) {
-      const { data: sueltas } = await supabase.from('detalle_ventas').select('item_id, cantidad').in('venta_id', vigPk).is('detalle_packing_id', null)
-      for (const d of (sueltas || [])) {
-        const mismas = lineas.filter(l => l.item_id === d.item_id)
-        if (!mismas.length) continue
-        const destino = mismas.find(l => (porLinea[l.id] || 0) < (+l.cantidad) - _TOL) || mismas[mismas.length - 1]
-        porLinea[destino.id] = (porLinea[destino.id] || 0) + (parseFloat(d.cantidad) || 0)
-      }
     }
   }
   return { lineas, porLinea }
@@ -184,13 +169,6 @@ export async function renderPacking(forzar = true) {
       }
     }
     window.filtrarPacking()
-    // Auto-corrección: PK "Parcial" que ya está 100 % facturado (por valor) se
-    // recalcula una vez por sesión — corrige estados que quedaron desfasados.
-    const sospechosos = _pkLista.filter(p => p.estado === 'parcial' && p._avance >= 99.9 && !_pkCurados.has(p.id))
-    if (sospechosos.length) {
-      sospechosos.forEach(p => _pkCurados.add(p.id))
-      for (const p of sospechosos) { try { await recalcularEstadoPacking(p.id) } catch (e) { console.warn('Recalculo PK', p.numero, e) } }
-    }
   } catch (e) {
     document.getElementById('tabla-packing-body').innerHTML = `<tr><td colspan="11" style="text-align:center; color:var(--color-danger);">${_esc(e.message)}</td></tr>`
   }

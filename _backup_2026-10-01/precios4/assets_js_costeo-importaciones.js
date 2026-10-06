@@ -2405,7 +2405,7 @@ async function renderGastosLocales() {
           <td><strong>${gasto.numero || '-'}</strong></td>
           <td>${nombreProveedor}</td>
           <td>${(gasto.cantidad || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td>${(gasto.precio_unitario || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+          <td>${(gasto.precio_unitario || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td>${(gasto.subtotal || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td>${(gasto.igv || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td><strong>${(gasto.total || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></td>

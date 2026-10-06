@@ -350,7 +350,7 @@ function _renderLineasVenta() {
         <td style="text-align:right;">${(parseFloat(l.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 3 })}</td>
         <td>${l.unidad_medida || '-'}</td>
         <td style="text-align:right;">${(parseFloat(l.cantidad_unidades) || 0) > 0 ? (parseFloat(l.cantidad_unidades) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '-'}</td>
-        <td style="text-align:right;">${(+l.precio_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+        <td style="text-align:right;">${l.precio_unitario.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         <td>${_badgeTipoIGV(l.tipo_base)}</td>
         <td style="text-align:right;">${l.subtotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         <td><input type="number" step="0.01" min="0" value="${l.igv_monto.toFixed(2)}" style="width:90px; text-align:right;" title="Editable: ajusta por redondeo si hace falta" onchange="window.editarMontoIGVLineaVenta(${idx}, this.value)"></td>

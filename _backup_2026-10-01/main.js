@@ -3,7 +3,6 @@
 // ============================================================================
 import { getItems } from './supabase-data.js'
 import { getCurrentUser } from './auth-supabase.js'
-import './modal-guardia.js'   // confirmar cierre de modales con cambios (2026-10-06)
 
 const THEME_KEY = 'erp_theme';
 

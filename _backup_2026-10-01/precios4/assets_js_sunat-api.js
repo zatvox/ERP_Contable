@@ -389,7 +389,7 @@ export function buildPayloadNubefact(venta, lineas, empresa) {
     descripcion:        l.descripcion  || '',
     cantidad:           parseFloat(l.cantidad || 0),
     valor_unitario:     parseFloat(l.precio_unitario || 0),
-    precio_unitario:    parseFloat((parseFloat(l.precio_unitario || 0) * (1 + igvRate)).toFixed(4)),
+    precio_unitario:    parseFloat((parseFloat(l.precio_unitario || 0) * (1 + igvRate)).toFixed(2)),
     subtotal:           parseFloat(l.subtotal || 0),
     tipo_de_igv:        l.tipo_base === 'gravada' ? 1 : (l.tipo_base === 'exonerada' ? 2 : 3),
     igv:                parseFloat(l.igv_monto || 0),

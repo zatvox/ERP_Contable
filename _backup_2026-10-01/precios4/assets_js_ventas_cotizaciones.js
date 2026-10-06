@@ -66,7 +66,7 @@ window.verCotizacion = async function(id) {
     alert(`COT #${cot.numero || cot.id}
 Cliente: ${cliente}
 Cantidad: ${formatQty(cot.cantidad || 0)}
-Precio Unitario: ${cot.currency || 'PEN'} ${(parseFloat(cot.precio_unitario) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+Precio Unitario: ${cot.currency || 'PEN'} ${formatNumber(cot.precio_unitario)}
 Subtotal: ${formatNumber(cot.subtotal)}
 IGV: ${formatNumber(cot.igv)}
 Total: ${formatNumber(cot.total)}
