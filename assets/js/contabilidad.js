@@ -158,7 +158,7 @@ async function construirReporteConta(panelId) {
         datos: filas,
         dimensiones: [
           { key: 'elemento', label: 'Elemento PCGE' }, { key: 'cuenta', label: 'Cuenta' },
-          { key: 'tipo_cuenta', label: 'Tipo' }, { key: 'mes', label: 'Mes' }
+          { key: 'tipo_cuenta', label: 'Tipo' }, { key: 'mes', label: 'Fecha', tipo: 'fecha', campo: 'fecha' }
         ],
         medidas: [
           { key: 'debe',  label: 'Debe',  agg: 'sum', formato: 'money' },
@@ -190,7 +190,7 @@ async function construirReporteConta(panelId) {
         descripcion: 'Cuánto contabilizó cada tipo de asiento (ventas, compras, cobros, pagos, manuales) mes a mes.',
         datos: filas,
         dimensiones: [
-          { key: 'mes', label: 'Mes' }, { key: 'tipo_asiento', label: 'Tipo de asiento' },
+          { key: 'mes', label: 'Fecha', tipo: 'fecha', campo: 'fecha' }, { key: 'tipo_asiento', label: 'Tipo de asiento' },
           { key: 'estado', label: 'Estado' }, { key: 'elemento', label: 'Elemento PCGE' }
         ],
         medidas: [
@@ -228,7 +228,7 @@ async function construirReporteConta(panelId) {
         descripcion: `Débito fiscal (ventas) menos crédito fiscal (compras) y retenciones, según las cuentas configuradas (${cIgvV} / ${cIgvC} / ${cRet}). Ajústalas en ⚙️ Configuración si tu plan usa otras.`,
         datos: igv,
         dimensiones: [
-          { key: 'mes', label: 'Mes' }, { key: 'concepto', label: 'Concepto' }, { key: 'cuenta', label: 'Cuenta' }
+          { key: 'mes', label: 'Fecha', tipo: 'fecha', campo: 'fecha' }, { key: 'concepto', label: 'Concepto' }, { key: 'cuenta', label: 'Cuenta' }
         ],
         medidas: [
           { key: 'igv_debito',  label: 'Débito (ventas)', agg: 'sum', formato: 'money' },
@@ -269,7 +269,7 @@ async function construirReporteConta(panelId) {
         datos,
         dimensiones: [
           { key: 'salud', label: 'Estado del cuadre' }, { key: 'asiento', label: 'N° de asiento' },
-          { key: 'tipo_asiento', label: 'Tipo' }, { key: 'mes', label: 'Mes' }
+          { key: 'tipo_asiento', label: 'Tipo' }, { key: 'mes', label: 'Fecha', tipo: 'fecha', campo: 'fecha' }
         ],
         medidas: [
           { key: 'debe', label: 'Debe', agg: 'sum', formato: 'money' },

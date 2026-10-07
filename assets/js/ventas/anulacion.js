@@ -255,7 +255,7 @@ window.anularGuiaDespachoVenta = async function (id) {
           )
           const lote = dg.lote_id ? await getLoteById(dg.lote_id) : null
           if (lote?.es_peso_variable) {
-            await revertirBultosDeDetalleGuiaDespacho(dg.id)
+            await revertirBultosDeDetalleGuiaDespacho(dg.id, dg.ubicacion_id)
             lotesPesoVariableTocados.add(dg.lote_id)
           }
         }

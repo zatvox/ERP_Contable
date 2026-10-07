@@ -181,9 +181,7 @@ async function _cargarPlanCuentasParaBanco() {
       .filter(c => c.activo !== false && c.tipo === 'Activo')
       .sort((a, b) => String(a.codigo).localeCompare(String(b.codigo)))
 
-    _html('ncCuentaContable', '<option value="">-- Sin asignar --</option>' +
-      _planCuentas.map(c => `<option value="${c.id}">${_esc(c.codigo)} — ${_esc(c.nombre)}</option>`).join(''))
-    refrescarBuscador('ncCuentaContable')
+    _pintarCuentasContablesBanco()
   } catch (e) {
     console.warn('_cargarPlanCuentasParaBanco:', e.message)
   }
@@ -213,7 +211,7 @@ async function cargarCuentasBancarias() {
       container.innerHTML = `
         <div style="text-align:center; padding:40px;">
           <p style="color:var(--text-secondary);">No hay cuentas bancarias registradas.</p>
-          <button class="btn btn-primary" onclick="window.irATabBanco('nueva-cuenta')">+ Agregar primera cuenta</button>
+          <button class="btn btn-primary" onclick="window.abrirModalCuentaBanco()">+ Agregar primera cuenta</button>
         </div>`
       return
     }
@@ -223,7 +221,7 @@ async function cargarCuentasBancarias() {
     container.innerHTML = `
       <div class="card-header">
         <h3 class="card-title">Cuentas Bancarias (${_bancos.length})</h3>
-        <button class="btn btn-primary btn-small" onclick="window.irATabBanco('nueva-cuenta')">+ Nueva Cuenta</button>
+        <button class="btn btn-primary btn-small" onclick="window.abrirModalCuentaBanco()">+ Nueva Cuenta</button>
       </div>
       <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(290px,1fr)); gap:15px; padding:15px;">
         ${_bancos.map(b => {
@@ -236,14 +234,14 @@ async function cargarCuentasBancarias() {
               <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
                 <div>
                   <strong style="font-size:1rem;">${_esc(b.nombre)}</strong>
-                  <div style="font-size:0.8rem; color:var(--text-secondary);">${_esc(b.banco)}</div>
+                  <div style="font-size:0.8rem; color:var(--text-secondary);">${b.tipo_cuenta === 'caja' ? '💵 Caja (efectivo)' : _esc(b.banco)}</div>
                 </div>
                 <span class="badge badge-info">${b.moneda}</span>
               </div>
               <div style="font-size:0.8rem; color:var(--text-secondary); line-height:1.5;">
-                Cta: ${_esc(b.numero_cuenta)}<br>
+                ${b.tipo_cuenta === 'caja' ? '' : `Cta: ${_esc(b.numero_cuenta)}<br>`}
                 ${b.cci ? `CCI: ${_esc(b.cci)}<br>` : ''}
-                Tipo: ${_esc(b.tipo_cuenta || '-')} · ${movs} movimiento(s)
+                Tipo: ${_esc(b.tipo_cuenta === 'caja' ? 'efectivo' : (b.tipo_cuenta || '-'))} · ${movs} movimiento(s)
               </div>
               <div style="font-size:1.35rem; font-weight:bold; color:${color}; margin-top:10px;">
                 ${_simbolo(b.moneda)} ${formatNumber(saldo)}
@@ -267,12 +265,47 @@ async function cargarCuentasBancarias() {
 
 function _html(id, contenido) { const el = document.getElementById(id); if (el) el.innerHTML = contenido }
 
+// ── Caja (efectivo) — 2026-10-06 ─────────────────────────────────────────────
+// Una caja es una "cuenta" más de Tesorería (movimientos, saldo, cobros/pagos
+// en efectivo), pero sin banco, N° de cuenta ni CCI. Se guarda con
+// banco='CAJA' y numero_cuenta='EFECTIVO' (columnas NOT NULL) y su cuenta
+// contable se elige de la 101 (Caja) del PCGE; las bancarias, de la 104.
+const _esCaja = () => document.getElementById('ncTipoCuenta')?.value === 'caja'
+
+function _pintarCuentasContablesBanco() {
+  const caja = _esCaja()
+  const prefijo = caja ? '101' : '104'
+  const filtradas = _planCuentas.filter(c => String(c.codigo).startsWith(prefijo))
+  const lista = filtradas.length ? filtradas : _planCuentas   // si el plan no tiene esa rama, se muestran todas
+  const actual = document.getElementById('ncCuentaContable')?.value || ''
+  _html('ncCuentaContable', '<option value="">-- Sin asignar --</option>' +
+    lista.map(c => `<option value="${c.id}">${_esc(c.codigo)} — ${_esc(c.nombre)}</option>`).join(''))
+  if (actual && lista.some(c => String(c.id) === String(actual))) _valor('ncCuentaContable', actual)
+  refrescarBuscador('ncCuentaContable')
+}
+
+window._onCambiarTipoCuentaBanco = function () {
+  const caja = _esCaja()
+  const gB = document.getElementById('ncGrupoBanco'), gN = document.getElementById('ncGrupoNumeros')
+  if (gB) gB.style.display = caja ? 'none' : ''
+  if (gN) gN.style.display = caja ? 'none' : ''
+  const nom = document.getElementById('ncNombre')
+  if (nom) nom.placeholder = caja ? 'Ej: Caja chica oficina PEN' : 'Ej: BCP Principal PEN'
+  const hint = document.getElementById('ncHintCuentaContable')
+  if (hint) hint.textContent = caja
+    ? 'Cuenta de la 101 — Caja (ej. 1011 Caja / 1012 Caja chica). Una caja por moneda.'
+    : 'Debe ser la subcuenta específica de ESTE banco (ej. 1041120 para BCP CC MN), no el código genérico del grupo (104).'
+  if (!_editandoBancoId) _set('nc-titulo', caja ? 'Nueva Caja (efectivo)' : 'Nueva Cuenta Bancaria')
+  _pintarCuentasContablesBanco()
+}
+
 window.guardarNuevaCuenta = async function() {
   try {
+    const esCaja       = _esCaja()
     const nombre       = document.getElementById('ncNombre')?.value?.trim()
-    const banco        = document.getElementById('ncBanco')?.value?.trim()
-    const numeroCuenta = document.getElementById('ncNumeroCuenta')?.value?.trim()
-    const cci          = document.getElementById('ncCCI')?.value?.trim()
+    const banco        = esCaja ? 'CAJA' : document.getElementById('ncBanco')?.value?.trim()
+    const numeroCuenta = esCaja ? 'EFECTIVO' : document.getElementById('ncNumeroCuenta')?.value?.trim()
+    const cci          = esCaja ? null : document.getElementById('ncCCI')?.value?.trim()
     const tipoCuenta   = document.getElementById('ncTipoCuenta')?.value
     const moneda       = document.getElementById('ncMoneda')?.value
     const saldoInicial = parseFloat(document.getElementById('ncSaldoInicial')?.value || 0)
@@ -281,8 +314,25 @@ window.guardarNuevaCuenta = async function() {
     const cuentaContable = cuentaContableId ? _planCuentas.find(c => c.id === cuentaContableId) : null
 
     if (!nombre || !banco || !numeroCuenta) {
-      showToast('Nombre, banco y número de cuenta son requeridos', 'warning'); return
+      showToast(esCaja ? 'Ponle un nombre a la caja' : 'Nombre, banco y número de cuenta son requeridos', 'warning'); return
     }
+    // Validaciones (2026-10-07)
+    if (cci && !/^\d{20}$/.test(cci)) { showToast('El CCI debe tener exactamente 20 dígitos (solo números)', 'warning'); return }
+    const otros = _bancos.filter(b => b.id !== _editandoBancoId)
+    if (otros.some(b => (b.nombre || '').trim().toLowerCase() === nombre.toLowerCase())) {
+      showToast(`Ya existe una cuenta con el nombre "${nombre}"`, 'warning'); return
+    }
+    if (!esCaja && otros.some(b => b.tipo_cuenta !== 'caja' && (b.numero_cuenta || '').replace(/\D/g, '') === numeroCuenta.replace(/\D/g, ''))) {
+      showToast('Ya existe una cuenta con ese número de cuenta', 'warning'); return
+    }
+    if (_editandoBancoId) {
+      const orig = _bancosMap[_editandoBancoId]
+      const nMovs = _movimientos.filter(m => m.banco_id === _editandoBancoId).length
+      if (nMovs > 0 && orig && orig.moneda !== moneda) {
+        showToast(`No se puede cambiar la moneda: la cuenta ya tiene ${nMovs} movimiento(s)`, 'warning'); return
+      }
+    }
+    if (!cuentaContableId && !confirm('No asignaste una Cuenta Contable: los cobros/pagos con esta cuenta no podrán generar su asiento.\n\n¿Guardar igual?')) return
     if (saldoInicial !== 0 && !saldoInicialFecha) {
       showToast('Ingresa la fecha de corte del saldo inicial (ej. la de tu asiento de apertura)', 'warning'); return
     }
@@ -290,30 +340,32 @@ window.guardarNuevaCuenta = async function() {
     if (_editandoBancoId) {
       // Al editar NO se toca saldo_actual desde el saldo inicial: se corregiría
       // solo con un movimiento de ajuste, para no romper la trazabilidad.
-      await updateBanco(_editandoBancoId, {
+      const r = await updateBanco(_editandoBancoId, {
         nombre, banco, numero_cuenta: numeroCuenta, cci: cci || null,
         tipo_cuenta: tipoCuenta, moneda, saldo_inicial: saldoInicial,
         saldo_inicial_fecha: saldoInicialFecha,
         cuenta_contable_id: cuentaContableId,
         cuenta_contable_codigo: cuentaContable?.codigo || null
       })
+      if (!r) throw new Error('No se pudo actualizar la cuenta')
       showToast('Cuenta bancaria actualizada ✅', 'success')
     } else {
-      await addBanco({
+      const r = await addBanco({
         nombre, banco, numero_cuenta: numeroCuenta, cci: cci || null,
         tipo_cuenta: tipoCuenta, moneda, saldo_inicial: saldoInicial,
         saldo_actual: saldoInicial, saldo_inicial_fecha: saldoInicialFecha,
         cuenta_contable_id: cuentaContableId,
         cuenta_contable_codigo: cuentaContable?.codigo || null
       })
-      showToast('Cuenta bancaria creada ✅', 'success')
+      if (!r) throw new Error('No se pudo crear la cuenta (revisa los datos o permisos)')
+      showToast(esCaja ? 'Caja creada ✅' : 'Cuenta bancaria creada ✅', 'success')
     }
 
+    window.closeModal('modal-cuenta-banco')
     window.cancelarEdicionBanco()
     invalidarVarios(['bancos'])
     await cargarCuentasBancarias()
     calcularKPIs()
-    window.irATabBanco('cuentas-banco')
   } catch (e) {
     showToast('Error: ' + e.message, 'danger')
   }
@@ -329,14 +381,20 @@ window.editarBanco = function(id) {
   _valor('ncNumeroCuenta', b.numero_cuenta || '')
   _valor('ncCCI', b.cci || '')
   _valor('ncTipoCuenta', b.tipo_cuenta || 'corriente')
+  window._onCambiarTipoCuentaBanco()
   _valor('ncMoneda', b.moneda || 'PEN')
   _valor('ncSaldoInicial', b.saldo_inicial ?? 0)
   _valor('ncSaldoInicialFecha', b.saldo_inicial_fecha || '')
   _valor('ncCuentaContable', b.cuenta_contable_id || '')
   refrescarBuscador('ncCuentaContable')
-  _set('nc-titulo', `Editar cuenta: ${b.nombre}`)
-  const btnC = document.getElementById('ncBtnCancelar'); if (btnC) btnC.style.display = ''
-  window.irATabBanco('nueva-cuenta')
+  _set('nc-titulo', `Editar ${b.tipo_cuenta === 'caja' ? 'caja' : 'cuenta'}: ${b.nombre}`)
+  const nMovs = _movimientos.filter(m => m.banco_id === id).length
+  const av = document.getElementById('ncAvisoMovs')
+  if (av) {
+    av.style.display = nMovs ? 'block' : 'none'
+    av.textContent = nMovs ? `Esta cuenta tiene ${nMovs} movimiento(s): la moneda no se puede cambiar y el saldo inicial no modifica el saldo actual (corrígelo con un movimiento de ajuste).` : ''
+  }
+  window.openModal('modal-cuenta-banco')
 }
 
 window.cancelarEdicionBanco = function() {
@@ -344,8 +402,17 @@ window.cancelarEdicionBanco = function() {
   ;['ncId', 'ncNombre', 'ncBanco', 'ncNumeroCuenta', 'ncCCI', 'ncCuentaContable', 'ncSaldoInicialFecha'].forEach(id => _valor(id, ''))
   refrescarBuscador('ncCuentaContable')
   _valor('ncSaldoInicial', 0)
+  _valor('ncTipoCuenta', 'corriente')
+  window._onCambiarTipoCuentaBanco()
   _set('nc-titulo', 'Nueva Cuenta Bancaria')
-  const btnC = document.getElementById('ncBtnCancelar'); if (btnC) btnC.style.display = 'none'
+  const av = document.getElementById('ncAvisoMovs'); if (av) av.style.display = 'none'
+}
+
+// Nueva cuenta/caja: modal flotante sobre "Cuentas Bancarias" (2026-10-07)
+window.abrirModalCuentaBanco = function () {
+  window.cancelarEdicionBanco()
+  window.openModal('modal-cuenta-banco')
+  setTimeout(() => document.getElementById('ncNombre')?.focus(), 50)
 }
 
 window.eliminarBanco = async function(id) {
@@ -797,7 +864,7 @@ function construirReporte(panelId) {
       descripcion: 'Entradas y salidas efectivamente registradas en las cuentas bancarias.',
       datos: base,
       dimensiones: [
-        { key: 'mes', label: 'Mes' }, { key: 'cuenta', label: 'Cuenta' },
+        { key: 'mes', label: 'Fecha', tipo: 'fecha', campo: 'fecha' }, { key: 'cuenta', label: 'Cuenta' },
         { key: 'tipo', label: 'Tipo' }, { key: 'moneda', label: 'Moneda' }
       ],
       medidas: medidasFlujo, filtros: filtrosComunes,
@@ -813,7 +880,7 @@ function construirReporte(panelId) {
       datos: base,
       dimensiones: [
         { key: 'categoria', label: 'Categoría' }, { key: 'tipo', label: 'Tipo' },
-        { key: 'mes', label: 'Mes' }, { key: 'cuenta', label: 'Cuenta' }
+        { key: 'mes', label: 'Fecha', tipo: 'fecha', campo: 'fecha' }, { key: 'cuenta', label: 'Cuenta' }
       ],
       medidas: medidasFlujo, filtros: filtrosComunes,
       agruparPorDefecto: ['categoria'], kpis: kpisFlujo
@@ -828,7 +895,7 @@ function construirReporte(panelId) {
       datos: base,
       dimensiones: [
         { key: 'cuenta', label: 'Cuenta' }, { key: 'banco', label: 'Banco' },
-        { key: 'conciliado', label: 'Conciliación' }, { key: 'mes', label: 'Mes' }
+        { key: 'conciliado', label: 'Conciliación' }, { key: 'mes', label: 'Fecha', tipo: 'fecha', campo: 'fecha' }
       ],
       medidas: medidasFlujo, filtros: filtrosComunes,
       agruparPorDefecto: ['cuenta'], kpis: kpisFlujo

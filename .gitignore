@@ -2,3 +2,8 @@
 
 # Caché local de Supabase CLI (no subir)
 supabase/.temp/
+
+# Respaldos locales (no subir) — 2026-10-07
+*.backup_*
+*.bak_*
+_backup_*/

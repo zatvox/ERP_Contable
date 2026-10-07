@@ -248,7 +248,7 @@
           <div id="gdInfoVenta" style="display:none; padding:10px 12px; background:var(--bg-secondary); border-radius:var(--radius-md); margin-bottom:12px; font-size:0.9rem;">
           </div>
 
-          <div class="grid grid-3">
+          <div style="display:grid; grid-template-columns:1.3fr 0.9fr 1.2fr 1fr; gap:12px;">
             <div class="form-group">
               <label>N° de Guía *</label>
               <input type="text" id="gdNumeroGuia" placeholder="Ej: T001-00001" required>
@@ -256,6 +256,11 @@
             <div class="form-group">
               <label>Fecha de Guía *</label>
               <input type="date" id="gdFechaGuia" required>
+            </div>
+            <div class="form-group">
+              <label>Destino (kardex) *</label>
+              <select id="gdDestino" onchange="window._gdOnCambiarDestino()" title="Ubicación de Partners a la que sale la mercadería. Se propone según la serie de la guía (T001 → Customers, GN01 → 90); puedes cambiarla."></select>
+              <small id="gdDestinoInfo" style="color:var(--text-secondary); font-size:0.78rem;"></small>
             </div>
             <div class="form-group">
               <label>Observaciones</label>

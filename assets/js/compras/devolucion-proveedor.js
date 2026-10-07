@@ -190,7 +190,7 @@ window.abrirModalGuiaDevolucion = async function (notaCompraId) {
 
       if (lote.es_peso_variable) {
         const bultosLote = await getLoteBultosByLote(lote.id)
-        const disponibles = (bultosLote || []).filter(b => b.estado === 'disponible')
+        const disponibles = (bultosLote || []).filter(b => b.estado === 'disponible' || b.estado === 'custodiado')
         if (disponibles.length === 0) continue
         const zonas = await getUbicaciones()
         const zonasMap = {}

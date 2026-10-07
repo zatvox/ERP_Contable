@@ -11,6 +11,7 @@ import { esNota, signoDocumento, badgeTipoDocumento } from '../notas.js'
 import { _nombreCliente, _nombreVendedor } from './helpers.js'
 import { _ventaRevertidaPorNC, _guiaEstaVigente } from './ventas-editar.js'
 import { getSeries } from '../series.js'
+import { supabase } from '../supabase-client.js'
 
 // ============================================================================
 // TAB: VENTAS (Facturas / Boletas + NUBEFACT CPE)
@@ -47,6 +48,8 @@ registrarColumnas('ventas', [
   { key: 'total',       label: 'Total' },
   { key: 'cpe',         label: 'CPE' },
   { key: 'despacho',    label: 'Guía de despacho' },
+  { key: 'packing',     label: 'Packing vinculado' },
+  { key: 'notas',       label: 'NC / ND vinculadas' },
   { key: 'acciones',    label: 'Acciones' }
 ])
 
@@ -68,6 +71,8 @@ function _valorOrdenVenta({ v, cliente, vendedor }, campo) {
     case 'total':        return parseFloat(v.total) || 0
     case 'cpe':          return v.cpe_estado || ''
     case 'despacho':     return _ORDEN_DESPACHO[_estadoDespachoVenta(v)] ?? 9
+    case 'packing':      return _packingPorIdCache.get(v.packing_id)?.numero || ''
+    case 'notas':        return (_notasPorVenta().get(v.id) || []).length || (v.venta_referencia_id ? -1 : 0)
     default: return ''
   }
 }
@@ -96,6 +101,7 @@ let _aplicadoPorAnticipoVentaCache = new Map()
 // vigentes: NC/ND, anticipos y anuladas no se despachan → 'na' (—).
 // Debajo se listan los N° de las guías VIGENTES de esa venta.
 let _guiasPorVentaCache = new Map() // venta_id -> ['T001-00000743', ...]
+let _packingPorIdCache = new Map() // packing.id -> { id, numero, estado }
 let _seriesNoCPE = new Set()        // 'tipo|serie' de series físicas (es_cpe=false): no se envían a NUBEFACT
 const _ORDEN_DESPACHO = { pendiente: 0, parcial: 1, despachado: 2, na: 3 }
 
@@ -111,7 +117,13 @@ function _badgeDespachoVenta(v) {
     : est === 'parcial' ? '<span class="badge badge-warning">Parcial</span>'
     : '<span class="badge badge-danger">Pendiente</span>'
   const guias = _guiasPorVentaCache.get(v.id) || []
-  return badge + (guias.length ? `<br><small style="color:var(--text-secondary);">${guias.join('<br>')}</small>` : '')
+  if (!guias.length) return badge
+  // Máx. 2 guías visibles; el resto como "+N" (tooltip con todas, clic para desplegar)
+  const visibles = guias.slice(0, 2).join('<br>')
+  const resto = guias.slice(2)
+  return badge + `<br><small style="color:var(--text-secondary);">${visibles}${resto.length ? `<br>
+    <span class="guias-mas" title="${guias.join('\n')}" style="cursor:pointer; color:var(--color-info); font-weight:600;"
+          onclick="event.stopPropagation(); const r = this.nextElementSibling; const ver = r.style.display === 'none'; r.style.display = ver ? '' : 'none'; this.textContent = ver ? '− ver menos' : '…+${resto.length}'">…+${resto.length}</span><span style="display:none;"><br>${resto.join('<br>')}</span>` : ''}</small>`
 }
 
 export async function renderVentas(forzar = false) {
@@ -126,6 +138,15 @@ export async function renderVentas(forzar = false) {
       for (const g of (guiasDespacho || []).filter(_guiaEstaVigente).sort((a, b) => a.id - b.id)) {
         if (!_guiasPorVentaCache.has(g.venta_id)) _guiasPorVentaCache.set(g.venta_id, [])
         _guiasPorVentaCache.get(g.venta_id).push(g.numero_guia)
+      }
+      // Packing vinculado (ventas.packing_id → packing.numero)
+      _packingPorIdCache = new Map()
+      const idsPK = [...new Set((ventas || []).map(v => v.packing_id).filter(Boolean))]
+      if (idsPK.length) {
+        try {
+          const { data: pks } = await supabase.from('packing').select('id, numero, estado').in('id', idsPK)
+          for (const p of (pks || [])) _packingPorIdCache.set(p.id, p)
+        } catch (e) { console.warn('Packing vinculado:', e) }
       }
       _aplicadoPorAnticipoVentaCache = new Map()
       for (const a of (anticiposAplicadosTodos || [])) {
@@ -192,6 +213,8 @@ export async function renderVentas(forzar = false) {
                 ${_thOrdenableVentas('Total', 'total')}
                 ${_thOrdenableVentas('CPE', 'cpe')}
                 ${_thOrdenableVentas('Guía', 'despacho')}
+                ${_thOrdenableVentas('Packing', 'packing')}
+                ${_thOrdenableVentas('NC / ND', 'notas')}
                 <th data-col-tabla="ventas" data-col="acciones"${colStyle('ventas','acciones')}>Acciones</th>
               </tr>
             </thead>
@@ -211,6 +234,17 @@ export async function renderVentas(forzar = false) {
 /** Badge "💰 Anticipo — saldo X" / "💰 Aplicado íntegramente" para ventas
  * tipo_venta='anticipo' — espejo del badgeStock de compras.js. Vacío para
  * ventas de mercadería normales. */
+/** Celda "Packing": N° del PK vinculado (clic → abre el packing). */
+function _celdaPackingVenta(v) {
+  if (!v.packing_id) return '<span style="color:var(--text-secondary);">—</span>'
+  const pk = _packingPorIdCache.get(v.packing_id)
+  if (!pk) return `<small style="color:var(--text-secondary);">PK #${v.packing_id}</small>`
+  const anulado = pk.estado === 'anulado'
+  return `<a href="#" onclick="event.preventDefault(); event.stopPropagation(); window.abrirModalPacking?.(${pk.id})"
+     title="Ver packing ${pk.numero}${pk.estado ? ' · ' + pk.estado : ''}"
+     style="font-weight:600; color:var(--color-info); white-space:nowrap;${anulado ? ' text-decoration:line-through;' : ''}">${pk.numero}</a>`
+}
+
 function _badgeAnticipoVenta(v) {
   if (v.tipo_venta !== 'anticipo') return ''
   const aplicado = _aplicadoPorAnticipoVentaCache.get(v.id) || 0
@@ -219,6 +253,42 @@ function _badgeAnticipoVenta(v) {
   return saldo <= 0.01
     ? '<br><span class="badge badge-success">💰 Aplicado íntegramente</span>'
     : `<br><span class="badge badge-warning" title="Aplicado ${aplicado.toFixed(2)} de ${total.toFixed(2)}">💰 Anticipo — saldo ${saldo.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>`
+}
+
+// ── Columna "NC / ND vinculadas" (2026-10-07) ──────────────────────────────
+// Factura/boleta: lista sus Notas de Crédito / Débito (ventas con
+// venta_referencia_id = esta venta), con su importe con signo. Nota: muestra
+// el comprobante que modifica. Clic → detalle de la nota / de la venta.
+let _notasPorVentaCache = null, _notasPorVentaFuente = null
+function _notasPorVenta() {
+  if (_notasPorVentaFuente === _ventasListaEnriquecida && _notasPorVentaCache) return _notasPorVentaCache
+  const m = new Map()
+  for (const { v } of (_ventasListaEnriquecida || [])) {
+    if (!v.venta_referencia_id || !esNota(v.tipo_comprobante)) continue
+    if (!m.has(v.venta_referencia_id)) m.set(v.venta_referencia_id, [])
+    m.get(v.venta_referencia_id).push(v)
+  }
+  _notasPorVentaCache = m; _notasPorVentaFuente = _ventasListaEnriquecida
+  return m
+}
+const _numDocVenta = (v) => `${v.serie || ''}-${String(v.correlativo || '').padStart(8, '0')}`
+
+function _celdaNotasVenta(v) {
+  if (esNota(v.tipo_comprobante)) {
+    if (!v.venta_referencia_id) return '<span style="color:var(--text-secondary);">—</span>'
+    const ref = `${v.doc_referencia_serie || ''}-${String(v.doc_referencia_numero || '').padStart(8, '0')}`
+    return `<small style="color:var(--text-secondary);">modifica a</small><br><span style="white-space:nowrap;">↩ ${ref}</span>`
+  }
+  const notas = (_notasPorVenta().get(v.id) || []).sort((a, b) => (a.fecha_emision || '').localeCompare(b.fecha_emision || ''))
+  if (!notas.length) return '<span style="color:var(--text-secondary);">—</span>'
+  return notas.map(n => {
+    const anul = estaAnulado(n)
+    const sg = signoDocumento(n.tipo_comprobante)
+    const tipo = String(n.tipo_comprobante) === '07' ? 'NC' : 'ND'
+    const color = anul ? 'var(--text-secondary)' : (sg < 0 ? 'var(--color-danger)' : 'var(--color-success)')
+    return `<a href="#" onclick="event.preventDefault(); window.verDetalleNotaVenta(${n.id})" title="${anul ? 'ANULADA — ' : ''}${tipo} ${_numDocVenta(n)} del ${n.fecha_emision || ''}: ${n.motivo_nota_texto || ''}"
+      style="display:block; white-space:nowrap; text-decoration:${anul ? 'line-through' : 'none'}; color:${color}; font-size:0.85rem;">${tipo} ${_numDocVenta(n)} · ${formatNumber(parseFloat(n.total || 0) * sg)}</a>`
+  }).join('')
 }
 
 function _pintarFilasVentas() {
@@ -255,7 +325,8 @@ function _pintarFilasVentas() {
   if (busqueda) {
     listaFiltrada = listaFiltrada.filter(({ v, cliente, vendedor }) => {
       const comprobante = `${v.serie || ''}-${String(v.correlativo || '').padStart(8, '0')}`
-      return `${comprobante} ${cliente || ''} ${vendedor || ''} ${v.moneda || ''} ${v.tipo_comprobante || ''}`
+      const pk = _packingPorIdCache.get(v.packing_id)?.numero || ''
+      return `${comprobante} ${pk} ${cliente || ''} ${vendedor || ''} ${v.moneda || ''} ${v.tipo_comprobante || ''}`
         .toLowerCase().includes(busqueda)
     })
   }
@@ -268,7 +339,7 @@ function _pintarFilasVentas() {
   }
 
   if (listaFiltrada.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="13" style="text-align:center;">${busqueda ? 'Sin resultados para la búsqueda' : (modoAnul === 'anulados' ? 'No hay comprobantes anulados' : 'Sin ventas registradas')}</td></tr>`
+    tbody.innerHTML = `<tr><td colspan="15" style="text-align:center;">${busqueda ? 'Sin resultados para la búsqueda' : (modoAnul === 'anulados' ? 'No hay comprobantes anulados' : 'Sin ventas registradas')}</td></tr>`
     return
   }
 
@@ -300,6 +371,8 @@ function _pintarFilasVentas() {
       <td data-col-tabla="ventas" data-col="total" style="text-align:right; font-weight:bold;${estiloMonto}${colStyle('ventas','total') ? ' display:none;' : ''}">${formatNumber(tot)}</td>
       <td data-col-tabla="ventas" data-col="cpe"${colStyle('ventas','cpe')}>${statusBadge(v)}${revertida ? ` <span class="badge badge-warning" title="Sus Notas de Crédito ya cubrieron el 100% del importe — sigue aceptado en SUNAT, no está anulado">REVERTIDO</span>` : ''}</td>
       <td data-col-tabla="ventas" data-col="despacho"${colStyle('ventas','despacho')}>${_badgeDespachoVenta(v)}</td>
+      <td data-col-tabla="ventas" data-col="packing"${colStyle('ventas','packing')}>${_celdaPackingVenta(v)}</td>
+      <td data-col-tabla="ventas" data-col="notas"${colStyle('ventas','notas')}>${_celdaNotasVenta(v)}</td>
       <td data-col-tabla="ventas" data-col="acciones" class="col-acciones" style="text-decoration:none; opacity:1;${colStyle('ventas','acciones') ? ' display:none;' : ''}">
         ${menuAccionesFila([
           esNota(v.tipo_comprobante) && { label: 'Ver detalle', icono: '📋', onclick: `window.verDetalleNotaVenta(${v.id})` },

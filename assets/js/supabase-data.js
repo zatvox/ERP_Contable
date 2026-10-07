@@ -116,7 +116,7 @@ export async function deleteLoteBulto(id) {
 export async function getLoteBultosDisponibles(loteId) {
   const bultos = await getLoteBultosByLote(loteId)
   return (bultos || [])
-    .filter(b => b.estado === 'disponible')
+    .filter(b => b.estado === 'disponible' || b.estado === 'custodiado') // custodiado = vendido en zona real, re-despachable (SQL 73)
     .sort((a, b) => (a.id || 0) - (b.id || 0))
 }
 
@@ -168,11 +168,14 @@ export async function getLoteBultosPorDetalleGuiaDespacho(detalleGuiaDespachoId)
  * mismo lote en más de una línea) — el llamador debe llamar
  * recalcularLoteDesdeBultos(loteId) por cada id devuelto, una sola vez.
  */
-export async function revertirBultosDeDetalleGuiaDespacho(detalleGuiaDespachoId) {
+export async function revertirBultosDeDetalleGuiaDespacho(detalleGuiaDespachoId, ubicacionOrigenId = null) {
   const bultos = await getLoteBultosPorDetalleGuiaDespacho(detalleGuiaDespachoId)
   const loteIds = new Set()
   for (const b of (bultos || [])) {
-    await updateLoteBulto(b.id, { estado: 'disponible', detalle_venta_id: null, detalle_guia_despacho_id: null })
+    const cambios = { estado: 'disponible', detalle_venta_id: null, detalle_guia_despacho_id: null }
+    // Bulto 'custodiado' se había movido a la zona destino: vuelve a su zona de origen.
+    if (b.estado === 'custodiado' && ubicacionOrigenId) cambios.ubicacion_id = ubicacionOrigenId
+    await updateLoteBulto(b.id, cambios)
     loteIds.add(b.lote_id)
   }
   return Array.from(loteIds)

@@ -73,7 +73,7 @@ export async function _revertirStockGuiaDespacho(id) {
       // Revierte a 'disponible' los bultos concretos que esta línea marcó
       // 'vendido', ANTES de borrar la guía (mismo orden que el fix de
       // compras: revertir/desvincular referencias primero, borrar después).
-      await revertirBultosDeDetalleGuiaDespacho(dg.id)
+      await revertirBultosDeDetalleGuiaDespacho(dg.id, dg.ubicacion_id)
       lotesPesoVariableTocados.add(dg.lote_id)
     }
   }

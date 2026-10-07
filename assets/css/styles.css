@@ -2114,3 +2114,8 @@ th.th-ordenable .th-orden-ind { font-size: 0.75em; opacity: 0.6; }
 /* Inventario › Por Ubicación: costo promedio de varios ingresos del mismo lote (2026-10-05) */
 td.costo-promedio { background: #fef3c7; color: #92400e; font-weight: 600; }
 body.dark-mode td.costo-promedio { background: rgba(245, 158, 11, 0.22); color: #fbbf24; }
+
+/* Cobros Registrados: N° de recibo físico editable en la celda (2026-10-07) */
+.input-recibo { width: 110px; padding: 4px 8px; font-size: 0.85rem; background: transparent; border: 1px dashed var(--border-color); border-radius: var(--radius-sm); color: var(--text-primary); }
+.input-recibo:hover { border-style: solid; }
+.input-recibo:focus { background: var(--bg-primary); border-style: solid; border-color: var(--color-primary); outline: none; }

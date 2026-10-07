@@ -43,7 +43,6 @@
             <button type="button" class="module-nav-group-toggle">Cuentas</button>
             <div class="module-nav-dropdown">
               <button class="tab-btn active" data-tab="cuentas-banco">Cuentas Bancarias</button>
-              <button class="tab-btn" data-tab="nueva-cuenta">+ Nueva Cuenta</button>
             </div>
           </div>
           <div class="module-nav-group">
@@ -214,81 +213,6 @@
           <div id="content-conciliacion" class="card">Selecciona una cuenta para conciliar.</div>
         </div>
 
-        <!-- TAB: Nueva Cuenta -->
-        <div id="tab-nueva-cuenta" class="tab-content">
-          <div class="card" style="max-width:620px;">
-            <div class="card-header"><h3 class="card-title" id="nc-titulo">Nueva Cuenta Bancaria</h3></div>
-            <div style="padding:20px; display:flex; flex-direction:column; gap:12px;">
-              <input type="hidden" id="ncId">
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-                <div class="form-group">
-                  <label>Nombre / Alias *</label>
-                  <input type="text" id="ncNombre" placeholder="Ej: BCP Principal PEN">
-                </div>
-                <div class="form-group">
-                  <label>Banco *</label>
-                  <input type="text" id="ncBanco" list="listaBancosPeru" placeholder="Escribe o elige de la lista..." autocomplete="off">
-                  <datalist id="listaBancosPeru"></datalist>
-                </div>
-              </div>
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-                <div class="form-group">
-                  <label>Número de Cuenta *</label>
-                  <input type="text" id="ncNumeroCuenta" placeholder="000-0000000-0-00">
-                </div>
-                <div class="form-group">
-                  <label>CCI (20 dígitos)</label>
-                  <input type="text" id="ncCCI" placeholder="00200000000000000000" maxlength="20">
-                </div>
-              </div>
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-                <div class="form-group">
-                  <label>Tipo de Cuenta</label>
-                  <select id="ncTipoCuenta">
-                    <option value="corriente">Cuenta Corriente</option>
-                    <option value="ahorro">Cuenta de Ahorro</option>
-                    <option value="detracciones">Cuenta de Detracciones</option>
-                    <option value="cuentas_recaudacion">Cuenta de Recaudación</option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label>Moneda</label>
-                  <select id="ncMoneda">
-                    <option value="PEN">PEN - Soles</option>
-                    <option value="USD">USD - Dólares</option>
-                  </select>
-                </div>
-              </div>
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-                <div class="form-group">
-                  <label>Saldo Inicial</label>
-                  <input type="number" id="ncSaldoInicial" step="0.01" placeholder="0.00" value="0">
-                </div>
-                <div class="form-group">
-                  <label>Fecha del Saldo Inicial</label>
-                  <input type="date" id="ncSaldoInicialFecha">
-                  <small style="color:var(--text-secondary); font-size:0.72rem;">
-                    La fecha de corte del saldo (ej. la de tu asiento de apertura), NO la de hoy.
-                  </small>
-                </div>
-              </div>
-              <div class="form-group">
-                <label>Cuenta Contable (plan de cuentas)</label>
-                <select id="ncCuentaContable">
-                  <option value="">-- Sin asignar --</option>
-                </select>
-                <small style="color:var(--text-secondary); font-size:0.72rem;">
-                  Debe ser la subcuenta específica de ESTE banco (ej. 1041120 para BCP CC MN), no el código genérico del grupo (104).
-                </small>
-              </div>
-              <div style="display:flex; gap:10px;">
-                <button class="btn btn-primary" onclick="window.guardarNuevaCuenta()" style="flex:1;">💾 Guardar Cuenta</button>
-                <button class="btn btn-secondary" onclick="window.cancelarEdicionBanco()" id="ncBtnCancelar" style="display:none;">Cancelar</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <!-- TAB: REPORTES -->
         <div id="tab-reportes" class="tab-content">
           <div class="subtab-bar" id="banco-subtabs-reportes">
@@ -309,6 +233,93 @@
         </div>
 
       </main>
+    </div>
+  </div>
+
+  <!-- MODAL: Nueva / Editar Cuenta Bancaria o Caja (2026-10-07) — antes era
+       un tab aparte; ahora flota sobre "Cuentas Bancarias" (estándar §3.2) y
+       hereda la confirmación al cerrar con cambios (modal-guardia.js). -->
+  <div id="modal-cuenta-banco" class="modal">
+    <div class="modal-content" style="width:min(94vw, 720px); max-width:min(94vw, 720px); max-height:calc(100vh - 48px); overflow-y:auto;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="nc-titulo">Nueva Cuenta Bancaria</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-cuenta-banco')">✕</button>
+      </div>
+      <input type="hidden" id="ncId">
+      <div id="ncAvisoMovs" style="display:none; padding:8px 12px; border-left:3px solid var(--color-warning, #f59e0b); background:var(--bg-secondary); border-radius:var(--radius-md); font-size:0.85rem; margin-bottom:12px;"></div>
+
+      <strong style="display:block; font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em; color:var(--text-secondary); margin-bottom:8px;">Datos de la cuenta</strong>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <div class="form-group">
+          <label>Tipo de Cuenta *</label>
+          <select id="ncTipoCuenta" onchange="window._onCambiarTipoCuentaBanco()">
+            <option value="caja">💵 Caja (efectivo)</option>
+            <option value="corriente" selected>Cuenta Corriente</option>
+            <option value="ahorro">Cuenta de Ahorro</option>
+            <option value="detracciones">Cuenta de Detracciones</option>
+            <option value="cuentas_recaudacion">Cuenta de Recaudación</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Moneda *</label>
+          <select id="ncMoneda">
+            <option value="PEN">PEN - Soles</option>
+            <option value="USD">USD - Dólares</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <div class="form-group">
+          <label>Nombre / Alias *</label>
+          <input type="text" id="ncNombre" placeholder="Ej: BCP Principal PEN">
+        </div>
+        <div class="form-group" id="ncGrupoBanco">
+          <label>Banco *</label>
+          <input type="text" id="ncBanco" list="listaBancosPeru" placeholder="Escribe o elige de la lista..." autocomplete="off">
+          <datalist id="listaBancosPeru"></datalist>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;" id="ncGrupoNumeros">
+        <div class="form-group">
+          <label>Número de Cuenta *</label>
+          <input type="text" id="ncNumeroCuenta" placeholder="000-0000000-0-00">
+        </div>
+        <div class="form-group">
+          <label>CCI (20 dígitos)</label>
+          <input type="text" id="ncCCI" placeholder="00200000000000000000" maxlength="20" inputmode="numeric">
+        </div>
+      </div>
+
+      <div style="border-top:1px solid var(--border-color); margin:14px 0 10px;"></div>
+      <strong style="display:block; font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em; color:var(--text-secondary); margin-bottom:8px;">Saldo inicial</strong>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <div class="form-group">
+          <label>Saldo Inicial</label>
+          <input type="number" id="ncSaldoInicial" step="0.01" placeholder="0.00" value="0">
+        </div>
+        <div class="form-group">
+          <label>Fecha del Saldo Inicial</label>
+          <input type="date" id="ncSaldoInicialFecha">
+          <small style="color:var(--text-secondary); font-size:0.72rem;">La fecha de corte del saldo (ej. la de tu asiento de apertura), NO la de hoy.</small>
+        </div>
+      </div>
+
+      <div style="border-top:1px solid var(--border-color); margin:14px 0 10px;"></div>
+      <strong style="display:block; font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em; color:var(--text-secondary); margin-bottom:8px;">Contabilidad</strong>
+      <div class="form-group">
+        <label>Cuenta Contable (plan de cuentas)</label>
+        <select id="ncCuentaContable">
+          <option value="">-- Sin asignar --</option>
+        </select>
+        <small id="ncHintCuentaContable" style="color:var(--text-secondary); font-size:0.72rem;">
+          Debe ser la subcuenta específica de ESTE banco (ej. 1041120 para BCP CC MN), no el código genérico del grupo (104).
+        </small>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn" onclick="window.closeModal('modal-cuenta-banco')">Cancelar</button>
+        <button class="btn btn-primary" id="ncBtnGuardar" onclick="window.conCarga(this, window.guardarNuevaCuenta)">💾 Guardar Cuenta</button>
+      </div>
     </div>
   </div>
 

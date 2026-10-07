@@ -3,7 +3,7 @@
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
 import { colStyle } from '../col-menu.js'
-import { getItems, getLotes, getCategorias, getPartidas, getMarcas, getAlmacenes, getUbicaciones, getStockUbicaciones, getKardex } from '../supabase-data.js'
+import { getItems, getLotes, getCategorias, getPartidas, getMarcas, getAlmacenes, getUbicaciones, getStockUbicaciones, getKardex, getVentas, getCompras, getContacts } from '../supabase-data.js'
 import { showToast } from '../helpers.js'
 import { getModuloConfig } from '../config-modulo.js'
 import { cacheado } from '../data-cache.js'
@@ -283,7 +283,8 @@ export async function construirReporteInv(panelId) {
         dimensiones: [
           { key: 'almacen', label: 'Almacén' }, { key: 'zona', label: 'Zona' },
           { key: 'producto', label: 'Producto' }, { key: 'lote', label: 'Lote' },
-          { key: 'categoria', label: 'Categoría' }
+          { key: 'categoria', label: 'Categoría' },
+          { key: 'fecha_ingreso', label: 'Fecha de ingreso', tipo: 'fecha', granularidad: 'mes' }
         ],
         medidas: [
           { key: 'cantidad', label: 'Cantidad', agg: 'sum', formato: 'qty' },
@@ -305,6 +306,32 @@ export async function construirReporteInv(panelId) {
     if (panelId === 'repi-rotacion' || panelId === 'repi-kardex') {
       const kardex = await cacheado('kardex', getKardex)
       const loteMap = {}; (lotes || []).forEach(l => { loteMap[l.id] = l.numero_lote || `#${l.id}` })
+
+      // Comprobante + contacto del movimiento (venta → cliente, compra → proveedor).
+      // Traslados / ajustes no tienen contraparte: se agrupan como "(sin …)".
+      const [ventasK, comprasK, contactsK] = await Promise.all([
+        cacheado('ventas', getVentas).catch(() => []),
+        cacheado('compras', getCompras).catch(() => []),
+        cacheado('contacts', getContacts).catch(() => [])
+      ])
+      const ventaMapK = {}; (ventasK || []).forEach(v => { ventaMapK[v.id] = v })
+      const compraMapK = {}; (comprasK || []).forEach(c => { compraMapK[c.id] = c })
+      const contactMapK = {}; (contactsK || []).forEach(c => { contactMapK[c.id] = c })
+      const _docYContacto = (k) => {
+        if (k.venta_id) {
+          const v = ventaMapK[k.venta_id]
+          if (!v) return { comprobante: `Venta #${k.venta_id}`, contacto: '(venta eliminada)' }
+          return { comprobante: `${v.serie || ''}-${String(v.correlativo || '').padStart(8, '0')}`,
+                   contacto: contactMapK[v.contact_id]?.nombre || '(sin contacto)' }
+        }
+        if (k.compra_id) {
+          const c = compraMapK[k.compra_id]
+          if (!c) return { comprobante: `Compra #${k.compra_id}`, contacto: '(compra eliminada)' }
+          return { comprobante: `${c.serie || ''}-${c.numero || ''}`,
+                   contacto: contactMapK[c.contact_id]?.nombre || c.proveedor_nombre || '(sin contacto)' }
+        }
+        return { comprobante: '(sin comprobante)', contacto: '(sin contacto)' }
+      }
 
       // Clase de movimiento (solo vista, la BD no cambia): tipo_movimiento
       // mezcla casos que contablemente son distintos — una devolución a
@@ -342,6 +369,7 @@ export async function construirReporteInv(panelId) {
           categoria: catMap[it.categoria_id] || '(sin categoría)',
           lote: k.lote_id ? (loteMap[k.lote_id] || `#${k.lote_id}`) : '(sin lote)',
           tipo: clase,
+          ..._docYContacto(k),
           mes: nombreMes((k.fecha || '').slice(0, 7)),
           fecha: k.fecha || '',
           entrada, salida,
@@ -365,9 +393,10 @@ export async function construirReporteInv(panelId) {
           descripcion: 'Entradas y salidas por producto, lote, tipo de movimiento y mes, con su valorización. Costo de ventas = salidas por venta − devoluciones de clientes.',
           datos: filasK,
           dimensiones: [
-            { key: 'mes', label: 'Mes' }, { key: 'producto', label: 'Producto' },
+            { key: 'mes', label: 'Fecha', tipo: 'fecha', campo: 'fecha' }, { key: 'producto', label: 'Producto' },
             { key: 'lote', label: 'Lote' },
-            { key: 'tipo', label: 'Tipo de movimiento' }, { key: 'categoria', label: 'Categoría' }
+            { key: 'tipo', label: 'Tipo de movimiento' }, { key: 'categoria', label: 'Categoría' },
+            { key: 'comprobante', label: 'N° comprobante' }, { key: 'contacto', label: 'Contacto' }
           ],
           medidas: [
             { key: 'entrada', label: 'Entradas (cant.)', agg: 'sum', formato: 'qty' },
@@ -382,7 +411,7 @@ export async function construirReporteInv(panelId) {
             { key: 'costo_venta', label: 'Costo de ventas', agg: 'sum', formato: 'money' }
           ],
           filtros: [
-            { key: 'buscar', label: 'Buscar', tipo: 'texto', campos: ['producto', 'sku', 'lote'], placeholder: 'Producto, SKU o lote...' },
+            { key: 'buscar', label: 'Buscar', tipo: 'texto', campos: ['producto', 'sku', 'lote', 'comprobante', 'contacto'], placeholder: 'Producto, SKU, lote, comprobante o contacto...' },
             { key: 'rango', label: 'Fecha', tipo: 'rango', campo: 'fecha' },
             { key: 'tipo', label: 'Tipo de movimiento', tipo: 'multi', opciones: clases }
           ],

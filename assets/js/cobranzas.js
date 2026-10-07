@@ -526,6 +526,7 @@ window.registrarCobro = async function() {
     const medioPago  = document.getElementById('cobroMedioPago')?.value
     const bancoId    = document.getElementById('cobroBanco')?.value
     const referencia = document.getElementById('cobroReferencia')?.value?.trim()
+    const numeroRecibo = document.getElementById('cobroNumeroRecibo')?.value?.trim() || null
     const tipoCambio = _tcEfectivoCP('cobro')   // 8 decimales: reproduce exacto el importe recibido
 
     if (!cxcId)     { showToast('Selecciona una Cuenta por Cobrar', 'warning'); return }
@@ -547,7 +548,10 @@ window.registrarCobro = async function() {
       return
     }
 
+    if (!_reciboValidoParaCliente(numeroRecibo, cxc.contact_id, null)) return
+
     const cobro = await addCobro({
+      numero_recibo: numeroRecibo,
       cxc_id: cxcId, contact_id: cxc.contact_id, fecha, monto,
       moneda: cxc.moneda || 'PEN', tipo_cambio: tipoCambio,
       medio_pago: medioPago, referencia: referencia || null,
@@ -572,6 +576,7 @@ window.registrarCobro = async function() {
     document.getElementById('cobroMonto').value      = ''
     document.getElementById('cobroMontoRecibido').value = ''
     document.getElementById('cobroReferencia').value = ''
+    document.getElementById('cobroNumeroRecibo').value = ''
     document.getElementById('cobro-cxc-info').textContent = ''
     document.getElementById('cobro-retencion-block').style.display = 'none'
     _cobroRetencionPendiente = 0
@@ -603,15 +608,19 @@ window.filtrarCobrosRecientes = function() {
   const q = (document.getElementById('buscarCobro')?.value || '').toLowerCase().trim()
 
   let lista = [..._cobrosList].sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '') || b.id - a.id)
-  if (q) lista = lista.filter(c => `${_nombreContacto(c.contact_id)} ${c.referencia || ''} ${c.medio_pago || ''}`.toLowerCase().includes(q))
+  if (q) lista = lista.filter(c => `${c.numero_recibo || ''} ${_nombreContacto(c.contact_id)} ${c.referencia || ''} ${c.medio_pago || ''}`.toLowerCase().includes(q))
   lista = lista.slice(0, 50)
 
   if (lista.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;">Sin cobros registrados</td></tr>'
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;">Sin cobros registrados</td></tr>'
     return
   }
 
   tbody.innerHTML = lista.map(c => `<tr>
+    <td data-sort="${_esc(c.numero_recibo || '')}"><input type="text" class="input-recibo" value="${_esc(c.numero_recibo || '')}" placeholder="—"
+        title="N° del recibo de cobranza físico — escribe y presiona Enter"
+        onkeydown="if(event.key==='Enter'){this.blur()} else if(event.key==='Escape'){this.value=this.defaultValue; this.blur()}"
+        onchange="window.guardarNumeroRecibo(${c.id}, this)"></td>
     <td>${fechaDMY(c.fecha, '-')}</td>
     <td>${_esc(_nombreContacto(c.contact_id))}</td>
     <td style="text-align:right; font-weight:bold;">${formatNumber(c.monto)}</td>
@@ -622,6 +631,97 @@ window.filtrarCobrosRecientes = function() {
     <td>${c.asiento_id ? `AS-${String(c.asiento_id).padStart(6, '0')}` : '—'}</td>
     <td style="white-space:nowrap;">${_botonesCP('cobro', c.id)}</td>
   </tr>`).join('')
+}
+
+// Un N° de recibo puede repetirse en vouchers del MISMO cliente (un recibo,
+// varios vouchers). Si ya está en un cobro de OTRO cliente → confirmar.
+function _reciboValidoParaCliente(numero, contactId, excluirId) {
+  const n = (numero || '').trim().toLowerCase()
+  if (!n) return true
+  const otro = _cobrosList.find(x => x.id !== excluirId && (x.numero_recibo || '').trim().toLowerCase() === n && x.contact_id !== contactId)
+  if (!otro) return true
+  return confirm(`El recibo N° ${numero} ya está en un cobro de OTRO cliente (${fechaDMY(otro.fecha)} — ${_nombreContacto(otro.contact_id)}, ${formatNumber(otro.monto)}).\n\n¿Guardar igual?`)
+}
+
+// Cobros (vouchers) que comparten el N° de recibo de `reg` — desde BD para
+// que funcione aunque el tab Cobros no se haya cargado. 2026-10-07
+async function _cobrosDelRecibo(reg) {
+  const n = (reg?.numero_recibo || '').trim()
+  if (!n) return []
+  try {
+    const { data, error } = await supabase.from('cobros').select('*').ilike('numero_recibo', n)
+    if (error) throw error
+    return (data || []).sort((a, b) => (a.fecha || '').localeCompare(b.fecha || '') || a.id - b.id)
+  } catch (e) {
+    console.warn('_cobrosDelRecibo:', e.message)
+    return _cobrosList.filter(x => (x.numero_recibo || '').trim().toLowerCase() === n.toLowerCase())
+  }
+}
+
+function _htmlSeccionRecibo(reg, lista) {
+  if (!reg?.numero_recibo || !lista?.length) return ''
+  const total = lista.reduce((s, x) => s + (parseFloat(x.monto) || 0), 0)
+  const otroCli = lista.some(x => x.contact_id !== reg.contact_id)
+  return `<h4 style="margin:16px 0 6px;">🧾 Recibo N° ${_esc(reg.numero_recibo)} — ${lista.length} voucher(s)</h4>
+    ${otroCli ? '<div style="padding:6px 10px; border-left:3px solid var(--color-danger); background:var(--bg-secondary); font-size:0.82rem; margin-bottom:6px;">⚠ Este N° de recibo también está en cobros de otro cliente: revisa si es un error de tipeo.</div>' : ''}
+    <div style="border:1px solid var(--border-color); border-radius:var(--radius-md); overflow:hidden; overflow-x:auto;">
+      <table style="width:100%; border-collapse:collapse; margin:0;">
+        <thead><tr style="background:var(--bg-secondary);"><th>Fecha</th><th>Cliente</th><th>Documento</th><th>Banco</th><th>Referencia</th><th style="text-align:right;">Monto</th><th></th></tr></thead>
+        <tbody>${lista.map(x => {
+          const cxc = _cxcList.find(d => d.id === x.cxc_id)
+          const docTxt = cxc ? `${cxc.serie ? cxc.serie + '-' : ''}${cxc.numero_comprobante || ''}` : '—'
+          const actual = x.id === reg.id
+          return `<tr style="border-top:1px solid var(--border-color);${actual ? ' background:rgba(59,130,246,0.08); font-weight:600;' : ''}${x.contact_id !== reg.contact_id ? ' color:var(--color-danger);' : ''}">
+            <td>${fechaDMY(x.fecha)}</td><td>${_esc(_nombreContacto(x.contact_id))}</td><td>${_esc(docTxt)}</td>
+            <td>${_esc(_bancosMap[x.banco_id]?.nombre || '—')}</td><td>${_esc(x.referencia || '—')}${_clipAdjunto('cobro', x.id)}</td>
+            <td style="text-align:right;">${formatNumber(x.monto)}</td>
+            <td style="white-space:nowrap;">${actual ? '<small style="color:var(--text-secondary);">este</small>' : _botonesCP('cobro', x.id)}</td></tr>`
+        }).join('')}</tbody>
+        <tfoot><tr style="border-top:2px solid var(--border-color); font-weight:bold;"><td colspan="5">Total del recibo</td><td style="text-align:right;">${formatNumber(total)}</td><td></td></tr></tfoot>
+      </table>
+    </div>`
+}
+
+// N° de recibo de cobranza físico, editable en la celda (2026-10-07, SQL 74).
+// Se guarda al salir del campo / Enter; avisa si ese N° ya está en otro cobro.
+window.guardarNumeroRecibo = async function (cobroId, input) {
+  const nuevo = (input.value || '').trim()
+  const c = _cobrosList.find(x => x.id === cobroId)
+  if (!c) return
+  const anterior = c.numero_recibo || ''
+  if (nuevo === anterior) return
+  // Un recibo puede agrupar VARIOS vouchers (cobros) del MISMO cliente: eso
+  // es válido y no pregunta. Solo avisa si el N° ya está en un cobro de OTRO
+  // cliente (casi seguro un error de tipeo). 2026-10-07
+  let mismos = []
+  if (nuevo) {
+    const conN = _cobrosList.filter(x => x.id !== cobroId && (x.numero_recibo || '').trim().toLowerCase() === nuevo.toLowerCase())
+    const otroCli = conN.find(x => x.contact_id !== c.contact_id)
+    if (otroCli && !confirm(`El recibo N° ${nuevo} ya está en un cobro de OTRO cliente (${fechaDMY(otroCli.fecha)} — ${_nombreContacto(otroCli.contact_id)}, ${formatNumber(otroCli.monto)}).\n\n¿Guardar igual?`)) {
+      input.value = anterior; return
+    }
+    mismos = conN.filter(x => x.contact_id === c.contact_id)
+  }
+  input.disabled = true
+  try {
+    const r = await updateCobro(cobroId, { numero_recibo: nuevo || null })
+    if (!r) throw new Error('¿ya corriste el SQL 74?')
+    c.numero_recibo = nuevo || null
+    input.defaultValue = nuevo
+    input.closest('td')?.setAttribute('data-sort', nuevo)
+    input.style.borderColor = 'var(--color-success)'
+    setTimeout(() => { input.style.borderColor = '' }, 1200)
+    if (!nuevo) showToast('N° de recibo borrado', 'success')
+    else if (mismos.length) {
+      const total = [c, ...mismos].reduce((s, x) => s + (parseFloat(x.monto) || 0), 0)
+      showToast(`Recibo ${nuevo}: ${mismos.length + 1} vouchers, total ${formatNumber(total)}`, 'success', 4500)
+    } else showToast(`Recibo N° ${nuevo} guardado`, 'success')
+  } catch (e) {
+    input.value = anterior
+    showToast('No se pudo guardar el N° de recibo: ' + e.message, 'danger')
+  } finally {
+    input.disabled = false
+  }
 }
 
 // ============================================================================
@@ -980,7 +1080,7 @@ function construirReporte(panelId) {
       dimensiones: [
         { key: 'tramo', label: 'Tramo de mora' }, { key: 'cliente', label: 'Cliente' },
         { key: 'estado', label: 'Estado' }, { key: 'moneda', label: 'Moneda' },
-        { key: 'mes', label: 'Mes emisión' }
+        { key: 'mes', label: 'Fecha emisión', tipo: 'fecha', campo: 'fecha_emision' }
       ],
       medidas: [
         { key: 'total', label: 'Facturado', agg: 'sum', formato: 'money' },
@@ -1040,7 +1140,7 @@ function construirReporte(panelId) {
       dimensiones: [
         { key: 'tramo', label: 'Tramo' }, { key: 'proveedor', label: 'Proveedor' },
         { key: 'estado', label: 'Estado' }, { key: 'moneda', label: 'Moneda' },
-        { key: 'mes', label: 'Mes emisión' }
+        { key: 'mes', label: 'Fecha emisión', tipo: 'fecha', campo: 'fecha_emision' }
       ],
       medidas: [
         { key: 'total', label: 'Comprado', agg: 'sum', formato: 'money' },
@@ -1083,7 +1183,7 @@ function construirReporte(panelId) {
       descripcion: 'Todo lo cobrado, cruzable por mes, cliente, medio de pago o banco.',
       datos,
       dimensiones: [
-        { key: 'mes', label: 'Mes' }, { key: 'cliente', label: 'Cliente' },
+        { key: 'mes', label: 'Fecha', tipo: 'fecha', campo: 'fecha' }, { key: 'cliente', label: 'Cliente' },
         { key: 'medio', label: 'Medio de pago' }, { key: 'banco', label: 'Banco' },
         { key: 'moneda', label: 'Moneda' }
       ],
@@ -1124,7 +1224,7 @@ function construirReporte(panelId) {
       descripcion: 'Salidas de caja hacia proveedores, por mes, proveedor, medio o banco.',
       datos,
       dimensiones: [
-        { key: 'mes', label: 'Mes' }, { key: 'proveedor', label: 'Proveedor' },
+        { key: 'mes', label: 'Fecha', tipo: 'fecha', campo: 'fecha' }, { key: 'proveedor', label: 'Proveedor' },
         { key: 'medio', label: 'Medio de pago' }, { key: 'banco', label: 'Banco' },
         { key: 'moneda', label: 'Moneda' }
       ],
@@ -1161,7 +1261,7 @@ function construirReporte(panelId) {
       descripcion: 'Base para deducir del IGV por pagar. Revisa el tramo "Falta comprobante": son retenciones que aún no puedes sustentar.',
       datos,
       dimensiones: [
-        { key: 'mes', label: 'Mes' }, { key: 'cliente', label: 'Cliente' },
+        { key: 'mes', label: 'Fecha', tipo: 'fecha', campo: 'fecha' }, { key: 'cliente', label: 'Cliente' },
         { key: 'estado_comprobante', label: 'Sustento' }
       ],
       medidas: [
@@ -1436,7 +1536,7 @@ async function construirAntiguedadCxC() {
         { key: 'tramo', label: 'Tramo de mora' },
         { key: 'cliente', label: 'Cliente' },
         { key: 'moneda', label: 'Moneda' },
-        { key: 'mes_venc', label: 'Mes de vencimiento' },
+        { key: 'mes_venc', label: 'Fecha vencimiento', tipo: 'fecha', campo: 'fecha_vencimiento' },
         { key: 'cuota_etiqueta', label: 'Cuota / hito' },
         { key: 'estado', label: 'Estado' }
       ],
@@ -2408,7 +2508,7 @@ window.verDetalleCP = async function(tipo, id) {
     if (doc) await _refrescarCuotasDoc(esCobro, doc.id)
     const cuotas = doc ? (esCobro ? _cuotasDe(doc.id) : _cuotasPagarDe(doc.id)) : []
 
-    const [asiento, movRes, adjuntos] = await Promise.all([_buscarAsientoCP(tipo, reg), _buscarMovimientoCP(tipo, reg), getAdjuntos(tipo, reg.id)])
+    const [asiento, movRes, adjuntos, delRecibo] = await Promise.all([_buscarAsientoCP(tipo, reg), _buscarMovimientoCP(tipo, reg), getAdjuntos(tipo, reg.id), esCobro ? _cobrosDelRecibo(reg) : []])
     let lineas = []
     if (asiento?.id) {
       lineas = (await getJournalEntryLinesByEntry(asiento.id)) || []
@@ -2425,6 +2525,7 @@ window.verDetalleCP = async function(tipo, id) {
     body.innerHTML = `
       <h4 style="margin:0 0 6px;">Datos del ${esCobro ? 'cobro' : 'pago'}</h4>
       <table class="table-compact" style="width:100%;">
+        ${esCobro ? fila('N° Recibo', _esc(reg.numero_recibo || '—')) : ''}
         ${fila('Fecha', fechaDMY(reg.fecha))}
         ${fila(esCobro ? 'Cliente' : 'Proveedor', _esc(_nombreContacto(reg.contact_id)))}
         ${fila('Monto', `<b>${reg.moneda || 'PEN'} ${formatNumber(reg.monto)}</b>`)}
@@ -2438,6 +2539,8 @@ window.verDetalleCP = async function(tipo, id) {
         ${fila('📎 Archivos adjuntos', _htmlAdjuntos(tipo, reg.id, adjuntos, false))}
         ${fila('Registrado', reg.created_at ? new Date(reg.created_at).toLocaleString('es-PE') : '—')}
       </table>
+
+      ${esCobro ? _htmlSeccionRecibo(reg, delRecibo) : ''}
 
       <h4 style="margin:16px 0 6px;">Documento ${esCobro ? 'CxC' : 'CxP'}</h4>
       ${doc ? `<table class="table-compact" style="width:100%;">
@@ -2506,6 +2609,7 @@ window.abrirEditarCP = async function(tipo, id) {
     $('ecpRetencion').value  = reg.monto_retencion || 0
     $('ecpTC').value         = reg.tipo_cambio ?? 1
     $('ecpReferencia').value = reg.referencia || ''
+    $('ecpNumeroRecibo').value = reg.numero_recibo || ''
     $('ecpObs').value        = reg.observaciones || ''
     $('ecpCompRet').value    = reg.numero_comprobante_retencion || ''
     $('ecpMedio').innerHTML  = _MEDIOS_CP[tipo].map(([v, t]) => `<option value="${v}">${t}</option>`).join('')
@@ -2552,6 +2656,8 @@ window.guardarEdicionCP = async function() {
     if (esCobro) {
       nuevo.monto_retencion = _r2($('ecpRetencion').value)
       nuevo.numero_comprobante_retencion = $('ecpCompRet').value.trim() || null
+      nuevo.numero_recibo = $('ecpNumeroRecibo').value.trim() || null
+      if (!_reciboValidoParaCliente(nuevo.numero_recibo, reg.contact_id, reg.id)) return
     }
     if (!nuevo.fecha)      { showToast('Ingresa la fecha', 'warning'); return }
     if (nuevo.monto <= 0)  { showToast('El monto debe ser mayor a 0', 'warning'); return }
@@ -2708,9 +2814,9 @@ async function _verDetalleDocCP(tipoDoc, docId) {
       <h4 style="margin:16px 0 6px;">${esCxC ? 'Cobros' : 'Pagos'} registrados (${movs.length})</h4>
       ${movs.length ? `<div style="border:1px solid var(--border-color); border-radius:var(--radius-md); overflow:hidden; overflow-x:auto;">
         <table style="width:100%; border-collapse:collapse; margin:0;">
-          <thead><tr style="background:var(--bg-secondary);"><th>Fecha</th><th style="text-align:right;">Monto</th>${esCxC ? '<th style="text-align:right;">Retención</th>' : ''}<th>Medio</th><th>Banco</th><th>Referencia</th><th></th></tr></thead>
+          <thead><tr style="background:var(--bg-secondary);">${esCxC ? '<th>N° Recibo</th>' : ''}<th>Fecha</th><th style="text-align:right;">Monto</th>${esCxC ? '<th style="text-align:right;">Retención</th>' : ''}<th>Medio</th><th>Banco</th><th>Referencia</th><th></th></tr></thead>
           <tbody>${movs.map(m => `<tr style="border-top:1px solid var(--border-color);">
-            <td>${fechaDMY(m.fecha)}</td><td style="text-align:right;">${formatNumber(m.monto)}</td>
+            ${esCxC ? `<td>${_esc(m.numero_recibo || '—')}</td>` : ''}<td>${fechaDMY(m.fecha)}</td><td style="text-align:right;">${formatNumber(m.monto)}</td>
             ${esCxC ? `<td style="text-align:right;">${parseFloat(m.monto_retencion || 0) > 0 ? formatNumber(m.monto_retencion) : '—'}</td>` : ''}
             <td>${m.medio_pago || '—'}</td><td>${_esc(_bancosMap[m.banco_id]?.nombre || '—')}</td><td>${_esc(m.referencia || '—')}</td>
             <td style="white-space:nowrap;">${_botonesCP(tipo, m.id)}</td></tr>`).join('')}</tbody>
@@ -3380,7 +3486,7 @@ async function construirEstadoCuenta() {
       dimensiones: [
         { key: 'contacto', label: 'Cliente / Proveedor' }, { key: 'lado', label: 'Por cobrar / pagar' },
         { key: 'moneda', label: 'Moneda' }, { key: 'documento', label: 'Documento' },
-        { key: 'tipo', label: 'Tipo de movimiento' }, { key: 'mes', label: 'Mes' }
+        { key: 'tipo', label: 'Tipo de movimiento' }, { key: 'mes', label: 'Fecha', tipo: 'fecha', campo: 'fecha' }
       ],
       medidas: [
         { key: 'cargo', label: 'Cargos', agg: 'sum', formato: 'money' },

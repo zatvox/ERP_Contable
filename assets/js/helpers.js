@@ -366,7 +366,9 @@ function _valorOrden(td) {
     const n = parseFloat(td.dataset.sort)
     return isNaN(n) ? td.dataset.sort.toLowerCase() : n
   }
-  const t = (td.innerText || '').trim().split('\n')[0].trim()
+  // textContent (no innerText): innerText fuerza un recálculo de layout por
+  // celda y con cientos de filas congelaba la pantalla (2026-10-07).
+  const t = (td.textContent || '').replace(/\s+/g, ' ').trim()
   const f = t.match(/^(\d{2})\/(\d{2})\/(\d{4})/)
   if (f) return `${f[3]}-${f[2]}-${f[1]}`
   const limpio = t.replace(/^(S\/|\$|USD|PEN)\s*/i, '')
@@ -379,20 +381,34 @@ export function hacerTablaOrdenable(table) {
   table.dataset.ordenable = '1'
   const tbody = table.tBodies[0]
   const ths = [...table.tHead.rows[0].cells]
-  let col = -1, dir = 1, ordenando = false
+  let col = -1, dir = 1
+  const coll = new Intl.Collator('es', { numeric: true })
 
+  // FIX 2026-10-07 — se congelaba la pantalla al ordenar: el MutationObserver
+  // (que re-aplica el orden cuando la tabla se repinta) se disparaba con los
+  // propios appendChild del orden → ordenar() → más mutaciones → bucle
+  // infinito. Ahora se desconecta el observer mientras se reordena y se
+  // descartan sus registros pendientes. Además la clave de orden se calcula
+  // UNA vez por fila (antes en cada comparación) y se mueve todo en un solo
+  // fragmento.
   const ordenar = () => {
     if (col < 0) return
-    ordenando = true
+    obs.disconnect()
     const filas = [...tbody.rows].filter(r => !r.querySelector('td[colspan]'))
-    filas.sort((a, b) => {
-      const va = _valorOrden(a.cells[col]), vb = _valorOrden(b.cells[col])
+    const conClave = filas.map(f => ({ f, v: _valorOrden(f.cells[col]) }))
+    conClave.sort((a, b) => {
+      const va = a.v, vb = b.v
       if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir
-      return String(va).localeCompare(String(vb), 'es', { numeric: true }) * dir
+      return coll.compare(String(va), String(vb)) * dir
     })
-    filas.forEach(f => tbody.appendChild(f))
-    ordenando = false
+    const frag = document.createDocumentFragment()
+    conClave.forEach(x => frag.appendChild(x.f))
+    tbody.appendChild(frag)
+    obs.takeRecords()
+    obs.observe(tbody, { childList: true })
   }
+  // Re-aplicar el orden cuando la tabla se vuelve a pintar (filtros/recarga)
+  const obs = new MutationObserver(() => ordenar())
 
   ths.forEach((th, i) => {
     const txt = th.textContent.trim()
@@ -410,8 +426,7 @@ export function hacerTablaOrdenable(table) {
       ordenar()
     })
   })
-  // Re-aplicar el orden cuando la tabla se vuelve a pintar
-  new MutationObserver(() => { if (!ordenando) ordenar() }).observe(tbody, { childList: true })
+  obs.observe(tbody, { childList: true })
 }
 window.hacerTablaOrdenable = hacerTablaOrdenable
 

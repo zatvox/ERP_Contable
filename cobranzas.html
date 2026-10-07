@@ -170,15 +170,15 @@
           <div class="card" style="margin-top:20px;">
             <div class="card-header solo-acciones">
               <button class="btn btn-primary btn-small" onclick="window.abrirRegistrarCobro()">+ Registrar Cobro</button>
-              <input type="text" id="buscarCobro" placeholder="Buscar cliente o referencia..." style="max-width:280px;" oninput="window.filtrarCobrosRecientes()">
+              <input type="text" id="buscarCobro" placeholder="Buscar N° recibo, cliente o referencia..." style="max-width:280px;" oninput="window.filtrarCobrosRecientes()">
             </div>
             <div class="table-container">
               <table>
                 <thead>
-                  <tr><th>Fecha</th><th>Cliente</th><th style="text-align:right;">Monto</th><th style="text-align:right;">Retención</th><th>Medio</th><th>Banco</th><th>Referencia</th><th>Asiento</th><th></th></tr>
+                  <tr><th title="N° del recibo de cobranza físico — clic en la celda para escribirlo">N° Recibo</th><th>Fecha</th><th>Cliente</th><th style="text-align:right;">Monto</th><th style="text-align:right;">Retención</th><th>Medio</th><th>Banco</th><th>Referencia</th><th>Asiento</th><th></th></tr>
                 </thead>
                 <tbody id="tbody-cobros-recientes">
-                  <tr><td colspan="9" style="text-align:center;">Cargando...</td></tr>
+                  <tr><td colspan="10" style="text-align:center;">Cargando...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -608,6 +608,8 @@
                     <small id="cobro-banco-aviso" style="color:var(--text-secondary); font-size:0.72rem;"></small>
                   </div>
                   <div class="form-group"><label>N° Operación / Referencia</label><input type="text" id="cobroReferencia" placeholder="N° transferencia o cheque"></div>
+                  <div class="form-group"><label>N° Recibo de cobranza</label><input type="text" id="cobroNumeroRecibo" placeholder="N° del talonario físico (opcional)">
+                    <small style="color:var(--text-secondary); font-size:0.72rem;">Varios vouchers del mismo cliente pueden llevar el mismo N° de recibo.</small></div>
                 </div>
               </div>
 
@@ -876,6 +878,7 @@
         </div>
         <div class="form-group"><label>Banco</label><select id="ecpBanco"></select></div>
         <div class="form-group"><label>N° Operación / Referencia</label><input type="text" id="ecpReferencia"></div>
+        <div class="form-group ecp-solo-cobro"><label>N° Recibo de cobranza</label><input type="text" id="ecpNumeroRecibo" placeholder="N° del talonario físico (opcional)"></div>
         <div class="form-group"><label>Observaciones</label><textarea id="ecpObs" rows="2"></textarea></div>
         <div class="form-group">
           <label>📎 Archivos adjuntos</label>

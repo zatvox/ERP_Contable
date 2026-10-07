@@ -6,6 +6,7 @@ import { S } from './state.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { getCustomers, getLotes, getLoteById, updateLote, getVentas, getVentaById, getDetalleVentas, updateDetalleVenta, getAlmacenes, getStockUbicaciones, updateStockUbicacion, deleteStockUbicacion, getUbicacionCustomers, addKardexMovimiento, getGuiasDespachoVenta, getGuiaDespachoVentaById, addGuiaDespachoVenta, updateGuiaDespachoVenta, getDetalleGuiasDespachoVenta, getDetalleGuiasDespachoVentaByVenta, addDetalleGuiaDespachoVenta, deleteDetalleGuiaDespachoVenta, getLoteBultosDisponiblesZona, updateLoteBulto, recalcularLoteDesdeBultos } from '../supabase-data.js'
 import { showToast, formatQty } from '../helpers.js'
+import { getUbicaciones, getKardexByVenta } from '../supabase-data.js'
 import { estaAnulado } from '../anulacion.js'
 import { convertirEnBuscador, refrescarBuscador } from '../buscador-select.js'
 import { _invalidarCacheVentas } from './anulacion.js'
@@ -29,7 +30,93 @@ async function _destinoKardexGuia(numeroGuia, customersZona) {
 /** N° de guía = [Serie ▾] + [Correlativo 🔒] (series.js montarNumeroConSerie).
  *  La serie se propone según el comprobante de la venta (FFFI/BBOL → T001,
  *  NV01 → GN01) y solo se puede elegir entre las series 09 activas. */
-function _numGuiaDespacho() { return montarNumeroConSerie('gdNumeroGuia', { tipo: '09' }) }
+function _numGuiaDespacho() { return montarNumeroConSerie('gdNumeroGuia', { tipo: '09', onCambio: () => _sugerirDestinoGuia() }) }
+
+// ── Destino de la guía (editable) — 2026-10-06 ───────────────────────────────
+// Lista = ubicaciones de almacenes virtuales (Partners/…). Se PROPONE según la
+// serie (series_documentos.ubicacion_destino_id; sin dato → Customers) y se
+// re-propone al cambiar la serie, salvo que el usuario ya lo haya elegido a mano.
+let _gdDestinoManual = false
+async function _poblarDestinosGuia() {
+  const sel = document.getElementById('gdDestino')
+  if (!sel) return
+  const alms = (_almacenes && _almacenes.length) ? _almacenes : ((await getAlmacenes().catch(() => [])) || [])
+  const almVirt = new Set(alms.filter(a => a.es_virtual).map(a => a.id))
+  const almNom = {}; alms.forEach(a => { almNom[a.id] = a.nombre })
+  const ubic = (await getUbicaciones().catch(() => [])) || []
+  const todas = ubic.filter(u => u.activo !== false && almNom[u.almacen_id] !== undefined)
+    .map(u => ({ id: u.id, virtual: almVirt.has(u.almacen_id), label: `${almNom[u.almacen_id] || ''} / ${u.nombre}` }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+  _gdDestinosReales = new Map(todas.filter(d => !d.virtual).map(d => [String(d.id), d.label]))
+  const opt = (d) => `<option value="${d.id}">${_escGD(d.label)}</option>`
+  const virt = todas.filter(d => d.virtual), reales = todas.filter(d => !d.virtual)
+  const actual = sel.value
+  sel.innerHTML =
+    (virt.length ? `<optgroup label="Partners (virtual · no suma stock)">${virt.map(opt).join('')}</optgroup>` : '') +
+    (reales.length ? `<optgroup label="Zonas reales (⚠ suman stock)">${reales.map(opt).join('')}</optgroup>` : '')
+  if (actual && todas.some(d => String(d.id) === actual)) sel.value = actual
+}
+// id → etiqueta de las ubicaciones de almacenes REALES (no virtuales)
+let _gdDestinosReales = new Map()
+function _pintarInfoDestino(texto) {
+  const info = document.getElementById('gdDestinoInfo')
+  if (!info) return
+  const v = document.getElementById('gdDestino')?.value || ''
+  const real = _gdDestinosReales.has(v)
+  info.textContent = real ? `⚠ Zona real: la mercadería vuelve a sumar stock aquí` : texto
+  info.style.color = real ? 'var(--warning, #b45309)' : ''
+}
+/** Si el destino elegido es una zona real, pide confirmación. true = seguir. */
+function _confirmarDestinoRealGuia() {
+  const v = document.getElementById('gdDestino')?.value || ''
+  if (!_gdDestinosReales.has(v)) return true
+  return confirm(
+    `El destino "${_gdDestinosReales.get(v)}" es una zona REAL del almacén.\n\n` +
+    `La venta quedará despachada en el kardex y además la mercadería volverá a sumar stock en esa zona.\n\n¿Continuar?`
+  )
+}
+const _escGD = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+
+async function _sugerirDestinoGuia() {
+  const sel = document.getElementById('gdDestino')
+  const info = document.getElementById('gdDestinoInfo')
+  if (!sel || _gdDestinoManual) return
+  const numero = document.getElementById('gdNumeroGuia')?.value || ''
+  const sg = await serieDeNumeroGuia(numero)
+  const cust = await getUbicacionCustomers()
+  const id = sg?.ubicacion_destino_id || cust?.id || null
+  if (id) sel.value = String(id)
+  if (info) _pintarInfoDestino(sg?.ubicacion_destino_id ? `Según serie ${sg.serie}` : 'Por defecto: Customers')
+}
+
+window._gdOnCambiarDestino = function () {
+  _gdDestinoManual = true
+  _pintarInfoDestino('Elegido a mano')
+}
+
+/** Prepara el selector de destino. Edición: toma el destino que ya usó la guía en el kardex. */
+export async function _prepararDestinoGuia({ numeroGuia = null, ventaId = null } = {}) {
+  _gdDestinoManual = false
+  await _poblarDestinosGuia()
+  if (numeroGuia && ventaId) {
+    const ks = (await getKardexByVenta(ventaId).catch(() => [])) || []
+    const k = ks.find(x => x.documento_referencia === numeroGuia && x.tipo_movimiento === 'salida' && x.ubicacion_destino_id)
+    if (k) {
+      const sel = document.getElementById('gdDestino')
+      if (sel) sel.value = String(k.ubicacion_destino_id)
+      _gdDestinoManual = true
+      _pintarInfoDestino('Destino actual de la guía')
+      return
+    }
+  }
+  await _sugerirDestinoGuia()
+}
+
+/** Destino elegido en el modal (o el de la serie como respaldo). */
+async function _destinoElegidoGuia(numeroGuia, customersZona) {
+  const v = parseInt(document.getElementById('gdDestino')?.value || 0)
+  return v || await _destinoKardexGuia(numeroGuia, customersZona)
+}
 
 async function _sugerirNumeroGuia(venta) {
   if (S._guiaDespachoEditId) return
@@ -118,6 +205,7 @@ window.abrirModalNuevaGuiaDespacho = async function () {
     const form = document.getElementById('formNuevaGuiaDespacho')
     if (form) form.reset()
     await _numGuiaDespacho()?.preparar()   // T001 por defecto hasta elegir la venta
+    await _prepararDestinoGuia()
     _numGuiaDespacho()?.bloquear(false)
     const _hint = document.getElementById('gdNumeroGuiaInfo'); if (_hint) _hint.textContent = ''
     document.getElementById('gdInfoVenta').style.display = 'none'
@@ -614,6 +702,7 @@ window.guardarGuiaDespachoVenta = async function () {
     }
 
     if (despachosValidados.length === 0) { showToast('No hay cantidades a despachar', 'warning'); return }
+    if (!_confirmarDestinoRealGuia()) return
 
     const venta = await getVentaById(ventaId)
 
@@ -631,7 +720,8 @@ window.guardarGuiaDespachoVenta = async function () {
     // Destino de la salida en el Kardex: lo define la serie de la guía
     // (T001 → Partners/Customers, GN01 → Partners/90). Fallback Customers.
     const customersZona = await getUbicacionCustomers()
-    const destinoKardexId = await _destinoKardexGuia(numeroGuia, customersZona)
+    const destinoKardexId = await _destinoElegidoGuia(numeroGuia, customersZona)
+    const destinoReal = _gdDestinosReales.has(String(destinoKardexId))
 
     // Copia local de las filas de stock_ubicaciones tocadas, para decrementar
     // ACUMULATIVAMENTE cuando varios despachos comparten el mismo
@@ -688,8 +778,10 @@ window.guardarGuiaDespachoVenta = async function () {
 
       if (esPesoVariable) {
         for (const bultoId of d.bultosSeleccionados) {
+          // Destino zona real → 'custodiado' y el bulto pasa físicamente a esa zona.
           await updateLoteBulto(bultoId, {
-            estado: 'vendido',
+            estado: destinoReal ? 'custodiado' : 'vendido',
+            ...(destinoReal ? { ubicacion_id: destinoKardexId } : {}),
             detalle_venta_id: d.detalle_venta_id,
             detalle_guia_despacho_id: detalleGuia?.id || null
           })
@@ -711,21 +803,23 @@ window.guardarGuiaDespachoVenta = async function () {
         ubicacion_destino_id:  destinoKardexId,
         fecha:                 fechaGuia,
         tipo_movimiento:       'salida',
-        concepto:              'Venta - salida de almacén (guía de despacho)',
+        concepto:              'Venta - salida de almacén (guía de despacho)' + (destinoReal ? ' → zona real' : ''),
         documento_referencia:  numeroGuia,
-        cantidad_entrada:      0,
+        // Destino = zona REAL (no virtual): la mercadería entra a esa zona en
+        // la MISMA fila (como un traslado) para que stock_ubicaciones la sume.
+        cantidad_entrada:      destinoReal ? d.cantidad : 0,
         cantidad_salida:       d.cantidad,
-        cantidad_unidades_entrada: 0,
+        cantidad_unidades_entrada: destinoReal ? (d.cantidad_unidades || 0) : 0,
         cantidad_unidades_salida:  d.cantidad_unidades || 0,
         costo_unitario:        costoUnitLote,
-        valor_entrada:         0,
+        valor_entrada:         destinoReal ? parseFloat((d.cantidad * costoUnitLote).toFixed(2)) : 0,
         valor_salida:          parseFloat((d.cantidad * costoUnitLote).toFixed(2)),
         moneda:                lote?.moneda || 'PEN',
         tipo_cambio:            parseFloat(lote?.tipo_cambio) || 1,
         costo_unit_original:    parseFloat(lote?.costo_unit_original ?? costoUnitLote),
-        saldo_cantidad:        nuevaCantidadLote,
-        saldo_valor:           parseFloat((nuevaCantidadLote * costoUnitLote).toFixed(2)),
-        saldo_unidades:        nuevaUnidadesLote,
+        saldo_cantidad:        (destinoReal && !esPesoVariable) ? nuevaCantidadLote + d.cantidad : nuevaCantidadLote,
+        saldo_valor:           parseFloat((((destinoReal && !esPesoVariable) ? nuevaCantidadLote + d.cantidad : nuevaCantidadLote) * costoUnitLote).toFixed(2)),
+        saldo_unidades:        (destinoReal && !esPesoVariable) ? nuevaUnidadesLote + (d.cantidad_unidades || 0) : nuevaUnidadesLote,
         venta_id:              ventaId,
         created_by:            user.db_id
       })
@@ -853,6 +947,7 @@ window.guardarEdicionGuiaDespachoVenta = async function () {
     }
 
     if (despachosValidados.length === 0) { showToast('No hay cantidades a despachar', 'warning'); return }
+    if (!_confirmarDestinoRealGuia()) return
 
     if (!confirm(
       `Se revertirá el stock/kardex que la guía ${guiaOriginal.numero_guia} había movido y se volverá a aplicar con los valores nuevos.\n\n¿Confirmar?`
@@ -871,7 +966,8 @@ window.guardarEdicionGuiaDespachoVenta = async function () {
     //       fila de guías_despacho_venta (ya existe, recién actualizada). ──
     await _refrescarStockLoteEnVivo()
     const customersZona = await getUbicacionCustomers()
-    const destinoKardexId = await _destinoKardexGuia(numeroGuia, customersZona)
+    const destinoKardexId = await _destinoElegidoGuia(numeroGuia, customersZona)
+    const destinoReal = _gdDestinosReales.has(String(destinoKardexId))
     await registrarUsoGuia(numeroGuia)
     const stockLocalPorFila = new Map()
     for (const su of (S._stockUbic || [])) stockLocalPorFila.set(su.id, { ...su })
@@ -912,21 +1008,23 @@ window.guardarEdicionGuiaDespachoVenta = async function () {
         ubicacion_destino_id:  destinoKardexId,
         fecha:                 fechaGuia,
         tipo_movimiento:       'salida',
-        concepto:              'Venta - salida de almacén (guía de despacho, editada)',
+        concepto:              'Venta - salida de almacén (guía de despacho, editada)' + (destinoReal ? ' → zona real' : ''),
         documento_referencia:  numeroGuia,
-        cantidad_entrada:      0,
+        // Destino = zona REAL (no virtual): la mercadería entra a esa zona en
+        // la MISMA fila (como un traslado) para que stock_ubicaciones la sume.
+        cantidad_entrada:      destinoReal ? d.cantidad : 0,
         cantidad_salida:       d.cantidad,
-        cantidad_unidades_entrada: 0,
+        cantidad_unidades_entrada: destinoReal ? (d.cantidad_unidades || 0) : 0,
         cantidad_unidades_salida:  d.cantidad_unidades || 0,
         costo_unitario:        costoUnitLote,
-        valor_entrada:         0,
+        valor_entrada:         destinoReal ? parseFloat((d.cantidad * costoUnitLote).toFixed(2)) : 0,
         valor_salida:          parseFloat((d.cantidad * costoUnitLote).toFixed(2)),
         moneda:                lote?.moneda || 'PEN',
         tipo_cambio:            parseFloat(lote?.tipo_cambio) || 1,
         costo_unit_original:    parseFloat(lote?.costo_unit_original ?? costoUnitLote),
-        saldo_cantidad:        nuevaCantidadLote,
-        saldo_valor:           parseFloat((nuevaCantidadLote * costoUnitLote).toFixed(2)),
-        saldo_unidades:        nuevaUnidadesLote,
+        saldo_cantidad:        destinoReal ? nuevaCantidadLote + d.cantidad : nuevaCantidadLote,
+        saldo_valor:           parseFloat(((destinoReal ? nuevaCantidadLote + d.cantidad : nuevaCantidadLote) * costoUnitLote).toFixed(2)),
+        saldo_unidades:        destinoReal ? nuevaUnidadesLote + (d.cantidad_unidades || 0) : nuevaUnidadesLote,
         venta_id:              ventaId,
         created_by:            user.db_id
       })

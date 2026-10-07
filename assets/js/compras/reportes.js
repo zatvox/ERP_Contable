@@ -79,7 +79,7 @@ export async function construirReporteCompras(panelId) {
         descripcion: 'Cuánto se compró mes a mes, cruzable por tipo de comprobante y moneda.',
         datos: filas,
         dimensiones: [
-          { key: 'mes', label: 'Mes' }, { key: 'tipo_comprobante', label: 'Comprobante' },
+          { key: 'mes', label: 'Fecha', tipo: 'fecha', campo: 'fecha' }, { key: 'tipo_comprobante', label: 'Comprobante' },
           { key: 'moneda', label: 'Moneda' }, { key: 'proveedor', label: 'Proveedor' }
         ],
         medidas: medidasBase, filtros: filtrosBase,
@@ -95,7 +95,7 @@ export async function construirReporteCompras(panelId) {
         datos: filas,
         dimensiones: [
           { key: 'proveedor', label: 'Proveedor' }, { key: 'moneda', label: 'Moneda' },
-          { key: 'mes', label: 'Mes' }, { key: 'tipo_comprobante', label: 'Comprobante' }
+          { key: 'mes', label: 'Fecha', tipo: 'fecha', campo: 'fecha' }, { key: 'tipo_comprobante', label: 'Comprobante' }
         ],
         medidas: medidasBase, filtros: filtrosBase,
         agruparPorDefecto: ['proveedor'], kpis: kpisBase
@@ -110,7 +110,7 @@ export async function construirReporteCompras(panelId) {
         datos: filas,
         dimensiones: [
           { key: 'estado_pago', label: 'Estado de pago' }, { key: 'proveedor', label: 'Proveedor' },
-          { key: 'mes', label: 'Mes' }, { key: 'moneda', label: 'Moneda' }
+          { key: 'mes', label: 'Fecha', tipo: 'fecha', campo: 'fecha' }, { key: 'moneda', label: 'Moneda' }
         ],
         medidas: [
           { key: 'total', label: 'Total', agg: 'sum', formato: 'money' },
@@ -156,7 +156,7 @@ export async function construirReporteCompras(panelId) {
         datos: filasDet,
         dimensiones: [
           { key: 'producto', label: 'Producto' }, { key: 'proveedor', label: 'Proveedor' },
-          { key: 'mes', label: 'Mes' }, { key: 'moneda', label: 'Moneda' }
+          { key: 'mes', label: 'Fecha', tipo: 'fecha', campo: 'fecha' }, { key: 'moneda', label: 'Moneda' }
         ],
         medidas: [
           { key: 'cantidad', label: 'Cantidad', agg: 'sum', formato: 'qty' },
