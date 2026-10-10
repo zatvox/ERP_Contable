@@ -95,12 +95,16 @@
         <!-- ================= TAB: CxC ================= -->
         <div id="tab-cxc" class="tab-content active">
           <div class="card">
-            <div class="card-header solo-acciones">
+            <div class="card-header" style="justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center;">
+              <h3 class="card-titulo-tab">Cuentas por Cobrar</h3>
+              <div class="card-acciones">
               <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button class="btn btn-secondary btn-small" onclick="window.abrirCobroMasivo()" title="Un depósito del cliente aplicado a varias facturas/letras, de la más antigua a la más nueva">💰 Cobro masivo</button>
                 <button class="btn btn-primary btn-small" onclick="window.abrirRegistrarCobro()">+ Registrar Cobro</button>
                 <button class="btn btn-secondary btn-small" onclick="window.exportarCxC()">⬇ CSV</button>
                 <button class="btn btn-secondary btn-small" onclick="window.cargarCxC()">↺ Actualizar</button>
               </div>
+            </div>
             </div>
             <div class="reporte-filtros">
               <div class="reporte-filtro">
@@ -147,7 +151,7 @@
               <table>
                 <thead>
                   <tr>
-                    <th>Cliente</th><th>Comprobante</th><th>F. Emisión</th>
+                    <th>Cliente</th><th>Comprobante</th><th>Packing</th><th>F. Emisión</th>
                     <th>F. Vencimiento</th><th>Días</th><th>Moneda</th>
                     <th style="text-align:right;">Total</th>
                     <th style="text-align:right;">Cobrado</th>
@@ -169,17 +173,21 @@
         <!-- ================= TAB: Registrar Cobro ================= -->
         <div id="tab-cobros" class="tab-content">
           <div class="card" style="margin-top:20px;">
-            <div class="card-header solo-acciones">
-              <button class="btn btn-primary btn-small" onclick="window.abrirRegistrarCobro()">+ Registrar Cobro</button>
+            <div class="card-header" style="justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center;">
+              <h3 class="card-titulo-tab">Cobros Registrados</h3>
+              <div class="card-acciones">
+              <button class="btn btn-secondary btn-small" onclick="window.abrirCobroMasivo()" title="Un depósito del cliente aplicado a varias facturas/letras, de la más antigua a la más nueva">💰 Cobro masivo</button>
+                <button class="btn btn-primary btn-small" onclick="window.abrirRegistrarCobro()">+ Registrar Cobro</button>
               <input type="text" id="buscarCobro" placeholder="Buscar N° recibo, cliente o referencia..." style="max-width:280px;" oninput="window.filtrarCobrosRecientes()">
+            </div>
             </div>
             <div class="table-container">
               <table>
                 <thead>
-                  <tr><th title="N° del recibo de cobranza físico — clic en la celda para escribirlo">N° Recibo</th><th>Fecha</th><th>Cliente</th><th style="text-align:right;">Monto</th><th style="text-align:right;">Retención</th><th>Medio</th><th>Banco</th><th>Referencia</th><th>Asiento</th><th></th></tr>
+                  <tr><th title="N° del recibo de cobranza físico — clic en la celda para escribirlo">N° Recibo</th><th title="Fecha en que se recibió el pago">F. Pago</th><th>Cliente</th><th>Documento</th><th title="Fecha de emisión del comprobante">F. Doc.</th><th>Packing</th><th>Moneda</th><th style="text-align:right;">Monto</th><th style="text-align:right;">Retención</th><th>Medio</th><th>Banco</th><th>Referencia</th><th>Asiento</th><th></th></tr>
                 </thead>
                 <tbody id="tbody-cobros-recientes">
-                  <tr><td colspan="10" style="text-align:center;">Cargando...</td></tr>
+                  <tr><td colspan="14" style="text-align:center;">Cargando...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -189,12 +197,15 @@
         <!-- ================= TAB: CxP ================= -->
         <div id="tab-cxp" class="tab-content">
           <div class="card">
-            <div class="card-header solo-acciones">
+            <div class="card-header" style="justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center;">
+              <h3 class="card-titulo-tab">Cuentas por Pagar</h3>
+              <div class="card-acciones">
               <div style="display:flex; gap:8px; flex-wrap:wrap;">
                 <button class="btn btn-primary btn-small" onclick="window.abrirRegistrarPago()">+ Registrar Pago</button>
                 <button class="btn btn-secondary btn-small" onclick="window.exportarCxP()">⬇ CSV</button>
                 <button class="btn btn-secondary btn-small" onclick="window.cargarCxP()">↺ Actualizar</button>
               </div>
+            </div>
             </div>
             <div class="reporte-filtros">
               <div class="reporte-filtro">
@@ -256,14 +267,17 @@
         <!-- ================= TAB: Pagos a proveedores ================= -->
         <div id="tab-pagos-prov" class="tab-content">
           <div class="card" style="margin-top:20px;">
-            <div class="card-header solo-acciones">
+            <div class="card-header" style="justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center;">
+              <h3 class="card-titulo-tab">Pagos Registrados</h3>
+              <div class="card-acciones">
               <button class="btn btn-primary btn-small" onclick="window.abrirRegistrarPago()">+ Registrar Pago</button>
               <input type="text" id="buscarPago" placeholder="Buscar proveedor o referencia..." style="max-width:280px;" oninput="window.filtrarPagosRecientes()">
+            </div>
             </div>
             <div class="table-container">
               <table>
                 <thead>
-                  <tr><th>Fecha</th><th>Proveedor</th><th style="text-align:right;">Monto</th><th>Moneda</th><th>Medio</th><th>Banco</th><th>Referencia</th><th></th></tr>
+                  <tr><th title="Fecha en que se hizo el pago">F. Pago</th><th>Proveedor</th><th>Documento</th><th title="Fecha de emisión del comprobante">F. Doc.</th><th>Moneda</th><th style="text-align:right;">Monto</th><th>Medio</th><th>Banco</th><th>Referencia</th><th>Asiento</th><th></th></tr>
                 </thead>
                 <tbody id="tbody-pagos-recientes">
                   <tr><td colspan="8" style="text-align:center;">Cargando...</td></tr>
@@ -276,11 +290,14 @@
         <!-- ================= TAB: Retenciones ================= -->
         <div id="tab-retenciones" class="tab-content">
           <div class="card">
-            <div class="card-header solo-acciones">
+            <div class="card-header" style="justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center;">
+              <h3 class="card-titulo-tab">Retenciones IGV</h3>
+              <div class="card-acciones">
               <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
                 <input type="month" id="retencionesPeriodo" onchange="window.cargarRetenciones()">
                 <button class="btn btn-secondary btn-small" onclick="window.cargarRetenciones()">↺ Actualizar</button>
               </div>
+            </div>
             </div>
             <p style="padding:0 16px; color:var(--text-secondary); font-size:0.85rem;">
               Cada fila es un cobro donde se aplicó retención de IGV. Completa el N° de Comprobante de Retención
@@ -314,9 +331,12 @@
         <!-- ================= TAB: RECIBOS DE COBRANZA ================= -->
         <div id="tab-recibos" class="tab-content">
           <div class="card">
-            <div class="card-header solo-acciones">
+            <div class="card-header" style="justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center;">
+              <h3 class="card-titulo-tab">Recibos de Cobranza</h3>
+              <div class="card-acciones">
               <button class="btn btn-secondary btn-small" onclick="window.exportarRecibosCSV()">⬇ CSV</button>
               <button class="btn btn-secondary btn-small" onclick="window.cargarRecibos()">↻ Actualizar</button>
+            </div>
             </div>
             <p style="padding:0 16px; color:var(--text-secondary); font-size:0.85rem;">
               Correlativo de los recibos de cobranza físicos: junta los <strong>cobros de facturas</strong> y los <strong>abonos de letras</strong>
@@ -344,9 +364,12 @@
         <!-- ================= TAB: LETRAS ================= -->
         <div id="tab-letras" class="tab-content">
           <div class="card">
-            <div class="card-header solo-acciones">
+            <div class="card-header" style="justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center;">
+              <h3 class="card-titulo-tab"><span id="letras-titulo">Letras de Cambio</span></h3>
+              <div class="card-acciones">
               <button class="btn btn-secondary btn-small" id="btnUnificarLetras" disabled onclick="window.unificarSeleccionadas()" title="Marca 2 o más letras con saldo del mismo cliente y moneda">🔗 Unificar letras</button>
               <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevaLetra()">+ Nueva Letra</button>
+            </div>
             </div>
             <p style="padding:0 16px; color:var(--text-secondary); font-size:0.85rem;">
               Una letra canjea el saldo de UNA cuota (de Cuentas por Cobrar o por Pagar) por un documento de crédito físico.
@@ -422,8 +445,11 @@
           <!-- Términos de Pago: dato maestro del módulo (antes era un tab aparte) -->
           <div id="tab-terminos-wrap" style="margin-top:20px;">
           <div class="card">
-            <div class="card-header solo-acciones">
+            <div class="card-header" style="justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center;">
+              <h3 class="card-titulo-tab">Términos de Pago</h3>
+              <div class="card-acciones">
               <button class="btn btn-primary btn-small" onclick="window.abrirModalTerminoPago()">+ Nuevo Término</button>
+            </div>
             </div>
             <p style="padding:0 16px; color:var(--text-secondary); font-size:0.85rem;">
               Define cómo se fracciona un total: porcentajes y días. Las fechas se calculan al aplicarlo sobre cada venta o compra.
@@ -684,7 +710,8 @@
                     </select>
                   </div>
                   <div class="form-group" id="cobroTCGroup">
-                    <label>Tipo de Cambio</label>
+                    <label style="display:flex; align-items:center; justify-content:space-between; gap:6px; flex-wrap:nowrap; white-space:nowrap;"><span>T. Cambio</span>
+                      <button type="button" class="btn-tc-dia" id="cobroBtnTC" onclick="window._consultarTCCP('cobro', this)" title="Consultar la tabla de tipo de cambio con la fecha del cobro">⟳ Del día</button></label>
                     <input type="number" id="cobroTipoCambio" step="0.0001" placeholder="3.750" value="3.750" oninput="window._cpRecalc('cobro','tc')">
                   </div>
                   <div class="form-group">
@@ -781,7 +808,8 @@
                     </select>
                   </div>
                   <div class="form-group" id="pagoTCGroup">
-                    <label>Tipo de Cambio</label>
+                    <label style="display:flex; align-items:center; justify-content:space-between; gap:6px; flex-wrap:nowrap; white-space:nowrap;"><span>T. Cambio</span>
+                      <button type="button" class="btn-tc-dia" id="pagoBtnTC" onclick="window._consultarTCCP('pago', this)" title="Consultar la tabla de tipo de cambio con la fecha del pago">⟳ Del día</button></label>
                     <input type="number" id="pagoTipoCambio" step="0.0001" placeholder="3.750" value="3.750" oninput="window._cpRecalc('pago','tc')">
                   </div>
                   <div class="form-group">

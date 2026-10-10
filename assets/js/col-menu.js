@@ -28,6 +28,7 @@
 // ============================================================================
 
 const _colDefsPorTabla = {}
+const _aplicadores = {}   // columnasAuto: nombre -> función que re-aplica el <style>
 
 function _esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
@@ -93,7 +94,8 @@ window._colMenuToggle = function (nombre, menuId, dropdownId) {
 window._colMenuSet = function (nombre, key, visible) {
   const cols = colsVisibles(nombre)
   cols[key] = visible
-  localStorage.setItem(_storageKey(nombre), JSON.stringify(cols))
+  try { localStorage.setItem(_storageKey(nombre), JSON.stringify(cols)) } catch (_) {}
+  _aplicadores[nombre]?.()
   document.querySelectorAll(`[data-col-tabla="${nombre}"][data-col="${key}"]`).forEach(el => {
     el.style.display = visible ? '' : 'none'
   })
@@ -108,4 +110,37 @@ if (!window._colMenuOutsideListener) {
       if (!menu.contains(ev.target)) menu.classList.remove('open')
     })
   })
+}
+
+
+/**
+ * Menú "⋮" AUTOMÁTICO para cualquier <table> ya existente (2026-10-10).
+ * Toma los títulos del <thead> (sin columnas vacías / Acciones) y oculta por
+ * POSICIÓN con un <style> propio, así sobrevive a cada re-render del <tbody>
+ * sin tener que marcar cada <td>. El ⋮ va en la esquina del .card.
+ *   columnasAuto(tabla, 'cob_cobros', { ocultas: ['Asiento'] })
+ */
+export function columnasAuto(tabla, nombre, { ocultas = [], card = null } = {}) {
+  if (!tabla || tabla.dataset.colAuto) return
+  tabla.dataset.colAuto = nombre
+  if (!tabla.id) tabla.id = `tbl-${nombre}`
+  const tid = tabla.id
+  const ths = [...tabla.querySelectorAll('thead tr:first-child > th')]
+  const defs = ths.map((th, i) => ({ key: th.textContent.replace(/[⇅▲▼↕]/g, '').trim(), i }))
+    .filter(d => d.key && !/^acciones$/i.test(d.key))
+  if (!defs.length) return
+  registrarColumnas(nombre, defs.map(d => ({ key: d.key, label: d.key, oculta: ocultas.includes(d.key) })))
+  let style = document.getElementById(`colauto-${tid}`)
+  if (!style) { style = document.createElement('style'); style.id = `colauto-${tid}`; document.head.appendChild(style) }
+  _aplicadores[nombre] = () => {
+    const vis = colsVisibles(nombre)
+    const sel = defs.filter(d => !vis[d.key]).map(d => `#${tid} thead tr > :nth-child(${d.i + 1}), #${tid} tbody tr > :nth-child(${d.i + 1})`)
+    style.textContent = sel.length ? `${sel.join(',\n')} { display: none !important; }` : ''
+  }
+  _aplicadores[nombre]()
+  const host = card || tabla.closest('.card')
+  if (host && !host.querySelector(`#colmenu-${nombre}`)) {
+    host.insertAdjacentHTML('afterbegin', colMenuHtml(nombre, `colmenu-${nombre}`, `colmenu-dd-${nombre}`))
+    host.classList.add('con-col-menu')
+  }
 }

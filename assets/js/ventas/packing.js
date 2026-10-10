@@ -226,6 +226,7 @@ window.filtrarPacking = function () {
       <td class="col-acciones">${menuAccionesFila([
         abierto ? { icono: '🧾', label: 'Facturar', onclick: `window.facturarPacking(${p.id})` } : null,
         { icono: abierto ? '✏️' : '👁', label: abierto ? 'Editar' : 'Ver detalle', onclick: `window.abrirModalPacking(${p.id})` },
+        { icono: '📑', label: 'Duplicar', onclick: `window.duplicarPacking(${p.id})` },   // cualquier estado, incluso anulado (2026-10-10)
         p._sinEmitir ? null : { icono: '📄', label: 'PDF', onclick: `window.imprimirPacking(${p.id})` },
         p._adjuntos ? { icono: '📎', label: `Ver adjunto${p._adjuntos > 1 ? 's (' + p._adjuntos + ')' : ''}`, onclick: `window.verAdjuntosPacking(${p.id})` } : null,
         abierto ? { separador: true } : null,
@@ -759,6 +760,41 @@ window.abrirModalPacking = async function (id = null) {
     window.openModal('modal-packing')
     _pintarAdjuntosPK(pk?.id || null)
   } catch (e) { showToast('Error: ' + e.message, 'danger') }
+}
+
+/**
+ * Duplicar PK (2026-10-10): abre un PK NUEVO (borrador, N° siguiente, fecha de
+ * hoy, T.C. del día) con el mismo cliente, vendedor, término, moneda,
+ * observaciones y líneas (cantidades y precios) del PK origen. Sirve desde
+ * cualquier estado, incluso facturado o anulado. No copia: N° de OC del
+ * cliente, adjuntos, facturas ni avance de facturación. Nada se guarda hasta
+ * que el usuario presiona Guardar.
+ */
+window.duplicarPacking = async function (id) {
+  try {
+    const origen = _pkLista.find(p => p.id === id) || (await supabase.from('packing').select('*').eq('id', id).single()).data
+    if (!origen) { showToast('PK no encontrado', 'warning'); return }
+    const lineas = (await _getDetalle(origen.id)).map(d => {
+      const { id: _i, packing_id: _p, created_at: _c, updated_at: _u, ...resto } = d
+      return { ...resto, cantidad: +d.cantidad, cantidad_unidades: +d.cantidad_unidades, precio_unitario: +d.precio_unitario, subtotal: +d.subtotal, igv_monto: +d.igv_monto, total_linea: +d.total_linea }
+    })
+    await window.abrirModalPacking(null)              // PK nuevo: N° sugerido, fecha hoy, T.C. en vivo
+    const val = (k, v) => { const el = document.getElementById(k); if (el) el.value = v ?? '' }
+    val('pkCliente', origen.contact_id || ''); refrescarBuscador('pkCliente'); _pintarDocClientePK()
+    val('pkVendedor', origen.vendedor_id || '')
+    val('pkTermino', origen.termino_pago_id || '')
+    if (origen.moneda && document.getElementById('pkMoneda')?.value !== origen.moneda) {
+      val('pkMoneda', origen.moneda)
+      document.getElementById('pkMoneda')?.dispatchEvent(new Event('change'))
+    }
+    _setOpcional('grupo-pk-obs', 'chkPkObs', 'pkObs', origen.observaciones)
+    _pkLineas = lineas
+    _pkFactPorLinea = {}
+    window._pkOnMoneda?.()
+    window._pkPintarLineas()
+    document.getElementById('pkTitulo').textContent = `Nuevo PK — copia de ${origen.numero}`
+    showToast(`Copia de ${origen.numero} lista: revisa y presiona Guardar`, 'info')
+  } catch (e) { showToast('Error al duplicar: ' + e.message, 'danger') }
 }
 
 /** Ver detalle: vista previa de las imágenes adjuntas + descargar; PDF solo enlace. */

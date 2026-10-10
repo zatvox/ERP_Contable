@@ -34,6 +34,8 @@ import { initModuleNavDropdowns, initSubtabs, menuAccionesFila } from './main.js
 import { getModuloConfig, renderConfiguracionTab, aplicarPreferenciasVista } from './config-modulo.js'
 import { cacheado, invalidarVarios } from './data-cache.js'
 import { renderEstadoCuentaCliente } from './estado-cuenta.js'
+import { initCobroMasivo, htmlSeccionLote } from './cobro-masivo.js'
+import { columnasAuto } from './col-menu.js'
 import { crearReporte, diasVencidos, tramoAntiguedad, nombreMes, mesActual, descargarCSV } from './reportes.js'
 import { convertirVarios, refrescarBuscador } from './buscador-select.js'
 import { saldoCuota, estadoCuota, repartirEntreCuotas, getTerminosConCuotas, invalidarCacheTerminos } from './cronograma.js'
@@ -117,6 +119,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Columnas ordenables asc/desc en todos los listados del módulo
     document.querySelectorAll('.tab-content:not(#tab-reportes) table').forEach(hacerTablaOrdenable)
     calcularKPIs()
+    _initCobroMasivo()
+    // Menú ⋮ (mostrar/ocultar columnas) en todas las tablas de trabajo del módulo
+    document.querySelectorAll('.tab-content:not(#tab-reportes):not(#tab-configuracion) table').forEach(t => {
+      const tab = t.closest('.tab-content')?.id?.replace('tab-', '') || 'x'
+      columnasAuto(t, `cob_${tab}`, { ocultas: tab === 'cobros' ? ['Asiento'] : [] })
+    })
   } catch (e) {
     console.error('cobranzas DOMContentLoaded:', e)
     showToast('Error al cargar el módulo: ' + e.message, 'danger')
@@ -275,6 +283,7 @@ window.cargarCxC = async function() {
     _cobrosList = await cacheado('cobros', getCobros)   // para los botones 👁 ✏️ ✕ de cada fila
     _letrasCache = await cacheado('letras_cambio', getLetrasCambio)
     await _cargarCuotas()
+    await _cargarPackings(_cxcList.map(c => c.venta_id))
     const lista = _filtrarCxC().sort((a, b) => (a.fecha_vencimiento || 'zzzz').localeCompare(b.fecha_vencimiento || 'zzzz'))
     const hoy = new Date().toISOString().split('T')[0]
 
@@ -299,7 +308,7 @@ window.cargarCxC = async function() {
     if (!tbody) return
 
     if (lista.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;">Sin registros para los filtros seleccionados</td></tr>'
+      tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;">Sin registros para los filtros seleccionados</td></tr>'
       if (tfoot) tfoot.innerHTML = ''
       _poblarSelectCxC([])
       calcularKPIs()
@@ -330,6 +339,7 @@ window.cargarCxC = async function() {
       return `<tr ${anulado ? 'style="opacity:.55; text-decoration:line-through;" title="Comprobante anulado: no genera deuda"' : (vencida ? 'style="background:rgba(239,68,68,.06);"' : '')}>
         <td>${_esc(_nombreContacto(cxc.contact_id))}</td>
         <td>${_esc(`${cxc.tipo_comprobante || ''} ${cxc.serie || ''}-${cxc.numero_comprobante || ''}`)}${_htmlCuotas(cxc.id)}</td>
+        <td style="white-space:nowrap;">${_esc(_pkDeCxc(cxc) || '—')}</td>
         <td>${fechaDMY(cxc.fecha_emision, '-')}</td>
         <td>${fechaDMY(cxc.fecha_vencimiento, '—')}</td>
         <td>${dias === null ? '—' : (dias > 0 ? `<span class="badge badge-vencido">+${dias}</span>` : `<span class="badge badge-alcorriente">${dias}</span>`)}</td>
@@ -343,7 +353,7 @@ window.cargarCxC = async function() {
     }).join('')
 
     if (tfoot) tfoot.innerHTML = `
-      <td colspan="6"><strong>TOTAL (${lista.filter(c => c.estado !== 'anulado').length} documentos${lista.some(c => c.estado === 'anulado') ? ` · ${lista.filter(c => c.estado === 'anulado').length} anulado(s) sin sumar` : ''})</strong></td>
+      <td colspan="7"><strong>TOTAL (${lista.filter(c => c.estado !== 'anulado').length} documentos${lista.some(c => c.estado === 'anulado') ? ` · ${lista.filter(c => c.estado === 'anulado').length} anulado(s) sin sumar` : ''})</strong></td>
       <td style="text-align:right;"><strong>${formatNumber(tTotal)}</strong></td>
       <td style="text-align:right;"><strong>${formatNumber(tCobrado)}</strong></td>
       <td style="text-align:right;"><strong>${formatNumber(tPend)}</strong></td>
@@ -599,10 +609,30 @@ window.registrarCobro = async function() {
 // COBROS RECIENTES
 // ============================================================================
 
+// N° de packing por venta (ventas.packing_id → packing.numero), con caché
+const _pkPorVenta = {}
+async function _cargarPackings(ventaIds) {
+  const faltan = [...new Set(ventaIds.filter(id => id && !(id in _pkPorVenta)))]
+  for (let i = 0; i < faltan.length; i += 200) {
+    const lote = faltan.slice(i, i + 200)
+    lote.forEach(id => { _pkPorVenta[id] = null })
+    try {
+      const { data: vs } = await supabase.from('ventas').select('id, packing_id').in('id', lote).not('packing_id', 'is', null)
+      const pkIds = [...new Set((vs || []).map(v => v.packing_id))]
+      const { data: pks } = pkIds.length ? await supabase.from('packing').select('id, numero').in('id', pkIds) : { data: [] }
+      const num = Object.fromEntries((pks || []).map(p => [p.id, p.numero]))
+      ;(vs || []).forEach(v => { _pkPorVenta[v.id] = num[v.packing_id] || null })
+    } catch (e) { console.warn('packings:', e.message) }
+  }
+}
+const _pkDeCxc = cxc => (cxc?.venta_id && _pkPorVenta[cxc.venta_id]) || ''
+
 async function cargarCobrosRecientes() {
   try {
     _cobrosList = await cacheado('cobros', getCobros)
     _adjConteo.cobro = await getConteoAdjuntos('cobro')
+    if (!_cxcList.length) _cxcList = await cacheado('cuentas_cobrar', getCuentasCobrar)
+    await _cargarPackings(_cobrosList.map(c => _cxcList.find(x => x.id === c.cxc_id)?.venta_id))
     window.filtrarCobrosRecientes()
   } catch (e) { console.error('cargarCobrosRecientes:', e) }
 }
@@ -613,11 +643,11 @@ window.filtrarCobrosRecientes = function() {
   const q = (document.getElementById('buscarCobro')?.value || '').toLowerCase().trim()
 
   let lista = [..._cobrosList].sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '') || b.id - a.id)
-  if (q) lista = lista.filter(c => `${c.numero_recibo || ''} ${_nombreContacto(c.contact_id)} ${c.referencia || ''} ${c.medio_pago || ''}`.toLowerCase().includes(q))
+  if (q) lista = lista.filter(c => { const d = _cxcList.find(x => x.id === c.cxc_id); return `${c.numero_recibo || ''} ${_nombreContacto(c.contact_id)} ${c.referencia || ''} ${c.medio_pago || ''} ${d ? _descDocCP(d) : ''} ${_pkDeCxc(d)}`.toLowerCase().includes(q) })
   lista = lista.slice(0, 50)
 
   if (lista.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;">Sin cobros registrados</td></tr>'
+    tbody.innerHTML = '<tr><td colspan="14" style="text-align:center;">Sin cobros registrados</td></tr>'
     return
   }
 
@@ -628,11 +658,13 @@ window.filtrarCobrosRecientes = function() {
         onchange="window.guardarNumeroRecibo(${c.id}, this)"></td>
     <td>${fechaDMY(c.fecha, '-')}</td>
     <td>${_esc(_nombreContacto(c.contact_id))}</td>
+    ${(() => { const d = _cxcList.find(x => x.id === c.cxc_id); return `<td style="white-space:nowrap;">${_esc(d ? _descDocCP(d) : '—')}</td><td>${fechaDMY(d?.fecha_emision, '—')}</td><td style="white-space:nowrap;">${_esc(_pkDeCxc(d) || '—')}</td>` })()}
+    <td><span class="badge ${(c.moneda || 'PEN') === 'USD' ? 'badge-info' : 'badge-secondary'}">${c.moneda || 'PEN'}</span></td>
     <td style="text-align:right; font-weight:bold;">${formatNumber(c.monto)}</td>
     <td style="text-align:right; color:var(--color-warning);">${parseFloat(c.monto_retencion || 0) > 0 ? formatNumber(c.monto_retencion) : '—'}</td>
     <td>${c.medio_pago || '-'}</td>
     <td>${_esc(_bancosMap[c.banco_id]?.nombre || '—')}</td>
-    <td>${_esc(c.referencia || '-')}${_clipAdjunto('cobro', c.id)}</td>
+    <td>${_esc(c.referencia || '-')}${_clipAdjunto('cobro', c.id)}${c.lote_id ? ` <span class="badge badge-info" title="Cobro masivo: un depósito aplicado a varios documentos" style="font-size:0.65rem;">📦 L${c.lote_id}</span>` : ''}</td>
     <td>${c.asiento_id ? `AS-${String(c.asiento_id).padStart(6, '0')}` : '—'}</td>
     <td style="white-space:nowrap;">${_botonesCP('cobro', c.id)}</td>
   </tr>`).join('')
@@ -931,6 +963,7 @@ async function cargarPagosRecientes() {
   try {
     _pagosList = await cacheado('pagos_proveedores', getPagosProveedores)
     _adjConteo.pago = await getConteoAdjuntos('pago')
+    if (!_cxpList.length) _cxpList = await cacheado('cuentas_pagar', getCuentasPagar)
     window.filtrarPagosRecientes()
   } catch (e) { console.error('cargarPagosRecientes:', e) }
 }
@@ -941,22 +974,24 @@ window.filtrarPagosRecientes = function() {
   const q = (document.getElementById('buscarPago')?.value || '').toLowerCase().trim()
 
   let lista = [..._pagosList].sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '') || b.id - a.id)
-  if (q) lista = lista.filter(p => `${_nombreContacto(p.contact_id)} ${p.referencia || ''} ${p.medio_pago || ''}`.toLowerCase().includes(q))
+  if (q) lista = lista.filter(p => { const d = _cxpList.find(x => x.id === p.cxp_id); return `${_nombreContacto(p.contact_id)} ${p.referencia || ''} ${p.medio_pago || ''} ${d ? _descDocCP(d) : ''}`.toLowerCase().includes(q) })
   lista = lista.slice(0, 50)
 
   if (lista.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">Sin pagos registrados</td></tr>'
+    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;">Sin pagos registrados</td></tr>'
     return
   }
 
   tbody.innerHTML = lista.map(p => `<tr>
     <td>${fechaDMY(p.fecha, '-')}</td>
     <td>${_esc(_nombreContacto(p.contact_id))}</td>
+    ${(() => { const d = _cxpList.find(x => x.id === p.cxp_id); return `<td style="white-space:nowrap;">${_esc(d ? _descDocCP(d) : '—')}</td><td>${fechaDMY(d?.fecha_emision, '—')}</td>` })()}
+    <td><span class="badge ${(p.moneda || 'PEN') === 'USD' ? 'badge-info' : 'badge-secondary'}">${p.moneda || 'PEN'}</span></td>
     <td style="text-align:right; font-weight:bold;">${formatNumber(p.monto)}</td>
-    <td>${p.moneda || 'PEN'}</td>
     <td>${p.medio_pago || '-'}</td>
     <td>${_esc(_bancosMap[p.banco_id]?.nombre || '—')}</td>
     <td>${_esc(p.referencia || '-')}${_clipAdjunto('pago', p.id)}</td>
+    <td>${p.asiento_id ? `AS-${String(p.asiento_id).padStart(6, '0')}` : '—'}</td>
     <td style="white-space:nowrap;">${_botonesCP('pago', p.id)}</td>
   </tr>`).join('')
 }
@@ -1866,6 +1901,8 @@ window.cargarLetras = async function () {
     _letrasCache = await cacheado('letras_cambio', getLetrasCambio)
 
     const tipoF   = document.getElementById('let-filtro-tipo')?.value || ''
+    const tit = document.getElementById('letras-titulo')
+    if (tit) tit.textContent = tipoF === 'emitida' ? 'Letras por Cobrar' : tipoF === 'recibida' ? 'Letras por Pagar' : 'Letras de Cambio'
     const estadoF = document.getElementById('let-filtro-estado')?.value || ''
     const lista = _letrasCache
       .filter(l => (!tipoF || l.tipo === tipoF) && (!estadoF || (estadoF === '_abiertas' ? _letraAbierta(l) : l.estado === estadoF)))
@@ -2482,7 +2519,7 @@ const _descDocCP = d => `${d?.tipo_comprobante || ''} ${d?.serie || ''}-${d?.num
 
 // ── Aplicar efectos ─────────────────────────────────────────────────────────
 
-async function _aplicarEfectosCobro(cobro, cxc) {
+async function _aplicarEfectosCobro(cobro, cxc, opts = {}) {
   const user     = getCurrentUser()
   const monto    = _r2(cobro.monto)
   const ret      = _r2(cobro.monto_retencion)
@@ -2503,7 +2540,8 @@ async function _aplicarEfectosCobro(cobro, cxc) {
     showToast('⚠️ Asiento no generado: ' + e.message, 'warning')
   }
 
-  await _registrarMovimientoBancario({
+  // Cobro masivo: el movimiento bancario es UNO solo por el depósito (lo crea el lote)
+  if (!opts.sinMov) await _registrarMovimientoBancario({
     bancoId, tipo: 'ingreso', fecha: cobro.fecha,
     concepto: `${descripcion} — ${_nombreContacto(cxc.contact_id)}`,
     referencia: cobro.referencia, monto, cobroId: cobro.id, asientoId,
@@ -2647,9 +2685,9 @@ async function _revertirEfectosCP(tipo, reg) {
   const monto = _r2(reg.monto)
   const ret   = esCobro ? _r2(reg.monto_retencion) : 0
 
-  const { mov, modo } = await _buscarMovimientoCP(tipo, reg)
+  const { mov, modo } = reg.lote_id ? { mov: null, modo: 'lote' } : await _buscarMovimientoCP(tipo, reg)   // lote: el mov. es del depósito
   if (mov) await _eliminarMovimientoYSaldo(mov)
-  else if (reg.banco_id && _cfg.autoMovBanco) avisos.push(modo === 'ambiguo'
+  else if (reg.banco_id && _cfg.autoMovBanco && !reg.lote_id) avisos.push(modo === 'ambiguo'
     ? 'hay varios movimientos bancarios parecidos: revisa el módulo Bancos'
     : 'no se encontró movimiento bancario')
 
@@ -2694,6 +2732,10 @@ window.eliminarCP = async function(tipo, id) {
     const esCobro = tipo === 'cobro'
     const reg = await _getRegCP(tipo, id)
     if (!reg) { showToast('Registro no encontrado', 'danger'); return }
+    if (reg.lote_id) {
+      if (confirm(`Este cobro es parte del cobro masivo L${reg.lote_id} (un depósito aplicado a varios documentos).\nSolo se puede deshacer el lote completo.\n\n¿Deshacer el cobro masivo?`)) window.deshacerCobroMasivo(reg.lote_id)
+      return
+    }
 
     const { mov } = await _buscarMovimientoCP(tipo, reg)
     const extras = []
@@ -2783,6 +2825,7 @@ window.verDetalleCP = async function(tipo, id) {
       </table>
 
       ${esCobro ? _htmlSeccionRecibo(reg, delRecibo) : ''}
+      ${esCobro && reg.lote_id ? `<div id="cp-lote-sec" data-lote="${reg.lote_id}"></div>` : ''}
 
       <h4 style="margin:16px 0 6px;">Documento ${esCobro ? 'CxC' : 'CxP'}</h4>
       ${doc ? `<table class="table-compact" style="width:100%;">
@@ -2839,6 +2882,7 @@ window.abrirEditarCP = async function(tipo, id) {
     const esCobro = tipo === 'cobro'
     const reg = await _getRegCP(tipo, id)
     if (!reg) { showToast('Registro no encontrado', 'danger'); return }
+    if (reg.lote_id) { showToast(`Cobro del lote masivo L${reg.lote_id}: para cambiarlo, deshaz el lote (Ver detalle) y regístralo de nuevo.`, 'warning', 7000); return }
     const doc = esCobro
       ? (reg.cxc_id ? await getCuentaCobrarById(reg.cxc_id) : null)
       : (reg.cxp_id ? await getCuentaPagarById(reg.cxp_id) : null)
@@ -3461,7 +3505,8 @@ async function _registrarAbonoLetra(l, d, abonoId = null) {
     medio: d.medio || null, fecha: d.fecha, banco_id: d.bancoId || null, moneda: l.moneda || 'PEN',
     tipo_cambio: d.tcDia || null, monto_amortizado: imp.base, interes: imp.intereses,
     gasto_portes: imp.portes, gasto_comision: imp.comision, gasto_otros: imp.otros, monto_neto: neto,
-    numero_operacion: d.numOp || null, numero_recibo: d.recibo || null, observaciones: d.obs || null
+    numero_operacion: d.numOp || null, numero_recibo: d.recibo || null, observaciones: d.obs || null,
+    ...(d.loteId ? { lote_id: d.loteId } : {})
   }
   const user = getCurrentUser()
   const ab = abonoId
@@ -3474,7 +3519,7 @@ async function _registrarAbonoLetra(l, d, abonoId = null) {
     origenes: [{ letra: l, monto: imp.base }],
     abono: { bancoId: d.bancoId, amort: imp.base, interes: imp.intereses, portes: imp.portes, comision: imp.comision, otros: imp.otros, tcDia: d.tcDia }
   })
-  const mov = await _registrarMovimientoBancario({
+  const mov = d.sinMov ? null : await _registrarMovimientoBancario({
     bancoId: d.bancoId, tipo: (emitida ? neto >= 0 : neto < 0) ? 'ingreso' : 'egreso', fecha: d.fecha,
     concepto: `${tipoAbono === 'total' ? verbo : 'Abono'} letra ${l.numero_letra} — ${_nombreContacto(l.contact_id)}${d.recibo ? ` (Rec. ${d.recibo})` : ''}`,
     categoria: emitida ? 'Cobranza letras' : 'Pago letras',
@@ -3519,6 +3564,7 @@ window.abrirCancelarLetra = async function (id, abonoId = null) {
     try { abono = (await _abonosDeLetra(id)).find(a => a.id === abonoId) } catch (e) { showToast(e.message, 'danger'); return }
     if (!abono) { showToast('Abono no encontrado', 'danger'); return }
     if (abono.refinanciacion_id) { showToast('Este abono es parte de una renovación/unificación: se deshace eliminando la refinanciación.', 'warning', 6000); return }
+    if (abono.lote_id) { showToast(`Abono del cobro masivo L${abono.lote_id}: para cambiarlo, deshaz el lote.`, 'warning', 6000); return }
   } else if (!_letraAbierta(l)) { showToast(`La letra está ${l.estado}: no tiene saldo por ${l.tipo === 'emitida' ? 'cobrar' : 'pagar'}`, 'warning'); return }
 
   const $ = i => document.getElementById(i)
@@ -3763,6 +3809,7 @@ window.eliminarAbonoLetra = async function (letraId, abonoId) {
     const ab = (await _abonosDeLetra(letraId)).find(a => a.id === abonoId)
     if (!l || !ab) { showToast('Abono no encontrado', 'danger'); return }
     if (ab.refinanciacion_id) { showToast('Este abono es parte de una renovación/unificación: elimina la refinanciación.', 'warning', 6000); return }
+    if (ab.lote_id) { if (confirm(`Este abono es parte del cobro masivo L${ab.lote_id}. ¿Deshacer el lote completo?`)) window.deshacerCobroMasivo(ab.lote_id); return }
     if (!confirm(`¿Eliminar el abono del ${fechaDMY(ab.fecha)} por ${formatNumber(ab.monto_amortizado)}${ab.numero_recibo ? ` (recibo ${ab.numero_recibo})` : ''}?\n\nSe borra su movimiento bancario y su asiento, y el saldo vuelve a la letra.`)) return
     const av = await _revertirContableAbono(ab, l)
     await _delAbono(ab.id)
@@ -5022,7 +5069,7 @@ window._cpRecalc = function (tipo, origen) {
 // ============================================================================
 // Hasta 3 archivos por vez, cada uno con su concepto. Se eligen en el modal
 // (quedan "pendientes" en memoria) y se suben al guardar el cobro/pago.
-const _adjPendientes = { cobro: [], pago: [], ecp: [], clet: [], rlet: [], rfin: [] }
+const _adjPendientes = { cobro: [], pago: [], ecp: [], clet: [], rlet: [], rfin: [], cmas: [] }
 const _adjConteo = { cobro: {}, pago: {} }
 const _ADJ_MAX_VEZ = 3
 
@@ -5148,6 +5195,28 @@ function _tcEfectivoCP(tipo) {
  * del documento (cobros → venta, pagos → compra). Si no hay, el T.C. de la
  * factura → mismo día y mismo T.C. = sin diferencia de cambio.
  */
+/** Botón "⟳ T.C. del día": consulta la tabla de tipo de cambio con la fecha del cobro/pago
+ *  (cobro → venta, pago → compra) y lo aplica. */
+window._consultarTCCP = async function (tipo, btn) {
+  const $ = id => document.getElementById(id)
+  const fecha = $(tipo === 'cobro' ? 'cobroFecha' : 'pagoFecha')?.value
+  if (!fecha) { showToast('Primero ingresa la fecha', 'warning'); return }
+  const txt = btn?.textContent
+  if (btn) { btn.disabled = true; btn.textContent = '⟳ …' }
+  try {
+    const r = await getTipoCambioDia(fecha, { permitirApi: false })
+    const v = tipo === 'cobro' ? r?.venta : r?.compra
+    if (!(v > 0)) { showToast(`No hay T.C. registrado para el ${fechaDMY(fecha)}`, 'warning'); return }
+    const inp = $(_CP_IDS[tipo].tc)
+    inp.value = v
+    inp.title = `SUNAT ${tipo === 'cobro' ? 'venta' : 'compra'} del ${fechaDMY(fecha)}`
+    window._cpRecalc(tipo, 'tc')
+    inp.style.borderColor = 'var(--color-success)'; setTimeout(() => { inp.style.borderColor = '' }, 1200)
+    showToast(`T.C. ${tipo === 'cobro' ? 'venta' : 'compra'} ${fechaDMY(fecha)}: ${v}`, 'success', 2500)
+  } catch (e) { showToast('No se pudo consultar el T.C.: ' + e.message, 'danger') }
+  finally { if (btn) { btn.disabled = false; btn.textContent = txt } }
+}
+
 window._tcDefaultCP = async function (tipo) {
   const k = _CP_IDS[tipo]
   const $ = id => document.getElementById(id)
@@ -5291,3 +5360,42 @@ window.exportarRecibosCSV = async function () {
     descargarCSV(`recibos_cobranza_${_hoyISO()}.csv`, [['N° Recibo', 'Fecha', 'Cliente', 'Concepto', 'Moneda', 'Importe'], ...filas])
   } catch (e) { showToast('Error: ' + e.message, 'danger') }
 }
+
+
+// ============================================================================
+// COBRO MASIVO — contexto para cobro-masivo.js (2026-10-10)
+// ============================================================================
+function _initCobroMasivo() {
+  initCobroMasivo({
+    cargar: async () => {
+      _cxcList = await cacheado('cuentas_cobrar', getCuentasCobrar)
+      _letrasCache = await cacheado('letras_cambio', getLetrasCambio)
+    },
+    cxc: () => _cxcList, letras: () => _letrasCache, bancos: () => _bancos,
+    contacto: id => _contactsMap[id], nombre: id => _nombreContacto(id), descDoc: d => _descDocCP(d),
+    saldoCxC: c => _saldoCxC(c), saldoLetra: l => _saldoLetra(l), letraAbierta: l => _letraAbierta(l), monedaLetra: l => _monedaLetra(l),
+    monedaBanco: id => _monedaBanco(id), conv: (m, de, a, tc) => _convMoneda(m, de, a, tc), calcRetencion: c => _calcularRetencionPendiente(c),
+    reciboLibre: (n, cid) => _reciboLibreGlobal(n, cid), refrescarBuscador: id => refrescarBuscador(id),
+    aplicarEfectosCobro: (cobro, cxc, o) => _aplicarEfectosCobro(cobro, cxc, o),
+    registrarAbonoLetra: (l, d) => _registrarAbonoLetra(l, d),
+    registrarMov: o => _registrarMovimientoBancario(o), numMB: id => _numMB(id),
+    limpiarAdjuntos: pref => { _adjPendientes[pref] = []; _pintarAdjPendientes(pref) },
+    subirAdjuntos: (pref, ent, id) => _subirAdjuntosPendientes(pref, ent, id),
+    revertirEfectosCP: (t, r) => _revertirEfectosCP(t, r), revertirContableAbono: (a, l) => _revertirContableAbono(a, l),
+    recalcularLetra: (l, e) => _recalcularLetra(l, e), getLetra: id => _getLetra(id),
+    movPorId: id => _movPorId(id), eliminarMovYSaldo: m => _eliminarMovimientoYSaldo(m),
+    refrescar: async () => {
+      invalidarVarios(['letras_abonos', 'journal_entries'])
+      await _recargarTrasCambioCP()
+      if (document.getElementById('tab-letras')?.classList.contains('active')) await window.cargarLetras()
+    }
+  })
+  convertirVarios([{ id: 'cmCliente', placeholder: 'Escribe el cliente...', sinResultados: 'Sin clientes con deuda pendiente' }])
+}
+
+// Ver detalle de un cobro de lote: pinta la sección del lote cuando aparece el contenedor
+const _detCP = document.getElementById('detalle-cp-body')
+if (_detCP) new MutationObserver(() => {
+  const el = document.getElementById('cp-lote-sec')
+  if (el && !el.dataset.pintado) { el.dataset.pintado = '1'; htmlSeccionLote(parseInt(el.dataset.lote)).then(h => { el.innerHTML = h }) }
+}).observe(_detCP, { childList: true })

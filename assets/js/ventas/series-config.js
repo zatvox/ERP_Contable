@@ -16,13 +16,17 @@ import { showToast } from '../helpers.js'
 const _esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 let _containerId = null
 
-/** Ubicaciones de almacenes virtuales (Partners/…): destinos posibles de una guía de venta. */
+/** Destinos posibles de una guía de venta: TODAS las ubicaciones de todos los
+ *  almacenes (zonas). Primero las virtuales (Partners/…), luego las físicas. */
 async function _destinosVirtuales() {
   const [ubic, alms] = await Promise.all([getUbicaciones(), getAlmacenes()])
   const almMap = {}; (alms || []).forEach(a => { almMap[a.id] = a })
-  return (ubic || []).filter(u => almMap[u.almacen_id]?.es_virtual)
-    .map(u => ({ id: u.id, label: `${almMap[u.almacen_id]?.nombre || ''} / ${u.nombre}` }))
-    .sort((a, b) => a.label.localeCompare(b.label))
+  return (ubic || []).filter(u => almMap[u.almacen_id] && u.activo !== false)
+    .map(u => {
+      const a = almMap[u.almacen_id]
+      return { id: u.id, label: `${a?.nombre || ''} / ${u.nombre}`, grupo: a?.es_virtual ? `Virtuales — ${a?.nombre || ''}` : `Almacén ${a?.nombre || ''}`, virtual: !!a?.es_virtual }
+    })
+    .sort((a, b) => (b.virtual - a.virtual) || a.label.localeCompare(b.label))
 }
 
 async function _maxUsadoPorSerie() {
@@ -187,7 +191,7 @@ function _asegurarModalSerie() {
               <small style="color:var(--text-secondary);">Serie que se sugiere al emitir la guía de despacho de este comprobante.</small></div>
             <div class="form-group" id="serieDestinoGrupo" style="grid-column:1/-1;"><label>Destino de la venta (kardex)</label>
               <select id="serieDestino"></select>
-              <small style="color:var(--text-secondary);">A qué ubicación de Partners sale la mercadería con esta guía. La NC con devolución reingresa desde aquí.</small></div>
+              <small style="color:var(--text-secondary);">A qué zona / ubicación sale la mercadería con esta guía (virtuales como Partners o cualquier almacén). La NC con devolución reingresa desde aquí.</small></div>
             <div class="form-group" id="serieValidezGrupo"><label>Validez por defecto (días)</label><input type="number" id="serieValidez" min="1" step="1" value="15"></div>
           </div>
         </div>
@@ -277,8 +281,9 @@ window.abrirModalSerie = async function (id = null) {
   set('serieGuia', s?.serie_guia || '')
   let destinos = []
   try { destinos = await _destinosVirtuales() } catch { /* */ }
+  const grupos = [...new Set(destinos.map(d => d.grupo))]
   document.getElementById('serieDestino').innerHTML = '<option value="">— Partners / Customers (por defecto) —</option>' +
-    destinos.map(d => `<option value="${d.id}">${_esc(d.label)}</option>`).join('')
+    grupos.map(g => `<optgroup label="${_esc(g)}">${destinos.filter(d => d.grupo === g).map(d => `<option value="${d.id}">${_esc(d.label)}</option>`).join('')}</optgroup>`).join('')
   set('serieDestino', s?.ubicacion_destino_id || '')
   document.getElementById('serieTipo').disabled = !!s
   document.getElementById('serieSerie').disabled = !!s
