@@ -201,15 +201,56 @@ export function formatearMedida(valor, formato) {
 // FILTROS
 // ============================================================================
 
-function _htmlFiltro(id, f, valorActual) {
+// ── MULTISELECCIÓN (2026-10-10) ──────────────────────────────────────────────
+// Todo filtro 'select' es un desplegable con casillas + buscador. Los filtros
+// de texto que buscan en un campo de contacto (cliente / proveedor / contacto)
+// suman un multiselect con los contactos que hay en los datos: en Ventas
+// salen clientes y en Compras proveedores, porque se arma de las filas.
+// Estado: array de valores; vacío/undefined = todos. Un valor viejo (string,
+// de una vista ⭐ guardada) se toma como lista de 1.
+const _CAMPOS_CONTACTO = ['cliente', 'proveedor', 'contacto', 'contraparte']
+const _campoContacto = f => f.tipo === 'texto' && f.multi !== false
+  ? (f.campos || [f.campo || f.key]).find(c => _CAMPOS_CONTACTO.includes(c)) || null : null
+const _msKey = (f, cf) => `${f.key}::${cf}`
+const _comoLista = v => Array.isArray(v) ? v.map(String) : (v === undefined || v === null || v === '' ? [] : [String(v)])
+
+function _opcionesSelect(f) {
+  return (f.opciones || []).map(o => ({ v: String(typeof o === 'object' ? o.value : o), l: String(typeof o === 'object' ? o.label : o) }))
+}
+function _opcionesDeDatos(datos, campo) {
+  const set = new Set()
+  ;(datos || []).forEach(r => { const v = r?.[campo]; if (v !== undefined && v !== null && v !== '') set.add(String(v)) })
+  return [...set].sort((a, b) => a.localeCompare(b, 'es')).map(v => ({ v, l: v }))
+}
+function _etiquetaMs(opciones, sel, todos = 'Todos') {
+  if (!sel.length) return todos
+  if (sel.length === 1) return opciones.find(o => o.v === sel[0])?.l || sel[0]
+  return `${sel.length} seleccionados`
+}
+function _htmlMs(msKey, opciones, valorActual, todos = 'Todos') {
+  const sel = _comoLista(valorActual)
+  return `<div class="rp-ms" data-rp-ms="${_esc(msKey)}">
+    <button type="button" class="rp-ms-btn ${sel.length ? 'activo' : ''}" title="${_esc(sel.join(', '))}"><span class="rp-ms-txt">${_esc(_etiquetaMs(opciones, sel, todos))}</span> <span class="rp-ms-car">▾</span></button>
+    <div class="rp-ms-panel" hidden>
+      ${opciones.length > 6 ? '<input type="text" class="rp-ms-buscar" placeholder="Buscar...">' : ''}
+      <div class="rp-ms-acc"><a href="#" data-rp-ms-todos>Marcar visibles</a><a href="#" data-rp-ms-limpiar>Limpiar</a></div>
+      <div class="rp-ms-lista">
+        ${opciones.map(o => `<label class="rp-ms-op" data-txt="${_esc(o.l.toLowerCase())}"><input type="checkbox" value="${_esc(o.v)}" ${sel.includes(o.v) ? 'checked' : ''}> <span>${_esc(o.l)}</span></label>`).join('') || '<small style="color:var(--text-secondary);">Sin opciones</small>'}
+      </div>
+    </div>
+  </div>`
+}
+
+function _htmlFiltro(id, f, valorActual, estadoFiltros = {}, datos = []) {
   const base = `rp-f-${id}-${f.key}`
-  if (f.tipo === 'select') {
-    const opts = (f.opciones || []).map(o => {
-      const val = typeof o === 'object' ? o.value : o
-      const lab = typeof o === 'object' ? o.label : o
-      return `<option value="${_esc(val)}" ${String(val) === String(valorActual ?? '') ? 'selected' : ''}>${_esc(lab)}</option>`
-    }).join('')
-    return `<select id="${base}" data-filtro="${f.key}"><option value="">${f.placeholderTodos || 'Todos'}</option>${opts}</select>`
+  if (f.tipo === 'select') return _htmlMs(f.key, _opcionesSelect(f), valorActual, f.placeholderTodos || 'Todos')
+  const cf = _campoContacto(f)
+  if (cf) {
+    const otros = (f.campos || [f.campo || f.key]).filter(c => c !== cf)
+    const ms = _htmlMs(_msKey(f, cf), _opcionesDeDatos(datos, cf), estadoFiltros[_msKey(f, cf)], `Todos (${cf === 'proveedor' ? 'proveedores' : cf === 'cliente' ? 'clientes' : 'contactos'})`)
+    if (!otros.length) return ms
+    return `<div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">${ms}
+      <input type="text" id="${base}" data-filtro="${f.key}" value="${_esc(typeof valorActual === 'string' ? valorActual : '')}" placeholder="${_esc('Buscar ' + otros.join(', ') + '...')}" style="min-width:150px; flex:1;"></div>`
   }
   if (f.tipo === 'multi') {
     // Selección múltiple con chips: valorActual = array de valores incluidos
@@ -239,6 +280,20 @@ function _htmlFiltro(id, f, valorActual) {
 function aplicarFiltros(datos, filtros, estado) {
   return datos.filter(fila => {
     for (const f of filtros) {
+      // Multiselect de contactos (filtros de texto)
+      const cf = _campoContacto(f)
+      if (cf) {
+        const selC = _comoLista(estado[_msKey(f, cf)])
+        if (selC.length && !selC.includes(String(fila[cf] ?? ''))) return false
+      }
+      // Select → multiselección
+      if (f.tipo === 'select') {
+        const selS = _comoLista(estado[f.key])
+        if (!selS.length) continue
+        if (f.match) { if (!selS.some(v => f.match(fila, v))) return false; continue }
+        if (!selS.includes(String(fila[f.campo || f.key] ?? ''))) return false
+        continue
+      }
       const val = estado[f.key]
       if (val === undefined || val === null || val === '' ) continue
       if (f.tipo === 'multi') {
@@ -259,7 +314,10 @@ function aplicarFiltros(datos, filtros, estado) {
         continue
       }
       if (f.tipo === 'texto') {
-        const campos = f.campos || [f.campo || f.key]
+        if (Array.isArray(val)) continue
+        // Con multiselect de contacto, el texto busca solo en los OTROS campos
+        const campos = (f.campos || [f.campo || f.key]).filter(c => !cf || c !== cf)
+        if (!campos.length) continue
         const q = String(val).toLowerCase()
         const hay = campos.some(c => String(fila[c] ?? '').toLowerCase().includes(q))
         if (!hay) return false
@@ -339,7 +397,7 @@ export function crearReporte(containerId, config) {
         ${(config.filtros || []).map(f => `
           <div class="reporte-filtro">
             <label>${_esc(f.label)}</label>
-            ${_htmlFiltro(id, f, estado.filtros[f.key])}
+            ${_htmlFiltro(id, f, estado.filtros[f.key], estado.filtros, config.datos)}
           </div>`).join('')}
 
         <div class="reporte-filtro">
@@ -585,6 +643,52 @@ function _bindEventos(id) {
         refrescarReporte(id)
       })
     })
+
+    // Multiselect desplegable
+    cajaFiltros.querySelectorAll('[data-rp-ms]').forEach(box => {
+      const key = box.getAttribute('data-rp-ms')
+      const btn = box.querySelector('.rp-ms-btn')
+      const panel = box.querySelector('.rp-ms-panel')
+      const pintarBtn = () => {
+        const sel = _comoLista(estado.filtros[key])
+        const ops = [...box.querySelectorAll('.rp-ms-op')].map(l => ({ v: l.querySelector('input').value, l: l.textContent.trim() }))
+        const f = (config.filtros || []).find(x => x.key === key)
+        box.querySelector('.rp-ms-txt').textContent = _etiquetaMs(ops, sel, f?.placeholderTodos || (key.includes('::') ? 'Todos' : 'Todos'))
+        btn.classList.toggle('activo', sel.length > 0)
+        btn.title = sel.join(', ')
+      }
+      const leer = () => {
+        estado.filtros[key] = [...box.querySelectorAll('.rp-ms-op input:checked')].map(i => i.value)
+        pintarBtn(); refrescarReporte(id)
+      }
+      btn.addEventListener('click', ev => {
+        ev.stopPropagation()
+        const abrir = panel.hidden
+        document.querySelectorAll('.rp-ms-panel').forEach(p => { p.hidden = true })
+        panel.hidden = !abrir
+        if (abrir) box.querySelector('.rp-ms-buscar')?.focus()
+      })
+      panel.addEventListener('click', ev => ev.stopPropagation())
+      box.querySelectorAll('.rp-ms-op input').forEach(i => i.addEventListener('change', leer))
+      box.querySelector('.rp-ms-buscar')?.addEventListener('input', ev => {
+        const q = ev.target.value.toLowerCase().trim()
+        box.querySelectorAll('.rp-ms-op').forEach(l => { l.hidden = !!q && !l.dataset.txt.includes(q) })
+      })
+      box.querySelector('[data-rp-ms-todos]')?.addEventListener('click', ev => {
+        ev.preventDefault()
+        box.querySelectorAll('.rp-ms-op').forEach(l => { if (!l.hidden) l.querySelector('input').checked = true })
+        leer()
+      })
+      box.querySelector('[data-rp-ms-limpiar]')?.addEventListener('click', ev => {
+        ev.preventDefault()
+        box.querySelectorAll('.rp-ms-op input').forEach(i => { i.checked = false })
+        leer()
+      })
+    })
+    if (!window.__rpMsCierre) {
+      window.__rpMsCierre = true
+      document.addEventListener('click', () => document.querySelectorAll('.rp-ms-panel').forEach(p => { p.hidden = true }))
+    }
 
     const _opcionesMulti = (key) => ((config.filtros || []).find(f => f.key === key)?.opciones || [])
       .map(o => String(typeof o === 'object' ? o.value : o))

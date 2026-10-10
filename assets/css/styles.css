@@ -2167,3 +2167,24 @@ body.dark-mode td.costo-promedio { background: rgba(245, 158, 11, 0.22); color: 
 .pdtf-hoja td.pdt-target, .pdtf-hoja th.pdt-target { background:#fde047 !important; }
 .pdtf-hoja td.pdt-dep, .pdtf-hoja th.pdt-dep { background:#93c5fd !important; }
 body.dark-mode .pdtf-hoja .pdtf-input, .pdtf-hoja .pdtf-input { background:#fff7d6 !important; color:#000 !important; }
+
+
+/* ── Reportes: filtro multiselección desplegable (2026-10-10) ── */
+.rp-ms { position: relative; min-width: 170px; }
+.rp-ms-btn { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 7px 10px;
+  border: 1px solid var(--border-color); border-radius: var(--radius-sm, 6px); background: var(--bg-primary); color: var(--text-primary);
+  font-size: 0.85rem; cursor: pointer; text-align: left; white-space: nowrap; overflow: hidden; }
+.rp-ms-btn .rp-ms-txt { overflow: hidden; text-overflow: ellipsis; }
+.rp-ms-btn.activo { border-color: var(--color-info, #3b82f6); box-shadow: 0 0 0 1px var(--color-info, #3b82f6) inset; font-weight: 600; }
+.rp-ms-panel { position: absolute; z-index: 60; top: calc(100% + 4px); left: 0; min-width: 240px; max-width: 360px; padding: 8px;
+  background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md, 8px); box-shadow: 0 10px 28px rgba(0,0,0,.35); }
+.rp-ms-buscar { width: 100%; margin-bottom: 6px; padding: 6px 8px; font-size: 0.85rem; }
+.rp-ms-acc { display: flex; justify-content: space-between; font-size: 0.75rem; margin-bottom: 4px; }
+.rp-ms-acc a { color: var(--color-info, #3b82f6); text-decoration: none; }
+.rp-ms-lista { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.rp-ms-op { display: flex !important; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 4px; cursor: pointer;
+  font-size: 0.84rem !important; text-transform: none !important; letter-spacing: 0 !important; color: var(--text-primary) !important; font-weight: 400 !important; }
+.rp-ms-op:hover { background: var(--bg-tertiary, rgba(127,127,127,.12)); }
+.rp-ms-op input { width: auto !important; margin: 0; flex: none; }
+
+.rp-ms-op[hidden] { display: none !important; }

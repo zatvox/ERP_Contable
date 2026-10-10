@@ -91,6 +91,13 @@ const DEFAULTS = {
     ctaDifPerdida:      '6761111',
     ctaRetencionIgv:    '401141',
     tasaMoratoriaAnual: 0,
+    empresaNombre:      'JHIRO PERU S.A.C.',
+    empresaRuc:         '20600842995',
+    empresaDireccion:   'Av. Santa Rosa Lt. 15 Mz. S Urb. San Gabriel — San Juan de Lurigancho, Lima',
+    empresaEmail:       'gerencia@jhiroperu.com',
+    empresaTelefono:    '979050317',
+    empresaWeb:         'https://jhiroperu.com',
+    textoPieEstadoCuenta: 'La línea de crédito será renovada a finales de julio y fines de diciembre de cada año, por lo tanto las cuentas deben estar en cero... ¡Gracias por su apoyo y confianza!',
     ctaInteresRefin:    '772110'
   },
   bancos: {
@@ -283,7 +290,15 @@ const CAMPOS_POR_MODULO = {
     { key: 'ctaRetencionIgv',    label: 'Retenciones de IGV', tipo: 'text' },
     { key: 'ctaInteresRefin',    label: 'Interés de refinanciación (al unificar/renovar letras)', tipo: 'text', hint: 'Plan actual: 772110. Se abona cuando el interés se suma a las nuevas letras.' },
     SEP('Letras — interés moratorio'),
-    { key: 'tasaMoratoriaAnual', label: 'Tasa moratoria anual (%) para sugerir el interés', tipo: 'number', hint: 'Interés sugerido = saldo × tasa/360 × días de atraso. 0 = no sugiere (lo escribes a mano).' }
+    { key: 'tasaMoratoriaAnual', label: 'Tasa moratoria anual (%) para sugerir el interés', tipo: 'number', hint: 'Interés sugerido = saldo × tasa/360 × días de atraso. 0 = no sugiere (lo escribes a mano).' },
+    SEP('Estado de cuenta del cliente (cabecera y pie del PDF/PNG)'),
+    { key: 'empresaNombre',   label: 'Razón social', tipo: 'text' },
+    { key: 'empresaRuc',      label: 'RUC', tipo: 'text' },
+    { key: 'empresaDireccion', label: 'Dirección', tipo: 'text' },
+    { key: 'empresaEmail',    label: 'Email', tipo: 'text' },
+    { key: 'empresaTelefono', label: 'Teléfono', tipo: 'text' },
+    { key: 'empresaWeb',      label: 'Sitio web', tipo: 'text' },
+    { key: 'textoPieEstadoCuenta', label: 'Texto del pie (línea de crédito)', tipo: 'text' }
   ],
   bancos: [
     SEP('Cuentas'),

@@ -33,6 +33,7 @@ import { showToast, formatNumber, fechaDMY, hacerTablaOrdenable } from './helper
 import { initModuleNavDropdowns, initSubtabs, menuAccionesFila } from './main.js'
 import { getModuloConfig, renderConfiguracionTab, aplicarPreferenciasVista } from './config-modulo.js'
 import { cacheado, invalidarVarios } from './data-cache.js'
+import { renderEstadoCuentaCliente } from './estado-cuenta.js'
 import { crearReporte, diasVencidos, tramoAntiguedad, nombreMes, mesActual, descargarCSV } from './reportes.js'
 import { convertirVarios, refrescarBuscador } from './buscador-select.js'
 import { saldoCuota, estadoCuota, repartirEntreCuotas, getTerminosConCuotas, invalidarCacheTerminos } from './cronograma.js'
@@ -1081,13 +1082,25 @@ function _filaReporteAbono(a, campoContacto) {
   }
 }
 
+window._volverEstadoCuenta = () => construirReporte('rep-estado-cuenta')
+
 function construirReporte(panelId) {
   if (_reportesListos[panelId]) return
   _reportesListos[panelId] = true
 
   const hoy = new Date().toISOString().split('T')[0]
 
-  if (panelId === 'rep-estado-cuenta') { construirEstadoCuenta(); return }
+  if (panelId === 'rep-estado-cuenta') {
+    // Vista principal: estado de cuenta del cliente (PDF/PNG). "📊 Movimientos" abre la tabla dinámica anterior.
+    const cont = document.getElementById('rep-estado-cuenta')
+    renderEstadoCuentaCliente(cont, {
+      onMovimientos: async () => {
+        await construirEstadoCuenta()
+        cont.insertAdjacentHTML('afterbegin', `<button class="btn btn-secondary btn-small" style="margin-bottom:10px;" onclick="window._volverEstadoCuenta()">← Estado de cuenta del cliente (PDF / PNG)</button>`)
+      }
+    })
+    return
+  }
   if (panelId === 'rep-antiguedad-cxc') { construirAntiguedadCxC(); return }
   if (panelId === '__rep-antiguedad-cxc-viejo') {
     const datos = _cxcList
@@ -3869,6 +3882,20 @@ window._rfinTCSugerido = function () {
   window._rfinRecalc()
 }
 
+/** Fecha de pago (sección 2): define la fecha del abono, del movimiento bancario,
+ *  del asiento y la emisión de las letras nuevas. Trae el T.C. de ese día. */
+window._rfinCambioFecha = function () {
+  if (!_rfin) return
+  const f = document.getElementById('rfinFecha').value
+  const necesitaTC = _rfin.moneda === 'USD' || (_monedaBanco(document.getElementById('rfinBanco').value) || _rfin.moneda) !== _rfin.moneda
+  if (f && necesitaTC) getTipoCambioDia(f, { permitirApi: false }).then(r => {
+    const v = _rfin.tipo === 'emitida' ? r?.venta : r?.compra
+    if (v > 0) document.getElementById('rfinTCDia').value = v
+    window._rfinGenerar()
+  }).catch(() => window._rfinGenerar())
+  else window._rfinGenerar()
+}
+
 window._rfinCambioCuenta = function () {
   if (!_rfin) return
   const m = _pintarMonedas('rfinMonedas', _rfin.moneda, document.getElementById('rfinBanco').value)
@@ -4032,9 +4059,20 @@ window._rfinRecalc = function () {
     caja('+ Interés refinanc.', intRef) +
     caja('= A documentar', aDoc) +
     caja(`En ${_rfin.filas.length} letra(s) nueva(s)`, enLetras) +
-    caja(Math.abs(dif) < 0.01 ? 'Cuadra ✔' : 'Diferencia', dif, ` color:${colorDif};`) +
-    (document.getElementById('rfinChkAbono').checked ? caja(_rfin.tipo === 'emitida' ? 'Banco: neto que entra' : 'Banco: neto que sale', Math.abs(neto), ' color:var(--color-success);') : '')
-  if (document.getElementById('rfinChkAbono').checked) _pintarConversion('rfinResumen', mon, $('rfinBanco').value, neto, parseFloat($('rfinTCDia').value))
+    caja(Math.abs(dif) < 0.01 ? 'Cuadra ✔' : 'Diferencia', dif, ` color:${colorDif};`)
+  // Detalle del pago en el acto: amortiza + intereses − gastos = neto (igual que en Cobrar letra)
+  const conAb = document.getElementById('rfinChkAbono').checked
+  document.getElementById('rfinResumenBancoWrap').style.display = conAb ? '' : 'none'
+  if (conAb) {
+    _pintarResumenLetra('rfinResumenBanco', { tipo: _rfin.tipo, moneda: mon }, imp, 'Amortiza')
+    const g = []
+    if (imp.portes) g.push(`Portes ${formatNumber(imp.portes)}`)
+    if (imp.comision) g.push(`Comisión ${formatNumber(imp.comision)}`)
+    if (imp.otros) g.push(`Otros ${formatNumber(imp.otros)}`)
+    const cajaG = document.getElementById('rfinResumenBanco')?.children[2]
+    if (cajaG && g.length) cajaG.insertAdjacentHTML('beforeend', `<small style="color:var(--text-secondary); font-size:0.7rem;">${g.join(' · ')}</small>`)
+  }
+  if (conAb) _pintarConversion('rfinResumenBanco', mon, $('rfinBanco').value, neto, parseFloat($('rfinTCDia').value))
   const btn = $('rfinBtnOk')
   if (btn && !btn.classList.contains('btn-cargando')) btn.disabled = Math.abs(dif) >= 0.01
 }
@@ -4061,7 +4099,8 @@ window.confirmarRefinanciar = async function () {
 
   // ── Validaciones (de lo general a lo específico) ──
   if (!origenes.length) { showToast('Marca al menos una letra a refinanciar', 'warning'); return }
-  if (!fecha) { showToast('Ingresa la fecha de la operación', 'warning'); return }
+  if (!fecha) { showToast('Ingresa la fecha de pago (sección 2)', 'warning'); return }
+  if (conAbono && fecha > _hoyISO() && !confirm(`La fecha de pago (${fechaDMY(fecha)}) es futura. ¿Continuar?`)) return
   if (_rfin.moneda === 'USD' && !(tcNueva > 0)) { showToast('Ingresa el T.C. de las letras nuevas', 'warning'); return }
   if (ab) {
     if (!ab.bancoId) { showToast('Selecciona la cuenta donde entra/sale el abono', 'warning'); return }
@@ -4082,7 +4121,7 @@ window.confirmarRefinanciar = async function () {
     if (_letrasCache.some(x => String(x.numero_letra).toLowerCase() === f.numero.toLowerCase())) { showToast(`El N° ${f.numero} ya existe`, 'warning'); return }
     if (!(f.monto > 0)) { showToast(`Letra ${f.numero}: el monto debe ser mayor a 0`, 'warning'); return }
     if (!f.venc) { showToast(`Letra ${f.numero}: falta el vencimiento`, 'warning'); return }
-    if (f.venc < fecha) { showToast(`Letra ${f.numero}: vence antes de la fecha de operación`, 'warning'); return }
+    if (f.venc < fecha) { showToast(`Letra ${f.numero}: vence antes de la fecha de pago`, 'warning'); return }
   }
   const enLetras = _r2(filas.reduce((s, f) => s + f.monto, 0))
   if (Math.abs(enLetras - aDoc) >= 0.01) { showToast(`Las letras nuevas suman ${formatNumber(enLetras)} y deben sumar ${formatNumber(aDoc)}`, 'warning'); return }
