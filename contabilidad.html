@@ -74,18 +74,14 @@
           <button type="button" class="tab-btn module-nav-config" data-tab="configuracion">⚙️ Configuración</button>
         </nav>
 
-        <div class="header-controls">
+        <div class="header-controls" style="display:flex; gap:8px; align-items:center;">
+          <!-- Nuevo Asiento Manual: movido al header (antes ocupaba una fila propia) — 2026-10-10 -->
+          <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevoAsiento()" title="Nuevo asiento manual (partida doble)">+ Asiento</button>
           <button class="theme-toggle" id="themeToggle">🌙 Oscuro</button>
         </div>
       </header>
 
       <main class="content">
-        <h1 class="page-title">Módulo Contabilidad</h1>
-
-        <!-- Botón flotante: Nuevo Asiento Manual -->
-        <div style="margin:10px 0; text-align:right;">
-          <button class="btn btn-primary" onclick="window.abrirModalNuevoAsiento()">+ Nuevo Asiento Manual</button>
-        </div>
 
         <div id="tab-cuentas" class="tab-content active">
           <div id="content-cuentas" class="card">Cargando...</div>
