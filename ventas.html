@@ -106,18 +106,7 @@
         -->
 
         <div id="tab-clientes" class="tab-content">
-          <div class="card">
-            <div class="card-header">
-              <h3 class="card-title">Clientes</h3>
-              <button class="btn btn-primary btn-small" onclick="window.abrirFormularioCliente()">+ Nuevo</button>
-            </div>
-            <div style="padding:12px 16px; border-bottom:1px solid var(--border-color, #e0e0e0);">
-              <input type="text" id="buscarCliente" placeholder="Buscar por nombre o N° documento..." style="width:100%; max-width:360px;" oninput="window.filtrarClientes()">
-            </div>
-            <div id="tabla-clientes" class="table-container">
-              <p style="text-align: center; color: var(--text-secondary);">Cargando...</p>
-            </div>
-          </div>
+          <div class="card" id="card-contactos-clientes"></div>
         </div>
 
         <!-- TAB REPORTES -->
@@ -828,92 +817,7 @@
     </div>
   </div>
 
-  <!-- MODAL NUEVO CLIENTE -->
-  <div id="modal-nuevo-cliente" class="modal">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3 class="modal-title" id="modalClienteTitle">Nuevo Cliente</h3>
-        <button class="modal-close" onclick="closeModal('modal-nuevo-cliente')">✕</button>
-      </div>
-      <form id="formNewCliente">
-        <div class="form-group">
-          <label>Nombre *</label>
-          <input type="text" id="cliNombre" required>
-        </div>
-        <div class="grid grid-2">
-          <div class="form-group">
-              <label>Tipo Documento *</label>
-              <select id="cliTipoDocumento" required>
-                <option value="">-- Selecciona --</option>
-                <option value="RUC">RUC</option>
-                <option value="DNI">DNI</option>
-                <option value="VAT">VAT</option>
-              </select>
-          </div>
-          <div class="form-group">
-            <label>Nro Documento</label>
-            <div style="display:flex; gap:6px;">
-              <input type="text" id="cliRUC" placeholder="11 dígitos" required style="flex:1;">
-              <button type="button" class="btn btn-secondary btn-small" id="btnConsultarCliRUC">🔍 Consultar</button>
-            </div>
-          </div>
-        </div>
-        <div class="form-group">
-          <label>Email</label>
-          <input type="email" id="cliEmail">
-        </div>
-        <div class="form-group">
-          <label>Teléfono</label>
-          <input type="text" id="cliPhone">
-        </div>
-        <div class="form-group">
-          <label>Direccion *</label>
-          <input type="text" id="cliDireccion" value="" required>
-        </div>
-        <div class="grid grid-2">
-          <div class="form-group">
-              <label>Distrito *</label>
-              <input type="text" id="cliDistrito" value="" required>
-          </div>
-          <div class="form-group">
-            <label>Pais *</label>
-            <input type="text" id="cliPais" value="" required>
-          </div>
-        </div>
-        <div id="cliDatosSunat" class="sunat-datos-box" style="display:none;">
-          <div class="sunat-datos-title">📋 Datos SUNAT</div>
-          <div class="sunat-datos-grid">
-            <div class="sunat-dato">
-              <span class="sunat-dato-label">Estado</span>
-              <span class="sunat-dato-valor badge badge-secondary" id="cliEstadoSunat">—</span>
-            </div>
-            <div class="sunat-dato">
-              <span class="sunat-dato-label">Condición</span>
-              <span class="sunat-dato-valor badge badge-secondary" id="cliCondicionSunat">—</span>
-            </div>
-            <div class="sunat-dato">
-              <span class="sunat-dato-label">Buen Contribuyente</span>
-              <span class="sunat-dato-valor badge badge-secondary" id="cliBuenContribuyenteSunat">—</span>
-            </div>
-            <div class="sunat-dato">
-              <span class="sunat-dato-label">Agente Retención</span>
-              <span class="sunat-dato-valor badge badge-secondary" id="cliAgenteRetencionSunat">—</span>
-            </div>
-          </div>
-        </div>
-        <div class="form-group">
-          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-            <input type="checkbox" id="cliSujetoRetencion">
-            <span>Sujeto a retención IGV (agente de retención SUNAT)</span>
-          </label>
-        </div>
-      </form>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeModal('modal-nuevo-cliente')">Cancelar</button>
-        <button class="btn btn-primary" onclick="guardarCliente()">Guardar</button>
-      </div>
-    </div>
-  </div>
+  <!-- Modal de contacto: único, lo inyecta assets/js/shared/contacto-modal.js (2026-10-07) -->
 
   <!-- MODAL NUEVO PRODUCTO -->
   <div id="modal-nuevo-producto" class="modal">

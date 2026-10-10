@@ -66,6 +66,9 @@ window.onCambiarClienteVenta = async function () {
     if (S._tipoVentaActual !== 'anticipo' && aplicarTiposPorCliente(selTipo, cli)) {
       showToast(`Tipo → ${selTipo.value === '03' ? 'Boleta' : 'Factura'} según el documento del cliente`, 'info')
       await window.onCambiarTipoCompVenta?.()
+    } else if (S._tipoVentaActual !== 'anticipo' && selTipo?.value === '01') {
+      // Mismo tipo, otro cliente: la lista de series depende de si es DNI (acepta_dni)
+      await window.onCambiarTipoCompVenta?.()
     }
   }
   _actualizarAvisoRetencionVenta()
@@ -88,6 +91,8 @@ window._onCambiarClienteEditarVenta = async function (soloOpciones = false) {
     const id = parseInt(document.getElementById('evContactId')?.value || 0)
     const cli = (S._clientes || []).find(c => c.id === id) || null
     if (aplicarTiposPorCliente(selTipo, cli, { cambiarValor: soloOpciones !== true && !selTipo.disabled })) {
+      await window._onCambiarTipoEdicionVenta?.()
+    } else if (soloOpciones !== true && selTipo.value === '01') {
       await window._onCambiarTipoEdicionVenta?.()
     }
   }

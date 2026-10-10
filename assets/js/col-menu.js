@@ -50,7 +50,8 @@ export function colsVisibles(nombre) {
   let guardado = {}
   try { guardado = JSON.parse(localStorage.getItem(_storageKey(nombre)) || '{}') } catch { guardado = {} }
   const cols = {}
-  for (const c of defs) cols[c.key] = guardado[c.key] !== false
+  // c.oculta = oculta por defecto (hasta que el usuario la active)
+  for (const c of defs) cols[c.key] = (c.key in guardado) ? guardado[c.key] !== false : !c.oculta
   return cols
 }
 

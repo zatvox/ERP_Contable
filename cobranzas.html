@@ -45,6 +45,7 @@
               <button class="tab-btn active" data-tab="cxc">Cuentas por Cobrar</button>
               <button class="tab-btn" data-tab="cobros">Cobros Registrados</button>
               <button class="tab-btn" data-tab="letras" data-letra-tipo="emitida">Letras por Cobrar</button>
+              <button class="tab-btn" data-tab="recibos">🧾 Recibos de Cobranza</button>
               <button class="tab-btn" data-tab="retenciones">Retenciones IGV</button>
             </div>
           </div>
@@ -114,6 +115,7 @@
                   <option value="pendiente" selected>Pendiente</option>
                   <option value="parcial">Parcial</option>
                   <option value="cobrado">Cobrado</option>
+                  <option value="anulado">Anulado</option>
                 </select>
               </div>
               <div class="reporte-filtro">
@@ -207,6 +209,7 @@
                   <option value="pendiente">Pendiente</option>
                   <option value="parcial">Parcial</option>
                   <option value="pagado">Pagado</option>
+                  <option value="anulado">Anulado</option>
                   <option value="_todos">Absolutamente todos</option>
                 </select>
               </div>
@@ -309,16 +312,48 @@
         </div>
 
         <!-- ================= TAB: TÉRMINOS DE PAGO ================= -->
+        <!-- ================= TAB: RECIBOS DE COBRANZA ================= -->
+        <div id="tab-recibos" class="tab-content">
+          <div class="card">
+            <div class="card-header solo-acciones">
+              <button class="btn btn-secondary btn-small" onclick="window.exportarRecibosCSV()">⬇ CSV</button>
+              <button class="btn btn-secondary btn-small" onclick="window.cargarRecibos()">↻ Actualizar</button>
+            </div>
+            <p style="padding:0 16px; color:var(--text-secondary); font-size:0.85rem;">
+              Correlativo de los recibos de cobranza físicos: junta los <strong>cobros de facturas</strong> y los <strong>abonos de letras</strong>
+              (cobro total, parcial, en banco, renovación o unificación). Un recibo puede agrupar varios vouchers del mismo cliente.
+            </p>
+            <div style="display:flex; flex-wrap:wrap; gap:12px; padding:0 16px 12px; align-items:end;">
+              <div class="reporte-filtro"><label>Buscar</label><input type="text" id="rec-buscar" placeholder="N°, cliente, letra..." oninput="window.cargarRecibos()"></div>
+              <div class="reporte-filtro"><label>Desde</label><input type="date" id="rec-desde" onchange="window.cargarRecibos()"></div>
+              <div class="reporte-filtro"><label>Hasta</label><input type="date" id="rec-hasta" onchange="window.cargarRecibos()"></div>
+              <strong id="recibos-total" style="margin-left:auto; color:var(--text-secondary); font-size:0.85rem;"></strong>
+            </div>
+            <div id="recibos-avisos" style="display:flex; flex-direction:column; gap:8px; padding:0 16px 12px; font-size:0.85rem;"></div>
+            <div class="table-container">
+              <table>
+                <thead><tr>
+                  <th>N° Recibo</th><th>Fecha</th><th>Cliente</th><th>Concepto</th><th>Medio / cuenta</th><th>Moneda</th>
+                  <th style="text-align:right;">Importe</th><th style="text-align:right;">Total recibo</th><th>Origen</th>
+                </tr></thead>
+                <tbody id="tbody-recibos"><tr><td colspan="9" style="text-align:center;">Abre este tab para cargar.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
         <!-- ================= TAB: LETRAS ================= -->
         <div id="tab-letras" class="tab-content">
           <div class="card">
             <div class="card-header solo-acciones">
+              <button class="btn btn-secondary btn-small" id="btnUnificarLetras" disabled onclick="window.unificarSeleccionadas()" title="Marca 2 o más letras con saldo del mismo cliente y moneda">🔗 Unificar letras</button>
               <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevaLetra()">+ Nueva Letra</button>
             </div>
             <p style="padding:0 16px; color:var(--text-secondary); font-size:0.85rem;">
               Una letra canjea el saldo de UNA cuota (de Cuentas por Cobrar o por Pagar) por un documento de crédito físico.
               Emitida = de un cliente (tu CxC). Recibida = a un proveedor (tu CxP). El estado sigue el flujo contable:
               <strong>cartera</strong> (en tu poder) → <strong>banco</strong> (en descuento/custodia) → <strong>cobrada</strong>, o <strong>protestada</strong> si no paga.
+              En cartera se aceptan <strong>abonos parciales</strong> (queda <strong>parcial</strong>). Varias letras con saldo se pueden <strong>renovar o unificar</strong> en letras nuevas (marca la casilla 🔗).
             </p>
             <div style="display:flex; flex-wrap:wrap; gap:12px; padding:0 16px 12px;">
               <div class="reporte-filtro">
@@ -333,9 +368,11 @@
                 <label>Estado</label>
                 <select id="let-filtro-estado" onchange="window.cargarLetras()">
                   <option value="">Todos</option>
+                  <option value="_abiertas">Con saldo (abiertas)</option>
                   <option value="cartera">Cartera</option>
                   <option value="banco">En banco</option>
                   <option value="cobranza">En cobranza</option>
+                  <option value="parcial">Parcial (con abonos)</option>
                   <option value="cobrada">Cobrada</option>
                   <option value="protestada">Protestada</option>
                   <option value="refinanciada">Refinanciada</option>
@@ -347,9 +384,9 @@
               <table>
                 <thead>
                   <tr>
-                    <th>N° Letra</th><th>Tipo</th><th>Contacto</th><th>Comprobante / Cuota</th>
-                    <th>F. Emisión</th><th>F. Vencimiento</th>
-                    <th style="text-align:right;">Monto</th><th>Banco</th><th>Estado</th><th>Acciones</th>
+                    <th style="width:34px;" title="Marcar para unificar">🔗</th><th>N° Letra</th><th>Tipo</th><th>Contacto</th><th>Comprobante / Cuota</th>
+                    <th>F. Emisión</th><th>F. Vencimiento</th><th>Moneda</th>
+                    <th style="text-align:right;">Monto</th><th style="text-align:right;">Pagado</th><th style="text-align:right;">Saldo</th><th>Banco</th><th>Estado</th><th>Acciones</th>
                   </tr>
                 </thead>
                 <tbody id="tbody-letras">
@@ -471,56 +508,79 @@
   </div>
 
   <!-- MODAL: Nueva Letra (canjea el saldo de UNA cuota) -->
+  <!-- MODAL: Nueva(s) Letra(s) — canje de UNA cuota en VARIAS letras (2026-10-07) -->
   <div id="modal-nueva-letra" class="modal">
-    <div class="modal-content" style="max-width: 640px;">
+    <div class="modal-content" style="width:min(96vw, 1000px); max-width:min(96vw, 1000px); max-height:calc(100vh - 48px); overflow-y:auto;">
       <div class="modal-header">
-        <h3 class="modal-title">Nueva Letra de Cambio</h3>
+        <h3 class="modal-title">Canje en Letras de Cambio</h3>
         <button class="modal-close" onclick="window.closeModal('modal-nueva-letra')">✕</button>
       </div>
-      <div style="padding:20px; display:flex; flex-direction:column; gap:14px;">
-        <div class="form-group">
-          <label>Tipo *</label>
-          <select id="letTipo" onchange="window.onCambiarTipoLetra()">
-            <option value="emitida">Emitida — de un cliente (canjea una cuota de CxC)</option>
-            <option value="recibida">Recibida — a un proveedor (canjea una cuota de CxP)</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Cuota pendiente a canjear *</label>
-          <select id="letCuota" onchange="window.onCambiarCuotaLetra()">
-            <option value="">-- Selecciona --</option>
-          </select>
+      <div style="display:flex; flex-direction:column; gap:14px;">
+
+        <!-- 1. DOCUMENTO -->
+        <div>
+          <strong style="display:block; margin:4px 0 8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Documento a canjear</strong>
+          <div style="display:grid; grid-template-columns:1fr 2fr; gap:12px;">
+            <div class="form-group" style="margin:0;">
+              <label>Tipo *</label>
+              <select id="letTipo" onchange="window.onCambiarTipoLetra()">
+                <option value="emitida">Emitida — a un cliente (CxC)</option>
+                <option value="recibida">Recibida — de un proveedor (CxP)</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label>Cuota pendiente a canjear *</label>
+              <select id="letCuota" onchange="window.onCambiarCuotaLetra()">
+                <option value="">-- Selecciona --</option>
+              </select>
+            </div>
+          </div>
+          <div id="letCuotaInfo" style="display:none; margin-top:10px; padding:12px 14px; background:var(--bg-secondary); border-radius:var(--radius-md); border-left:3px solid var(--color-info); font-size:0.88rem; line-height:1.6;"></div>
           <small id="letCuotaAviso" style="color:var(--text-secondary); font-size:0.78rem;"></small>
         </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-          <div class="form-group">
-            <label>N° de Letra *</label>
-            <input type="text" id="letNumero" placeholder="Ej: LT.187-01">
+
+        <!-- 2. GENERAR LETRAS -->
+        <div style="padding-top:12px; border-top:1px solid var(--border-color);">
+          <strong style="display:block; margin:4px 0 8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Generar letras</strong>
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; align-items:end;">
+            <div class="form-group" style="margin:0;"><label>Cantidad</label><input type="number" id="letCantidad" min="1" max="60" step="1" value="1"></div>
+            <div class="form-group" style="margin:0;"><label>Prefijo del N°</label><input type="text" id="letPrefijo" placeholder="Ej: LT.376-"></div>
+            <div class="form-group" style="margin:0;"><label>Fecha de emisión *</label><input type="date" id="letFechaEmision" onchange="window._letPintarExt && window._letPintarExt()"></div>
+            <div class="form-group" style="margin:0;"><label>1er vencimiento *</label><input type="date" id="letPrimerVenc"></div>
+            <div class="form-group" style="margin:0;"><label>Cada (días)</label><input type="number" id="letIntervalo" min="1" step="1" value="30"></div>
+            <button type="button" class="btn btn-secondary" style="height:38px; white-space:nowrap;" onclick="window._letGenerar()" title="Reparte el saldo de la cuota en partes iguales (la última absorbe los centavos)">⚡ Generar</button>
           </div>
-          <div class="form-group">
-            <label>Monto a canjear *</label>
-            <input type="number" id="letMonto" step="0.01" min="0.01" placeholder="0.00">
-            <small style="color:var(--text-secondary); font-size:0.72rem;">Puede ser menor al saldo de la cuota (canje parcial).</small>
-          </div>
+          <small style="color:var(--text-secondary); font-size:0.72rem;">Reparte el saldo en partes iguales; luego puedes ajustar cada N°, monto y vencimiento en la tabla.</small>
         </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-          <div class="form-group">
-            <label>Fecha de Emisión *</label>
-            <input type="date" id="letFechaEmision">
+
+        <!-- 3. LETRAS -->
+        <div>
+          <div style="border:1px solid var(--border-color); border-radius:var(--radius-md); overflow:hidden; overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse; margin:0;">
+              <thead><tr style="background:var(--bg-secondary);">
+                <th style="text-align:center; padding:8px 10px; font-size:0.78rem; width:40px;">#</th>
+                <th style="text-align:left; padding:8px 10px; font-size:0.78rem;">N° de letra *</th>
+                <th style="text-align:right; padding:8px 10px; font-size:0.78rem; width:170px;">Monto *</th>
+                <th style="text-align:left; padding:8px 10px; font-size:0.78rem; width:180px;">Vencimiento *</th>
+                <th style="text-align:right; padding:8px 10px; font-size:0.78rem; width:80px;">Plazo</th>
+                <th style="width:44px;"></th>
+              </tr></thead>
+              <tbody id="letFilasBody"></tbody>
+            </table>
           </div>
-          <div class="form-group">
-            <label>Fecha de Vencimiento *</label>
-            <input type="date" id="letFechaVencimiento">
-          </div>
+          <button type="button" class="btn btn-secondary btn-small" style="margin-top:8px;" onclick="window._letAgregarFila()">+ Agregar letra</button>
         </div>
-        <div class="form-group">
+
+        <div id="letResumen" style="display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; padding:12px; background:var(--bg-secondary); border-radius:var(--radius-md);"></div>
+
+        <div class="form-group" style="margin:0;">
           <label>Observaciones</label>
-          <input type="text" id="letObservaciones" placeholder="Opcional">
+          <input type="text" id="letObservaciones" placeholder="Opcional — se guarda en cada letra">
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="window.closeModal('modal-nueva-letra')">Cancelar</button>
-        <button class="btn btn-primary" onclick="window.conCarga(this, window.guardarLetra)">💾 Guardar Letra</button>
+        <button class="btn" onclick="window.closeModal('modal-nueva-letra')">Cancelar</button>
+        <button class="btn btn-primary" id="letBtnGuardar" onclick="window.conCarga(this, window.guardarLetra)">💾 Guardar letras</button>
       </div>
     </div>
   </div>
@@ -608,7 +668,7 @@
                     <small id="cobro-banco-aviso" style="color:var(--text-secondary); font-size:0.72rem;"></small>
                   </div>
                   <div class="form-group"><label>N° Operación / Referencia</label><input type="text" id="cobroReferencia" placeholder="N° transferencia o cheque"></div>
-                  <div class="form-group"><label>N° Recibo de cobranza</label><input type="text" id="cobroNumeroRecibo" placeholder="N° del talonario físico (opcional)">
+                  <div class="form-group"><label>N° Recibo de cobranza</label><div style="display:flex; gap:6px;"><input type="text" id="cobroNumeroRecibo" placeholder="N° del talonario físico (opcional)" style="flex:1; min-width:0;"><button type="button" class="btn btn-small btn-secondary" title="Sugerir el siguiente N° del correlativo" onclick="window._sugerirRecibo('cobroNumeroRecibo')">⏭</button></div>
                     <small style="color:var(--text-secondary); font-size:0.72rem;">Varios vouchers del mismo cliente pueden llevar el mismo N° de recibo.</small></div>
                 </div>
               </div>
@@ -756,37 +816,208 @@
   </div>
 
   <!-- MODAL: Cobrar / Pagar letra (misma estructura que modal-letra-banco) -->
+  <!-- MODAL: Cobrar / abonar letra (total, parcial, en cartera o en banco) — 2026-10-07 -->
   <div id="modal-cancelar-letra" class="modal">
-    <div class="modal-content" style="max-width: 480px;">
+    <div class="modal-content" style="width:min(96vw, 940px); max-width:min(96vw, 940px); max-height:calc(100vh - 48px); overflow-y:auto;">
       <div class="modal-header">
         <h3 class="modal-title" id="clet-titulo">Cobrar letra</h3>
         <button class="modal-close" onclick="window.closeModal('modal-cancelar-letra')">✕</button>
       </div>
-      <div style="padding:20px; display:flex; flex-direction:column; gap:14px;">
+      <div style="display:flex; flex-direction:column; gap:14px;">
         <input type="hidden" id="cletId">
         <div id="clet-info" style="padding:12px 14px; background:var(--bg-secondary); border-radius:var(--radius-md); border-left:3px solid var(--color-info); font-size:0.88rem; line-height:1.6;"></div>
-        <div class="form-group">
-          <label>Cuenta bancaria *</label>
-          <select id="cletBanco"><option value="">-- Selecciona --</option></select>
+
+        <!-- 1. ¿Dónde está la letra? / ¿Qué paga? -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:14px;">
+          <div>
+            <strong style="display:block; margin:4px 0 8px; color:var(--text-primary); font-size:0.85rem; font-weight:700; text-transform:uppercase; letter-spacing:0.03em;">1. ¿Dónde está la letra?</strong>
+            <div id="cletUbicSeg" style="display:flex; gap:8px; flex-wrap:wrap;"></div>
+          </div>
+          <div>
+            <strong style="display:block; margin:4px 0 8px; color:var(--text-primary); font-size:0.85rem; font-weight:700; text-transform:uppercase; letter-spacing:0.03em;">2. ¿Qué paga?</strong>
+            <div id="cletModoSeg" style="display:flex; gap:8px; flex-wrap:wrap;"></div>
+          </div>
         </div>
-        <div class="form-group">
-          <label>Fecha *</label>
-          <input type="date" id="cletFecha">
+        <small id="cletHintModo" style="color:var(--text-secondary); font-size:0.78rem; margin-top:-6px;"></small>
+
+        <!-- 3. Datos -->
+        <div style="padding-top:12px; border-top:1px solid var(--border-color);">
+          <strong style="display:block; margin:4px 0 8px; color:var(--text-primary); font-size:0.85rem; font-weight:700; text-transform:uppercase; letter-spacing:0.03em;">3. Datos del pago</strong>
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:12px;">
+            <div class="form-group" style="margin:0;"><label>Medio *</label><select id="cletMedio"></select></div>
+            <div class="form-group" style="margin:0;"><label>Cuenta (banco / caja) *</label><select id="cletBanco" onchange="window._cletCambioCuenta()"><option value="">-- Selecciona --</option></select></div>
+            <div class="form-group" style="margin:0;"><label>Fecha *</label><input type="date" id="cletFecha" onchange="window._tcDefaultLetraCanc && window._tcDefaultLetraCanc()"></div>
+            <div class="form-group" style="margin:0;"><label>N° operación / N° único banco</label><input type="text" id="cletNumOp" placeholder="Ej: 8650159"></div>
+            <div class="form-group" style="margin:0;"><label id="cletLblRecibo">N° Recibo de cobranza</label>
+              <div style="display:flex; gap:6px;"><input type="text" id="cletRecibo" placeholder="Talonario" style="flex:1; min-width:0;">
+                <button type="button" class="btn btn-small btn-secondary" title="Sugerir el siguiente N° del correlativo" onclick="window._sugerirRecibo('cletRecibo')">⏭</button></div></div>
+            <div class="form-group" style="margin:0;"><label>Moneda letra / cuenta</label>
+              <div id="cletMonedas" style="display:flex; gap:6px; align-items:center; min-height:38px; flex-wrap:wrap;"></div></div>
+            <div class="form-group" id="cletTCGroup" style="margin:0;"><label id="cletLblTC">T.C. del día</label><input type="number" id="cletTC" step="0.0001" min="0" oninput="window._cletRecalc()"></div>
+          </div>
         </div>
-        <div class="form-group">
-          <label>N° de Operación</label>
-          <input type="text" id="cletNumOp" placeholder="Opcional">
+
+        <!-- 4. Importes -->
+        <div style="padding-top:12px; border-top:1px solid var(--border-color);">
+          <strong style="display:block; margin:4px 0 8px; color:var(--text-primary); font-size:0.85rem; font-weight:700; text-transform:uppercase; letter-spacing:0.03em;">4. Importes <span id="cletMon" style="text-transform:none;"></span></strong>
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; align-items:start;">
+            <div class="form-group" style="margin:0;"><label>Monto a amortizar (capital) *</label><input type="number" id="cletMonto" step="0.01" min="0" oninput="window._cletRecalc()" style="text-align:right; font-weight:600;"></div>
+            <div style="padding:8px 10px; border:1px dashed var(--border-color); border-radius:var(--radius-md);">
+              <label style="display:flex; gap:8px; align-items:center; cursor:pointer; margin:0;"><input type="checkbox" style="width:auto; margin:0; flex:none;" id="cletChkInteres" onchange="window._cletToggleInteres()"> <span id="cletLblInteres">Cobrar interés moratorio</span></label>
+              <div id="cletInteresBox" style="display:none; margin-top:8px;">
+                <input type="number" id="cletInteres" step="0.01" min="0" value="0" oninput="window._cletRecalc()" style="text-align:right; width:100%;">
+                <small id="cletInteresHint" style="display:block; color:var(--text-secondary); font-size:0.72rem; margin-top:4px;"></small>
+              </div>
+            </div>
+          </div>
+          <label id="cletChkGastosWrap" style="display:flex; gap:8px; align-items:center; cursor:pointer; margin:10px 0 0;"><input type="checkbox" style="width:auto; margin:0; flex:none;" id="cletChkGastos" onchange="window._cletToggleGastos()"> Hubo gastos (ITF, comisión por depósito de otra plaza, etc.)</label>
+          <div id="cletGastosBox" style="display:none; margin-top:10px;">
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:12px;">
+              <div class="form-group" style="margin:0;"><label>Portes</label><input type="number" id="cletPortes" step="0.01" min="0" value="0" oninput="window._cletRecalc()" style="text-align:right;"></div>
+              <div class="form-group" style="margin:0;"><label>Comisión</label><input type="number" id="cletComision" step="0.01" min="0" value="0" oninput="window._cletRecalc()" style="text-align:right;"></div>
+              <div class="form-group" style="margin:0;"><label>Otros gastos</label><input type="number" id="cletOtros" step="0.01" min="0" value="0" oninput="window._cletRecalc()" style="text-align:right;"></div>
+            </div>
+            <small style="color:var(--text-secondary); font-size:0.72rem;">Copia los importes del "Dietario de cobranzas" del banco.</small>
+          </div>
+          <div id="cletResumen" style="display:grid; grid-template-columns:repeat(5, 1fr); gap:10px; margin-top:12px; padding:12px; background:var(--bg-secondary); border-radius:var(--radius-md);"></div>
         </div>
-        <div class="form-group" id="cletTCGroup">
-          <label>Tipo de Cambio del cobro/pago</label>
-          <input type="number" id="cletTC" step="0.0001" min="0">
-          <small style="color:var(--text-secondary); font-size:0.72rem;">Si difiere del T.C. de la letra, la diferencia va a 776 (ganancia) o 676 (pérdida).</small>
+
+        <div class="form-group" style="margin:0;"><label>Observaciones</label><input type="text" id="cletObs" placeholder="Opcional"></div>
+        <div style="padding-top:12px; border-top:1px solid var(--border-color);">
+          <strong style="display:block; margin:4px 0 8px; color:var(--text-primary); font-size:0.85rem; font-weight:700; text-transform:uppercase; letter-spacing:0.03em;">Archivos adjuntos</strong>
+          <div id="clet-adjunto" style="display:flex; flex-direction:column; gap:4px; font-size:0.85rem; margin-bottom:8px;"></div>
+          <input type="file" id="cletArchivo" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp" onchange="window._adjSeleccionar('clet')">
+          <small style="color:var(--text-secondary); font-size:0.72rem;">Recibo, voucher o dietario del banco (máx. 3 por vez).</small>
+          <div id="clet-adj-lista" style="display:flex; flex-direction:column; gap:6px; margin-top:6px;"></div>
         </div>
-        <small style="color:var(--text-secondary); font-size:0.72rem;">Genera el movimiento bancario (N° de registro MB-xxxxxx), ajusta el saldo de la cuenta y crea el asiento banco ↔ letra.</small>
+        <small style="color:var(--text-secondary); font-size:0.72rem;">Genera el movimiento bancario por el NETO y el asiento (cuenta, letra, intereses, gastos y diferencia de cambio). Cuentas en ⚙️ Configuración.</small>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="window.closeModal('modal-cancelar-letra')">Cancelar</button>
-        <button class="btn btn-primary" id="cletBtnOk" onclick="window.conCarga(this, window.confirmarCancelarLetra)">Confirmar</button>
+        <button class="btn" onclick="window.closeModal('modal-cancelar-letra')">Cancelar</button>
+        <button class="btn btn-primary" id="cletBtnOk" onclick="window.conCarga(this, window.confirmarCancelarLetra)">💾 Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Refinanciar letras — renovar (1) o unificar (varias) — 2026-10-07 -->
+  <div id="modal-refinanciar-letras" class="modal">
+    <div class="modal-content" style="width:min(96vw, 1140px); max-width:min(96vw, 1140px); max-height:calc(100vh - 48px); overflow-y:auto;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="rfin-titulo">Refinanciar letras</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-refinanciar-letras')">✕</button>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div id="rfin-info" style="padding:12px 14px; background:var(--bg-secondary); border-radius:var(--radius-md); border-left:3px solid var(--color-warning, #f59e0b); font-size:0.88rem; line-height:1.6;"></div>
+
+        <!-- 1. Letras de origen -->
+        <div>
+          <strong style="display:block; margin:4px 0 8px; color:var(--text-primary); font-size:0.85rem; font-weight:700; text-transform:uppercase; letter-spacing:0.03em;">1. Letras a refinanciar <span id="rfinMon" style="text-transform:none;"></span></strong>
+          <div style="border:1px solid var(--border-color); border-radius:var(--radius-md); overflow:hidden; overflow-x:auto; max-height:260px; overflow-y:auto;">
+            <table style="width:100%; border-collapse:collapse; margin:0; font-size:0.86rem;">
+              <thead><tr style="background:var(--bg-secondary);">
+                <th style="width:40px;"></th><th style="text-align:left; padding:8px 10px;">N° letra</th><th style="text-align:left; padding:8px 10px;">Vence</th><th style="text-align:left; padding:8px 10px;">Estado</th>
+                <th style="text-align:right; padding:8px 10px;">Monto</th><th style="text-align:right; padding:8px 10px;">Pagado</th><th style="text-align:right; padding:8px 10px;">Saldo</th><th style="text-align:right; padding:8px 10px;">T.C.</th>
+              </tr></thead>
+              <tbody id="rfinOrigenesBody"></tbody>
+              <tfoot><tr id="rfinOrigenesFoot" style="border-top:2px solid var(--border-color); background:var(--bg-secondary);"></tr></tfoot>
+            </table>
+          </div>
+        </div>
+
+        <!-- 2. Abono en el acto -->
+        <div style="padding-top:12px; border-top:1px solid var(--border-color);">
+          <label style="display:flex; gap:8px; align-items:center; cursor:pointer; font-weight:600;"><input type="checkbox" style="width:auto; margin:0; flex:none;" id="rfinChkAbono" onchange="window._rfinToggleAbono()"> 2. Paga una parte en el acto (amortización)</label>
+          <div id="rfinAbonoBox" style="display:none; margin-top:10px; padding:12px; border:1px solid var(--border-color); border-radius:var(--radius-md);">
+            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;" id="rfinUbicSeg"></div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(165px, 1fr)); gap:12px;">
+              <div class="form-group" style="margin:0;"><label>Medio *</label><select id="rfinMedio"></select></div>
+              <div class="form-group" style="margin:0;"><label>Cuenta (banco / caja) *</label><select id="rfinBanco" onchange="window._rfinCambioCuenta()"></select></div>
+              <div class="form-group" style="margin:0;"><label>N° operación</label><input type="text" id="rfinNumOp"></div>
+              <div class="form-group" style="margin:0;"><label id="rfinLblRecibo">N° Recibo de cobranza</label>
+                <div style="display:flex; gap:6px;"><input type="text" id="rfinRecibo" style="flex:1; min-width:0;">
+                  <button type="button" class="btn btn-small btn-secondary" title="Sugerir el siguiente N°" onclick="window._sugerirRecibo('rfinRecibo')">⏭</button></div></div>
+              <div class="form-group" style="margin:0;"><label>Moneda letra / cuenta</label>
+                <div id="rfinMonedas" style="display:flex; gap:6px; align-items:center; min-height:38px; flex-wrap:wrap;"></div></div>
+              <div class="form-group" style="margin:0;"><label>T.C. del día</label><input type="number" id="rfinTCDia" step="0.0001" min="0" oninput="window._rfinRecalc()"></div>
+              <div class="form-group" style="margin:0;"><label>% que paga</label><input type="number" id="rfinPct" step="1" min="0" max="99" oninput="window._rfinDesdePct()" style="text-align:right;"></div>
+              <div class="form-group" style="margin:0;"><label>Amortización *</label><input type="number" id="rfinAmort" step="0.01" min="0" value="0" oninput="window._rfinDesdeMonto()" style="text-align:right; font-weight:600;"></div>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:12px; margin-top:10px;">
+              <div style="padding:8px 10px; border:1px dashed var(--border-color); border-radius:var(--radius-md);">
+                <label style="display:flex; gap:8px; align-items:center; cursor:pointer; margin:0;"><input type="checkbox" style="width:auto; margin:0; flex:none;" id="rfinChkInteres" onchange="window._rfinToggleInteres()"> Interés moratorio (se paga ahora)</label>
+                <div id="rfinInteresBox" style="display:none; margin-top:8px;"><input type="number" id="rfinInteres" step="0.01" min="0" value="0" oninput="window._rfinRecalc()" style="text-align:right; width:100%;">
+                  <small style="color:var(--text-secondary); font-size:0.72rem;">Sugerido con la tasa moratoria de ⚙️ (editable).</small></div>
+              </div>
+              <div>
+                <label id="rfinChkGastosWrap" style="display:flex; gap:8px; align-items:center; cursor:pointer; margin:0;"><input type="checkbox" style="width:auto; margin:0; flex:none;" id="rfinChkGastos" onchange="window._rfinToggleGastos()"> Hubo gastos (ITF, comisión…)</label>
+                <div id="rfinGastosBox" style="display:none; margin-top:8px;">
+                  <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px;">
+                    <div class="form-group" style="margin:0;"><label>Comisión renov.</label><input type="number" id="rfinComision" step="0.01" min="0" value="0" oninput="window._rfinRecalc()" style="text-align:right;"></div>
+                    <div class="form-group" style="margin:0;"><label>Portes</label><input type="number" id="rfinPortes" step="0.01" min="0" value="0" oninput="window._rfinRecalc()" style="text-align:right;"></div>
+                    <div class="form-group" style="margin:0;"><label>Otros</label><input type="number" id="rfinOtros" step="0.01" min="0" value="0" oninput="window._rfinRecalc()" style="text-align:right;"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Interés de refinanciación -->
+        <div style="padding-top:12px; border-top:1px solid var(--border-color);">
+          <label style="display:flex; gap:8px; align-items:center; cursor:pointer; font-weight:600;"><input type="checkbox" style="width:auto; margin:0; flex:none;" id="rfinChkIntRef" onchange="window._rfinToggleIntRef()"> 3. Sumar interés de refinanciación a las letras nuevas</label>
+          <div id="rfinIntRefBox" style="display:none; margin-top:10px;">
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 220px)); gap:12px;">
+              <div class="form-group" style="margin:0;"><label>% sobre el saldo a refinanciar</label><input type="number" id="rfinIntRefPct" step="0.01" min="0" value="0" oninput="window._rfinIntRefDesdePct()" style="text-align:right;"></div>
+              <div class="form-group" style="margin:0;"><label>Interés (monto)</label><input type="number" id="rfinIntRef" step="0.01" min="0" value="0" oninput="window._rfinGenerar()" style="text-align:right;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. Nuevas letras -->
+        <div style="padding-top:12px; border-top:1px solid var(--border-color);">
+          <strong style="display:block; margin:4px 0 8px; color:var(--text-primary); font-size:0.85rem; font-weight:700; text-transform:uppercase; letter-spacing:0.03em;">4. Letras nuevas</strong>
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(135px, 1fr)); gap:10px; align-items:end;">
+            <div class="form-group" style="margin:0;"><label>Fecha operación *</label><input type="date" id="rfinFecha" onchange="window._rfinGenerar()"></div>
+            <div class="form-group" style="margin:0;"><label>Cantidad</label><input type="number" id="rfinCantidad" min="1" max="60" step="1" value="1"></div>
+            <div class="form-group" style="margin:0;"><label>Prefijo del N°</label><input type="text" id="rfinPrefijo" placeholder="Vacío = N°-R"></div>
+            <div class="form-group" style="margin:0;"><label>1er vencimiento *</label><input type="date" id="rfinPrimerVenc"></div>
+            <div class="form-group" style="margin:0;"><label>Cada (días)</label><input type="number" id="rfinIntervalo" min="1" step="1" value="30"></div>
+            <div class="form-group" style="margin:0;"><label>T.C. letras nuevas</label>
+              <div style="display:flex; gap:6px;"><input type="number" id="rfinTCNueva" step="0.0001" min="0" oninput="window._rfinTC_edit()" style="flex:1; min-width:0;">
+                <button type="button" class="btn btn-small btn-secondary" title="Volver al promedio ponderado" onclick="window._rfinTCSugerido()">↺</button></div></div>
+            <button type="button" class="btn btn-secondary" style="height:38px; white-space:nowrap;" onclick="window._rfinGenerar()">⚡ Generar</button>
+          </div>
+          <small id="rfinTCAviso" style="display:block; color:var(--text-secondary); font-size:0.72rem; margin-top:4px;"></small>
+          <div style="border:1px solid var(--border-color); border-radius:var(--radius-md); overflow:hidden; overflow-x:auto; margin-top:10px;">
+            <table style="width:100%; border-collapse:collapse; margin:0;">
+              <thead><tr style="background:var(--bg-secondary);">
+                <th style="text-align:center; padding:8px 10px; font-size:0.78rem; width:40px;">#</th>
+                <th style="text-align:left; padding:8px 10px; font-size:0.78rem;">N° de letra *</th>
+                <th style="text-align:right; padding:8px 10px; font-size:0.78rem; width:170px;">Monto *</th>
+                <th style="text-align:left; padding:8px 10px; font-size:0.78rem; width:180px;">Vencimiento *</th>
+                <th style="text-align:right; padding:8px 10px; font-size:0.78rem; width:80px;">Plazo</th>
+                <th style="width:44px;"></th>
+              </tr></thead>
+              <tbody id="rfinFilasBody"></tbody>
+            </table>
+          </div>
+          <button type="button" class="btn btn-secondary btn-small" style="margin-top:8px;" onclick="window._rfinAgregarFila()">+ Agregar letra</button>
+        </div>
+
+        <div id="rfinResumen" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; padding:12px; background:var(--bg-secondary); border-radius:var(--radius-md);"></div>
+
+        <div class="form-group" style="margin:0;"><label>Observaciones</label><input type="text" id="rfinObs" placeholder="Opcional"></div>
+        <div>
+          <strong style="display:block; margin:4px 0 8px; color:var(--text-primary); font-size:0.85rem; font-weight:700; text-transform:uppercase; letter-spacing:0.03em;">Archivos adjuntos</strong>
+          <input type="file" id="rfinArchivo" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp" onchange="window._adjSeleccionar('rfin')">
+          <small style="color:var(--text-secondary); font-size:0.72rem;">Se guardan en la primera letra nueva (máx. 3 por vez).</small>
+          <div id="rfin-adj-lista" style="display:flex; flex-direction:column; gap:6px; margin-top:6px;"></div>
+        </div>
+        <small style="color:var(--text-secondary); font-size:0.72rem;">Las letras marcadas pasan a <b>Refinanciada</b>. Un solo asiento: sale el saldo de las originales (a su T.C.), entran las nuevas (a su T.C.), y si hay abono: banco, intereses y gastos. Se deshace completo desde Ver detalle.</small>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="window.closeModal('modal-refinanciar-letras')">Cancelar</button>
+        <button class="btn btn-primary" id="rfinBtnOk" onclick="window.conCarga(this, window.confirmarRefinanciar)">💾 Refinanciar</button>
       </div>
     </div>
   </div>
@@ -849,7 +1080,7 @@
 
   <!-- MODAL: Detalle de Cobro / Pago -->
   <div id="modal-detalle-cp" class="modal">
-    <div class="modal-content" style="max-width: 720px;">
+    <div class="modal-content" style="width:min(96vw, 1000px); max-width:min(96vw, 1000px);">
       <div class="modal-header">
         <h3 class="modal-title" id="detalle-cp-titulo">Detalle</h3>
         <button class="modal-close" onclick="window.closeModal('modal-detalle-cp')">✕</button>

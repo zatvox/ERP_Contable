@@ -19,18 +19,18 @@ import {
   getCuentasPagar, updateCuentaPagar,
   getCobros, addCobro, updateCobro, deleteCobro, getCobroById,
   getPagosProveedores, addPagoProveedor, updatePagoProveedor, deletePagoProveedor, getPagoProveedorById,
-  getCuentaCobrarById, getCuentaPagarById, getBancoById,
+  getCuentaCobrarById, getCuentaPagarById, getBancoById, deleteCuentaCobrar, deleteCuentaPagar,
   getMovimientosBanco, deleteMovimientoBanco, updateMovimientoBanco, crearAsientoContable,
   getJournalEntryByReferencia, getJournalEntryLinesByEntry, eliminarAsientoContable, getAccounts,
   getContacts,
   getBancos, updateBanco, addMovimientoBanco,
   getLetrasCambio, addLetraCambio, updateLetraCambio, deleteLetraCambio,
   getSuppliers, getCuentasGasto, addCompra, addCompraDetalle, addCuentaPagar,
-  generarAsientoCobroCliente, generarAsientoPagoProveedor, crearAsientoCancelacionME,
+  generarAsientoCobroCliente, generarAsientoPagoProveedor, crearAsientoCancelacionME, crearAsientoMultiME, ctaCob,
   subirAdjuntos, getAdjuntos, getConteoAdjuntos, getUrlAdjunto, eliminarAdjunto, eliminarAdjuntosDe, ADJ_CONCEPTOS
 } from './supabase-data.js'
 import { showToast, formatNumber, fechaDMY, hacerTablaOrdenable } from './helpers.js'
-import { initModuleNavDropdowns, initSubtabs } from './main.js'
+import { initModuleNavDropdowns, initSubtabs, menuAccionesFila } from './main.js'
 import { getModuloConfig, renderConfiguracionTab, aplicarPreferenciasVista } from './config-modulo.js'
 import { cacheado, invalidarVarios } from './data-cache.js'
 import { crearReporte, diasVencidos, tramoAntiguedad, nombreMes, mesActual, descargarCSV } from './reportes.js'
@@ -139,6 +139,7 @@ function initTabs() {
         if (f && btn.dataset.letraTipo !== undefined) f.value = btn.dataset.letraTipo
         window.cargarLetras()
       }
+      if (nombre === 'recibos') window.cargarRecibos()
       if (nombre === 'reportes') {
         const activo = document.querySelector('#cob-subtabs-reportes .subtab.active')?.getAttribute('data-sub') || 'rep-estado-cuenta'
         construirReporte(activo)
@@ -155,7 +156,7 @@ window.irATab = function(nombre) {
 }
 
 function _refrescarTodo() {
-  invalidarVarios(['cuentas_cobrar', 'cuentas_pagar', 'cobros', 'pagos_proveedores', 'bancos', 'cuotas_cobrar', 'cuotas_pagar', 'letras_cambio'])
+  invalidarVarios(['cuentas_cobrar', 'cuentas_pagar', 'cobros', 'pagos_proveedores', 'bancos', 'cuotas_cobrar', 'cuotas_pagar', 'letras_cambio', 'letras_abonos'])
   _cuotasCache = []
   _cuotasPagarCache = []
   _reportesListos = {}
@@ -312,17 +313,20 @@ window.cargarCxC = async function() {
       const notasCr   = parseFloat(cxc.monto_notas_credito || 0)
       const notasDb   = parseFloat(cxc.monto_notas_debito || 0)
       const anticipoAp = parseFloat(cxc.monto_anticipo_aplicado || 0)
-      const pendiente = total + notasDb - notasCr - cobrado - retenido - anticipoAp
-      const vencida   = cxc.estado !== 'cobrado' && cxc.fecha_vencimiento && cxc.fecha_vencimiento < hoy
-      const dias      = cxc.fecha_vencimiento ? diasVencidos(cxc.fecha_vencimiento) : null
+      // Anulado: la deuda deja de existir (pendiente 0, fuera de los totales)
+      const anulado   = cxc.estado === 'anulado'
+      const pendiente = anulado ? 0 : _saldoCxC(cxc)
+      const vencida   = !anulado && cxc.estado !== 'cobrado' && pendiente > 0.01 && cxc.fecha_vencimiento && cxc.fecha_vencimiento < hoy
+      const dias      = anulado || cxc.estado === 'cobrado' ? null : (cxc.fecha_vencimiento ? diasVencidos(cxc.fecha_vencimiento) : null)
       const retPendienteSustentar = retencionPendientePorCxc[cxc.id] || 0
-      tTotal += total; tCobrado += cobrado + retenido; tPend += pendiente
+      if (!anulado) { tTotal += total; tCobrado += cobrado + retenido; tPend += pendiente }
 
-      const badge = cxc.estado === 'cobrado' ? 'badge-success'
+      const badge = anulado ? 'badge-danger'
+                  : cxc.estado === 'cobrado' ? 'badge-success'
                   : cxc.estado === 'parcial' ? 'badge-warning'
                   : vencida ? 'badge-danger' : 'badge-secondary'
 
-      return `<tr ${vencida ? 'style="background:rgba(239,68,68,.06);"' : ''}>
+      return `<tr ${anulado ? 'style="opacity:.55; text-decoration:line-through;" title="Comprobante anulado: no genera deuda"' : (vencida ? 'style="background:rgba(239,68,68,.06);"' : '')}>
         <td>${_esc(_nombreContacto(cxc.contact_id))}</td>
         <td>${_esc(`${cxc.tipo_comprobante || ''} ${cxc.serie || ''}-${cxc.numero_comprobante || ''}`)}${_htmlCuotas(cxc.id)}</td>
         <td>${fechaDMY(cxc.fecha_emision, '-')}</td>
@@ -330,15 +334,15 @@ window.cargarCxC = async function() {
         <td>${dias === null ? '—' : (dias > 0 ? `<span class="badge badge-vencido">+${dias}</span>` : `<span class="badge badge-alcorriente">${dias}</span>`)}</td>
         <td>${cxc.moneda || 'PEN'}</td>
         <td style="text-align:right;">${formatNumber(total)}</td>
-        <td style="text-align:right;">${formatNumber(cobrado)}${retenido > 0 ? `<br><small style="color:var(--color-warning);">+ret. ${formatNumber(retenido)}</small>` : ''}${notasCr > 0 ? `<br><small style="color:var(--color-danger);">−NC ${formatNumber(notasCr)}</small>` : ''}${notasDb > 0 ? `<br><small style="color:var(--color-success);">+ND ${formatNumber(notasDb)}</small>` : ''}${retPendienteSustentar > 0 ? `<br><span class="badge badge-warning" title="Retención de ${formatNumber(retPendienteSustentar)} aplicada al cobrar, sin N° de comprobante de retención del cliente todavía">⚠ pendiente sustentar ret.</span>` : ''}</td>
+        <td style="text-align:right;">${formatNumber(cobrado)}${retenido > 0 ? `<br><small style="color:var(--color-warning);">+ret. ${formatNumber(retenido)}</small>` : ''}${notasCr > 0 ? `<br><small style="color:var(--color-danger);">−NC ${formatNumber(notasCr)}</small>` : ''}${notasDb > 0 ? `<br><small style="color:var(--color-success);">+ND ${formatNumber(notasDb)}</small>` : ''}${parseFloat(cxc.monto_canjeado || 0) > 0 ? `<br><small style="color:var(--color-info);" title="Canjeado en letras: la deuda sigue en las letras">⇄ letras ${formatNumber(cxc.monto_canjeado)}</small>` : ''}${retPendienteSustentar > 0 ? `<br><span class="badge badge-warning" title="Retención de ${formatNumber(retPendienteSustentar)} aplicada al cobrar, sin N° de comprobante de retención del cliente todavía">⚠ pendiente sustentar ret.</span>` : ''}</td>
         <td style="text-align:right; font-weight:bold;">${formatNumber(pendiente)}</td>
         <td><span class="badge ${badge}">${cxc.estado}</span></td>
-        <td style="white-space:nowrap;">${cxc.estado !== 'cobrado' ? `<button class="btn btn-small btn-primary" onclick="window.irARegistrarCobro(${cxc.id})">Cobrar</button> ` : ''}${_botonesDocCP('cxc', cxc.id)}</td>
+        <td style="white-space:nowrap;">${_menuDocCP('cxc', cxc)}</td>
       </tr>`
     }).join('')
 
     if (tfoot) tfoot.innerHTML = `
-      <td colspan="6"><strong>TOTAL (${lista.length} documentos)</strong></td>
+      <td colspan="6"><strong>TOTAL (${lista.filter(c => c.estado !== 'anulado').length} documentos${lista.some(c => c.estado === 'anulado') ? ` · ${lista.filter(c => c.estado === 'anulado').length} anulado(s) sin sumar` : ''})</strong></td>
       <td style="text-align:right;"><strong>${formatNumber(tTotal)}</strong></td>
       <td style="text-align:right;"><strong>${formatNumber(tCobrado)}</strong></td>
       <td style="text-align:right;"><strong>${formatNumber(tPend)}</strong></td>
@@ -775,14 +779,16 @@ window.cargarCxP = async function() {
       const nCr    = parseFloat(cxp.monto_notas_credito || 0)
       const nDb    = parseFloat(cxp.monto_notas_debito || 0)
       const antAp  = parseFloat(cxp.monto_anticipo_aplicado || 0)
-      const pend   = total + nDb - nCr - pagado - antAp
-      const dias   = cxp.fecha_vencimiento ? diasVencidos(cxp.fecha_vencimiento) : null
-      tTotal += total; tPagado += pagado; tPend += pend
+      const anulado = cxp.estado === 'anulado'
+      const pend   = anulado ? 0 : _saldoCxP(cxp)
+      const dias   = anulado || cxp.estado === 'pagado' ? null : (cxp.fecha_vencimiento ? diasVencidos(cxp.fecha_vencimiento) : null)
+      if (!anulado) { tTotal += total; tPagado += pagado; tPend += pend }
 
-      const badge = cxp.estado === 'pagado' ? 'badge-success'
+      const badge = anulado ? 'badge-danger'
+                  : cxp.estado === 'pagado' ? 'badge-success'
                   : cxp.estado === 'parcial' ? 'badge-warning' : 'badge-secondary'
 
-      return `<tr>
+      return `<tr ${anulado ? 'style="opacity:.55; text-decoration:line-through;" title="Comprobante anulado: no genera deuda"' : ''}>
         <td>${_esc(_nombreContacto(cxp.contact_id))}</td>
         <td>${_esc(`${cxp.tipo_comprobante || ''} ${cxp.serie || ''}-${cxp.numero_comprobante || ''}`)}</td>
         <td>${fechaDMY(cxp.fecha_emision, '-')}</td>
@@ -793,7 +799,7 @@ window.cargarCxP = async function() {
         <td style="text-align:right;">${formatNumber(pagado)}${nCr > 0 ? `<br><small style="color:var(--color-danger);">−NC ${formatNumber(nCr)}</small>` : ''}${nDb > 0 ? `<br><small style="color:var(--color-success);">+ND ${formatNumber(nDb)}</small>` : ''}</td>
         <td style="text-align:right; font-weight:bold;">${formatNumber(pend)}</td>
         <td><span class="badge ${badge}">${cxp.estado || 'pendiente'}</span></td>
-        <td style="white-space:nowrap;">${cxp.estado !== 'pagado' ? `<button class="btn btn-small btn-primary" onclick="window.irARegistrarPago(${cxp.id})">Pagar</button> ` : ''}${_botonesDocCP('cxp', cxp.id)}</td>
+        <td style="white-space:nowrap;">${_menuDocCP('cxp', cxp)}</td>
       </tr>`
     }).join('')
 
@@ -1042,6 +1048,39 @@ window.aplicarDeduccionRetenciones = function() {
 // REPORTES (tablas dinámicas) — se construyen al abrir cada sub-tab
 // ============================================================================
 
+/** Todos los abonos de letras (cacheado). Vacío si aún no se corre el SQL 77. */
+async function _abonosTodosCache() {
+  try {
+    return await cacheado('letras_abonos', async () => {
+      const { data, error } = await supabase.from('letras_abonos').select('*').order('fecha')
+      if (error) throw error
+      return data || []
+    })
+  } catch (e) { console.warn('letras_abonos:', e.message); return [] }
+}
+
+/** Fila de reporte de cobranza/pagos a partir de un abono de letra. */
+function _filaReporteAbono(a, campoContacto) {
+  const l = _letrasCache.find(x => x.id === a.letra_id)
+  const neto = Math.abs(parseFloat(a.monto_neto || 0))
+  return {
+    origen: 'Letra',
+    documento: l ? `Letra ${l.numero_letra}` : (a.refinanciacion_id ? `Refinanciación #${a.refinanciacion_id}` : 'Letra'),
+    recibo: a.numero_recibo || '(sin recibo)',
+    [campoContacto]: _nombreContacto(a.contact_id ?? l?.contact_id),
+    mes: nombreMes((a.fecha || '').slice(0, 7)),
+    medio: a.medio || '(sin medio)',
+    banco: _bancosMap[a.banco_id]?.nombre || '(sin banco)',
+    moneda: a.moneda || l?.moneda || 'PEN',
+    fecha: a.fecha || '',
+    monto: neto,
+    retencion: 0,
+    interes: parseFloat(a.interes || 0),
+    gastos: _r2((parseFloat(a.gasto_portes) || 0) + (parseFloat(a.gasto_comision) || 0) + (parseFloat(a.gasto_otros) || 0)),
+    total_aplicado: parseFloat(a.monto_amortizado || 0)
+  }
+}
+
 function construirReporte(panelId) {
   if (_reportesListos[panelId]) return
   _reportesListos[panelId] = true
@@ -1164,37 +1203,52 @@ function construirReporte(panelId) {
     })
   }
 
-  if (panelId === 'rep-cobros') {
-    const datos = _cobrosList.map(c => ({
-      cliente: _nombreContacto(c.contact_id),
-      mes: nombreMes((c.fecha || '').slice(0, 7)),
-      medio: c.medio_pago || '(sin medio)',
-      banco: _bancosMap[c.banco_id]?.nombre || '(sin banco)',
-      moneda: c.moneda || 'PEN',
-      fecha: c.fecha || '',
-      monto: parseFloat(c.monto || 0),
-      retencion: parseFloat(c.monto_retencion || 0),
-      total_aplicado: parseFloat(c.monto || 0) + parseFloat(c.monto_retencion || 0)
-    }))
+  if (panelId === 'rep-cobros') { (async () => {
+    // Cobros de facturas + abonos de letras emitidas (cobro total, parcial, en banco, renovación…)
+    const abonos = (await _abonosTodosCache()).filter(a => a.tipo === 'emitida')
+    if (!_letrasCache.length) _letrasCache = await cacheado('letras_cambio', getLetrasCambio)
+    const datos = [
+      ..._cobrosList.map(c => {
+        const cxc = _cxcList.find(d => d.id === c.cxc_id)
+        return {
+          origen: 'Factura', documento: cxc ? _descDocCP(cxc) : '—', recibo: c.numero_recibo || '(sin recibo)',
+          cliente: _nombreContacto(c.contact_id),
+          mes: nombreMes((c.fecha || '').slice(0, 7)),
+          medio: c.medio_pago || '(sin medio)',
+          banco: _bancosMap[c.banco_id]?.nombre || '(sin banco)',
+          moneda: c.moneda || 'PEN',
+          fecha: c.fecha || '',
+          monto: parseFloat(c.monto || 0),
+          retencion: parseFloat(c.monto_retencion || 0),
+          interes: 0, gastos: 0,
+          total_aplicado: parseFloat(c.monto || 0) + parseFloat(c.monto_retencion || 0)
+        }
+      }),
+      ...abonos.map(a => _filaReporteAbono(a, 'cliente'))
+    ]
 
     crearReporte('rep-cobros', {
       id: 'rep-cobros',
       titulo: 'Cobranza recibida',
-      descripcion: 'Todo lo cobrado, cruzable por mes, cliente, medio de pago o banco.',
+      descripcion: 'Todo lo cobrado (facturas y letras), cruzable por mes, cliente, medio de pago, banco o recibo. En letras: efectivo = neto que entró al banco; total aplicado = capital de la letra cancelado.',
       datos,
       dimensiones: [
         { key: 'mes', label: 'Fecha', tipo: 'fecha', campo: 'fecha' }, { key: 'cliente', label: 'Cliente' },
+        { key: 'origen', label: 'Origen' }, { key: 'documento', label: 'Documento' }, { key: 'recibo', label: 'N° Recibo' },
         { key: 'medio', label: 'Medio de pago' }, { key: 'banco', label: 'Banco' },
         { key: 'moneda', label: 'Moneda' }
       ],
       medidas: [
         { key: 'monto', label: 'Cobrado en efectivo', agg: 'sum', formato: 'money' },
         { key: 'retencion', label: 'Retención IGV', agg: 'sum', formato: 'money' },
+        { key: 'interes', label: 'Intereses', agg: 'sum', formato: 'money' },
+        { key: 'gastos', label: 'Gastos bancarios', agg: 'sum', formato: 'money' },
         { key: 'total_aplicado', label: 'Total aplicado', agg: 'sum', formato: 'money' }
       ],
       filtros: [
-        { key: 'cliente', label: 'Cliente', tipo: 'texto', campos: ['cliente'], placeholder: 'Buscar...' },
-        { key: 'medio', label: 'Medio', tipo: 'select', opciones: ['transferencia', 'deposito', 'efectivo', 'cheque', 'detraccion', 'otro'] },
+        { key: 'cliente', label: 'Cliente', tipo: 'texto', campos: ['cliente', 'documento', 'recibo'], placeholder: 'Cliente, documento o recibo...' },
+        { key: 'origen', label: 'Origen', tipo: 'select', opciones: ['Factura', 'Letra'] },
+        { key: 'medio', label: 'Medio', tipo: 'select', opciones: ['transferencia', 'deposito', 'efectivo', 'cheque', 'detraccion', 'banco_letra', 'yape_plin', 'otro'] },
         { key: 'rango', label: 'Fecha', tipo: 'rango', campo: 'fecha' }
       ],
       agruparPorDefecto: ['mes'],
@@ -1205,10 +1259,12 @@ function construirReporte(panelId) {
         { label: 'Cobro promedio', valor: filas.length ? filas.reduce((s, f) => s + f.monto, 0) / filas.length : 0, formato: 'money' }
       ]
     })
-  }
+  })().catch(e => { console.error('rep-cobros:', e); showToast('Error en reporte de cobranza: ' + e.message, 'danger') }) }
 
-  if (panelId === 'rep-pagos') {
-    const datos = _pagosList.map(p => ({
+  if (panelId === 'rep-pagos') { (async () => {
+    const abonosP = (await _abonosTodosCache()).filter(a => a.tipo === 'recibida')
+    if (!_letrasCache.length) _letrasCache = await cacheado('letras_cambio', getLetrasCambio)
+    const datos = [..._pagosList.map(p => ({ origen: 'Factura',
       proveedor: _nombreContacto(p.contact_id),
       mes: nombreMes((p.fecha || '').slice(0, 7)),
       medio: p.medio_pago || '(sin medio)',
@@ -1216,7 +1272,7 @@ function construirReporte(panelId) {
       moneda: p.moneda || 'PEN',
       fecha: p.fecha || '',
       monto: parseFloat(p.monto || 0)
-    }))
+    })), ...abonosP.map(a => _filaReporteAbono(a, 'proveedor'))]
 
     crearReporte('rep-pagos', {
       id: 'rep-pagos',
@@ -1224,14 +1280,14 @@ function construirReporte(panelId) {
       descripcion: 'Salidas de caja hacia proveedores, por mes, proveedor, medio o banco.',
       datos,
       dimensiones: [
-        { key: 'mes', label: 'Fecha', tipo: 'fecha', campo: 'fecha' }, { key: 'proveedor', label: 'Proveedor' },
+        { key: 'mes', label: 'Fecha', tipo: 'fecha', campo: 'fecha' }, { key: 'proveedor', label: 'Proveedor' }, { key: 'origen', label: 'Origen' },
         { key: 'medio', label: 'Medio de pago' }, { key: 'banco', label: 'Banco' },
         { key: 'moneda', label: 'Moneda' }
       ],
       medidas: [{ key: 'monto', label: 'Pagado', agg: 'sum', formato: 'money' }],
       filtros: [
         { key: 'proveedor', label: 'Proveedor', tipo: 'texto', campos: ['proveedor'], placeholder: 'Buscar...' },
-        { key: 'medio', label: 'Medio', tipo: 'select', opciones: ['transferencia', 'cheque', 'efectivo', 'deposito', 'detraccion', 'otro'] },
+        { key: 'medio', label: 'Medio', tipo: 'select', opciones: ['transferencia', 'cheque', 'efectivo', 'deposito', 'detraccion', 'banco_letra', 'otro'] },
         { key: 'rango', label: 'Fecha', tipo: 'rango', campo: 'fecha' }
       ],
       agruparPorDefecto: ['mes'],
@@ -1241,7 +1297,8 @@ function construirReporte(panelId) {
         { label: 'Pago promedio', valor: filas.length ? filas.reduce((s, f) => s + f.monto, 0) / filas.length : 0, formato: 'money' }
       ]
     })
-  }
+  })().catch(e => { console.error('rep-pagos:', e); showToast('Error en reporte de pagos: ' + e.message, 'danger') }) }
+
 
   if (panelId === 'rep-retenciones') {
     const datos = _cobrosList
@@ -1798,22 +1855,25 @@ window.cargarLetras = async function () {
     const tipoF   = document.getElementById('let-filtro-tipo')?.value || ''
     const estadoF = document.getElementById('let-filtro-estado')?.value || ''
     const lista = _letrasCache
-      .filter(l => (!tipoF || l.tipo === tipoF) && (!estadoF || l.estado === estadoF))
+      .filter(l => (!tipoF || l.tipo === tipoF) && (!estadoF || (estadoF === '_abiertas' ? _letraAbierta(l) : l.estado === estadoF)))
       .sort((a, b) => String(a.fecha_vencimiento || '').localeCompare(String(b.fecha_vencimiento || '')))
 
     const tbody = document.getElementById('tbody-letras')
     if (!tbody) return
 
     if (lista.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;">Sin letras registradas</td></tr>'
+      tbody.innerHTML = '<tr><td colspan="14" style="text-align:center;">Sin letras registradas</td></tr>'
+      _letPintarBotonUnificar()
       return
     }
 
     const badgeEstado = {
       cartera: 'badge-secondary', banco: 'badge-info', cobranza: 'badge-warning',
-      cobrada: 'badge-success', protestada: 'badge-danger',
-      refinanciada: 'badge-warning', anulada: 'badge-secondary'
+      parcial: 'badge-warning', cobrada: 'badge-success', protestada: 'badge-danger',
+      refinanciada: 'badge-info', anulada: 'badge-secondary'
     }
+    // Quita de la selección las que ya no están abiertas
+    for (const id of [..._letSel]) { const x = _letrasCache.find(z => z.id === id); if (!x || !_letraAbierta(x)) _letSel.delete(id) }
 
     tbody.innerHTML = lista.map(l => {
       const cuota = l.tipo === 'emitida'
@@ -1827,19 +1887,26 @@ window.cargarLetras = async function () {
         : '—'
       const banco = l.banco_id ? (_bancosMap[l.banco_id]?.nombre || `Banco #${l.banco_id}`) : '—'
 
+      const saldo = _saldoLetra(l)
+      const puedeSel = _letraAbierta(l) && saldo > 0.005
       return `<tr>
-        <td>${_esc(l.numero_letra)}</td>
+        <td style="text-align:center;">${puedeSel ? `<input type="checkbox" style="width:auto; margin:0;" ${_letSel.has(l.id) ? 'checked' : ''} title="Marcar para unificar" onchange="window._letToggleSel(${l.id}, this.checked, this)">` : ''}</td>
+        <td>${_esc(l.numero_letra)}${l.refinanciacion_id ? ' <span title="Nace de una refinanciación">🔗</span>' : ''}</td>
         <td>${l.tipo === 'emitida' ? 'Por Cobrar' : 'Por Pagar'}</td>
         <td>${_esc(_nombreContacto(l.contact_id))}</td>
         <td>${_esc(comprobante)}${cuota ? ` <small style="color:var(--text-secondary);">(cuota ${cuota.numero_cuota})</small>` : ''}</td>
         <td>${fechaDMY(l.fecha_emision, '-')}</td>
         <td>${fechaDMY(l.fecha_vencimiento, '-')}</td>
-        <td style="text-align:right;">${formatNumber(parseFloat(l.monto || 0))} ${l.moneda || 'PEN'}</td>
+        <td><span class="badge ${_monedaLetra(l) === 'USD' ? 'badge-info' : 'badge-secondary'}">${_monedaLetra(l)}</span></td>
+        <td style="text-align:right;">${formatNumber(parseFloat(l.monto || 0))}</td>
+        <td style="text-align:right;">${_n(l.monto_pagado) ? formatNumber(l.monto_pagado) : '—'}</td>
+        <td style="text-align:right; font-weight:600;${saldo > 0 ? '' : ' color:var(--text-secondary);'}">${formatNumber(saldo)}</td>
         <td>${banco}</td>
         <td><span class="badge ${badgeEstado[l.estado] || 'badge-secondary'}">${l.estado}</span></td>
         <td style="white-space:nowrap;">${_accionesLetra(l)}</td>
       </tr>`
     }).join('')
+    _letPintarBotonUnificar()
   } catch (e) {
     console.error('cargarLetras:', e)
     showToast('Error al cargar letras: ' + e.message, 'danger')
@@ -1847,13 +1914,24 @@ window.cargarLetras = async function () {
 }
 
 function _accionesLetra(l) {
-  // Estándar del sistema: acción principal del estado (Cobrar/Pagar) + 👁 ✏️ ✕.
-  // "A banco" y "Protestar" viven dentro del Ver detalle.
-  const abierta = ['cartera', 'banco', 'cobranza'].includes(l.estado)
+  // Acción principal (Cobrar/Pagar) + menú ⋮ (estándar CxC/CxP).
+  const abierta = _letraAbierta(l)
+  const verbo = l.tipo === 'recibida' ? 'Pagar' : 'Cobrar'
   const principal = abierta
-    ? `<button class="btn btn-small btn-primary" onclick="window.abrirCancelarLetra(${l.id})">${l.tipo === 'recibida' ? 'Pagar' : 'Cobrar'}</button> `
+    ? `<button class="btn btn-small btn-primary" onclick="window.abrirCancelarLetra(${l.id})">${verbo}</button> `
     : ''
-  return principal + _botonesLetra(l.id)
+  const items = [
+    abierta && { icono: '💵', label: `${verbo} / abonar`, onclick: `window.abrirCancelarLetra(${l.id})` },
+    abierta && { icono: '🔄', label: 'Renovar (pago parcial + nueva letra)', onclick: `window.abrirRenovarLetra(${l.id})` },
+    abierta && { icono: '🔗', label: 'Unificar con otras letras…', onclick: `window.abrirRefinanciar([${l.id}], 'unificacion')` },
+    { icono: '👁', label: 'Ver detalle / abonos', onclick: `window.verDetalleLetra(${l.id})` },
+    l.estado !== 'refinanciada' && { icono: '✏️', label: 'Editar', onclick: `window.abrirEditarLetra(${l.id})` },
+    { separador: true },
+    (l.refinanciacion_id || l.estado === 'refinanciada')
+      ? { icono: '↩', label: 'Deshacer refinanciación', peligro: true, onclick: `window.eliminarLetra(${l.id})` }
+      : { icono: '✕', label: 'Eliminar', peligro: true, onclick: `window.eliminarLetra(${l.id})` }
+  ].filter(Boolean)
+  return principal + menuAccionesFila(items)
 }
 
 function _botonesLetra(id) {
@@ -1868,11 +1946,13 @@ window.abrirModalNuevaLetra = async function () {
   await Promise.all([_cargarCuotas(), _cargarCuotasPagar()])
   const hoy = new Date().toISOString().split('T')[0]
   document.getElementById('letTipo').value = 'emitida'
-  document.getElementById('letNumero').value = ''
-  document.getElementById('letMonto').value = ''
   document.getElementById('letObservaciones').value = ''
   document.getElementById('letFechaEmision').value = hoy
-  document.getElementById('letFechaVencimiento').value = ''
+  document.getElementById('letPrimerVenc').value = ''
+  document.getElementById('letCantidad').value = 1
+  document.getElementById('letIntervalo').value = 30
+  document.getElementById('letPrefijo').value = ''
+  _letFilas = []
   window.onCambiarTipoLetra()
   window.openModal('modal-nueva-letra')
 }
@@ -1899,19 +1979,121 @@ window.onCambiarTipoLetra = function () {
     `<option value="${o.id}" data-saldo="${o.saldo}" data-contact="${o.contactId}" data-moneda="${o.moneda}" data-tc="${o.tipoCambio}">${_esc(o.label)}</option>`
   ).join('')
 
-  document.getElementById('letMonto').value = ''
+  _letFilas = []; _letPintar()
+  const info = document.getElementById('letCuotaInfo'); if (info) info.style.display = 'none'
   document.getElementById('letCuotaAviso').textContent = opciones.length === 0
     ? 'No hay cuotas con saldo pendiente para este tipo.'
     : ''
 }
 
-window.onCambiarCuotaLetra = function () {
+// ── Canje en VARIAS letras (2026-10-07) ─────────────────────────────────────
+// _letFilas = [{ numero, monto, venc }] — una fila por letra a crear.
+let _letFilas = []
+const _letCuotaSel = () => {
   const opt = document.getElementById('letCuota')?.selectedOptions[0]
-  if (!opt || !opt.value) return
-  const saldo = parseFloat(opt.getAttribute('data-saldo') || 0)
-  const moneda = opt.getAttribute('data-moneda') || 'PEN'
-  document.getElementById('letMonto').value = saldo.toFixed(2)
-  document.getElementById('letCuotaAviso').textContent = `Saldo disponible: ${formatNumber(saldo)} ${moneda}`
+  if (!opt || !opt.value) return null
+  return { id: parseInt(opt.value), saldo: parseFloat(opt.getAttribute('data-saldo') || 0), moneda: opt.getAttribute('data-moneda') || 'PEN', opt }
+}
+const _sumarDias = (f, d) => { if (!f) return ''; const x = new Date(f + 'T00:00:00'); x.setDate(x.getDate() + d); return x.toISOString().slice(0, 10) }
+const _diasEntre = (a, b) => (a && b) ? Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000) : null
+
+window.onCambiarCuotaLetra = function () {
+  const c = _letCuotaSel()
+  const info = document.getElementById('letCuotaInfo')
+  if (!c) { if (info) info.style.display = 'none'; _letFilas = []; _letPintar(); return }
+  const tipo = document.getElementById('letTipo')?.value || 'emitida'
+  const q = (tipo === 'emitida' ? _cuotasCache : _cuotasPagarCache).find(x => x.id === c.id)
+  const cab = q ? (tipo === 'emitida' ? _cxcList.find(d => d.id === q.cxc_id) : _cxpList.find(d => d.id === q.cxp_id)) : null
+  if (info) {
+    info.style.display = ''
+    info.innerHTML = `<div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">${tipo === 'emitida' ? 'Cliente' : 'Proveedor'}</div>
+      <div style="font-weight:600; font-size:1.05rem; margin-top:2px;">${_esc(_nombreContacto(cab?.contact_id))}</div>
+      <div style="font-size:0.85rem; color:var(--text-secondary); margin-top:2px;">${_esc(_descDocCP(cab))} · Cuota ${q?.numero_cuota ?? '—'} · vence ${fechaDMY(q?.fecha_vencimiento, '—')} · <b style="color:var(--text-primary);">Saldo ${c.moneda} ${formatNumber(c.saldo)}</b></div>`
+  }
+  document.getElementById('letCuotaAviso').textContent = ''
+  const pref = document.getElementById('letPrefijo')
+  if (pref && !pref.value) pref.value = `LT.${String(cab?.numero_comprobante || '').replace(/^0+/, '')}-`
+  const pv = document.getElementById('letPrimerVenc')
+  if (pv && !pv.value) pv.value = _sumarDias(document.getElementById('letFechaEmision')?.value, parseInt(document.getElementById('letIntervalo')?.value || 30) || 30)
+  window._letGenerar()
+}
+
+// Reparte el saldo en N letras iguales (la última absorbe los centavos).
+window._letGenerar = function () {
+  const c = _letCuotaSel()
+  if (!c) { showToast('Primero elige la cuota a canjear', 'warning'); return }
+  const n = Math.min(60, Math.max(1, parseInt(document.getElementById('letCantidad')?.value || 1) || 1))
+  const pref = document.getElementById('letPrefijo')?.value?.trim() || 'LT-'
+  const intervalo = Math.max(1, parseInt(document.getElementById('letIntervalo')?.value || 30) || 30)
+  const emi = document.getElementById('letFechaEmision')?.value
+  const primer = document.getElementById('letPrimerVenc')?.value || _sumarDias(emi, intervalo)
+  const base = Math.floor((c.saldo / n) * 100) / 100
+  _letFilas = Array.from({ length: n }, (_, i) => ({
+    numero: `${pref}${String(i + 1).padStart(2, '0')}`,
+    monto: i === n - 1 ? _r2(c.saldo - base * (n - 1)) : base,
+    venc: _sumarDias(primer, i * intervalo)
+  }))
+  _letPintar()
+}
+
+window._letAgregarFila = function () {
+  const c = _letCuotaSel()
+  if (!c) { showToast('Primero elige la cuota a canjear', 'warning'); return }
+  const usado = _letFilas.reduce((s, f) => s + (parseFloat(f.monto) || 0), 0)
+  const ult = _letFilas[_letFilas.length - 1]
+  const pref = document.getElementById('letPrefijo')?.value?.trim() || 'LT-'
+  const intervalo = Math.max(1, parseInt(document.getElementById('letIntervalo')?.value || 30) || 30)
+  _letFilas.push({
+    numero: `${pref}${String(_letFilas.length + 1).padStart(2, '0')}`,
+    monto: Math.max(0, _r2(c.saldo - usado)),
+    venc: ult?.venc ? _sumarDias(ult.venc, intervalo) : (document.getElementById('letPrimerVenc')?.value || '')
+  })
+  _letPintar()
+}
+window._letPintarExt = () => _letPintar()
+window._letQuitarFila = function (i) { _letFilas.splice(i, 1); _letPintar() }
+window._letSet = function (i, campo, valor) {
+  if (!_letFilas[i]) return
+  _letFilas[i][campo] = campo === 'monto' ? parseFloat(valor) || 0 : valor
+  if (campo === 'venc') {
+    const td = document.getElementById(`letPlazo${i}`)
+    if (td) td.textContent = (_diasEntre(document.getElementById('letFechaEmision')?.value, valor) ?? '—') + ' d'
+  }
+  _letResumen()
+}
+
+function _letPintar() {
+  const tb = document.getElementById('letFilasBody')
+  if (!tb) return
+  const emi = document.getElementById('letFechaEmision')?.value
+  const inp = 'style="width:100%; padding:6px 8px;"'
+  tb.innerHTML = _letFilas.length ? _letFilas.map((f, i) => `<tr style="border-top:1px solid var(--border-color);">
+      <td style="text-align:center; padding:6px 10px; color:var(--text-secondary);">${i + 1}</td>
+      <td style="padding:6px 10px;"><input type="text" ${inp} value="${_esc(f.numero)}" oninput="window._letSet(${i}, 'numero', this.value)"></td>
+      <td style="padding:6px 10px;"><input type="number" step="0.01" min="0.01" ${inp.replace('padding:6px 8px;', 'padding:6px 8px; text-align:right;')} value="${(parseFloat(f.monto) || 0).toFixed(2)}" oninput="window._letSet(${i}, 'monto', this.value)"></td>
+      <td style="padding:6px 10px;"><input type="date" ${inp} value="${f.venc || ''}" onchange="window._letSet(${i}, 'venc', this.value)"></td>
+      <td id="letPlazo${i}" style="text-align:right; padding:6px 10px; color:var(--text-secondary); font-size:0.85rem;">${_diasEntre(emi, f.venc) ?? '—'} d</td>
+      <td style="text-align:center; padding:6px 6px;"><button type="button" class="btn btn-small btn-danger" title="Quitar letra" onclick="window._letQuitarFila(${i})">✕</button></td>
+    </tr>`).join('')
+    : '<tr><td colspan="6" style="text-align:center; padding:14px; color:var(--text-secondary);">Elige la cuota y pulsa ⚡ Generar (o + Agregar letra).</td></tr>'
+  _letResumen()
+}
+
+function _letResumen() {
+  const box = document.getElementById('letResumen')
+  if (!box) return
+  const c = _letCuotaSel()
+  const mon = c?.moneda || ''
+  const saldo = c?.saldo || 0
+  const total = _r2(_letFilas.reduce((s, f) => s + (parseFloat(f.monto) || 0), 0))
+  const queda = _r2(saldo - total)
+  const color = queda < -0.009 ? 'var(--color-danger)' : (Math.abs(queda) < 0.01 ? 'var(--color-success)' : 'var(--color-warning)')
+  const card = (lbl, val, st = '') => `<div><div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">${lbl}</div><div style="font-weight:700; font-size:1.1rem;${st}">${val}</div></div>`
+  box.innerHTML = card('Saldo de la cuota', `${mon} ${formatNumber(saldo)}`) +
+    card(`Total en ${_letFilas.length} letra(s)`, `${mon} ${formatNumber(total)}`) +
+    card(queda < -0.009 ? 'Excede el saldo' : 'Queda sin canjear', `${mon} ${formatNumber(queda)}`, ` color:${color};`)
+  const btn = document.getElementById('letBtnGuardar')
+  if (btn && !btn.classList.contains('btn-cargando')) btn.textContent = `💾 Guardar ${_letFilas.length || ''} letra${_letFilas.length === 1 ? '' : 's'}`
 }
 
 window.guardarLetra = async function () {
@@ -1924,21 +2106,29 @@ window.guardarLetra = async function () {
     const opt = sel?.selectedOptions[0]
     const cuotaId = parseInt(sel?.value || 0)
     if (!cuotaId) { showToast('Selecciona la cuota a canjear', 'warning'); return }
-
-    const numero = document.getElementById('letNumero')?.value?.trim()
-    if (!numero) { showToast('Ingresa el N° de letra', 'warning'); return }
-
-    const saldo = parseFloat(opt.getAttribute('data-saldo') || 0)
-    const monto = parseFloat(document.getElementById('letMonto')?.value || 0)
-    if (!monto || monto <= 0) { showToast('Ingresa un monto válido', 'warning'); return }
-    if (monto > saldo + 0.01) {
-      showToast(`El monto (${formatNumber(monto)}) supera el saldo de la cuota (${formatNumber(saldo)})`, 'warning')
-      return
-    }
+    if (!_letFilas.length) { showToast('Agrega al menos una letra (⚡ Generar o + Agregar letra)', 'warning'); return }
 
     const fechaEmision = document.getElementById('letFechaEmision')?.value
-    const fechaVencimiento = document.getElementById('letFechaVencimiento')?.value
-    if (!fechaEmision || !fechaVencimiento) { showToast('Ingresa ambas fechas', 'warning'); return }
+    if (!fechaEmision) { showToast('Ingresa la fecha de emisión', 'warning'); return }
+
+    // Validación de TODAS las filas antes de crear nada
+    const vistos = new Set()
+    for (const [i, f] of _letFilas.entries()) {
+      const n = (f.numero || '').trim()
+      if (!n) { showToast(`Letra ${i + 1}: falta el N°`, 'warning'); return }
+      if (vistos.has(n.toLowerCase())) { showToast(`N° de letra repetido: ${n}`, 'warning'); return }
+      vistos.add(n.toLowerCase())
+      if (_letrasCache?.some?.(l => (l.numero_letra || '').trim().toLowerCase() === n.toLowerCase())) { showToast(`Ya existe una letra con el N° ${n}`, 'warning'); return }
+      if (!(parseFloat(f.monto) > 0)) { showToast(`Letra ${n}: monto inválido`, 'warning'); return }
+      if (!f.venc) { showToast(`Letra ${n}: falta el vencimiento`, 'warning'); return }
+      if (f.venc < fechaEmision) { showToast(`Letra ${n}: vence antes de la fecha de emisión`, 'warning'); return }
+    }
+    const saldo = parseFloat(opt.getAttribute('data-saldo') || 0)
+    const totalLetras = _r2(_letFilas.reduce((s, f) => s + (parseFloat(f.monto) || 0), 0))
+    if (totalLetras > saldo + 0.01) {
+      showToast(`El total de las letras (${formatNumber(totalLetras)}) supera el saldo de la cuota (${formatNumber(saldo)})`, 'warning'); return
+    }
+    if (saldo - totalLetras > 0.01 && !confirm(`Las letras suman ${formatNumber(totalLetras)} y la cuota tiene ${formatNumber(saldo)}.\n\nQuedarán ${formatNumber(saldo - totalLetras)} sin canjear (canje parcial). ¿Continuar?`)) return
 
     const contactId = parseInt(opt.getAttribute('data-contact') || 0) || null
     const moneda = opt.getAttribute('data-moneda') || 'PEN'
@@ -1949,53 +2139,55 @@ window.guardarLetra = async function () {
       ? _cuotasCache.find(q => q.id === cuotaId)
       : _cuotasPagarCache.find(q => q.id === cuotaId)
     if (!cuota) { showToast('No se encontró la cuota seleccionada', 'danger'); return }
-
     const cabecera = tipo === 'emitida'
       ? _cxcList.find(c => c.id === cuota.cxc_id)
       : _cxpList.find(c => c.id === cuota.cxp_id)
 
-    const letra = await addLetraCambio({
-      numero_letra: numero,
-      tipo,
-      contact_id: contactId,
-      venta_id:  tipo === 'emitida'  ? (cabecera?.venta_id  || null) : null,
-      compra_id: tipo === 'recibida' ? (cabecera?.compra_id || null) : null,
-      cxc_id: tipo === 'emitida'  ? cuota.cxc_id : null,
-      cxp_id: tipo === 'recibida' ? cuota.cxp_id : null,
-      cuota_cobrar_id: tipo === 'emitida'  ? cuota.id : null,
-      cuota_pagar_id:  tipo === 'recibida' ? cuota.id : null,
-      moneda,
-      tipo_cambio: tipoCambio,
-      monto: parseFloat(monto.toFixed(2)),
-      fecha_emision: fechaEmision,
-      fecha_vencimiento: fechaVencimiento,
-      estado: 'cartera',
-      observaciones,
-      created_by: user.db_id
-    })
-
-    if (!letra?.id) {
-      showToast('No se pudo registrar la letra (¿número duplicado?)', 'danger')
-      return
+    // Se crean una por una: si alguna falla, las anteriores quedan bien
+    // registradas (cada una con su canje y asiento) y se avisa cuál falló.
+    let canjeadoCuota = parseFloat(cuota.monto_canjeado) || 0
+    const creadas = []
+    for (const f of _letFilas) {
+      const monto = _r2(f.monto)
+      const numero = f.numero.trim()
+      const letra = await addLetraCambio({
+        numero_letra: numero,
+        tipo,
+        contact_id: contactId,
+        venta_id:  tipo === 'emitida'  ? (cabecera?.venta_id  || null) : null,
+        compra_id: tipo === 'recibida' ? (cabecera?.compra_id || null) : null,
+        cxc_id: tipo === 'emitida'  ? cuota.cxc_id : null,
+        cxp_id: tipo === 'recibida' ? cuota.cxp_id : null,
+        cuota_cobrar_id: tipo === 'emitida'  ? cuota.id : null,
+        cuota_pagar_id:  tipo === 'recibida' ? cuota.id : null,
+        moneda,
+        tipo_cambio: tipoCambio,
+        monto,
+        fecha_emision: fechaEmision,
+        fecha_vencimiento: f.venc,
+        estado: 'cartera',
+        observaciones,
+        created_by: user.db_id
+      })
+      if (!letra?.id) {
+        showToast(`No se pudo registrar la letra ${numero} (¿N° duplicado?).${creadas.length ? ` Se registraron ${creadas.length}: ${creadas.join(', ')}` : ''}`, 'danger')
+        break
+      }
+      // La cuota y el DOCUMENTO bajan su saldo con cada letra
+      canjeadoCuota = _r2(canjeadoCuota + monto)
+      const cuotaAct = { ...cuota, monto_canjeado: canjeadoCuota }
+      if (tipo === 'emitida') await updateCuotaCobrar(cuota.id, { monto_canjeado: canjeadoCuota, estado: estadoCuota(cuotaAct, true) })
+      else                    await updateCuotaPagar(cuota.id,  { monto_canjeado: canjeadoCuota, estado: estadoCuota(cuotaAct, false) })
+      await _aplicarCanjeDoc(tipo, tipo === 'emitida' ? cuota.cxc_id : cuota.cxp_id, monto)
+      const asCanje = await _asientoLetra('canje', letra, null)
+      if (asCanje?.id) await updateLetraCambio(letra.id, { asiento_emision_id: asCanje.id })
+      creadas.push(numero)
     }
 
-    // Consume el saldo de la cuota: monto_canjeado sube y el estado se
-    // recalcula con el mismo helper que usan los cobros/pagos.
-    const nuevoCanjeado = parseFloat(((parseFloat(cuota.monto_canjeado) || 0) + monto).toFixed(2))
-    const cuotaActualizada = { ...cuota, monto_canjeado: nuevoCanjeado }
-    if (tipo === 'emitida') {
-      await updateCuotaCobrar(cuota.id, { monto_canjeado: nuevoCanjeado, estado: estadoCuota(cuotaActualizada, true) })
-    } else {
-      await updateCuotaPagar(cuota.id, { monto_canjeado: nuevoCanjeado, estado: estadoCuota(cuotaActualizada, false) })
+    if (creadas.length === _letFilas.length) {
+      showToast(`${creadas.length} letra(s) registrada(s) ✅ — ${creadas.join(', ')}`, 'success', 5000)
+      window.closeModal('modal-nueva-letra')
     }
-
-    // El canje también baja el saldo del DOCUMENTO (CxC/CxP), no solo de la cuota.
-    await _aplicarCanjeDoc(tipo, tipo === 'emitida' ? cuota.cxc_id : cuota.cxp_id, monto)
-    const asCanje = await _asientoLetra('canje', letra, null)
-    if (asCanje?.id) await updateLetraCambio(letra.id, { asiento_emision_id: asCanje.id })
-
-    showToast(`Letra ${numero} registrada ✅${asCanje?.id ? ` — asiento ${asCanje.numero_asiento}` : ''}`, 'success')
-    window.closeModal('modal-nueva-letra')
     _refrescarTodo()
     await window.cargarLetras()
   } catch (e) {
@@ -2007,6 +2199,13 @@ window.guardarLetra = async function () {
 // ── Cambios de estado ──
 
 window.abrirModalLetraBanco = async function (id) {
+  const lx = _letrasCache.find(x => x.id === id)
+  if (lx && (lx.estado !== 'cartera' || _n(lx.monto_pagado) > 0)) {
+    showToast(lx.estado === 'parcial' || _n(lx.monto_pagado) > 0
+      ? 'Una letra con abonos se gestiona en cartera: para llevarla al banco, primero renuévala o unifícala en una letra nueva por el saldo.'
+      : `Solo se envían al banco letras en cartera (esta está ${lx.estado}).`, 'warning', 8000)
+    return
+  }
   document.getElementById('letBancoLetraId').value = id
   const sel = document.getElementById('letBancoSelect')
   const bancos = await cacheado('bancos', getBancos)
@@ -2144,7 +2343,7 @@ async function _registrarComisionBancariaLetra(letra, proveedorId, monto) {
 window.cambiarEstadoLetra = async function (id, nuevoEstado) {
   const letra = _letrasCache.find(l => l.id === id)
   if (!letra) return
-  const etiquetas = { cartera: 'Cartera', banco: 'En banco', cobranza: 'En cobranza', cobrada: 'Cobrada', protestada: 'Protestada', refinanciada: 'Refinanciada', anulada: 'Anulada' }
+  const etiquetas = { cartera: 'Cartera', banco: 'En banco', cobranza: 'En cobranza', parcial: 'Parcial', cobrada: 'Cobrada', protestada: 'Protestada', refinanciada: 'Refinanciada', anulada: 'Anulada' }
   if (!confirm(`¿Cambiar la letra ${letra.numero_letra} a "${etiquetas[nuevoEstado] || nuevoEstado}"?`)) return
 
   try {
@@ -2160,8 +2359,38 @@ window.cambiarEstadoLetra = async function (id, nuevoEstado) {
 window.eliminarLetra = async function (id) {
   const letra = _letrasCache.find(l => l.id === id)
   if (!letra) return
+  // Refinanciación: se deshace completa (no letra por letra)
+  if (letra.estado === 'refinanciada') {
+    let refId = null
+    try { refId = await _refinQueCerro(id) } catch (e) { showToast(e.message, 'danger'); return }
+    if (!refId) { showToast('Letra refinanciada sin registro de refinanciación (flujo anterior): revísala en Supabase.', 'warning', 7000); return }
+    return window.deshacerRefinanciacion(refId)
+  }
+  if (letra.refinanciacion_id) return window.deshacerRefinanciacion(letra.refinanciacion_id)
+  // Con abonos (pagos totales o parciales): se revierten todos antes de eliminar
+  let abonos = []
+  try { abonos = await _abonosDeLetra(id) } catch (_) { abonos = [] }
+  if (abonos.some(a => a.refinanciacion_id)) { showToast('La letra tiene un abono de renovación: deshaz la refinanciación.', 'warning'); return }
+  if (abonos.length) {
+    if (!confirm(`¿Eliminar la letra ${letra.numero_letra}?\n\nTiene ${abonos.length} abono(s) por ${formatNumber(abonos.reduce((t, a) => t + _n(a.monto_amortizado), 0))}: primero se revierten (movimientos bancarios + asientos) y luego se libera el canje de la cuota/documento y se borra el asiento de canje.`)) return
+    try {
+      for (const ab of abonos) {
+        const av = await _revertirContableAbono(ab, letra)
+        if (av.length) showToast('⚠️ ' + av.join('; '), 'warning')
+        await _delAbono(ab.id)
+      }
+      await _updLetra(id, { estado: 'cartera', monto_pagado: 0, banco_id: null, asiento_cobro_id: null })
+      letra.estado = 'cartera'; letra.monto_pagado = 0; letra.asiento_cobro_id = null
+    } catch (e) { showToast('Error al revertir abonos: ' + e.message, 'danger'); return }
+    return _eliminarLetraSinCobro(letra, true)
+  }
+  return _eliminarLetraSinCobro(letra, false)
+}
+
+async function _eliminarLetraSinCobro(letra, yaConfirmado) {
+  const id = letra.id
   const cobrada = letra.estado === 'cobrada'
-  if (!confirm(`¿Eliminar la letra ${letra.numero_letra}?\n\n${cobrada ? 'Primero se revierte su cobro/pago (movimiento bancario + asiento) y luego ' : ''}se libera el monto canjeado al saldo de la cuota y del documento, y se borra el asiento de canje.`)) return
+  if (!yaConfirmado && !confirm(`¿Eliminar la letra ${letra.numero_letra}?\n\n${cobrada ? 'Primero se revierte su cobro/pago (movimiento bancario + asiento) y luego ' : ''}se libera el monto canjeado al saldo de la cuota y del documento, y se borra el asiento de canje.`)) return
 
   try {
     if (cobrada) {
@@ -2760,6 +2989,87 @@ function _botonesDocCP(tipoDoc, docId) {
     <button class="btn btn-small btn-danger" ${dis || `title="Eliminar ${nombre}"`} onclick="window.accionDocCP('${tipoDoc}', ${docId}, 'eliminar')">✕</button>`
 }
 
+// ── Menú ⋮ por fila de CxC / CxP (2026-10-07) ─────────────────────────────
+// Agrupa en un solo menú: Cobrar/Pagar · Ver detalle · Editar/Eliminar el
+// cobro o pago · Canjear en letras · Eliminar el documento. Esta última solo
+// para documentos SIN venta/compra vinculada (apertura o manuales) y sin
+// cobros/pagos/letras — p. ej. la CxC de apertura duplicada de una factura
+// que luego se importó como venta.
+function _menuDocCP(tipoDoc, doc) {
+  const esCxC = tipoDoc === 'cxc'
+  const nMov = _movsDeDoc(tipoDoc, doc.id).length, nLet = _letrasDeDoc(tipoDoc, doc.id).length
+  const pendiente = esCxC ? doc.estado !== 'cobrado' && doc.estado !== 'anulado' : doc.estado !== 'pagado' && doc.estado !== 'anulado'
+  const nombre = esCxC ? 'cobro' : 'pago'
+  const vinculado = esCxC ? doc.venta_id : doc.compra_id
+  return menuAccionesFila([
+    pendiente && { label: esCxC ? 'Cobrar' : 'Pagar', icono: '💵', onclick: `window.${esCxC ? 'irARegistrarCobro' : 'irARegistrarPago'}(${doc.id})` },
+    { label: 'Ver detalle', icono: '👁', onclick: `window.accionDocCP('${tipoDoc}', ${doc.id}, 'ver')` },
+    pendiente && { label: 'Canjear en letras', icono: '🔁', onclick: `window.canjearDocEnLetras('${tipoDoc}', ${doc.id})` },
+    (nMov + nLet) > 0 && { separador: true },
+    (nMov + nLet) > 0 && { label: `Editar ${nombre}${nLet ? '/letra' : ''}`, icono: '✏️', onclick: `window.accionDocCP('${tipoDoc}', ${doc.id}, 'editar')` },
+    (nMov + nLet) > 0 && { label: `Eliminar ${nombre}${nLet ? '/letra' : ''}`, icono: '✕', peligro: true, onclick: `window.accionDocCP('${tipoDoc}', ${doc.id}, 'eliminar')` },
+    !vinculado && { separador: true },
+    !vinculado && { label: `Eliminar ${esCxC ? 'cuenta por cobrar' : 'cuenta por pagar'}`, icono: '🗑', peligro: true, onclick: `window.eliminarDocCP('${tipoDoc}', ${doc.id})` }
+  ])
+}
+
+window.eliminarDocCP = async function (tipoDoc, docId) {
+  const esCxC = tipoDoc === 'cxc'
+  const doc = (esCxC ? _cxcList : _cxpList).find(d => d.id === docId)
+  if (!doc) { showToast('Documento no encontrado', 'danger'); return }
+  if (esCxC ? doc.venta_id : doc.compra_id) {
+    showToast(`Esta ${esCxC ? 'CxC está vinculada a una venta' : 'CxP está vinculada a una compra'}: se elimina desde ${esCxC ? 'Ventas' : 'Compras'}`, 'warning'); return
+  }
+  const nMov = _movsDeDoc(tipoDoc, docId).length, nLet = _letrasDeDoc(tipoDoc, docId).length
+  if (nMov || nLet) {
+    showToast(`Tiene ${nMov} ${esCxC ? 'cobro' : 'pago'}(s) y ${nLet} letra(s): elimínalos primero desde 👁 Ver detalle`, 'warning'); return
+  }
+  if (doc.asiento_id) { showToast('Tiene asiento contable vinculado: revísalo en Contabilidad antes de eliminar', 'warning'); return }
+  await (esCxC ? _cargarCuotas() : _cargarCuotasPagar())
+  const cuotas = esCxC ? _cuotasDe(docId) : _cuotasPagarDe(docId)
+  if (cuotas.some(q => parseFloat(q.monto_canjeado || 0) > 0 || parseFloat((esCxC ? q.monto_cobrado : q.monto_pagado) || 0) > 0)) {
+    showToast('Alguna cuota ya tiene cobros/pagos o canjes aplicados: no se puede eliminar', 'warning'); return
+  }
+  if (!confirm(`¿Eliminar la ${esCxC ? 'cuenta por cobrar' : 'cuenta por pagar'} ${_descDocCP(doc)}?\n\n${_nombreContacto(doc.contact_id)} — ${doc.moneda || 'PEN'} ${formatNumber(doc.monto_total)}\n(sin venta/compra vinculada, sin ${esCxC ? 'cobros' : 'pagos'} ni letras${cuotas.length ? `; se borran sus ${cuotas.length} cuota(s)` : ''})\n\nEsta acción no se puede deshacer.`)) return
+  try {
+    for (const q of cuotas) {
+      const ok = await (esCxC ? deleteCuotaCobrar(q.id) : deleteCuotaPagar(q.id))
+      if (!ok) throw new Error(`no se pudo borrar la cuota ${q.numero_cuota}`)
+    }
+    const ok = await (esCxC ? deleteCuentaCobrar(docId) : deleteCuentaPagar(docId))
+    if (!ok) throw new Error('no se pudo eliminar el documento (¿permisos/RLS o referencias?)')
+    invalidarVarios([esCxC ? 'cuentas_cobrar' : 'cuentas_pagar', esCxC ? 'cuotas_cobrar' : 'cuotas_pagar'])
+    showToast(`${esCxC ? 'CxC' : 'CxP'} ${_descDocCP(doc)} eliminada ✅`, 'success')
+    if (esCxC) { _cuotasCache = _cuotasCache.filter(q => q.cxc_id !== docId); await cargarCxC() }
+    else { _cuotasPagarCache = _cuotasPagarCache.filter(q => q.cxp_id !== docId); await cargarCxP() }
+  } catch (e) {
+    console.error('eliminarDocCP:', e)
+    showToast('Error al eliminar: ' + e.message, 'danger')
+  }
+}
+
+// Canjear en letras desde la fila: abre "Nueva Letra" con el tipo correcto y
+// el selector de cuota filtrado a ESTE documento (primera cuota con saldo).
+window.canjearDocEnLetras = async function (tipoDoc, docId) {
+  const esCxC = tipoDoc === 'cxc'
+  await window.abrirModalNuevaLetra()
+  const tipoSel = document.getElementById('letTipo')
+  tipoSel.value = esCxC ? 'emitida' : 'recibida'
+  window.onCambiarTipoLetra()
+  await _refrescarCuotasDoc(esCxC, docId)
+  window.onCambiarTipoLetra()
+  const sel = document.getElementById('letCuota')
+  const cuotasDoc = new Set((esCxC ? _cuotasDe(docId) : _cuotasPagarDe(docId)).filter(q => saldoCuota(q) > 0.01).map(q => String(q.id)))
+  ;[...sel.options].forEach(o => { if (o.value && !cuotasDoc.has(o.value)) o.remove() })
+  if (!cuotasDoc.size) {
+    document.getElementById('letCuotaAviso').textContent = '⚠ Este documento no tiene cuotas con saldo: revisa su cronograma (👁 Ver detalle) antes de canjear.'
+    return
+  }
+  sel.value = [...cuotasDoc][0]
+  try { refrescarBuscador('letCuota') } catch (_) {}
+  window.onCambiarCuotaLetra()
+}
+
 window.accionDocCP = async function(tipoDoc, docId, accion) {
   const lista = _movsDeDoc(tipoDoc, docId)
   const letras = _letrasDeDoc(tipoDoc, docId)
@@ -2884,19 +3194,20 @@ async function _asientoLetra(etapa, letra, bancoId, fecha = null, tcCancel = nul
       return await crearAsientoCancelacionME({
         ...base, descripcion: `Canje ${emitida ? 'factura por letra' : 'letra aceptada'} ${letra.numero_letra}`,
         documentoReferencia: `LETRA-${letra.id}`, tipoMovimiento: 'Canje Letra',
-        cuentaDebe: emitida ? '12131' : (usd ? '42122' : '42111'), cuentaHaber: emitida ? (usd ? '12112' : '12111') : '42131',
+        cuentaDebe: emitida ? ctaCob('ctaLetrasCobrar', '12131') : (usd ? ctaCob('ctaCxpME', '42122') : ctaCob('ctaCxpMN', '42111')),
+        cuentaHaber: emitida ? (usd ? ctaCob('ctaCxcME', '12112') : ctaCob('ctaCxcMN', '12111')) : ctaCob('ctaLetrasPagar', '42131'),
         tcDebe: tcDoc, tcHaber: tcDoc,
         descDebe: emitida ? 'Letras por cobrar' : 'Canje de factura', descHaber: emitida ? 'Canje de factura' : 'Letras por pagar'
       })
     }
     // Cobro/pago de la letra: banco al T.C. del día, letra al T.C. de la factura → 776/676
     const banco = bancoId ? await getBancoById(bancoId) : null
-    const ctaBanco = banco?.cuenta_contable_codigo || '10411'
+    const ctaBanco = banco?.cuenta_contable_codigo || ctaCob('ctaBancoDefault', '10411')
     const tcC = parseFloat(tcCancel) || tcDoc
     return await crearAsientoCancelacionME({
       ...base, descripcion: `${emitida ? 'Cobro' : 'Pago'} letra ${letra.numero_letra}`,
       documentoReferencia: `LETRA-CANC-${letra.id}`, tipoMovimiento: emitida ? 'Cobro Letra' : 'Pago Letra',
-      cuentaDebe: emitida ? ctaBanco : '42131', cuentaHaber: emitida ? '12131' : ctaBanco,
+      cuentaDebe: emitida ? ctaBanco : ctaCob('ctaLetrasPagar', '42131'), cuentaHaber: emitida ? ctaCob('ctaLetrasCobrar', '12131') : ctaBanco,
       tcDebe: emitida ? tcC : tcDoc, tcHaber: emitida ? tcDoc : tcC,
       descDebe: emitida ? 'Cobro de letra' : 'Cancelación letra por pagar', descHaber: emitida ? 'Cancelación letra por cobrar' : 'Pago de letra'
     })
@@ -2907,78 +3218,1045 @@ async function _asientoLetra(etapa, letra, bancoId, fecha = null, tcCancel = nul
   }
 }
 
-window.abrirCancelarLetra = function (id) {
-  const l = _letrasCache.find(x => x.id === id)
-  if (!l) return
+/** Cuenta sugerida para letras: misma moneda y que sea banco (no caja/efectivo). */
+const _bancoSugeridoLetra = mon => _bancos.find(b => b.moneda === mon && !/caja|efectivo/i.test(`${b.nombre} ${b.numero_cuenta || ''}`))
+  || _bancos.find(b => b.moneda === mon)
+
+// ============================================================================
+// LETRAS — ABONOS (cobro total / parcial) Y REFINANCIACIÓN (renovar / unificar)
+// ============================================================================
+// Todo pago de una letra es un ABONO (tabla letras_abonos, SQL 77):
+//   saldo de la letra = monto − monto_pagado
+//   saldo 0 → 'cobrada' · saldo > 0 con abonos → 'parcial' (solo en cartera)
+// Refinanciar = cerrar 1..N letras con saldo ('refinanciada') y crear 1..N
+// letras nuevas por: saldos − abono en el acto + interés de refinanciación.
+//   1 origen  → "renovación" (típico del banco: paga 50% + comisión)
+//   N orígenes → "unificación" (varias letras chicas → una sola)
+// Analogía: la letra es una alcancía al revés; cada abono le saca una parte
+// y refinanciar es vaciar varias alcancías en una nueva.
+
+const _n = v => _r2(parseFloat(v) || 0)
+const _ESTADOS_ABIERTOS = ['cartera', 'banco', 'cobranza', 'parcial', 'protestada']
+const _letraAbierta = l => _ESTADOS_ABIERTOS.includes(l?.estado)
+const _saldoLetra = l => _letraAbierta(l) ? Math.max(0, _r2(_n(l.monto) - _n(l.monto_pagado))) : 0
+const _hoyISO = () => new Date().toISOString().split('T')[0]
+const _addDias = (iso, d) => { const f = new Date((iso || _hoyISO()) + 'T00:00:00'); f.setDate(f.getDate() + d); return f.toISOString().split('T')[0] }
+const _diasAtraso = (venc, fecha) => { const d = _diasEntre(venc, fecha || _hoyISO()); return d && d > 0 ? d : 0 }
+/** Moneda de la letra (y si faltara, la de su factura). Empresa bimoneda PEN/USD. */
+const _monedaLetra = l => l?.moneda || (l?.tipo === 'recibida' ? _cxpList.find(c => c.id === l?.cxp_id) : _cxcList.find(c => c.id === l?.cxc_id))?.moneda || 'PEN'
+const _monedaBanco = id => _bancosMap[id]?.moneda || _bancos.find(b => Number(b.id) === Number(id))?.moneda || null
+const _SIMB = m => (m === 'USD' ? 'US$' : 'S/')
+/** Badges "USD → PEN" en el modal; devuelve { monLetra, monCuenta, distinta }. */
+function _pintarMonedas(contId, monLetra, bancoId) {
+  const monCuenta = _monedaBanco(bancoId)
+  const distinta = !!monCuenta && monCuenta !== monLetra
+  const b = (m, t) => `<span class="badge ${m === 'USD' ? 'badge-info' : 'badge-secondary'}" title="${t}">${m}</span>`
+  const c = document.getElementById(contId)
+  if (c) c.innerHTML = b(monLetra, 'Moneda de la letra (de la factura original)') +
+    (monCuenta ? ` → ${b(monCuenta, 'Moneda de la cuenta bancaria')}` : ' → <small style="color:var(--text-secondary);">elige cuenta</small>') +
+    (distinta ? ` <small style="color:var(--color-warning);">⚠ se convierte al T.C.</small>` : '')
+  return { monLetra, monCuenta, distinta }
+}
+const _ubicacionDeLetra = l => ['banco', 'cobranza'].includes(l?.estado) ? 'banco' : 'cartera'
+const _MEDIOS_LETRA = {
+  transferencia: 'Transferencia', deposito: 'Depósito en cuenta', efectivo: 'Efectivo', cheque: 'Cheque',
+  yape_plin: 'Yape / Plin', banco_letra: 'Cobro de letra en banco', otro: 'Otro'
+}
+const _TIPOS_ABONO = { total: 'Cobro total', parcial: 'Abono parcial', renovacion: 'Renovación', unificacion: 'Unificación' }
+
+function _errSQL77(e) {
+  const m = e?.message || String(e)
+  return /letras_abonos|letras_refinanciacion|monto_pagado|refinanciacion_id|schema cache|does not exist/i.test(m)
+    ? new Error('Falta ejecutar el script SQL 77 (letras_abonos / refinanciación). Detalle: ' + m) : (e instanceof Error ? e : new Error(m))
+}
+async function _sb(q) { const { data, error } = await q; if (error) throw _errSQL77(error); return data }
+const _abonosDeLetra = id => _sb(supabase.from('letras_abonos').select('*').eq('letra_id', id).order('fecha').order('id'))
+const _insAbono = row => _sb(supabase.from('letras_abonos').insert(row).select().single())
+const _updAbono = (id, d) => _sb(supabase.from('letras_abonos').update({ ...d, updated_at: new Date().toISOString() }).eq('id', id).select().single())
+const _delAbono = id => _sb(supabase.from('letras_abonos').delete().eq('id', id))
+async function _updLetra(id, d) {
+  const r = await updateLetraCambio(id, { ...d, updated_at: new Date().toISOString() })
+  if (!r) throw new Error('No se pudo actualizar la letra (¿ejecutaste el SQL 77?)')
+  return r
+}
+
+// ── Recibos de cobranza: correlativo común a cobros y abonos de letras ──
+
+/** Todos los recibos usados (cobros + abonos de letras emitidas). */
+async function _todosLosRecibos() {
+  const [cob, ab] = await Promise.all([
+    supabase.from('cobros').select('id, numero_recibo, contact_id, fecha, monto, moneda, cxc_id, banco_id, medio_pago').not('numero_recibo', 'is', null),
+    supabase.from('letras_abonos').select('id, numero_recibo, contact_id, fecha, monto_neto, monto_amortizado, interes, moneda, letra_id, refinanciacion_id, banco_id, medio, tipo_abono, tipo').not('numero_recibo', 'is', null)
+  ])
+  const out = (cob.data || []).filter(x => String(x.numero_recibo).trim()).map(x => ({ origen: 'cobro', ...x, importe: _n(x.monto) }))
+  for (const a of (ab.data || [])) {
+    if (a.tipo !== 'emitida' || !String(a.numero_recibo).trim()) continue
+    out.push({ origen: 'abono', ...a, importe: _r2(_n(a.monto_amortizado) + _n(a.interes)) })
+  }
+  return out
+}
+
+/** Separa "001-000123" en { pref:'001-', num:123, ancho:6 }. */
+function _partesRecibo(s) {
+  const m = String(s || '').trim().match(/^(.*?)(\d+)$/)
+  return m ? { pref: m[1], num: parseInt(m[2], 10), ancho: m[2].length } : null
+}
+
+/** Siguiente N° de recibo: el mayor usado + 1 (mismo prefijo y ancho). */
+window._sugerirRecibo = async function (inputId) {
+  const inp = document.getElementById(inputId)
+  if (!inp) return
+  try {
+    const usados = (await _todosLosRecibos()).map(r => _partesRecibo(r.numero_recibo)).filter(Boolean)
+    if (!usados.length) { showToast('Aún no hay recibos registrados: escribe el primero', 'info'); return }
+    const mayor = usados.reduce((a, b) => (b.num > a.num ? b : a))
+    inp.value = `${mayor.pref}${String(mayor.num + 1).padStart(mayor.ancho, '0')}`
+    inp.dispatchEvent(new Event('input'))
+  } catch (e) { showToast('No se pudo sugerir: ' + e.message, 'warning') }
+}
+
+/** Avisa si el N° de recibo ya está en un cobro/abono de OTRO cliente. */
+async function _reciboLibreGlobal(numero, contactId, excluir = {}) {
+  const n = (numero || '').trim().toLowerCase()
+  if (!n) return true
+  const todos = await _todosLosRecibos()
+  const otro = todos.find(r => String(r.numero_recibo).trim().toLowerCase() === n
+    && Number(r.contact_id) !== Number(contactId)
+    && !(r.origen === excluir.origen && r.id === excluir.id))
+  if (!otro) return true
+  return confirm(`El recibo N° ${numero} ya está en un ${otro.origen === 'cobro' ? 'cobro' : 'abono de letra'} de OTRO cliente (${fechaDMY(otro.fecha)} — ${_nombreContacto(otro.contact_id)}).\n\n¿Guardar igual?`)
+}
+
+// ── Asiento genérico de letras ──
+/**
+ * origenes: [{ letra, monto }] → salen de 12131/42131 a su T.C. de origen.
+ * nuevas:   [{ numero, monto }] → entran a 12131/42131 al tcNueva.
+ * intRef:   interés de refinanciación (se suma a las nuevas).
+ * abono:    { bancoId, amort, interes, portes, comision, otros, ubicacion, tcDia } | null
+ * El banco va por el NETO; la diferencia de T.C. la cuadra 776/676.
+ */
+async function _asientoLetras({ ref, tipoMov, descripcion, fecha, l, origenes = [], nuevas = [], tcNueva = null, intRef = 0, abono = null, renov = false }) {
+  try {
+    const user = getCurrentUser()
+    const emitida = l.tipo === 'emitida'
+    const moneda = l.moneda || 'PEN'
+    const ctaLetra = emitida ? ctaCob('ctaLetrasCobrar', '12131') : ctaCob('ctaLetrasPagar', '42131')
+    const ladoOrig = emitida ? 'haber' : 'debe'
+    const ladoNueva = emitida ? 'debe' : 'haber'
+    const lineas = []
+    for (const o of origenes) lineas.push({ cuenta: ctaLetra, lado: ladoOrig, monto: o.monto, tc: parseFloat(o.letra.tipo_cambio) || 1, desc: `Letra ${o.letra.numero_letra}` })
+    for (const nv of nuevas) lineas.push({ cuenta: ctaLetra, lado: ladoNueva, monto: nv.monto, tc: tcNueva || 1, desc: `Nueva letra ${nv.numero}` })
+    if (_n(intRef) > 0) lineas.push({
+      cuenta: emitida ? ctaCob('ctaInteresRefin', ctaCob('ctaInteresCobrado', '772110')) : ctaCob('ctaInteresPagado', '679220'),
+      lado: emitida ? 'haber' : 'debe', monto: intRef, tc: tcNueva || 1, desc: 'Interés de refinanciación'
+    })
+    let neto = 0
+    if (abono) {
+      const tcD = parseFloat(abono.tcDia) || parseFloat(l.tipo_cambio) || 1
+      const banco = abono.bancoId ? await getBancoById(abono.bancoId) : null
+      const ctaBanco = banco?.cuenta_contable_codigo || ctaCob('ctaBancoDefault', '10411')
+      const ctaGastos = ctaCob('ctaGastosBancarios', '679218')
+      const ctaComis = renov ? ctaCob('ctaComisionRenov', '679214') : ctaGastos
+      neto = _calcLetraBanco(l, { base: abono.amort, intereses: abono.interes, portes: abono.portes, comision: abono.comision, otros: abono.otros }).neto
+      lineas.push(
+        { cuenta: emitida ? ctaCob('ctaInteresCobrado', '772110') : ctaCob('ctaInteresPagado', '679220'), lado: emitida ? 'haber' : 'debe', monto: abono.interes, tc: tcD, desc: emitida ? 'Interés moratorio cobrado' : 'Interés moratorio pagado' },
+        { cuenta: ctaGastos, lado: 'debe', monto: _n(abono.portes) + _n(abono.otros), tc: tcD, desc: 'Portes y gastos bancarios' },
+        { cuenta: ctaComis, lado: 'debe', monto: abono.comision, tc: tcD, desc: renov ? 'Comisión de renovación' : 'Comisión bancaria' },
+        {
+          cuenta: ctaBanco, lado: emitida ? (neto >= 0 ? 'debe' : 'haber') : (neto >= 0 ? 'haber' : 'debe'),
+          // Cuenta en soles y letra en dólares: la línea de banco va en soles (sin importe ME)
+          ...(banco?.moneda === 'PEN' && moneda === 'USD'
+            ? { monto: _r2(Math.abs(neto) * tcD), tc: 1, moneda: 'PEN' }
+            : { monto: Math.abs(neto), tc: tcD }),
+          desc: (emitida ? 'Abono neto en cuenta' : 'Cargo neto en cuenta') + (banco?.moneda && banco.moneda !== moneda ? ` (${moneda}→${banco.moneda} T.C. ${tcD})` : '')
+        }
+      )
+    }
+    const tcRef = abono?.tcDia || tcNueva || parseFloat(l.tipo_cambio) || 1
+    return await crearAsientoMultiME({ fecha, descripcion, documentoReferencia: ref, tipoMovimiento: tipoMov, contactId: l.contact_id, userId: user?.db_id || null, moneda, tcRef, lineas })
+  } catch (e) {
+    console.warn('Asiento de letras no generado:', e.message)
+    showToast(`⚠️ Asiento no generado: ${e.message}`, 'warning', 7000)
+    return null
+  }
+}
+
+/** Neto que entra (emitida) o sale (recibida) del banco. */
+function _calcLetraBanco(l, { base, intereses = 0, portes = 0, comision = 0, otros = 0 }) {
+  const gastos = _r2(_n(portes) + _n(comision) + _n(otros))
+  const neto = l.tipo === 'emitida' ? _r2(_n(base) + _n(intereses) - gastos) : _r2(_n(base) + _n(intereses) + gastos)
+  return { gastos, neto }
+}
+
+async function _movPorId(id) {
+  if (!id) return null
+  const { data } = await supabase.from('movimientos_banco').select('*').eq('id', id).maybeSingle()
+  return data || null
+}
+
+/** Revierte mov. bancario + asiento de un abono (no toca la letra ni borra la fila). */
+async function _revertirContableAbono(ab, l) {
+  const avisos = []
+  let mov = await _movPorId(ab.movimiento_banco_id)
+  if (!mov && ab.banco_id && l) {   // abonos migrados (SQL 77) sin vínculo directo
+    const { data } = await supabase.from('movimientos_banco').select('*').eq('banco_id', ab.banco_id).eq('referencia', `LETRA ${l.numero_letra}`).limit(1)
+    mov = data?.[0] || null
+  }
+  if (mov) await _eliminarMovimientoYSaldo(mov)
+  else if (ab.banco_id) avisos.push('no se encontró el movimiento bancario del abono')
+  const asId = ab.asiento_id
+  if (asId) {
+    await _updAbono(ab.id, { asiento_id: null, movimiento_banco_id: null })
+    if (l && Number(l.asiento_cobro_id) === Number(asId)) await _updLetra(l.id, { asiento_cobro_id: null })
+    try { await eliminarAsientoContable(asId) } catch (e) { avisos.push('asiento no eliminado: ' + e.message) }
+  }
+  return avisos
+}
+
+/** Recalcula monto_pagado y estado de la letra a partir de sus abonos. */
+async function _recalcularLetra(l, estadoSiSinAbonos = null) {
+  const abonos = await _abonosDeLetra(l.id)
+  const pagado = _r2(abonos.reduce((s, a) => s + _n(a.monto_amortizado), 0))
+  let estado
+  if (pagado >= _n(l.monto) - 0.005) estado = 'cobrada'
+  else if (pagado > 0.005) estado = 'parcial'
+  else {
+    const prev = estadoSiSinAbonos || abonos[0]?.estado_previo
+    estado = prev && prev !== 'parcial' && prev !== 'cobrada' ? prev : 'cartera'
+  }
+  const ult = abonos[abonos.length - 1]
+  const cambios = { monto_pagado: pagado, estado }
+  if (estado === 'cobrada' && ult?.banco_id) cambios.banco_id = ult.banco_id
+  if (estado === 'cartera' && l.estado === 'cobrada') cambios.banco_id = null
+  await _updLetra(l.id, cambios)
+  Object.assign(l, cambios)
+  return { pagado, estado }
+}
+
+/**
+ * Registra (o re-registra, si abonoId) un abono simple sobre UNA letra.
+ * d = { ubicacion, medio, bancoId, fecha, numOp, recibo, tcDia, amort, interes, portes, comision, otros, obs }
+ */
+async function _registrarAbonoLetra(l, d, abonoId = null) {
   const emitida = l.tipo === 'emitida'
-  document.getElementById('clet-titulo').textContent = `${emitida ? 'Cobrar' : 'Pagar'} letra ${l.numero_letra}`
-  document.getElementById('clet-info').innerHTML = `
-    <div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">${emitida ? 'Letra por cobrar' : 'Letra por pagar'}</div>
-    <div style="font-weight:600; font-size:1.05rem; margin-top:2px;">${_esc(l.numero_letra)} — ${l.moneda || 'PEN'} ${formatNumber(l.monto)}</div>
-    <div style="font-size:0.85rem; color:var(--text-secondary); margin-top:2px;">${_esc(_nombreContacto(l.contact_id))} · Vence ${fechaDMY(l.fecha_vencimiento)}</div>`
-  document.getElementById('cletId').value = id
-  document.getElementById('cletFecha').value = new Date().toISOString().split('T')[0]
-  document.getElementById('cletNumOp').value = ''
-  const sel = document.getElementById('cletBanco')
+  const saldoAntes = _r2(_n(l.monto) - _n(l.monto_pagado))
+  const tipoAbono = Math.abs(_n(d.amort) - saldoAntes) < 0.005 ? 'total' : 'parcial'
+  const imp = { base: _n(d.amort), intereses: _n(d.interes), portes: _n(d.portes), comision: _n(d.comision), otros: _n(d.otros) }
+  const { neto } = _calcLetraBanco(l, imp)
+  const fila = {
+    letra_id: l.id, tipo: l.tipo, contact_id: l.contact_id, tipo_abono: tipoAbono, ubicacion: d.ubicacion,
+    medio: d.medio || null, fecha: d.fecha, banco_id: d.bancoId || null, moneda: l.moneda || 'PEN',
+    tipo_cambio: d.tcDia || null, monto_amortizado: imp.base, interes: imp.intereses,
+    gasto_portes: imp.portes, gasto_comision: imp.comision, gasto_otros: imp.otros, monto_neto: neto,
+    numero_operacion: d.numOp || null, numero_recibo: d.recibo || null, observaciones: d.obs || null
+  }
+  const user = getCurrentUser()
+  const ab = abonoId
+    ? await _updAbono(abonoId, fila)
+    : await _insAbono({ ...fila, estado_previo: l.estado, created_by: user?.db_id || null })
+  const verbo = emitida ? 'Cobro' : 'Pago'
+  const asiento = await _asientoLetras({
+    ref: `LETRA-ABONO-${ab.id}`, tipoMov: emitida ? 'Cobro Letra' : 'Pago Letra', fecha: d.fecha, l,
+    descripcion: `${tipoAbono === 'total' ? verbo : 'Abono'} letra ${l.numero_letra}`,
+    origenes: [{ letra: l, monto: imp.base }],
+    abono: { bancoId: d.bancoId, amort: imp.base, interes: imp.intereses, portes: imp.portes, comision: imp.comision, otros: imp.otros, tcDia: d.tcDia }
+  })
+  const mov = await _registrarMovimientoBancario({
+    bancoId: d.bancoId, tipo: (emitida ? neto >= 0 : neto < 0) ? 'ingreso' : 'egreso', fecha: d.fecha,
+    concepto: `${tipoAbono === 'total' ? verbo : 'Abono'} letra ${l.numero_letra} — ${_nombreContacto(l.contact_id)}${d.recibo ? ` (Rec. ${d.recibo})` : ''}`,
+    categoria: emitida ? 'Cobranza letras' : 'Pago letras',
+    referencia: `LETRA ${l.numero_letra}`, numeroOperacion: d.numOp,
+    monto: Math.abs(neto), asientoId: asiento?.id || null, monedaMonto: l.moneda || 'PEN', tc: d.tcDia || 1
+  })
+  await _updAbono(ab.id, { asiento_id: asiento?.id || null, movimiento_banco_id: mov?.id || null })
+  if (d.numOp) await _updLetra(l.id, { numero_operacion: d.numOp })
+  const r = await _recalcularLetra(l)
+  return { ab, asiento, mov, neto, ...r }
+}
+
+// ── Modal Cobrar / Abonar letra ──
+let _clet = null   // { letra, abono (edición), ubicacion, modo }
+
+function _segmento(contId, opciones, valor, onclick) {
+  const c = document.getElementById(contId)
+  if (!c) return
+  const est = on => on
+    ? 'background:var(--color-info, #3b82f6); color:#fff; border:1px solid var(--color-info, #3b82f6); font-weight:600; box-shadow:0 0 0 2px rgba(59,130,246,.25);'
+    : 'background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border-color);'
+  c.innerHTML = opciones.map(o => `<button type="button" class="btn btn-small" ${o.disabled ? 'disabled' : ''}
+    title="${_esc(o.title || '')}" onclick="${onclick}('${o.v}')" style="flex:1; min-width:120px; ${est(o.v === valor)}${o.disabled ? ' opacity:.45; cursor:not-allowed;' : ''}">${o.t}</button>`).join('')
+}
+
+function _optsBancos(sel, valor) {
   sel.innerHTML = '<option value="">-- Selecciona --</option>' + _bancos
     .map(b => `<option value="${b.id}">${_esc(b.nombre)} — ${_esc(b.numero_cuenta || '')} (${b.moneda || ''})</option>`).join('')
-  // Sugerir la cuenta de la misma moneda (o la del banco donde está la letra)
-  sel.value = l.banco_id || (_bancos.find(b => b.moneda === (l.moneda || 'PEN'))?.id ?? '')
-  const g = document.getElementById('cletTCGroup')
-  if (g) g.style.display = (l.moneda || 'PEN') === 'USD' ? '' : 'none'
-  document.getElementById('cletTC').value = l.tipo_cambio || ''
-  window._tcDefaultLetra(l)
+  sel.value = valor || ''
+}
+
+function _optsMedios(sel, valor) {
+  sel.innerHTML = Object.entries(_MEDIOS_LETRA).map(([k, t]) => `<option value="${k}">${t}</option>`).join('')
+  sel.value = valor || 'transferencia'
+}
+
+window.abrirCancelarLetra = async function (id, abonoId = null) {
+  const l = _letrasCache.find(x => x.id === id) || await _getLetra(id)
+  if (!l) return
+  let abono = null
+  if (abonoId) {
+    try { abono = (await _abonosDeLetra(id)).find(a => a.id === abonoId) } catch (e) { showToast(e.message, 'danger'); return }
+    if (!abono) { showToast('Abono no encontrado', 'danger'); return }
+    if (abono.refinanciacion_id) { showToast('Este abono es parte de una renovación/unificación: se deshace eliminando la refinanciación.', 'warning', 6000); return }
+  } else if (!_letraAbierta(l)) { showToast(`La letra está ${l.estado}: no tiene saldo por ${l.tipo === 'emitida' ? 'cobrar' : 'pagar'}`, 'warning'); return }
+
+  const $ = i => document.getElementById(i)
+  const emitida = l.tipo === 'emitida'
+  const mon = _monedaLetra(l)
+  if (!l.moneda) l.moneda = mon
+  const saldoDisp = _r2(_n(l.monto) - _n(l.monto_pagado) + (abono ? _n(abono.monto_amortizado) : 0))
+  _clet = { letra: l, abono, saldoDisp, ubicacion: abono?.ubicacion || _ubicacionDeLetra(l), modo: abono ? (abono.tipo_abono === 'total' ? 'total' : 'parcial') : 'total' }
+
+  $('clet-titulo').textContent = abono ? `Editar abono — letra ${l.numero_letra}` : `${emitida ? 'Cobrar / abonar' : 'Pagar / abonar'} letra ${l.numero_letra}`
+  const atraso = _diasAtraso(l.fecha_vencimiento)
+  $('clet-info').innerHTML = `
+    <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+      <div>
+        <div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">${emitida ? 'Letra por cobrar' : 'Letra por pagar'} · ${_esc(l.estado)}</div>
+        <div style="font-weight:600; font-size:1.05rem; margin-top:2px;">${_esc(l.numero_letra)} — ${_esc(_nombreContacto(l.contact_id))}</div>
+        <div style="font-size:0.85rem; color:var(--text-secondary); margin-top:2px;">Vence ${fechaDMY(l.fecha_vencimiento)}${atraso ? ` · <b style="color:var(--color-danger);">${atraso} día(s) de atraso</b>` : ''}</div>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(3, auto); gap:4px 18px; text-align:right; font-size:0.85rem;">
+        <span style="color:var(--text-secondary);">Monto</span><span style="color:var(--text-secondary);">Pagado</span><span style="color:var(--text-secondary);">Saldo</span>
+        <b>${mon} ${formatNumber(l.monto)}</b><b>${mon} ${formatNumber(l.monto_pagado || 0)}</b><b style="color:var(--color-warning);">${mon} ${formatNumber(_saldoLetra(l))}</b>
+      </div>
+    </div>`
+  $('cletId').value = id
+  $('cletFecha').value = abono?.fecha || _hoyISO()
+  $('cletNumOp').value = abono?.numero_operacion || ''
+  $('cletRecibo').value = abono?.numero_recibo || ''
+  $('cletObs').value = abono?.observaciones || ''
+  $('cletTC').value = abono?.tipo_cambio || l.tipo_cambio || 1
+  _optsBancos($('cletBanco'), abono?.banco_id || (_clet.ubicacion === 'banco' && l.banco_id) || _bancoSugeridoLetra(mon)?.id)
+  _optsMedios($('cletMedio'), abono?.medio || (_clet.ubicacion === 'banco' ? 'banco_letra' : 'transferencia'))
+  _pintarMonedas('cletMonedas', mon, $('cletBanco').value)
+  $('cletMonto').value = (abono ? _n(abono.monto_amortizado) : saldoDisp).toFixed(2)
+  const intAb = abono ? _n(abono.interes) : 0
+  $('cletChkInteres').checked = intAb > 0
+  $('cletInteres').value = intAb.toFixed(2)
+  $('cletInteresBox').style.display = intAb > 0 ? '' : 'none'
+  for (const [k, c] of [['cletPortes', 'gasto_portes'], ['cletComision', 'gasto_comision'], ['cletOtros', 'gasto_otros']]) $(k).value = _n(abono?.[c]).toFixed(2)
+  $('cletChkGastos').checked = abono ? (_n(abono.gasto_portes) + _n(abono.gasto_comision) + _n(abono.gasto_otros)) > 0 : false
+  $('cletMon').textContent = `(${mon})`
+  $('cletLblRecibo').textContent = emitida ? 'N° Recibo de cobranza' : 'N° Recibo / constancia'
+  $('cletLblInteres').textContent = emitida ? 'Cobrar interés moratorio' : 'Pagar interés moratorio'
+  $('cletBtnOk').textContent = abono ? '💾 Guardar cambios' : '💾 Confirmar'
+  _adjPendientes.clet = []; _pintarAdjPendientes('clet')
+  _pintarAdjLetra(l.id)
+  window._cletUbicacion(_clet.ubicacion, true)
+  if (!abono) window._tcDefaultLetra(l).then(() => window._cletRecalc())
   window.openModal('modal-cancelar-letra')
 }
 
-/** Núcleo: cobra/paga la letra (asiento banco↔letra + movimiento MB + estado). */
-async function _aplicarCancelacionLetra(l, bancoId, fecha, numOp, tcCancel = null) {
+window._cletCambioCuenta = function () {
+  if (!_clet) return
+  const m = _pintarMonedas('cletMonedas', _monedaLetra(_clet.letra), document.getElementById('cletBanco').value)
+  // Letra en soles cobrada en cuenta en dólares (o al revés): hace falta el T.C. del día
+  if (m.distinta && !(parseFloat(document.getElementById('cletTC').value) > 1)) window._tcDefaultLetra(_clet.letra, true).then(() => window._cletRecalc())
+  else window._cletRecalc()
+}
+
+window._cletUbicacion = function (v, inicial = false) {
+  if (!_clet) return
+  _clet.ubicacion = v
+  const l = _clet.letra
   const emitida = l.tipo === 'emitida'
-  const tcC = parseFloat(tcCancel) || parseFloat(l.tipo_cambio) || 1
-  const asiento = await _asientoLetra('cancelacion', l, bancoId, fecha, tcC)
-  const mov = await _registrarMovimientoBancario({
-    bancoId, tipo: emitida ? 'ingreso' : 'egreso', fecha,
-    concepto: `${emitida ? 'Cobro' : 'Pago'} letra ${l.numero_letra} — ${_nombreContacto(l.contact_id)}`,
-    categoria: emitida ? 'Cobranza letras' : 'Pago letras',
-    referencia: `LETRA ${l.numero_letra}`, numeroOperacion: numOp,
-    monto: _r2(l.monto), asientoId: asiento?.id || null,
-    monedaMonto: l.moneda || 'PEN', tc: tcC
-  })
-  const upd = await updateLetraCambio(l.id, {
-    estado: 'cobrada', banco_id: bancoId, numero_operacion: numOp,
-    asiento_cobro_id: asiento?.id || null, updated_at: new Date().toISOString()
-  })
-  if (!upd) throw new Error('No se pudo actualizar la letra')
-  Object.assign(l, { estado: 'cobrada', banco_id: bancoId, numero_operacion: numOp, asiento_cobro_id: asiento?.id || null })
-  return { mov, asiento }
+  _segmento('cletUbicSeg', [
+    { v: 'cartera', t: '📁 En cartera', title: 'El cliente paga directo (transferencia, depósito, efectivo…)' },
+    { v: 'banco', t: '🏦 En banco', title: 'El banco cobró la letra (dietario): puede haber portes y comisión' }
+  ], v, 'window._cletUbicacion')
+  if (v === 'banco' && _clet.modo === 'parcial' && !_clet.abono) _clet.modo = 'total'
+  if (!inicial) {
+    const medio = document.getElementById('cletMedio')
+    if (v === 'banco') medio.value = 'banco_letra'
+    else if (medio.value === 'banco_letra') medio.value = 'transferencia'
+    if (v === 'banco' && l.banco_id) document.getElementById('cletBanco').value = l.banco_id
+    _pintarMonedas('cletMonedas', _monedaLetra(l), document.getElementById('cletBanco').value)
+  }
+  window._cletModo(_clet.modo, true)
+}
+
+window._cletModo = function (m, interno = false) {
+  if (!_clet) return
+  if (m === 'renovar') {
+    const id = _clet.letra.id
+    window.closeModal('modal-cancelar-letra')
+    window.abrirRefinanciar([id], 'renovacion', _clet.ubicacion)
+    return
+  }
+  _clet.modo = m
+  const enBanco = _clet.ubicacion === 'banco'
+  const emitida = _clet.letra.tipo === 'emitida'
+  _segmento('cletModoSeg', [
+    { v: 'total', t: emitida ? '✅ Cobro total' : '✅ Pago total' },
+    { v: 'parcial', t: '➗ Abono parcial', disabled: enBanco && !_clet.abono, title: enBanco ? 'El banco no recibe pagos parciales: usa Renovar' : 'Paga una parte; la letra queda Parcial en cartera' },
+    ...(_clet.abono ? [] : [{ v: 'renovar', t: '🔄 Renovar con nueva letra', title: 'Paga una parte y el saldo pasa a una letra nueva' }])
+  ], m, 'window._cletModo')
+  const inp = document.getElementById('cletMonto')
+  if (m === 'total') { inp.value = _clet.saldoDisp.toFixed(2); inp.readOnly = true }
+  else {
+    inp.readOnly = false
+    if (!interno && _n(inp.value) >= _clet.saldoDisp) inp.value = _r2(_clet.saldoDisp / 2).toFixed(2)
+  }
+  document.getElementById('cletHintModo').textContent = m === 'total'
+    ? `Cancela el saldo completo (${formatNumber(_clet.saldoDisp)}). La letra queda ${emitida ? 'Cobrada' : 'Pagada'}.`
+    : `Paga una parte (menos de ${formatNumber(_clet.saldoDisp)}). La letra sigue en cartera como Parcial hasta completar.`
+  // Gastos: visibles en banco; en cartera solo si marcas "hubo gastos"
+  document.getElementById('cletChkGastosWrap').style.display = enBanco ? 'none' : 'flex'
+  const verGastos = enBanco || document.getElementById('cletChkGastos').checked
+  document.getElementById('cletGastosBox').style.display = verGastos ? '' : 'none'
+  window._cletRecalc()
+}
+
+window._cletToggleGastos = function () {
+  document.getElementById('cletGastosBox').style.display = document.getElementById('cletChkGastos').checked ? '' : 'none'
+  window._cletRecalc()
+}
+
+/** Interés moratorio sugerido: saldo × tasa/360 × días de atraso (⚙️ tasa anual). */
+function _interesSugerido(saldo, venc, fecha) {
+  const tasa = parseFloat(_cfgModuloLetras().tasaMoratoriaAnual) || 0
+  const dias = _diasAtraso(venc, fecha)
+  return { dias, tasa, monto: tasa > 0 && dias > 0 ? _r2(saldo * tasa / 100 / 360 * dias) : 0 }
+}
+const _cfgModuloLetras = () => { try { return getModuloConfig(MODULO) || {} } catch (_) { return {} } }
+
+window._cletToggleInteres = function (forzarSugerido = false) {
+  const chk = document.getElementById('cletChkInteres')
+  const box = document.getElementById('cletInteresBox')
+  box.style.display = chk.checked ? '' : 'none'
+  if (chk.checked && (forzarSugerido || !_n(document.getElementById('cletInteres').value)) && _clet) {
+    const s = _interesSugerido(_n(document.getElementById('cletMonto').value), _clet.letra.fecha_vencimiento, document.getElementById('cletFecha').value)
+    document.getElementById('cletInteres').value = s.monto.toFixed(2)
+  }
+  window._cletRecalc()
+}
+
+function _impClet() {
+  const v = id => _n(document.getElementById(id)?.value)
+  const verGastos = _clet?.ubicacion === 'banco' || document.getElementById('cletChkGastos')?.checked
+  return {
+    base: v('cletMonto'),
+    intereses: document.getElementById('cletChkInteres')?.checked ? v('cletInteres') : 0,
+    portes: verGastos ? v('cletPortes') : 0, comision: verGastos ? v('cletComision') : 0, otros: verGastos ? v('cletOtros') : 0
+  }
+}
+
+window._cletRecalc = function () {
+  if (!_clet) return
+  const l = _clet.letra
+  const imp = _impClet()
+  const s = _interesSugerido(imp.base, l.fecha_vencimiento, document.getElementById('cletFecha')?.value)
+  const hint = document.getElementById('cletInteresHint')
+  if (hint) hint.innerHTML = s.dias
+    ? (s.tasa > 0 ? `${s.dias} día(s) de atraso × ${s.tasa}% anual = <b>${formatNumber(s.monto)}</b> sugerido · <a href="#" onclick="window._cletToggleInteres(true); return false;">usar sugerido</a>` : `${s.dias} día(s) de atraso. Configura la tasa moratoria en ⚙️ para sugerir el monto.`)
+    : 'La letra no está vencida a esta fecha.'
+  const queda = _r2(_clet.saldoDisp - imp.base)
+  const neto = _pintarResumenLetra('cletResumen', l, imp, _clet.modo === 'total' ? 'Letra' : 'Amortiza', queda)
+  _pintarConversion('cletResumen', _monedaLetra(l), document.getElementById('cletBanco')?.value, neto, parseFloat(document.getElementById('cletTC')?.value))
+}
+
+/** Agrega al resumen la caja "Entra/sale de la cuenta" cuando la cuenta es de otra moneda. */
+function _pintarConversion(contId, monLetra, bancoId, neto, tc) {
+  const cont = document.getElementById(contId)
+  const monCuenta = _monedaBanco(bancoId)
+  if (!cont || !monCuenta || monCuenta === monLetra) return
+  const conv = _r2(_convMoneda(Math.abs(neto), monLetra, monCuenta, tc))
+  cont.style.gridTemplateColumns = `repeat(${cont.children.length + 1}, 1fr)`
+  cont.insertAdjacentHTML('beforeend', `<div title="${monLetra} ${formatNumber(Math.abs(neto))} ${monLetra === 'USD' ? '×' : '÷'} T.C. ${tc || '—'}"><div style="font-size:0.7rem; color:var(--text-secondary); text-transform:uppercase;">En la cuenta (${monCuenta})</div>
+    <div style="font-weight:700; font-size:1.05rem; color:var(--color-info, #3b82f6);">${monCuenta} ${formatNumber(conv)}</div>
+    <small style="color:var(--text-secondary); font-size:0.7rem;">T.C. ${tc || '—'}</small></div>`)
+}
+
+/** Resumen en cajas: capital, +intereses, ±gastos, neto (y saldo que queda). */
+function _pintarResumenLetra(contId, l, imp, etiqueta = 'Letra', queda = null) {
+  const { gastos, neto } = _calcLetraBanco(l, imp)
+  const mon = l.moneda || 'PEN'
+  const emitida = l.tipo === 'emitida'
+  const caja = (t, v, fuerte, color) => `<div><div style="font-size:0.7rem; color:var(--text-secondary); text-transform:uppercase;">${t}</div>
+    <div style="font-weight:${fuerte ? 700 : 500}; font-size:${fuerte ? '1.05rem' : '0.95rem'};${color ? ` color:${color};` : ''}">${mon} ${formatNumber(v)}</div></div>`
+  const cont = document.getElementById(contId)
+  if (!cont) return neto
+  cont.style.gridTemplateColumns = `repeat(${queda == null ? 4 : 5}, 1fr)`
+  cont.innerHTML = caja(etiqueta, imp.base) + caja('+ Intereses', imp.intereses) +
+    caja(emitida ? '− Gastos' : '+ Gastos', gastos) +
+    caja(emitida ? (neto >= 0 ? 'Neto que entra' : 'Neto que sale') : 'Neto que sale', Math.abs(neto), true, 'var(--color-success)') +
+    (queda == null ? '' : caja('Saldo que queda', queda, false, queda < -0.009 ? 'var(--color-danger)' : (queda > 0.009 ? 'var(--color-warning)' : '')))
+  return neto
+}
+
+window._tcDefaultLetraCanc = function () {
+  if (_clet?.letra) window._tcDefaultLetra(_clet.letra).then(() => window._cletRecalc())
 }
 
 window.confirmarCancelarLetra = async function () {
-  const id = parseInt(document.getElementById('cletId').value || 0)
-  const l = _letrasCache.find(x => x.id === id)
-  if (!l) return
-  const bancoId = parseInt(document.getElementById('cletBanco').value || 0)
-  const fecha = document.getElementById('cletFecha').value
-  const numOp = document.getElementById('cletNumOp').value.trim() || null
-  if (!bancoId) { showToast('Selecciona la cuenta bancaria', 'warning'); return }
-  if (!fecha)   { showToast('Ingresa la fecha', 'warning'); return }
-  const btn = document.getElementById('cletBtnOk')
-  if (btn.disabled) return
-  btn.disabled = true
+  if (!_clet) return
+  const $ = i => document.getElementById(i)
+  const l = _clet.letra
+  const editando = !!_clet.abono
+  const d = {
+    ubicacion: _clet.ubicacion, medio: $('cletMedio').value, bancoId: parseInt($('cletBanco').value || 0),
+    fecha: $('cletFecha').value, numOp: $('cletNumOp').value.trim() || null, recibo: $('cletRecibo').value.trim() || null,
+    tcDia: parseFloat($('cletTC').value) || parseFloat(l.tipo_cambio) || 1, obs: $('cletObs').value.trim() || null
+  }
+  const imp = _impClet()
+  Object.assign(d, { amort: imp.base, interes: imp.intereses, portes: imp.portes, comision: imp.comision, otros: imp.otros })
+  if (!d.bancoId) { showToast('Selecciona la cuenta (banco o caja)', 'warning'); return }
+  if (!d.fecha) { showToast('Ingresa la fecha', 'warning'); return }
+  if (!(d.amort > 0)) { showToast('El monto a amortizar debe ser mayor a 0', 'warning'); return }
+  if (d.amort > _clet.saldoDisp + 0.005) { showToast(`El monto supera el saldo de la letra (${formatNumber(_clet.saldoDisp)})`, 'warning'); return }
+  if (_clet.modo === 'parcial' && d.amort >= _clet.saldoDisp - 0.005) { showToast('Para pagar todo el saldo elige "Cobro total"', 'warning'); return }
+  if (_clet.modo === 'parcial' && _clet.ubicacion === 'banco' && !editando) { showToast('En banco no hay abonos parciales: usa Renovar', 'warning'); return }
+  const monCta = _monedaBanco(d.bancoId)
+  const conv = monCta && monCta !== _monedaLetra(l)
+  if (((l.moneda || 'PEN') === 'USD' || conv) && !(d.tcDia > 0)) { showToast('Ingresa el T.C. del día', 'warning'); return }
+  if (conv && d.tcDia <= 1 && !confirm(`La letra está en ${_monedaLetra(l)} y la cuenta en ${monCta}, pero el T.C. es ${d.tcDia}.\n\n¿Seguro? (normalmente ~3.4)`)) return
+  if (l.tipo === 'emitida' && !(await _reciboLibreGlobal(d.recibo, l.contact_id, editando ? { origen: 'abono', id: _clet.abono.id } : {}))) return
+  if (editando && !confirm('Editar el abono regenera su asiento y su movimiento bancario.\n\n¿Continuar?')) return
+
   try {
-    const tcC = parseFloat(document.getElementById('cletTC')?.value) || parseFloat(l.tipo_cambio) || 1
-    const { mov, asiento } = await _aplicarCancelacionLetra(l, bancoId, fecha, numOp, tcC)
+    if (editando) {
+      const av = await _revertirContableAbono(_clet.abono, l)
+      if (av.length) showToast('⚠️ ' + av.join('; '), 'warning')
+      // Quita temporalmente lo amortizado para validar contra el saldo correcto
+      l.monto_pagado = _r2(_n(l.monto_pagado) - _n(_clet.abono.monto_amortizado))
+    }
+    const r = await _registrarAbonoLetra(l, d, editando ? _clet.abono.id : null)
+    await _subirAdjuntosPendientes('clet', 'letra', l.id)
     window.closeModal('modal-cancelar-letra')
-    showToast(`Letra ${l.numero_letra} ${l.tipo === 'emitida' ? 'cobrada' : 'pagada'} ✅${mov?.id ? ` — ${_numMB(mov.id)}` : ''}${asiento?.id ? ` / ${asiento.numero_asiento}` : ''}`, 'success', 6000)
+    const estadoTxt = r.estado === 'cobrada' ? (l.tipo === 'emitida' ? 'cobrada' : 'pagada') : `parcial — saldo ${formatNumber(_r2(_n(l.monto) - r.pagado))}`
+    showToast(`Letra ${l.numero_letra} ${estadoTxt} ✅${r.mov?.id ? ` — ${_numMB(r.mov.id)}` : ''}${r.asiento?.id ? ` / ${r.asiento.numero_asiento}` : ''}`, 'success', 7000)
+    _clet = null
     _refrescarTodo()
     await _recargarTrasLetra()
   } catch (e) {
     console.error('confirmarCancelarLetra:', e)
-    showToast('Error: ' + e.message, 'danger')
-  } finally { btn.disabled = false }
+    showToast('Error: ' + e.message, 'danger', 8000)
+  }
 }
 
-/** Deshace el cobro/pago de una letra (mov. bancario + saldo + asiento) y la deja en cartera. */
+/** Elimina un abono simple: revierte banco + asiento y recalcula la letra. */
+window.eliminarAbonoLetra = async function (letraId, abonoId) {
+  try {
+    const l = await _getLetra(letraId)
+    const ab = (await _abonosDeLetra(letraId)).find(a => a.id === abonoId)
+    if (!l || !ab) { showToast('Abono no encontrado', 'danger'); return }
+    if (ab.refinanciacion_id) { showToast('Este abono es parte de una renovación/unificación: elimina la refinanciación.', 'warning', 6000); return }
+    if (!confirm(`¿Eliminar el abono del ${fechaDMY(ab.fecha)} por ${formatNumber(ab.monto_amortizado)}${ab.numero_recibo ? ` (recibo ${ab.numero_recibo})` : ''}?\n\nSe borra su movimiento bancario y su asiento, y el saldo vuelve a la letra.`)) return
+    const av = await _revertirContableAbono(ab, l)
+    await _delAbono(ab.id)
+    await _recalcularLetra(l, ab.estado_previo)
+    if (av.length) showToast('⚠️ ' + av.join('; '), 'warning')
+    showToast('Abono eliminado ✅', 'success')
+    window.closeModal?.('modal-detalle-cp')
+    _refrescarTodo()
+    await _recargarTrasLetra()
+  } catch (e) { showToast('Error: ' + e.message, 'danger', 8000) }
+}
+
+// ── Refinanciación: renovar (1 letra) o unificar (varias) ──
+let _rfin = null   // { tipo, contactId, moneda, sel:Set, cand:[], ubicacion, filas:[] }
+
+window.abrirRenovarLetra = id => window.abrirRefinanciar([id], 'renovacion')
+
+window.abrirRefinanciar = async function (ids, modalidad = 'unificacion', ubicacion = null) {
+  try {
+    _letrasCache = await cacheado('letras_cambio', getLetrasCambio)
+    const base = _letrasCache.find(x => x.id === ids[0])
+    if (!base) return
+    const cand = _letrasCache.filter(x => x.tipo === base.tipo && Number(x.contact_id) === Number(base.contact_id)
+      && (x.moneda || 'PEN') === (base.moneda || 'PEN') && _letraAbierta(x) && _saldoLetra(x) > 0.005)
+      .sort((a, b) => String(a.fecha_vencimiento).localeCompare(String(b.fecha_vencimiento)))
+    const sel = new Set(ids.filter(id => cand.some(c => c.id === id)))
+    if (!sel.size) { showToast('La letra no tiene saldo pendiente', 'warning'); return }
+    const renov = modalidad === 'renovacion'
+    _rfin = { tipo: base.tipo, contactId: base.contact_id, moneda: _monedaLetra(base), sel, cand, modalidad, ubicacion: ubicacion || _ubicacionDeLetra(base), filas: [], tcEditado: false }
+    const $ = i => document.getElementById(i)
+    const emitida = base.tipo === 'emitida'
+    $('rfin-titulo').textContent = renov ? `Renovar letra ${base.numero_letra}` : `Unificar letras — ${_nombreContacto(base.contact_id)}`
+    $('rfin-info').innerHTML = `<div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">${emitida ? 'Letras por cobrar' : 'Letras por pagar'} · ${_rfin.moneda}</div>
+      <div style="font-weight:600; font-size:1.05rem; margin-top:2px;">${_esc(_nombreContacto(base.contact_id))}</div>
+      <div style="font-size:0.85rem; color:var(--text-secondary); margin-top:2px;">Marca las letras a refinanciar: sus saldos se cierran y nacen las letras nuevas de abajo.</div>`
+    $('rfinFecha').value = _hoyISO()
+    $('rfinChkAbono').checked = renov
+    $('rfinChkIntRef').checked = false
+    $('rfinIntRef').value = '0.00'
+    for (const k of ['rfinInteres', 'rfinPortes', 'rfinComision', 'rfinOtros']) $(k).value = '0.00'
+    $('rfinChkInteres').checked = false
+    $('rfinChkGastos').checked = false
+    $('rfinNumOp').value = ''; $('rfinRecibo').value = ''; $('rfinObs').value = ''
+    $('rfinTCDia').value = base.tipo_cambio || 1
+    _optsBancos($('rfinBanco'), (_rfin.ubicacion === 'banco' && base.banco_id) || _bancoSugeridoLetra(_rfin.moneda)?.id)
+    _optsMedios($('rfinMedio'), _rfin.ubicacion === 'banco' ? 'banco_letra' : 'transferencia')
+    _pintarMonedas('rfinMonedas', _rfin.moneda, $('rfinBanco').value)
+    $('rfinPct').value = renov ? 50 : 0
+    $('rfinCantidad').value = 1
+    $('rfinIntervalo').value = 30
+    $('rfinPrefijo').value = renov ? '' : `${String(base.numero_letra).replace(/-R\d*$/, '').replace(/-\d+$/, '')}-U`
+    $('rfinPrimerVenc').value = _addDias(renov ? base.fecha_vencimiento : _hoyISO(), 30)
+    $('rfinLblRecibo').textContent = emitida ? 'N° Recibo de cobranza' : 'N° Recibo / constancia'
+    $('rfinMon').textContent = `(${_rfin.moneda})`
+    $('rfinBtnOk').textContent = renov ? '💾 Renovar letra' : '💾 Unificar letras'
+    _adjPendientes.rfin = []; _pintarAdjPendientes('rfin')
+    _rfinPintarOrigenes()
+    window._rfinUbicacion(_rfin.ubicacion, true)
+    window._rfinToggleAbono()
+    window._rfinTCSugerido()
+    window._rfinGenerar()
+    if (_rfin.moneda === 'USD') getTipoCambioDia($('rfinFecha').value, { permitirApi: false }).then(r => {
+      const v = emitida ? r?.venta : r?.compra
+      if (v > 0) { $('rfinTCDia').value = v; window._rfinRecalc() }
+    }).catch(() => {})
+    window.openModal('modal-refinanciar-letras')
+  } catch (e) { console.error('abrirRefinanciar:', e); showToast('Error: ' + e.message, 'danger') }
+}
+
+const _rfinOrigenes = () => _rfin ? _rfin.cand.filter(c => _rfin.sel.has(c.id)) : []
+const _rfinTotalSaldos = () => _r2(_rfinOrigenes().reduce((s, x) => s + _saldoLetra(x), 0))
+
+function _rfinPintarOrigenes() {
+  const tb = document.getElementById('rfinOrigenesBody')
+  if (!tb || !_rfin) return
+  const mon = _rfin.moneda
+  tb.innerHTML = _rfin.cand.map(x => {
+    const on = _rfin.sel.has(x.id)
+    const atraso = _diasAtraso(x.fecha_vencimiento)
+    return `<tr style="border-top:1px solid var(--border-color);${on ? ' background:rgba(59,130,246,0.07);' : ' opacity:.65;'}">
+      <td style="text-align:center; padding:6px;"><input type="checkbox" style="width:auto; margin:0;" ${on ? 'checked' : ''} onchange="window._rfinToggleOrigen(${x.id}, this.checked)"></td>
+      <td style="padding:6px 10px; font-weight:600;">${_esc(x.numero_letra)}</td>
+      <td style="padding:6px 10px;">${fechaDMY(x.fecha_vencimiento)}${atraso ? ` <small style="color:var(--color-danger);">(${atraso} d)</small>` : ''}</td>
+      <td style="padding:6px 10px;"><span class="badge ${x.estado === 'parcial' ? 'badge-warning' : (x.estado === 'banco' ? 'badge-info' : 'badge-secondary')}">${x.estado}</span></td>
+      <td style="padding:6px 10px; text-align:right;">${formatNumber(x.monto)}</td>
+      <td style="padding:6px 10px; text-align:right;">${formatNumber(x.monto_pagado || 0)}</td>
+      <td style="padding:6px 10px; text-align:right; font-weight:600;">${formatNumber(_saldoLetra(x))}</td>
+      <td style="padding:6px 10px; text-align:right; color:var(--text-secondary);">${mon === 'USD' ? (parseFloat(x.tipo_cambio) || 1).toFixed(3) : '—'}</td>
+    </tr>`
+  }).join('')
+  const n = _rfin.sel.size
+  document.getElementById('rfinOrigenesFoot').innerHTML = `<td></td><td colspan="5" style="padding:8px 10px;">${n} letra(s) seleccionada(s)</td>
+    <td style="padding:8px 10px; text-align:right; font-weight:700;">${mon} ${formatNumber(_rfinTotalSaldos())}</td><td></td>`
+}
+
+window._rfinToggleOrigen = function (id, on) {
+  if (!_rfin) return
+  if (on) _rfin.sel.add(id); else _rfin.sel.delete(id)
+  if (!_rfin.sel.size) { _rfin.sel.add(id); showToast('Debe quedar al menos una letra', 'warning') }
+  _rfin.modalidad = _rfin.sel.size > 1 ? 'unificacion' : 'renovacion'
+  document.getElementById('rfinBtnOk').textContent = _rfin.modalidad === 'renovacion' ? '💾 Renovar letra' : '💾 Unificar letras'
+  _rfinPintarOrigenes()
+  if (!_rfin.tcEditado) window._rfinTCSugerido()
+  window._rfinGenerar()
+}
+
+/** T.C. de las letras nuevas = promedio ponderado (por saldo) de las originales. */
+window._rfinTCSugerido = function () {
+  if (!_rfin) return
+  const o = _rfinOrigenes()
+  const tot = o.reduce((s, x) => s + _saldoLetra(x), 0)
+  const tc = tot > 0 ? o.reduce((s, x) => s + _saldoLetra(x) * (parseFloat(x.tipo_cambio) || 1), 0) / tot : 1
+  const inp = document.getElementById('rfinTCNueva')
+  inp.value = _rfin.moneda === 'USD' ? tc.toFixed(4) : '1'
+  inp.dataset.sugerido = inp.value
+  _rfin.tcEditado = false
+  window._rfinRecalc()
+}
+
+window._rfinCambioCuenta = function () {
+  if (!_rfin) return
+  const m = _pintarMonedas('rfinMonedas', _rfin.moneda, document.getElementById('rfinBanco').value)
+  if (m.distinta && !(parseFloat(document.getElementById('rfinTCDia').value) > 1)) {
+    getTipoCambioDia(document.getElementById('rfinFecha').value, { permitirApi: false }).then(r => {
+      const v = _rfin.tipo === 'emitida' ? r?.venta : r?.compra
+      if (v > 0) document.getElementById('rfinTCDia').value = v
+      window._rfinRecalc()
+    }).catch(() => window._rfinRecalc())
+  } else window._rfinRecalc()
+}
+
+window._rfinUbicacion = function (v, inicial = false) {
+  if (!_rfin) return
+  _rfin.ubicacion = v
+  _segmento('rfinUbicSeg', [
+    { v: 'cartera', t: '📁 En cartera', title: 'Paga directo al negocio' },
+    { v: 'banco', t: '🏦 En banco', title: 'Operación en el banco: portes y comisión de renovación' }
+  ], v, 'window._rfinUbicacion')
+  if (!inicial) {
+    const medio = document.getElementById('rfinMedio')
+    if (v === 'banco') medio.value = 'banco_letra'
+    else if (medio.value === 'banco_letra') medio.value = 'transferencia'
+  }
+  document.getElementById('rfinChkGastosWrap').style.display = v === 'banco' ? 'none' : 'flex'
+  document.getElementById('rfinGastosBox').style.display = v === 'banco' || document.getElementById('rfinChkGastos').checked ? '' : 'none'
+  window._rfinRecalc()
+}
+
+window._rfinTC_edit = function () { if (_rfin) _rfin.tcEditado = true; window._rfinRecalc() }
+
+window._rfinToggleAbono = function () {
+  const on = document.getElementById('rfinChkAbono').checked
+  document.getElementById('rfinAbonoBox').style.display = on ? '' : 'none'
+  if (on && !_n(document.getElementById('rfinAmort').value)) window._rfinDesdePct()
+  else window._rfinGenerar()
+}
+window._rfinToggleGastos = function () {
+  document.getElementById('rfinGastosBox').style.display = _rfin?.ubicacion === 'banco' || document.getElementById('rfinChkGastos').checked ? '' : 'none'
+  window._rfinRecalc()
+}
+window._rfinToggleInteres = function () {
+  const on = document.getElementById('rfinChkInteres').checked
+  document.getElementById('rfinInteresBox').style.display = on ? '' : 'none'
+  if (on && !_n(document.getElementById('rfinInteres').value)) {
+    const fecha = document.getElementById('rfinFecha').value
+    const s = _rfinOrigenes().reduce((t, x) => t + _interesSugerido(_saldoLetra(x), x.fecha_vencimiento, fecha).monto, 0)
+    document.getElementById('rfinInteres').value = _r2(s).toFixed(2)
+  }
+  window._rfinRecalc()
+}
+window._rfinToggleIntRef = function () {
+  document.getElementById('rfinIntRefBox').style.display = document.getElementById('rfinChkIntRef').checked ? '' : 'none'
+  window._rfinGenerar()
+}
+window._rfinIntRefDesdePct = function () {
+  const pct = _n(document.getElementById('rfinIntRefPct').value)
+  const base = _r2(_rfinTotalSaldos() - _rfinAmort())
+  document.getElementById('rfinIntRef').value = _r2(base * pct / 100).toFixed(2)
+  window._rfinGenerar()
+}
+window._rfinDesdePct = function () {
+  const pct = Math.min(99.99, Math.max(0, _n(document.getElementById('rfinPct').value)))
+  document.getElementById('rfinAmort').value = _r2(_rfinTotalSaldos() * pct / 100).toFixed(2)
+  window._rfinGenerar()
+}
+window._rfinDesdeMonto = function () {
+  const tot = _rfinTotalSaldos()
+  const a = _n(document.getElementById('rfinAmort').value)
+  document.getElementById('rfinPct').value = tot > 0 ? +(a / tot * 100).toFixed(2) : 0
+  window._rfinGenerar()
+}
+
+const _rfinAmort = () => document.getElementById('rfinChkAbono')?.checked ? _n(document.getElementById('rfinAmort').value) : 0
+const _rfinIntRef = () => document.getElementById('rfinChkIntRef')?.checked ? _n(document.getElementById('rfinIntRef').value) : 0
+const _rfinADocumentar = () => _r2(_rfinTotalSaldos() - _rfinAmort() + _rfinIntRef())
+
+function _impRfin() {
+  const v = id => _n(document.getElementById(id)?.value)
+  const conAbono = document.getElementById('rfinChkAbono')?.checked
+  const verGastos = _rfin?.ubicacion === 'banco' || document.getElementById('rfinChkGastos')?.checked
+  if (!conAbono) return { base: 0, intereses: 0, portes: 0, comision: 0, otros: 0 }
+  return {
+    base: v('rfinAmort'),
+    intereses: document.getElementById('rfinChkInteres')?.checked ? v('rfinInteres') : 0,
+    portes: verGastos ? v('rfinPortes') : 0, comision: verGastos ? v('rfinComision') : 0, otros: verGastos ? v('rfinOtros') : 0
+  }
+}
+
+/** Reparte el total a documentar en N letras (la última absorbe los centavos). */
+window._rfinGenerar = function () {
+  if (!_rfin) return
+  const $ = i => document.getElementById(i)
+  const total = _rfinADocumentar()
+  const n = Math.min(60, Math.max(1, parseInt($('rfinCantidad').value || 1) || 1))
+  const intervalo = Math.max(1, parseInt($('rfinIntervalo').value || 30) || 30)
+  const primer = $('rfinPrimerVenc').value || _addDias($('rfinFecha').value, intervalo)
+  const pref = $('rfinPrefijo').value.trim()
+  const unica = _rfinOrigenes()[0]
+  const base = Math.floor((total / n) * 100) / 100
+  _rfin.filas = Array.from({ length: n }, (_, i) => ({
+    numero: (n === 1 && _rfin.modalidad === 'renovacion' && !pref) ? _siguienteNumeroRenov(unica.numero_letra) : `${pref || 'LT-'}${String(i + 1).padStart(2, '0')}`,
+    monto: i === n - 1 ? _r2(total - base * (n - 1)) : base,
+    venc: _addDias(primer, i * intervalo)
+  }))
+  _rfinPintarFilas()
+}
+window._rfinAgregarFila = function () {
+  if (!_rfin) return
+  const usado = _rfin.filas.reduce((s, f) => s + _n(f.monto), 0)
+  const ult = _rfin.filas[_rfin.filas.length - 1]
+  const pref = document.getElementById('rfinPrefijo').value.trim() || 'LT-'
+  _rfin.filas.push({ numero: `${pref}${String(_rfin.filas.length + 1).padStart(2, '0')}`, monto: Math.max(0, _r2(_rfinADocumentar() - usado)), venc: ult?.venc ? _addDias(ult.venc, 30) : document.getElementById('rfinPrimerVenc').value })
+  _rfinPintarFilas()
+}
+window._rfinQuitarFila = function (i) { if (_rfin.filas.length > 1) { _rfin.filas.splice(i, 1); _rfinPintarFilas() } else showToast('Debe quedar al menos una letra nueva', 'warning') }
+window._rfinSet = function (i, campo, valor) {
+  if (!_rfin?.filas[i]) return
+  _rfin.filas[i][campo] = campo === 'monto' ? _n(valor) : valor
+  if (campo === 'venc') { const td = document.getElementById(`rfinPlazo${i}`); if (td) td.textContent = (_diasEntre(document.getElementById('rfinFecha').value, valor) ?? '—') + ' d' }
+  window._rfinRecalc()
+}
+
+function _rfinPintarFilas() {
+  const tb = document.getElementById('rfinFilasBody')
+  if (!tb) return
+  const fecha = document.getElementById('rfinFecha').value
+  const inp = 'style="width:100%; padding:6px 8px;"'
+  tb.innerHTML = _rfin.filas.map((f, i) => `<tr style="border-top:1px solid var(--border-color);">
+      <td style="text-align:center; padding:6px 10px; color:var(--text-secondary);">${i + 1}</td>
+      <td style="padding:6px 10px;"><input type="text" ${inp} value="${_esc(f.numero)}" oninput="window._rfinSet(${i}, 'numero', this.value)"></td>
+      <td style="padding:6px 10px;"><input type="number" step="0.01" min="0.01" style="width:100%; padding:6px 8px; text-align:right;" value="${_n(f.monto).toFixed(2)}" oninput="window._rfinSet(${i}, 'monto', this.value)"></td>
+      <td style="padding:6px 10px;"><input type="date" ${inp} value="${f.venc || ''}" onchange="window._rfinSet(${i}, 'venc', this.value)"></td>
+      <td id="rfinPlazo${i}" style="text-align:right; padding:6px 10px; color:var(--text-secondary); font-size:0.85rem;">${_diasEntre(fecha, f.venc) ?? '—'} d</td>
+      <td style="text-align:center; padding:6px;"><button type="button" class="btn btn-small btn-danger" title="Quitar" onclick="window._rfinQuitarFila(${i})">✕</button></td>
+    </tr>`).join('')
+  window._rfinRecalc()
+}
+
+window._rfinRecalc = function () {
+  if (!_rfin) return
+  const $ = i => document.getElementById(i)
+  const mon = _rfin.moneda
+  const saldos = _rfinTotalSaldos()
+  const imp = _impRfin()
+  const intRef = _rfinIntRef()
+  const aDoc = _r2(saldos - imp.base + intRef)
+  const enLetras = _r2(_rfin.filas.reduce((s, f) => s + _n(f.monto), 0))
+  const dif = _r2(aDoc - enLetras)
+  const lTipo = { tipo: _rfin.tipo }
+  const { neto } = _calcLetraBanco(lTipo, imp)
+  const tcN = $('rfinTCNueva')
+  const tcAviso = $('rfinTCAviso')
+  if (tcAviso) tcAviso.textContent = mon !== 'USD' ? '' : (Math.abs(_n(tcN.value) - _n(tcN.dataset.sugerido)) > 0.00005
+    ? `⚠ Distinto del promedio ponderado (${tcN.dataset.sugerido}): generará diferencia de cambio.` : 'Promedio ponderado de las letras originales: sin diferencia de cambio.')
+  const caja = (t, v, st = '') => `<div><div style="font-size:0.7rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">${t}</div><div style="font-weight:700; font-size:1.02rem;${st}">${mon} ${formatNumber(v)}</div></div>`
+  const colorDif = Math.abs(dif) < 0.01 ? 'var(--color-success)' : 'var(--color-danger)'
+  $('rfinResumen').innerHTML =
+    caja('Saldos de origen', saldos) +
+    caja('− Amortización', imp.base) +
+    caja('+ Interés refinanc.', intRef) +
+    caja('= A documentar', aDoc) +
+    caja(`En ${_rfin.filas.length} letra(s) nueva(s)`, enLetras) +
+    caja(Math.abs(dif) < 0.01 ? 'Cuadra ✔' : 'Diferencia', dif, ` color:${colorDif};`) +
+    (document.getElementById('rfinChkAbono').checked ? caja(_rfin.tipo === 'emitida' ? 'Banco: neto que entra' : 'Banco: neto que sale', Math.abs(neto), ' color:var(--color-success);') : '')
+  if (document.getElementById('rfinChkAbono').checked) _pintarConversion('rfinResumen', mon, $('rfinBanco').value, neto, parseFloat($('rfinTCDia').value))
+  const btn = $('rfinBtnOk')
+  if (btn && !btn.classList.contains('btn-cargando')) btn.disabled = Math.abs(dif) >= 0.01
+}
+
+window.confirmarRefinanciar = async function () {
+  if (!_rfin) return
+  const $ = i => document.getElementById(i)
+  const origenes = _rfinOrigenes()
+  const l0 = origenes[0]
+  const emitida = _rfin.tipo === 'emitida'
+  const fecha = $('rfinFecha').value
+  const conAbono = $('rfinChkAbono').checked
+  const imp = _impRfin()
+  const intRef = _rfinIntRef()
+  const saldos = _rfinTotalSaldos()
+  const tcNueva = _rfin.moneda === 'USD' ? (parseFloat($('rfinTCNueva').value) || 0) : 1
+  const filas = _rfin.filas.map(f => ({ ...f, numero: String(f.numero || '').trim(), monto: _n(f.monto) }))
+  const ab = conAbono ? {
+    ubicacion: _rfin.ubicacion, medio: $('rfinMedio').value, bancoId: parseInt($('rfinBanco').value || 0),
+    numOp: $('rfinNumOp').value.trim() || null, recibo: $('rfinRecibo').value.trim() || null,
+    tcDia: parseFloat($('rfinTCDia').value) || tcNueva || 1,
+    amort: imp.base, interes: imp.intereses, portes: imp.portes, comision: imp.comision, otros: imp.otros
+  } : null
+
+  // ── Validaciones (de lo general a lo específico) ──
+  if (!origenes.length) { showToast('Marca al menos una letra a refinanciar', 'warning'); return }
+  if (!fecha) { showToast('Ingresa la fecha de la operación', 'warning'); return }
+  if (_rfin.moneda === 'USD' && !(tcNueva > 0)) { showToast('Ingresa el T.C. de las letras nuevas', 'warning'); return }
+  if (ab) {
+    if (!ab.bancoId) { showToast('Selecciona la cuenta donde entra/sale el abono', 'warning'); return }
+    const monCtaR = _monedaBanco(ab.bancoId)
+    if (monCtaR && monCtaR !== _rfin.moneda && !(ab.tcDia > 1) && !confirm(`Letras en ${_rfin.moneda} y cuenta en ${monCtaR} con T.C. ${ab.tcDia}. ¿Seguro?`)) return
+    if (ab.amort < 0) { showToast('La amortización no puede ser negativa', 'warning'); return }
+    if (ab.amort >= saldos - 0.005) { showToast('Si paga todo el saldo no hay refinanciación: usa Cobrar/Pagar', 'warning'); return }
+    if (!(ab.amort > 0 || ab.interes > 0 || ab.portes + ab.comision + ab.otros > 0)) { showToast('El abono está en 0: desmarca "Paga en el acto" o ingresa importes', 'warning'); return }
+  }
+  if (intRef < 0) { showToast('El interés de refinanciación no puede ser negativo', 'warning'); return }
+  const aDoc = _r2(saldos - (ab?.amort || 0) + intRef)
+  if (!filas.length) { showToast('Agrega al menos una letra nueva', 'warning'); return }
+  const vistos = new Set()
+  for (const [i, f] of filas.entries()) {
+    if (!f.numero) { showToast(`Letra nueva ${i + 1}: falta el N°`, 'warning'); return }
+    if (vistos.has(f.numero.toLowerCase())) { showToast(`N° repetido: ${f.numero}`, 'warning'); return }
+    vistos.add(f.numero.toLowerCase())
+    if (_letrasCache.some(x => String(x.numero_letra).toLowerCase() === f.numero.toLowerCase())) { showToast(`El N° ${f.numero} ya existe`, 'warning'); return }
+    if (!(f.monto > 0)) { showToast(`Letra ${f.numero}: el monto debe ser mayor a 0`, 'warning'); return }
+    if (!f.venc) { showToast(`Letra ${f.numero}: falta el vencimiento`, 'warning'); return }
+    if (f.venc < fecha) { showToast(`Letra ${f.numero}: vence antes de la fecha de operación`, 'warning'); return }
+  }
+  const enLetras = _r2(filas.reduce((s, f) => s + f.monto, 0))
+  if (Math.abs(enLetras - aDoc) >= 0.01) { showToast(`Las letras nuevas suman ${formatNumber(enLetras)} y deben sumar ${formatNumber(aDoc)}`, 'warning'); return }
+  if (ab && emitida && !(await _reciboLibreGlobal(ab.recibo, _rfin.contactId))) return
+  const modalidad = origenes.length > 1 ? 'unificacion' : 'renovacion'
+  const neto = ab ? _calcLetraBanco({ tipo: _rfin.tipo }, { base: ab.amort, intereses: ab.interes, portes: ab.portes, comision: ab.comision, otros: ab.otros }).neto : 0
+  if (!confirm(`${modalidad === 'renovacion' ? 'Renovar' : 'Unificar'} ${origenes.length} letra(s) (${origenes.map(x => x.numero_letra).join(', ')}):\n` +
+    `• Saldos: ${formatNumber(saldos)}${ab ? `  • Amortiza: ${formatNumber(ab.amort)}` : ''}${intRef ? `  • Interés refinanc.: ${formatNumber(intRef)}` : ''}\n` +
+    `• Nuevas: ${filas.map(f => `${f.numero} ${formatNumber(f.monto)} (${fechaDMY(f.venc)})`).join(', ')}\n` +
+    (ab ? `• Banco: ${formatNumber(Math.abs(neto))} ${(emitida ? neto >= 0 : neto < 0) ? 'ingreso' : 'egreso'}\n` : '') + '\n¿Continuar?')) return
+
+  const user = getCurrentUser()
+  const creadas = []
+  let refin = null
+  let conAsiento = false
+  try {
+    // 1) Cabecera + orígenes
+    refin = await _sb(supabase.from('letras_refinanciacion').insert({
+      tipo: _rfin.tipo, modalidad, contact_id: _rfin.contactId, fecha, moneda: _rfin.moneda, tipo_cambio: tcNueva,
+      total_saldos: saldos, monto_abono: ab?.amort || 0, interes_refin: intRef, total_nuevas: enLetras,
+      observaciones: $('rfinObs').value.trim() || null, created_by: user?.db_id || null
+    }).select().single())
+    await _sb(supabase.from('letras_refinanciacion_origen').insert(origenes.map(x => ({
+      refinanciacion_id: refin.id, letra_id: x.id, saldo: _saldoLetra(x), estado_previo: x.estado, monto_pagado_previo: _n(x.monto_pagado)
+    }))))
+    // 2) Letras nuevas (heredan documento/cuota si todas las de origen son del mismo)
+    const comun = campo => { const v = origenes.map(x => x[campo] || null); return v.every(z => z === v[0]) ? v[0] : null }
+    for (const f of filas) {
+      const nueva = await addLetraCambio({
+        numero_letra: f.numero, tipo: _rfin.tipo, contact_id: _rfin.contactId,
+        venta_id: comun('venta_id'), compra_id: comun('compra_id'), cxc_id: comun('cxc_id'), cxp_id: comun('cxp_id'),
+        cuota_cobrar_id: comun('cuota_cobrar_id'), cuota_pagar_id: comun('cuota_pagar_id'),
+        moneda: _rfin.moneda, tipo_cambio: tcNueva, monto: f.monto, fecha_emision: fecha, fecha_vencimiento: f.venc,
+        estado: 'cartera', refinanciacion_id: refin.id, letra_origen_id: origenes.length === 1 ? l0.id : null,
+        observaciones: `${modalidad === 'renovacion' ? 'Renovación' : 'Unificación'} de ${origenes.map(x => x.numero_letra).join(', ')}`,
+        created_by: user?.db_id || null
+      })
+      if (!nueva?.id) throw new Error(`No se pudo crear la letra ${f.numero} (¿N° duplicado o falta el SQL 77?)`)
+      creadas.push(nueva)
+    }
+    // 3) Asiento único
+    const asiento = await _asientoLetras({
+      ref: `LETRA-REFIN-${refin.id}`, tipoMov: modalidad === 'renovacion' ? 'Renovación Letra' : 'Unificación Letras', fecha, l: l0,
+      descripcion: `${modalidad === 'renovacion' ? 'Renovación' : 'Unificación'} ${origenes.map(x => x.numero_letra).join(', ')} → ${filas.map(f => f.numero).join(', ')}`,
+      origenes: origenes.map(x => ({ letra: x, monto: _saldoLetra(x) })), nuevas: filas, tcNueva, intRef,
+      abono: ab ? { ...ab } : null, renov: !!ab && ab.ubicacion === 'banco'
+    })
+    conAsiento = true
+    await _sb(supabase.from('letras_refinanciacion').update({ asiento_id: asiento?.id || null }).eq('id', refin.id))
+    // 4) Abono en el acto (banco + recibo)
+    if (ab) {
+      const fila = await _insAbono({
+        letra_id: origenes.length === 1 ? l0.id : null, refinanciacion_id: refin.id, tipo: _rfin.tipo, contact_id: _rfin.contactId,
+        tipo_abono: modalidad, ubicacion: ab.ubicacion, medio: ab.medio, fecha, banco_id: ab.bancoId, moneda: _rfin.moneda,
+        tipo_cambio: ab.tcDia, monto_amortizado: ab.amort, interes: ab.interes, gasto_portes: ab.portes,
+        gasto_comision: ab.comision, gasto_otros: ab.otros, monto_neto: neto, numero_operacion: ab.numOp,
+        numero_recibo: ab.recibo, estado_previo: l0.estado, asiento_id: asiento?.id || null, created_by: user?.db_id || null
+      })
+      const mov = await _registrarMovimientoBancario({
+        bancoId: ab.bancoId, tipo: (emitida ? neto >= 0 : neto < 0) ? 'ingreso' : 'egreso', fecha,
+        concepto: `${modalidad === 'renovacion' ? 'Renovación' : 'Unificación'} letra(s) ${origenes.map(x => x.numero_letra).join(', ')} — ${_nombreContacto(_rfin.contactId)}${ab.recibo ? ` (Rec. ${ab.recibo})` : ''}`,
+        categoria: emitida ? 'Cobranza letras' : 'Pago letras', referencia: `LETRA-REFIN ${refin.id}`, numeroOperacion: ab.numOp,
+        monto: Math.abs(neto), asientoId: asiento?.id || null, monedaMonto: _rfin.moneda, tc: ab.tcDia
+      })
+      if (mov?.id) await _updAbono(fila.id, { movimiento_banco_id: mov.id })
+    }
+    // 5) Orígenes → refinanciada
+    for (const x of origenes) await _updLetra(x.id, { estado: 'refinanciada' })
+    await _subirAdjuntosPendientes('rfin', 'letra', creadas[0].id)
+    window.closeModal('modal-refinanciar-letras')
+    showToast(`${modalidad === 'renovacion' ? 'Renovación' : 'Unificación'} registrada ✅ — nuevas: ${creadas.map(c => c.numero_letra).join(', ')}${asiento?.numero_asiento ? ` / ${asiento.numero_asiento}` : ''}`, 'success', 8000)
+    _rfin = null
+    _letSel.clear()
+    _refrescarTodo()
+    await _recargarTrasLetra()
+  } catch (e) {
+    console.error('confirmarRefinanciar:', e)
+    if (!conAsiento) {
+      // Falló antes del asiento: se revierte todo lo creado (letras nuevas + cabecera)
+      for (const c of creadas) { try { await deleteLetraCambio(c.id) } catch (_) {} }
+      if (refin?.id) { try { await supabase.from('letras_refinanciacion').delete().eq('id', refin.id) } catch (_) {} }
+      showToast('Error: ' + e.message + ' — no se guardó nada.', 'danger', 10000)
+    } else {
+      showToast(`Error a mitad de la refinanciación #${refin.id}: ${e.message}. Ábrela desde una letra nueva y usa "Deshacer refinanciación".`, 'danger', 12000)
+      _refrescarTodo(); await _recargarTrasLetra()
+    }
+  }
+}
+
+function _siguienteNumeroRenov(numero) {
+  const base = String(numero).replace(/-R\d*$/, '')
+  const usados = new Set((_letrasCache || []).map(x => x.numero_letra))
+  if (!usados.has(`${base}-R`)) return `${base}-R`
+  let i = 2
+  while (usados.has(`${base}-R${i}`)) i++
+  return `${base}-R${i}`
+}
+
+/** Deshace una refinanciación completa (desde cualquiera de sus letras nuevas o de origen). */
+async function _deshacerRefinanciacion(refId) {
+  const refin = await _sb(supabase.from('letras_refinanciacion').select('*').eq('id', refId).single())
+  const origen = await _sb(supabase.from('letras_refinanciacion_origen').select('*').eq('refinanciacion_id', refId))
+  const nuevas = await _sb(supabase.from('letras_cambio').select('*').eq('refinanciacion_id', refId))
+  const bloqueo = nuevas.find(x => x.estado !== 'cartera' || _n(x.monto_pagado) > 0)
+  if (bloqueo) throw new Error(`La letra nueva ${bloqueo.numero_letra} ya tiene movimientos (${bloqueo.estado}${_n(bloqueo.monto_pagado) ? ', con abonos' : ''}). Revierte eso primero.`)
+  const abonos = await _sb(supabase.from('letras_abonos').select('*').eq('refinanciacion_id', refId))
+  const avisos = []
+  for (const ab of abonos) {
+    const mov = await _movPorId(ab.movimiento_banco_id)
+    if (mov) await _eliminarMovimientoYSaldo(mov)
+    else if (ab.banco_id) avisos.push('no se encontró el movimiento del abono')
+    await _delAbono(ab.id)
+  }
+  for (const x of nuevas) {
+    try { await eliminarAdjuntosDe('letra', x.id) } catch (_) {}
+    const ok = await deleteLetraCambio(x.id)
+    if (ok === false) throw new Error(`No se pudo eliminar la letra ${x.numero_letra}`)
+  }
+  for (const o of origen) await _updLetra(o.letra_id, { estado: o.estado_previo, monto_pagado: _n(o.monto_pagado_previo) })
+  await _sb(supabase.from('letras_refinanciacion').delete().eq('id', refId))
+  if (refin.asiento_id) { try { await eliminarAsientoContable(refin.asiento_id) } catch (e) { avisos.push('asiento no eliminado: ' + e.message) } }
+  return { avisos, nuevas, origen }
+}
+
+window.deshacerRefinanciacion = async function (refId) {
+  try {
+    const origen = await _sb(supabase.from('letras_refinanciacion_origen').select('letra_id').eq('refinanciacion_id', refId))
+    const nuevas = await _sb(supabase.from('letras_cambio').select('numero_letra').eq('refinanciacion_id', refId))
+    const nom = id => _letrasCache.find(x => x.id === id)?.numero_letra || `#${id}`
+    if (!confirm(`Deshacer la refinanciación #${refId}:\n• Se eliminan las letras nuevas: ${nuevas.map(x => x.numero_letra).join(', ')}\n• Se borran su asiento, el abono y el movimiento bancario (si hubo)\n• Vuelven a su estado anterior: ${origen.map(o => nom(o.letra_id)).join(', ')}\n\n¿Continuar?`)) return
+    const r = await _deshacerRefinanciacion(refId)
+    if (r.avisos.length) showToast('⚠️ ' + r.avisos.join('; '), 'warning')
+    showToast('Refinanciación deshecha ✅', 'success')
+    window.closeModal?.('modal-detalle-cp')
+    _refrescarTodo()
+    await _recargarTrasLetra()
+  } catch (e) { showToast('Error: ' + e.message, 'danger', 9000) }
+}
+
+/** Id de la refinanciación que cerró una letra 'refinanciada'. */
+async function _refinQueCerro(letraId) {
+  const r = await _sb(supabase.from('letras_refinanciacion_origen').select('refinanciacion_id').eq('letra_id', letraId).order('id', { ascending: false }).limit(1))
+  return r?.[0]?.refinanciacion_id || null
+}
+
+// ── Selección múltiple en la tabla de letras (para Unificar) ──
+const _letSel = new Set()
+window._letToggleSel = function (id, on, chk) {
+  const l = _letrasCache.find(x => x.id === id)
+  if (on && l) {
+    const otra = _letrasCache.find(x => _letSel.has(x.id))
+    if (otra && (otra.tipo !== l.tipo || Number(otra.contact_id) !== Number(l.contact_id) || (otra.moneda || 'PEN') !== (l.moneda || 'PEN'))) {
+      showToast('Solo se unifican letras del mismo cliente/proveedor, tipo y moneda', 'warning')
+      if (chk) chk.checked = false
+      return
+    }
+    _letSel.add(id)
+  } else _letSel.delete(id)
+  _letPintarBotonUnificar()
+}
+function _letPintarBotonUnificar() {
+  const b = document.getElementById('btnUnificarLetras')
+  if (!b) return
+  b.disabled = _letSel.size < 2
+  b.textContent = `🔗 Unificar letras${_letSel.size ? ` (${_letSel.size})` : ''}`
+  b.title = _letSel.size < 2 ? 'Marca 2 o más letras con saldo del mismo cliente y moneda' : ''
+}
+window.unificarSeleccionadas = function () {
+  if (_letSel.size < 2) { showToast('Marca al menos 2 letras', 'warning'); return }
+  window.abrirRefinanciar([..._letSel], 'unificacion')
+}
+
+/** Deshace el cobro/pago de una letra del flujo ANTERIOR (sin abonos, previo al SQL 77). */
+
 async function _revertirCancelacionLetraCore(l) {
     const avisos = []
     if (l.banco_id) {
@@ -2999,7 +4277,7 @@ async function _revertirCancelacionLetraCore(l) {
 // ============================================================================
 
 async function _recargarTrasLetra() {
-  invalidarVarios(['letras_cambio', 'cuentas_cobrar', 'cuentas_pagar', 'cuotas_cobrar', 'cuotas_pagar', 'movimientos_banco', 'bancos'])
+  invalidarVarios(['letras_cambio', 'letras_abonos', 'cuentas_cobrar', 'cuentas_pagar', 'cuotas_cobrar', 'cuotas_pagar', 'movimientos_banco', 'bancos'])
   await window.cargarLetras()
   await Promise.all([cargarCxC(), cargarCxP()])
   calcularKPIs()
@@ -3032,61 +4310,129 @@ window.verDetalleLetra = async function (id) {
     const l = await _getLetra(id)
     if (!l) { body.innerHTML = '<p>Letra no encontrada.</p>'; return }
     const emitida = l.tipo === 'emitida'
-    const abierta = ['cartera', 'banco', 'cobranza'].includes(l.estado)
+    const abierta = _letraAbierta(l)
+    const mon = l.moneda || 'PEN'
+    const sinAbonos = _n(l.monto_pagado) <= 0
+    let abonos = [], refinOrigen = null, refinCierre = null
+    try { abonos = await _abonosDeLetra(id) } catch (_) {}
+    try {
+      if (l.refinanciacion_id) {
+        const [ref, ori, hermanas] = await Promise.all([
+          _sb(supabase.from('letras_refinanciacion').select('*').eq('id', l.refinanciacion_id).single()),
+          _sb(supabase.from('letras_refinanciacion_origen').select('*').eq('refinanciacion_id', l.refinanciacion_id)),
+          _sb(supabase.from('letras_cambio').select('id, numero_letra, monto, fecha_vencimiento, estado').eq('refinanciacion_id', l.refinanciacion_id))
+        ])
+        refinOrigen = { ref, ori, hermanas }
+      }
+      if (l.estado === 'refinanciada') {
+        const rid = await _refinQueCerro(id)
+        if (rid) {
+          const [ref, nuevas] = await Promise.all([
+            _sb(supabase.from('letras_refinanciacion').select('*').eq('id', rid).single()),
+            _sb(supabase.from('letras_cambio').select('id, numero_letra, monto, fecha_vencimiento, estado').eq('refinanciacion_id', rid))
+          ])
+          refinCierre = { ref, nuevas }
+        }
+      }
+    } catch (e) { console.warn('detalle refinanciación:', e.message) }
+
     document.getElementById('detalle-cp-titulo').textContent = `Letra ${l.numero_letra}`
+    const btn = (txt, js, cls = 'btn-secondary') => `<button class="btn ${cls}" onclick="window.closeModal('modal-detalle-cp'); ${js}">${txt}</button>`
     document.getElementById('detalle-cp-acciones').innerHTML = `
       <button class="btn btn-secondary" onclick="window.closeModal('modal-detalle-cp')">Cerrar</button>
-      ${l.estado === 'cartera' ? `<button class="btn btn-secondary" onclick="window.closeModal('modal-detalle-cp'); window.abrirModalLetraBanco(${id})">A banco</button>` : ''}
-      ${(l.estado === 'banco' || l.estado === 'cobranza') ? `<button class="btn btn-secondary" onclick="window.closeModal('modal-detalle-cp'); window.cambiarEstadoLetra(${id},'protestada')">Protestar</button>` : ''}
-      ${abierta ? `<button class="btn btn-primary" onclick="window.closeModal('modal-detalle-cp'); window.abrirCancelarLetra(${id})">${emitida ? 'Cobrar' : 'Pagar'}</button>` : ''}
-      <button class="btn btn-secondary" onclick="window.closeModal('modal-detalle-cp'); window.abrirEditarLetra(${id})">✏️ Editar</button>
-      <button class="btn btn-danger" onclick="window.eliminarLetra(${id})">✕ Eliminar</button>`
+      ${l.estado === 'cartera' && sinAbonos ? btn('A banco', `window.abrirModalLetraBanco(${id})`) : ''}
+      ${(l.estado === 'banco' || l.estado === 'cobranza') ? btn('Protestar', `window.cambiarEstadoLetra(${id},'protestada')`) : ''}
+      ${abierta ? btn('🔄 Renovar', `window.abrirRenovarLetra(${id})`) : ''}
+      ${abierta ? btn(emitida ? '💵 Cobrar / abonar' : '💵 Pagar / abonar', `window.abrirCancelarLetra(${id})`, 'btn-primary') : ''}
+      ${l.estado !== 'refinanciada' ? btn('✏️ Editar', `window.abrirEditarLetra(${id})`) : ''}
+      ${refinCierre ? btn('↩ Deshacer refinanciación', `window.deshacerRefinanciacion(${refinCierre.ref.id})`, 'btn-danger')
+        : l.refinanciacion_id ? btn('↩ Deshacer refinanciación', `window.deshacerRefinanciacion(${l.refinanciacion_id})`, 'btn-danger')
+        : `<button class="btn btn-danger" onclick="window.eliminarLetra(${id})">✕ Eliminar</button>`}`
 
     const doc = emitida ? (l.cxc_id ? await getCuentaCobrarById(l.cxc_id) : null) : (l.cxp_id ? await getCuentaPagarById(l.cxp_id) : null)
-    const [mov, asCanje, asCobro] = await Promise.all([_movDeLetra(l), _numeroAsiento(l.asiento_emision_id), _numeroAsiento(l.asiento_cobro_id)])
+    const asCanje = await _numeroAsiento(l.asiento_emision_id || refinOrigen?.ref?.asiento_id)
     const fila = (k, v) => `<tr><td style="color:var(--text-secondary); width:40%;">${k}</td><td>${v}</td></tr>`
+    const saldo = _saldoLetra(l)
+    const asNums = await Promise.all(abonos.map(a => _numeroAsiento(a.asiento_id)))
+    let adjLetra = []
+    try { adjLetra = await getAdjuntos('letra', id) } catch (_) {}
+    const tabla = (cab, filas, pie = '') => `<div style="border:1px solid var(--border-color); border-radius:var(--radius-md); overflow:hidden; overflow-x:auto;">
+      <table style="width:100%; border-collapse:collapse; margin:0; font-size:0.85rem;"><thead><tr style="background:var(--bg-secondary);">${cab}</tr></thead><tbody>${filas}</tbody>${pie}</table></div>`
+    const listaLetras = arr => arr.map(x => `<a href="#" onclick="window.verDetalleLetra(${x.id}); return false;">${_esc(x.numero_letra)}</a> <small style="color:var(--text-secondary);">${formatNumber(x.monto)} · ${x.estado}</small>`).join(' · ')
 
     body.innerHTML = `
-      <div style="padding:12px 14px; background:var(--bg-secondary); border-radius:var(--radius-md); border-left:3px solid var(--color-info); font-size:0.88rem; line-height:1.6;">
-        <div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">${emitida ? 'Letra por cobrar' : 'Letra por pagar'} · ${l.estado}</div>
-        <div style="font-weight:600; font-size:1.05rem; margin-top:2px;">${_esc(l.numero_letra)} — ${l.moneda || 'PEN'} ${formatNumber(l.monto)}</div>
-        <div style="font-size:0.85rem; color:var(--text-secondary); margin-top:2px;">${_esc(_nombreContacto(l.contact_id))} · Canjea ${_esc(doc ? _descDocCP(doc) : '—')}</div>
+      <div style="padding:12px 14px; background:var(--bg-secondary); border-radius:var(--radius-md); border-left:3px solid var(--color-info); font-size:0.88rem; line-height:1.6; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+        <div>
+          <div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">${emitida ? 'Letra por cobrar' : 'Letra por pagar'} · ${l.estado}</div>
+          <div style="font-weight:600; font-size:1.05rem; margin-top:2px;">${_esc(l.numero_letra)} — ${_esc(_nombreContacto(l.contact_id))}</div>
+          <div style="font-size:0.85rem; color:var(--text-secondary); margin-top:2px;">Canjea ${_esc(doc ? _descDocCP(doc) : (l.refinanciacion_id ? 'refinanciación de letras' : '—'))}</div>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(3, auto); gap:2px 18px; text-align:right;">
+          <span style="color:var(--text-secondary); font-size:0.75rem;">MONTO</span><span style="color:var(--text-secondary); font-size:0.75rem;">PAGADO</span><span style="color:var(--text-secondary); font-size:0.75rem;">SALDO</span>
+          <b>${mon} ${formatNumber(l.monto)}</b><b>${mon} ${formatNumber(l.monto_pagado || 0)}</b><b style="color:${saldo > 0 ? 'var(--color-warning)' : 'var(--color-success)'};">${mon} ${formatNumber(saldo)}</b>
+        </div>
       </div>
       <table class="table-compact" style="width:100%; margin-top:10px;">
-        ${fila('F. Emisión', fechaDMY(l.fecha_emision))}
-        ${fila('F. Vencimiento', fechaDMY(l.fecha_vencimiento))}
+        ${fila('F. Emisión / Vencimiento', `${fechaDMY(l.fecha_emision)} → ${fechaDMY(l.fecha_vencimiento)}${abierta && _diasAtraso(l.fecha_vencimiento) ? ` <b style="color:var(--color-danger);">(${_diasAtraso(l.fecha_vencimiento)} d de atraso)</b>` : ''}`)}
         ${fila('Banco', _esc(l.banco_id ? (_bancosMap[l.banco_id]?.nombre || l.banco_id) : '—'))}
-        ${fila('N° Operación', _esc(l.numero_operacion || '—'))}
-        ${fila('Asiento de canje', asCanje)}
-        ${fila(emitida ? 'Asiento de cobro' : 'Asiento de pago', asCobro)}
+        ${mon === 'USD' ? fila('T.C. de la letra', parseFloat(l.tipo_cambio || 1).toFixed(4)) : ''}
+        ${fila(l.refinanciacion_id ? 'Asiento de refinanciación' : 'Asiento de canje', asCanje)}
         ${fila('Observaciones', _esc(l.observaciones || '—'))}
+        ${fila('📎 Archivos adjuntos', _htmlAdjuntos('letra', id, adjLetra, false))}
       </table>
-      <h4 style="margin:16px 0 6px;">Movimiento bancario</h4>
-      ${mov ? `<table class="table-compact" style="width:100%;">
-        ${fila('N° Registro', `<b>${_numMB(mov.id)}</b>`)}
-        ${fila('Fecha', fechaDMY(mov.fecha))}
-        ${fila('Cuenta', _esc(_bancosMap[mov.banco_id]?.nombre || mov.banco_id))}
-        ${fila('Monto', `${mov.tipo} ${formatNumber(mov.monto)}`)}
-        ${fila('Saldo posterior', mov.saldo_posterior != null ? formatNumber(mov.saldo_posterior) : '—')}
-      </table>` : `<p style="color:var(--text-secondary);">${l.estado === 'cobrada' ? 'No se encontró el movimiento.' : 'Aún no cobrada/pagada.'}</p>`}`
+
+      ${refinOrigen ? `<h4 style="margin:16px 0 6px;">🔗 Nace de la ${refinOrigen.ref.modalidad === 'renovacion' ? 'renovación' : 'unificación'} #${refinOrigen.ref.id} (${fechaDMY(refinOrigen.ref.fecha)})</h4>
+        <div style="font-size:0.85rem; line-height:1.8;">
+          <div><span style="color:var(--text-secondary);">Letras de origen:</span> ${listaLetras(refinOrigen.ori.map(o => ({ id: o.letra_id, numero_letra: _letrasCache.find(x => x.id === o.letra_id)?.numero_letra || '#' + o.letra_id, monto: o.saldo, estado: 'saldo' })))}</div>
+          <div><span style="color:var(--text-secondary);">Letras nuevas:</span> ${listaLetras(refinOrigen.hermanas)}</div>
+          <div><span style="color:var(--text-secondary);">Saldos ${formatNumber(refinOrigen.ref.total_saldos)} − abono ${formatNumber(refinOrigen.ref.monto_abono)} + interés ${formatNumber(refinOrigen.ref.interes_refin)} = </span><b>${mon} ${formatNumber(refinOrigen.ref.total_nuevas)}</b>${mon === 'USD' ? ` · T.C. ${parseFloat(refinOrigen.ref.tipo_cambio || 1).toFixed(4)}` : ''}</div>
+        </div>` : ''}
+      ${refinCierre ? `<h4 style="margin:16px 0 6px;">🔗 ${refinCierre.ref.modalidad === 'renovacion' ? 'Renovada' : 'Unificada'} en #${refinCierre.ref.id} (${fechaDMY(refinCierre.ref.fecha)})</h4>
+        <div style="font-size:0.85rem;">Letras nuevas: ${listaLetras(refinCierre.nuevas)}</div>` : ''}
+
+      <h4 style="margin:16px 0 6px;">💵 Abonos ${emitida ? '/ cobros' : '/ pagos'} (${abonos.length})</h4>
+      ${abonos.length ? tabla(
+        `<th>Fecha</th><th>Tipo</th><th>Medio / cuenta</th><th>Recibo</th><th>N° Op.</th><th style="text-align:right;">Amortiza (${mon})</th><th style="text-align:right;">Interés</th><th style="text-align:right;">Gastos</th><th style="text-align:right;">Neto (${mon})</th><th>Mov. / Asiento</th><th></th>`,
+        abonos.map((a, i) => `<tr style="border-top:1px solid var(--border-color);">
+          <td>${fechaDMY(a.fecha)}</td>
+          <td><span class="badge ${a.tipo_abono === 'total' ? 'badge-success' : (a.tipo_abono === 'parcial' ? 'badge-warning' : 'badge-info')}">${_TIPOS_ABONO[a.tipo_abono] || a.tipo_abono}</span><br><small style="color:var(--text-secondary);">${a.ubicacion === 'banco' ? '🏦 banco' : '📁 cartera'}</small></td>
+          <td>${_esc(_MEDIOS_LETRA[a.medio] || a.medio || '—')}<br><small style="color:var(--text-secondary);">${_esc(_bancosMap[a.banco_id]?.nombre || '—')}</small></td>
+          <td><b>${_esc(a.numero_recibo || '—')}</b></td>
+          <td>${_esc(a.numero_operacion || '—')}</td>
+          <td style="text-align:right;">${formatNumber(a.monto_amortizado)}</td>
+          <td style="text-align:right;">${formatNumber(a.interes || 0)}</td>
+          <td style="text-align:right;">${formatNumber(_n(a.gasto_portes) + _n(a.gasto_comision) + _n(a.gasto_otros))}</td>
+          <td style="text-align:right; font-weight:600;">${formatNumber(Math.abs(_n(a.monto_neto)))}</td>
+          <td style="white-space:nowrap;">${a.movimiento_banco_id ? _numMB(a.movimiento_banco_id) : '—'}<br><small style="color:var(--text-secondary);">${asNums[i]}</small></td>
+          <td>${a.refinanciacion_id ? '<small style="color:var(--text-secondary);">refinanc.</small>' : menuAccionesFila([
+            { icono: '✏️', label: 'Editar abono', onclick: `window.closeModal('modal-detalle-cp'); window.abrirCancelarLetra(${id}, ${a.id})` },
+            { separador: true },
+            { icono: '✕', label: 'Eliminar abono', peligro: true, onclick: `window.eliminarAbonoLetra(${id}, ${a.id})` }
+          ])}</td></tr>`).join(''),
+        `<tfoot><tr style="border-top:2px solid var(--border-color); font-weight:bold;"><td colspan="5">Total</td>
+          <td style="text-align:right;">${formatNumber(abonos.reduce((t, a) => t + _n(a.monto_amortizado), 0))}</td>
+          <td style="text-align:right;">${formatNumber(abonos.reduce((t, a) => t + _n(a.interes), 0))}</td>
+          <td style="text-align:right;">${formatNumber(abonos.reduce((t, a) => t + _n(a.gasto_portes) + _n(a.gasto_comision) + _n(a.gasto_otros), 0))}</td>
+          <td style="text-align:right;">${formatNumber(abonos.reduce((t, a) => t + Math.abs(_n(a.monto_neto)), 0))}</td><td colspan="2"></td></tr></tfoot>`)
+      : `<p style="color:var(--text-secondary);">${l.estado === 'refinanciada' ? 'Sin abonos directos: su saldo pasó a la refinanciación.' : 'Aún sin abonos.'}</p>`}`
   } catch (e) {
     console.error('verDetalleLetra:', e)
     body.innerHTML = `<p style="color:var(--color-danger);">Error: ${_esc(e.message)}</p>`
   }
 }
 
-let _edicionLetra = null   // { letra, mov, maxMonto }
+let _edicionLetra = null   // { letra, maxMonto }
 
 window.abrirEditarLetra = async function (id) {
   try {
     const l = await _getLetra(id)
     if (!l) { showToast('Letra no encontrada', 'danger'); return }
+    if (l.estado === 'refinanciada') { showToast('Una letra refinanciada no se edita: deshaz la refinanciación desde Ver detalle.', 'warning', 6000); return }
     const emitida = l.tipo === 'emitida'
     await _refrescarCuotasDoc(emitida, emitida ? l.cxc_id : l.cxp_id)
     const cuota = emitida ? _cuotasCache.find(q => q.id === l.cuota_cobrar_id) : _cuotasPagarCache.find(q => q.id === l.cuota_pagar_id)
     const maxMonto = _r2((cuota ? saldoCuota(cuota) : 0) + parseFloat(l.monto || 0))
-    const mov = l.estado === 'cobrada' ? await _movDeLetra(l) : null
-    _edicionLetra = { letra: l, mov, maxMonto }
+    _edicionLetra = { letra: l, maxMonto }
 
     const $ = i => document.getElementById(i)
     $('elet-titulo').textContent = `Editar letra ${l.numero_letra}`
@@ -3095,18 +4441,17 @@ window.abrirEditarLetra = async function (id) {
     $('eletFechaVenc').value = l.fecha_vencimiento || ''
     $('eletMonto').value = l.monto
     $('eletObs').value = l.observaciones || ''
-    $('elet-info').textContent = `Canjea la cuota ${cuota?.numero_cuota ?? '—'} — monto máximo: ${l.moneda || 'PEN'} ${formatNumber(maxMonto)}`
-    const cobrada = l.estado === 'cobrada'
-    $('elet-cobro').style.display = cobrada ? '' : 'none'
-    $('elet-cobro-titulo').textContent = emitida ? 'Cobro de la letra' : 'Pago de la letra'
-    if (cobrada) {
-      $('eletBanco').innerHTML = '<option value="">-- Selecciona --</option>' + _bancos.map(b => `<option value="${b.id}">${_esc(b.nombre)} (${b.moneda || ''})</option>`).join('')
-      $('eletBanco').value = l.banco_id || ''
-      $('eletFechaCobro').value = mov?.fecha || ''
-      $('eletNumOp').value = l.numero_operacion || ''
-      $('eletTC').value = await _tcCancelLetra(l)
-    }
-    $('eletTCGroup').style.display = cobrada && (l.moneda || 'PEN') === 'USD' ? '' : 'none'
+    const pagado = _n(l.monto_pagado)
+    const bloqueaMonto = pagado > 0 || !!l.refinanciacion_id
+    $('eletMonto').readOnly = bloqueaMonto
+    $('elet-info').textContent = l.refinanciacion_id
+      ? `Letra de refinanciación #${l.refinanciacion_id}: el monto no se edita (deshaz la refinanciación para cambiarlo).`
+      : pagado > 0
+        ? `Tiene abonos por ${formatNumber(pagado)}: el monto no se edita. Los cobros/abonos se editan desde 👁 Ver detalle.`
+        : `Canjea la cuota ${cuota?.numero_cuota ?? '—'} — monto máximo: ${l.moneda || 'PEN'} ${formatNumber(maxMonto)}`
+    // Los cobros/abonos ya no se editan aquí (cada abono tiene su ⋮ en Ver detalle)
+    $('elet-cobro').style.display = 'none'
+    $('eletTCGroup').style.display = 'none'
     window.openModal('modal-editar-letra')
   } catch (e) {
     console.error('abrirEditarLetra:', e)
@@ -3134,27 +4479,14 @@ window.guardarEdicionLetra = async function () {
     if (!nuevo.numero_letra) { showToast('Ingresa el N° de letra', 'warning'); return }
     if (!nuevo.fecha_emision || !nuevo.fecha_vencimiento) { showToast('Ingresa ambas fechas', 'warning'); return }
     if (!(nuevo.monto > 0)) { showToast('El monto debe ser mayor a 0', 'warning'); return }
-    if (nuevo.monto > _edicionLetra.maxMonto + 0.01) { showToast(`El monto supera el máximo de la cuota (${formatNumber(_edicionLetra.maxMonto)})`, 'warning'); return }
-
-    const cobrada = l.estado === 'cobrada'
-    const cobro = cobrada ? { bancoId: parseInt($('eletBanco').value || 0), fecha: $('eletFechaCobro').value, numOp: $('eletNumOp').value.trim() || null, tc: parseFloat($('eletTC').value) || parseFloat(l.tipo_cambio) || 1 } : null
-    const tcCancelPrevio = cobrada ? parseFloat(await _tcCancelLetra(l)) || 0 : 0
-    if (cobrada && (!cobro.bancoId || !cobro.fecha)) { showToast('Indica banco y fecha del cobro/pago', 'warning'); return }
-
     const delta = _r2(nuevo.monto - parseFloat(l.monto || 0))
-    const cambioCanje = delta !== 0 || nuevo.numero_letra !== l.numero_letra || nuevo.fecha_emision !== l.fecha_emision
-    const cambioCobro = cobrada && (cambioCanje
-      || cobro.bancoId !== Number(l.banco_id) || cobro.fecha !== (_edicionLetra.mov?.fecha || '') || (cobro.numOp || null) !== (l.numero_operacion || null)
-      || Math.abs(cobro.tc - tcCancelPrevio) > 1e-9)
+    if (delta && (_n(l.monto_pagado) > 0 || l.refinanciacion_id)) { showToast('El monto no se edita en letras con abonos o de refinanciación', 'warning', 6000); return }
+    if (!l.refinanciacion_id && nuevo.monto > _edicionLetra.maxMonto + 0.01) { showToast(`El monto supera el máximo de la cuota (${formatNumber(_edicionLetra.maxMonto)})`, 'warning'); return }
 
-    if ((cambioCanje || cambioCobro) && !confirm('Este cambio regenera los asientos de la letra' + (cambioCobro ? ' y su movimiento bancario' : '') + (delta ? ' y ajusta el canje de la cuota y del documento' : '') + '.\n\n¿Continuar?')) return
+    // Letras de refinanciación: su asiento es el de la refinanciación (no se regenera)
+    const cambioCanje = !l.refinanciacion_id && (delta !== 0 || nuevo.numero_letra !== l.numero_letra || nuevo.fecha_emision !== l.fecha_emision)
+    if (cambioCanje && !confirm('Este cambio regenera el asiento de canje' + (delta ? ' y ajusta el canje de la cuota y del documento' : '') + '.\n\n¿Continuar?')) return
 
-    // 1) Cobrada + cambio contable: deshacer el cobro/pago (mov. MB + saldo + asiento)
-    if (cambioCobro) {
-      const av = await _revertirCancelacionLetraCore(l)
-      if (av.length) showToast('⚠️ ' + av.join('; '), 'warning')
-    }
-    // 2) Canje: ajustar cuota + documento y rehacer el asiento de canje
     if (cambioCanje) {
       if (l.asiento_emision_id) {
         await updateLetraCambio(l.id, { asiento_emision_id: null })
@@ -3171,17 +4503,12 @@ window.guardarEdicionLetra = async function () {
         await _aplicarCanjeDoc(l.tipo, emitida ? l.cxc_id : l.cxp_id, delta)
       }
     }
-    // 3) Datos de la letra
     const upd = await updateLetraCambio(l.id, { ...nuevo, updated_at: new Date().toISOString() })
     if (!upd) throw new Error('No se pudo actualizar la letra (¿N° de letra duplicado?)')
-    const lNueva = { ...l, ...nuevo }
     if (cambioCanje) {
-      const as = await _asientoLetra('canje', lNueva, null)
+      const as = await _asientoLetra('canje', { ...l, ...nuevo }, null)
       if (as?.id) await updateLetraCambio(l.id, { asiento_emision_id: as.id })
     }
-    // 4) Rehacer el cobro/pago con los datos nuevos
-    if (cambioCobro) await _aplicarCancelacionLetra(lNueva, cobro.bancoId, cobro.fecha, cobro.numOp, cobro.tc)
-
     window.closeModal('modal-editar-letra')
     showToast(`Letra ${nuevo.numero_letra} actualizada ✅`, 'success')
     _refrescarTodo()
@@ -3465,16 +4792,54 @@ async function construirEstadoCuenta() {
       const c = cxpMap[p.cxp_id]; if (!c) continue
       push('Por pagar', p.contact_id, c.moneda, p.fecha, '4 · Pago', _descDocCP(c), p.referencia, 0, parseFloat(p.monto || 0))
     }
+    // Letras: canje (factura → letra), cargo de la letra y sus abonos reales
+    // (fecha y monto de cada abono). Las letras de refinanciación no tienen
+    // factura: su cargo nace del saldo refinanciado de las letras de origen.
+    const abonosLetra = await _abonosTodosCache()
+    const abonosPorLetra = {}
+    for (const a of abonosLetra) if (a.letra_id) (abonosPorLetra[a.letra_id] ||= []).push(a)
+    // Lo que pasa a letras nuevas = saldo de cada origen − su parte del abono en el acto
+    // (el abono ya figura como "Cobro de letra"; el interés de refinanciación va dentro del cargo de la letra nueva).
+    let origRefin = []
+    try {
+      const [{ data: ori }, { data: refs }] = await Promise.all([
+        supabase.from('letras_refinanciacion_origen').select('letra_id, saldo, refinanciacion_id'),
+        supabase.from('letras_refinanciacion').select('id, total_saldos, monto_abono')
+      ])
+      const rmap = Object.fromEntries((refs || []).map(r => [r.id, r]))
+      origRefin = (ori || []).map(o => {
+        const r = rmap[o.refinanciacion_id]
+        const parte = r && parseFloat(r.total_saldos) > 0 ? parseFloat(o.saldo) / parseFloat(r.total_saldos) * parseFloat(r.monto_abono || 0) : 0
+        return { ...o, traspaso: _r2(parseFloat(o.saldo || 0) - parte) }
+      })
+    } catch (_) {}
     for (const l of (_letrasCache || [])) {
       if (l.estado === 'anulada') continue
       const emitida = l.tipo === 'emitida'
-      const c = emitida ? cxcMap[l.cxc_id] : cxpMap[l.cxp_id]; if (!c) continue
+      const c = emitida ? cxcMap[l.cxc_id] : cxpMap[l.cxp_id]
+      if (!c && !l.refinanciacion_id) continue
       const lado = emitida ? 'Por cobrar' : 'Por pagar'
+      const mon = l.moneda || c?.moneda
       const m = parseFloat(l.monto || 0)
-      push(lado, l.contact_id, l.moneda || c.moneda, l.fecha_emision, '7 · Canje a letra', _descDocCP(c), l.numero_letra, 0, m)
-      push(lado, l.contact_id, l.moneda || c.moneda, l.fecha_emision, '8 · Letra', `Letra ${l.numero_letra}`, `Vence ${fechaDMY(l.fecha_vencimiento)} · ${l.estado}`, m, 0)
-      if (l.estado === 'cobrada') push(lado, l.contact_id, l.moneda || c.moneda, String(l.updated_at || l.fecha_vencimiento).slice(0, 10),
+      if (!l.refinanciacion_id) push(lado, l.contact_id, mon, l.fecha_emision, '7 · Canje a letra', _descDocCP(c), l.numero_letra, 0, m)
+      push(lado, l.contact_id, mon, l.fecha_emision, '8 · Letra', `Letra ${l.numero_letra}`, `Vence ${fechaDMY(l.fecha_vencimiento)} · ${l.estado}${l.refinanciacion_id ? ` · refinanc. #${l.refinanciacion_id}` : ''}`, m, 0)
+      const abs = abonosPorLetra[l.id] || []
+      for (const a of abs) {
+        const ref = [a.numero_recibo ? `Rec. ${a.numero_recibo}` : '', a.numero_operacion ? `Op. ${a.numero_operacion}` : ''].filter(Boolean).join(' · ')
+        push(lado, l.contact_id, mon, a.fecha, emitida ? '9 · Cobro de letra' : '9 · Pago de letra', `Letra ${l.numero_letra}`, ref, 0, parseFloat(a.monto_amortizado || 0))
+      }
+      // Sin abonos registrados (flujo anterior al SQL 77): usa el estado de la letra
+      if (!abs.length && l.estado === 'cobrada') push(lado, l.contact_id, mon, l.fecha_cobro || String(l.updated_at || l.fecha_vencimiento).slice(0, 10),
         emitida ? '9 · Cobro de letra' : '9 · Pago de letra', `Letra ${l.numero_letra}`, l.numero_operacion, 0, m)
+      // Saldo que pasó a letras nuevas (renovación / unificación)
+      for (const o of origRefin.filter(o => Number(o.letra_id) === Number(l.id))) {
+        push(lado, l.contact_id, mon, l.updated_at ? String(l.updated_at).slice(0, 10) : l.fecha_vencimiento, '10 · Pasa a letra nueva', `Letra ${l.numero_letra}`, `Refinanc. #${o.refinanciacion_id}`, 0, o.traspaso)
+      }
+    }
+    // Abonos en el acto de una unificación (no pertenecen a una sola letra)
+    for (const a of abonosLetra.filter(a => !a.letra_id && a.refinanciacion_id)) {
+      push(a.tipo === 'emitida' ? 'Por cobrar' : 'Por pagar', a.contact_id, a.moneda, a.fecha, a.tipo === 'emitida' ? '9 · Cobro de letra' : '9 · Pago de letra',
+        `Refinanciación #${a.refinanciacion_id}`, a.numero_recibo ? `Rec. ${a.numero_recibo}` : '', 0, parseFloat(a.monto_amortizado || 0))
     }
     filas.sort((a, b) => a.contacto.localeCompare(b.contacto) || a.fecha.localeCompare(b.fecha))
 
@@ -3618,7 +4983,7 @@ window._cpRecalc = function (tipo, origen) {
 // ============================================================================
 // Hasta 3 archivos por vez, cada uno con su concepto. Se eligen en el modal
 // (quedan "pendientes" en memoria) y se suben al guardar el cobro/pago.
-const _adjPendientes = { cobro: [], pago: [], ecp: [] }
+const _adjPendientes = { cobro: [], pago: [], ecp: [], clet: [], rlet: [], rfin: [] }
 const _adjConteo = { cobro: {}, pago: {} }
 const _ADJ_MAX_VEZ = 3
 
@@ -3630,7 +4995,9 @@ window._adjSeleccionar = function (pref) {
   for (const f of nuevos.slice(0, Math.max(0, libres))) {
     // Sugerencia de concepto por el nombre del archivo
     const n = f.name.toLowerCase()
-    _adjPendientes[pref].push({ file: f, concepto: /recib/.test(n) ? 'recibo' : (/vouch|constan|transf|deposit/.test(n) ? 'voucher' : 'voucher') })
+    // Letras cobradas en banco (o nombre con "dietario") → Dietario del banco
+    const enBanco = (pref === 'clet' && _clet?.ubicacion === 'banco') || (pref === 'rfin' && _rfin?.ubicacion === 'banco')
+    _adjPendientes[pref].push({ file: f, concepto: /dietar/.test(n) ? 'dietario' : (/recib/.test(n) ? 'recibo' : (/vouch|constan|transf|deposit/.test(n) ? 'voucher' : (enBanco ? 'dietario' : 'voucher'))) })
   }
   input.value = ''   // permite volver a elegir el mismo archivo
   _pintarAdjPendientes(pref)
@@ -3691,10 +5058,24 @@ window.verAdjunto = async function (adjId, path) {
   } catch (e) { if (w) w.close(); showToast('Error: ' + e.message, 'danger') }
 }
 
+/** Archivos ya guardados de la letra (en el modal Cobrar/abonar). */
+async function _pintarAdjLetra(letraId) {
+  const c = document.getElementById('clet-adjunto')
+  if (!c) return
+  c.innerHTML = '<span style="color:var(--text-secondary);">Cargando archivos…</span>'
+  try {
+    const adj = await getAdjuntos('letra', letraId)
+    c.innerHTML = adj?.length
+      ? `<div style="color:var(--text-secondary); font-size:0.75rem;">Ya guardados en la letra:</div>${_htmlAdjuntos('letra', letraId, adj, true)}`
+      : ''
+  } catch (e) { c.innerHTML = '' }
+}
+
 window.quitarAdjunto = async function (entidad, id, adjId) {
   if (!confirm('¿Quitar este archivo adjunto?')) return
   try {
     await eliminarAdjunto(adjId)
+    if (entidad === 'letra') { await _pintarAdjLetra(id); showToast('Archivo eliminado', 'success'); return }
     document.getElementById('ecp-adjunto').innerHTML = _htmlAdjuntos(entidad, id, await getAdjuntos(entidad, id), true)
     showToast('Archivo eliminado', 'success')
     await Promise.all([cargarCobrosRecientes(), cargarPagosRecientes()])
@@ -3758,8 +5139,9 @@ async function _tcCancelLetra(l) {
   return distinto || tcs[0] || l.tipo_cambio || ''
 }
 
-window._tcDefaultLetra = async function (l) {
-  if ((l.moneda || 'PEN') !== 'USD') return
+window._tcDefaultLetra = async function (l, forzar = false) {
+  const monCta = _monedaBanco(document.getElementById('cletBanco')?.value)
+  if (!forzar && (l.moneda || 'PEN') !== 'USD' && !(monCta && monCta !== (l.moneda || 'PEN'))) return
   try {
     const fecha = document.getElementById('cletFecha')?.value
     const r = await getTipoCambioDia(fecha, { permitirApi: false })
@@ -3773,4 +5155,100 @@ async function _asientoSinME(reg) {
   if ((reg.moneda || 'PEN') !== 'USD' || !reg.asiento_id) return false
   const { data } = await supabase.from('journal_entry_lines').select('importe_original').eq('journal_entry_id', reg.asiento_id)
   return !(data || []).some(l => parseFloat(l.importe_original) > 0)
+}
+
+
+// ============================================================================
+// RECIBOS DE COBRANZA — correlativo único (cobros de facturas + abonos de letras)
+// ============================================================================
+// Un recibo puede agrupar varios vouchers del MISMO cliente. La vista agrupa
+// por N°, detecta HUECOS del correlativo (por prefijo) y N° repetidos en
+// clientes distintos (casi siempre error de tipeo).
+window.cargarRecibos = async function () {
+  const tbody = document.getElementById('tbody-recibos')
+  const avisos = document.getElementById('recibos-avisos')
+  if (!tbody) return
+  tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;">Cargando...</td></tr>'
+  try {
+    if (!_letrasCache.length) _letrasCache = await cacheado('letras_cambio', getLetrasCambio)
+    if (!_cxcList.length) _cxcList = await cacheado('cuentas_cobrar', getCuentasCobrar)
+    const q = (document.getElementById('rec-buscar')?.value || '').toLowerCase().trim()
+    const desde = document.getElementById('rec-desde')?.value || ''
+    const hasta = document.getElementById('rec-hasta')?.value || ''
+    const todos = await _todosLosRecibos()
+    // Agrupar por N°
+    const grupos = new Map()
+    for (const r of todos) {
+      const k = String(r.numero_recibo).trim().toUpperCase()
+      if (!grupos.has(k)) grupos.set(k, [])
+      grupos.get(k).push(r)
+    }
+    const desc = r => {
+      if (r.origen === 'cobro') {
+        const cxc = _cxcList.find(d => d.id === r.cxc_id)
+        return { txt: `Cobro ${cxc ? `${cxc.serie ? cxc.serie + '-' : ''}${cxc.numero_comprobante || ''}` : 'factura'}`, ver: `window.verDetalleCP('cobro', ${r.id})` }
+      }
+      const l = _letrasCache.find(x => x.id === r.letra_id)
+      return { txt: `${_TIPOS_ABONO[r.tipo_abono] || 'Abono'} letra ${l?.numero_letra || (r.refinanciacion_id ? `(refinanc. #${r.refinanciacion_id})` : '')}`, ver: r.letra_id ? `window.verDetalleLetra(${r.letra_id})` : '' }
+    }
+    let filas = [...grupos.entries()].map(([num, items]) => {
+      const clientes = [...new Set(items.map(i => Number(i.contact_id)))]
+      const fecha = items.map(i => i.fecha).sort()[0]
+      const monedas = [...new Set(items.map(i => i.moneda || 'PEN'))]
+      return { num, items, clientes, fecha, monedas, total: _r2(items.reduce((t, i) => t + _n(i.importe), 0)), partes: _partesRecibo(num) }
+    })
+    // Huecos por prefijo (sobre TODOS, antes de filtrar)
+    const porPref = {}
+    for (const f of filas) if (f.partes) (porPref[f.partes.pref] ||= []).push(f.partes)
+    const huecos = []
+    for (const [pref, arr] of Object.entries(porPref)) {
+      const nums = [...new Set(arr.map(a => a.num))].sort((a, b) => a - b)
+      const ancho = arr[0].ancho
+      for (let i = 1; i < nums.length; i++) {
+        const salto = nums[i] - nums[i - 1]
+        if (salto > 1 && salto <= 50) for (let n = nums[i - 1] + 1; n < nums[i]; n++) huecos.push(`${pref}${String(n).padStart(ancho, '0')}`)
+        else if (salto > 50) huecos.push(`${pref}${String(nums[i - 1] + 1).padStart(ancho, '0')} … ${pref}${String(nums[i] - 1).padStart(ancho, '0')}`)
+      }
+    }
+    const dup = filas.filter(f => f.clientes.length > 1)
+    if (avisos) avisos.innerHTML = [
+      huecos.length ? `<div style="padding:8px 12px; border-left:3px solid var(--color-warning); background:var(--bg-secondary); border-radius:var(--radius-sm);">⚠ <b>${huecos.length} N° faltante(s)</b> en el correlativo: ${huecos.slice(0, 30).map(_esc).join(', ')}${huecos.length > 30 ? '…' : ''}<br><small style="color:var(--text-secondary);">Pueden ser recibos anulados o aún no registrados en el ERP.</small></div>` : '',
+      dup.length ? `<div style="padding:8px 12px; border-left:3px solid var(--color-danger); background:var(--bg-secondary); border-radius:var(--radius-sm);">⛔ <b>${dup.length} N° usado(s) en clientes distintos</b>: ${dup.map(d => _esc(d.num)).join(', ')}</div>` : '',
+      !huecos.length && !dup.length && filas.length ? '<div style="padding:8px 12px; border-left:3px solid var(--color-success); background:var(--bg-secondary); border-radius:var(--radius-sm);">✅ Correlativo sin huecos ni duplicados.</div>' : ''
+    ].join('')
+    filas = filas.filter(f => (!desde || f.fecha >= desde) && (!hasta || f.fecha <= hasta)
+      && (!q || `${f.num} ${f.clientes.map(c => _nombreContacto(c)).join(' ')} ${f.items.map(i => desc(i).txt).join(' ')}`.toLowerCase().includes(q)))
+      .sort((a, b) => (b.partes?.pref || '').localeCompare(a.partes?.pref || '') || (b.partes?.num ?? 0) - (a.partes?.num ?? 0) || b.num.localeCompare(a.num))
+    document.getElementById('recibos-total').textContent = `${filas.length} recibo(s)`
+    if (!filas.length) { tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;">Sin recibos para los filtros</td></tr>'; return }
+    tbody.innerHTML = filas.map(f => {
+      const malo = f.clientes.length > 1
+      return f.items.map((i, k) => {
+        const d = desc(i)
+        return `<tr style="${k ? '' : 'border-top:2px solid var(--border-color);'}${malo ? ' color:var(--color-danger);' : ''}">
+          ${k ? '<td></td>' : `<td rowspan="1" style="font-weight:700;">${_esc(f.num)}${f.items.length > 1 ? ` <small class="badge badge-info">${f.items.length}</small>` : ''}</td>`}
+          <td>${fechaDMY(i.fecha)}</td>
+          <td>${_esc(_nombreContacto(i.contact_id))}</td>
+          <td>${d.ver ? `<a href="#" onclick="${d.ver}; return false;">${_esc(d.txt)}</a>` : _esc(d.txt)}</td>
+          <td>${_esc(i.origen === 'cobro' ? (i.medio_pago || '—') : (_MEDIOS_LETRA[i.medio] || i.medio || '—'))}<br><small style="color:var(--text-secondary);">${_esc(_bancosMap[i.banco_id]?.nombre || '')}</small></td>
+          <td>${i.moneda || 'PEN'}</td>
+          <td style="text-align:right;">${formatNumber(i.importe)}</td>
+          <td style="text-align:right; font-weight:600;">${k === f.items.length - 1 && f.items.length > 1 ? formatNumber(f.total) : (f.items.length === 1 ? formatNumber(f.total) : '')}</td>
+          <td><span class="badge ${i.origen === 'cobro' ? 'badge-secondary' : 'badge-warning'}">${i.origen === 'cobro' ? 'Factura' : 'Letra'}</span></td>
+        </tr>`
+      }).join('')
+    }).join('')
+  } catch (e) {
+    console.error('cargarRecibos:', e)
+    tbody.innerHTML = `<tr><td colspan="9" style="color:var(--color-danger);">Error: ${_esc(e.message)}</td></tr>`
+  }
+}
+
+window.exportarRecibosCSV = async function () {
+  try {
+    const todos = await _todosLosRecibos()
+    const filas = todos.sort((a, b) => String(a.numero_recibo).localeCompare(String(b.numero_recibo), undefined, { numeric: true }))
+      .map(r => [r.numero_recibo, r.fecha, _nombreContacto(r.contact_id), r.origen === 'cobro' ? 'Cobro factura' : (_TIPOS_ABONO[r.tipo_abono] || 'Abono letra'), r.moneda || 'PEN', _n(r.importe)])
+    descargarCSV(`recibos_cobranza_${_hoyISO()}.csv`, [['N° Recibo', 'Fecha', 'Cliente', 'Concepto', 'Moneda', 'Importe'], ...filas])
+  } catch (e) { showToast('Error: ' + e.message, 'danger') }
 }

@@ -861,7 +861,7 @@ export async function eliminarAdjuntoCompra(compraId) {
 // (1 fila por archivo, con entidad + entidad_id + concepto). Se abren con URL
 // firmada temporal: el bucket es privado.
 const ADJ_BUCKET = 'tesoreria-adjuntos'
-export const ADJ_CONCEPTOS = { voucher: 'Voucher', recibo: 'Recibo', otro: 'Otro' }
+export const ADJ_CONCEPTOS = { voucher: 'Voucher', recibo: 'Recibo', dietario: 'Dietario del banco', otro: 'Otro' }
 const _ADJ_MIME = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
 
 export function validarArchivoAdjunto(file) {
@@ -2724,6 +2724,11 @@ export async function generarAsientoVenta(ventaId, userId) {
 //   cobro: debe banco (USD × T.C. cobro)  vs  haber CxC (USD × T.C. factura)
 //   pago : debe CxP   (USD × T.C. compra) vs  haber banco (USD × T.C. pago)
 // La diferencia va a 776111 (ganancia) o 6761111 (pérdida). Mismo T.C. → nada.
+// Cuentas del módulo Cobranzas, editables en ⚙️ Configuración (2026-10-07).
+import { getModuloConfig as _cfgModulo } from './config-modulo.js'
+export function ctaCob(key, porDefecto) {
+  try { return String(_cfgModulo('cobranzas')?.[key] || porDefecto || '').trim() || porDefecto } catch (_) { return porDefecto }
+}
 export const CTA_DIF_CAMBIO_GANANCIA = '776111'
 export const CTA_DIF_CAMBIO_PERDIDA  = '6761111'
 const _r2s = n => Math.round((parseFloat(n) || 0) * 100) / 100
@@ -2744,8 +2749,8 @@ function _agregarDiferenciaCambio(lineas) {
   if (Math.abs(d) < 0.005) return lineas
   // Debe > Haber → falta haber → ganancia; Haber > Debe → falta debe → pérdida
   lineas.push(d > 0
-    ? { cuenta_codigo: CTA_DIF_CAMBIO_GANANCIA, debe: 0, haber: d, descripcion: 'Ganancia por diferencia de cambio' }
-    : { cuenta_codigo: CTA_DIF_CAMBIO_PERDIDA, debe: -d, haber: 0, descripcion: 'Pérdida por diferencia de cambio' })
+    ? { cuenta_codigo: ctaCob('ctaDifGanancia', CTA_DIF_CAMBIO_GANANCIA), debe: 0, haber: d, descripcion: 'Ganancia por diferencia de cambio' }
+    : { cuenta_codigo: ctaCob('ctaDifPerdida', CTA_DIF_CAMBIO_PERDIDA), debe: -d, haber: 0, descripcion: 'Pérdida por diferencia de cambio' })
   return lineas
 }
 
@@ -2778,13 +2783,13 @@ function _convertirLineasModeloUSD(lineas, tc, mapaCuentas) {
 
 export async function generarAsientoCobroCliente({ cobroId, monto, cxcId, bancoId, medioPago, fecha, descripcion, userId, monedaDoc = 'PEN', tcDoc = 1, tcCobro = 1, contactId = null }) {
   const cuentaBanco = bancoId
-    ? ((await getBancoById(bancoId))?.cuenta_contable_codigo || '10411')
-    : (medioPago === 'efectivo' ? '10111' : '10411')
+    ? ((await getBancoById(bancoId))?.cuenta_contable_codigo || ctaCob('ctaBancoDefault', '10411'))
+    : (medioPago === 'efectivo' ? '10111' : ctaCob('ctaBancoDefault', '10411'))
   const usd = monedaDoc === 'USD'
   // Banco al T.C. del cobro; CxC al T.C. de la factura; la diferencia → 776/676
   const lineas = _agregarDiferenciaCambio([
     _lineaMoneda(cuentaBanco, 'debe', monto, monedaDoc, tcCobro, 'Cobro a cliente'),
-    _lineaMoneda(usd ? '12112' : '12111', 'haber', monto, monedaDoc, tcDoc, 'Cancelación CxC')
+    _lineaMoneda(usd ? ctaCob('ctaCxcME', '12112') : ctaCob('ctaCxcMN', '12111'), 'haber', monto, monedaDoc, tcDoc, 'Cancelación CxC')
   ])
   return await crearAsientoContable({
     fecha:               fecha || new Date().toISOString().split('T')[0],
@@ -2804,12 +2809,12 @@ export async function generarAsientoCobroCliente({ cobroId, monto, cxcId, bancoI
 
 export async function generarAsientoPagoProveedor({ pagoId, monto, compraId, bancoId, moneda, fecha, descripcion, userId, tcDoc = 1, tcPago = 1, contactId = null }) {
   const cuentaBanco = bancoId
-    ? ((await getBancoById(bancoId))?.cuenta_contable_codigo || '10411')
-    : '10411'
+    ? ((await getBancoById(bancoId))?.cuenta_contable_codigo || ctaCob('ctaBancoDefault', '10411'))
+    : ctaCob('ctaBancoDefault', '10411')
   const usd = moneda === 'USD'
   // CxP al T.C. de la compra; banco al T.C. del pago; la diferencia → 776/676
   const lineas = _agregarDiferenciaCambio([
-    _lineaMoneda(usd ? '42122' : '42111', 'debe', monto, moneda, tcDoc, 'Cancelación CxP'),
+    _lineaMoneda(usd ? ctaCob('ctaCxpME', '42122') : ctaCob('ctaCxpMN', '42111'), 'debe', monto, moneda, tcDoc, 'Cancelación CxP'),
     _lineaMoneda(cuentaBanco, 'haber', monto, moneda, tcPago, 'Pago a proveedor')
   ])
   return await crearAsientoContable({
@@ -2834,6 +2839,23 @@ export async function crearAsientoCancelacionME({ fecha, descripcion, documentoR
   return await crearAsientoContable({
     fecha, descripcion, documento_referencia: documentoReferencia, tipo_movimiento: tipoMovimiento,
     contact_id: contactId, tipo_cambio: moneda === 'USD' ? tcDebe : null, created_by: userId, lineas
+  })
+}
+
+/**
+ * Asiento de N líneas en moneda del documento (2026-10-07): cada línea con su
+ * propio T.C. (ej. letra al T.C. de la factura, banco/gastos/intereses al T.C.
+ * del día) y la diferencia de cambio se cuadra sola (776/676 configurables).
+ * lineas = [{ cuenta, lado:'debe'|'haber', monto, tc, desc }] — montos en `moneda`.
+ */
+export async function crearAsientoMultiME({ fecha, descripcion, documentoReferencia, tipoMovimiento, contactId, userId, moneda, tcRef, lineas }) {
+  const ls = _agregarDiferenciaCambio(
+    (lineas || []).filter(l => l && Math.abs(parseFloat(l.monto) || 0) >= 0.005)
+      .map(l => _lineaMoneda(l.cuenta, l.lado, _r2s(l.monto), l.moneda || moneda, l.tc, l.desc))   // l.moneda: override por línea (p. ej. banco en soles de una letra en USD)
+  )
+  return await crearAsientoContable({
+    fecha, descripcion, documento_referencia: documentoReferencia, tipo_movimiento: tipoMovimiento,
+    contact_id: contactId, tipo_cambio: moneda === 'USD' ? tcRef : null, created_by: userId, lineas: ls
   })
 }
 

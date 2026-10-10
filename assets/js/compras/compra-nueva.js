@@ -280,7 +280,19 @@ export function _calcularMontosDetalleCompra(cantidad, precio, descuento, igvVal
     total = subtotal + igvMonto
   }
 
-  return { subtotal, igvMonto, total, igvPct }
+  // Precio unitario SIN IGV (lo que se guarda en detalle_compras.precio_unitario).
+  // Con "18% incluido" el usuario tipea el precio con IGV: se guarda el neto,
+  // porque la Guía de Ingreso usa este precio como COSTO del lote — 2026-10-09.
+  const precioNeto = (incluido && igvPct > 0) ? parseFloat((precio / (1 + igvPct / 100)).toFixed(6)) : precio
+  return { subtotal, igvMonto, total, igvPct, precioNeto }
+}
+
+/** Costo unitario de una línea de compra (moneda de la compra, SIN IGV y con
+ *  descuento aplicado) = subtotal / cantidad. Fuente del costo del lote. */
+export function costoNetoLineaCompra(d) {
+  const q = parseFloat(d?.cantidad) || 0, s = parseFloat(d?.subtotal) || 0
+  if (q > 0 && s > 0) return parseFloat((s / q).toFixed(6))
+  return parseFloat(d?.precio_unitario) || 0
 }
 
 window.calcularDetalleCompraMercaderia = function () {
@@ -311,7 +323,7 @@ window.crearDetalleCompraMercaderia = function () {
 
     if (cantidad <= 0 || precio <= 0) { showToast('Cantidad y precio deben ser mayores a 0', 'warning'); return }
 
-    const { subtotal, igvMonto, total, igvPct } = _calcularMontosDetalleCompra(cantidad, precio, descuento, igvValor)
+    const { subtotal, igvMonto, total, igvPct, precioNeto } = _calcularMontosDetalleCompra(cantidad, precio, descuento, igvValor)
 
     _detallesCompraEnCreacion.push({
       item_id:         itemId,
@@ -319,7 +331,7 @@ window.crearDetalleCompraMercaderia = function () {
       glosa:           '', // vacío = usa el nombre del ítem; editable en la tabla para anotar algo distinto (ej. "incluye flete")
       cantidad,
       unidad_medida:   unidad,
-      precio_unitario: precio,
+      precio_unitario: precioNeto,   // sin IGV aunque se haya tipeado con IGV incluido
       igv_porcentaje:  igvPct,
       subtotal:        parseFloat(subtotal.toFixed(2)),
       igv_monto:       parseFloat(igvMonto.toFixed(2)),

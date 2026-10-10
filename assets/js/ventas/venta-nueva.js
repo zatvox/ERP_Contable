@@ -14,7 +14,7 @@ import { _aplicarAnticiposVentaSeleccionados } from './venta-anticipo.js'
 import { _setEv } from './ventas-editar.js'
 import { renderVentas } from './ventas-lista.js'
 import { vincularTCEnVivo } from '../tc-en-vivo.js'
-import { serieDefault, seriesDeTipo, getSerie, siguienteCorrelativo, registrarUsoSerie, getSeries, NOMBRE_TIPO_SERIE, poblarSelectSeries } from '../series.js'
+import { serieDefault, seriesDeTipo, getSerie, siguienteCorrelativo, registrarUsoSerie, getSeries, NOMBRE_TIPO_SERIE, poblarSelectSeries, esClienteDNI } from '../series.js'
 import { refrescarBuscador as _refrescarBuscadorPK } from '../buscador-select.js'
 import { marcarPackingFacturado } from './packing.js'
 
@@ -446,8 +446,8 @@ window.guardarNuevaVenta = async function() {
       const docCli = String(cli?.nro_documento || '').replace(/\D/g, '')
       // (Clientes del exterior con VAT/pasaporte sí pueden llevar factura de exportación)
       const esDNI = String(cli?.tipo_documento || '').toUpperCase() === 'DNI' || docCli.length === 8
-      if (tipoComp === '01' && esDNI) {
-        showToast('Una Factura no se emite a DNI: el cliente necesita RUC. Con DNI emite Boleta.', 'danger', 8000)
+      if (tipoComp === '01' && esDNI && !(await getSerie('01', serie.toUpperCase()))?.acepta_dni) {
+        showToast(`La serie ${serie} no se emite a DNI: el cliente necesita RUC. Con DNI emite Boleta o una serie que acepte DNI (Configuración → Series).`, 'danger', 8000)
         return
       }
       if (tipoComp === '03' && docCli.length === 11 &&
@@ -799,7 +799,10 @@ async function _poblarDatalistSeriesVenta() {
   if (!sel) return
   const tipo = document.getElementById('ventaTipoComp')?.value || '01'
   const cfg = getModuloConfig('ventas')
+  const idCli = parseInt(document.getElementById('ventaContactId')?.value || 0)
+  const cli = (S._clientes || []).find(c => c.id === idCli) || null
   await poblarSelectSeries(sel, tipo, {
+    clienteDNI: esClienteDNI(cli),
     preferida: sel.value || null,
     fallback: tipo === '03' ? (cfg.serieBoleta || 'B001') : (cfg.serieFactura || 'F001')
   })

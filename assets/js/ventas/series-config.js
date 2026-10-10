@@ -109,7 +109,7 @@ export async function renderSeriesConfig(containerId) {
               <td style="text-align:right;">${s.correlativo_inicial}</td>
               <td style="text-align:right;">${usado || '—'}</td>
               <td><code>${_esc(formatearNumero(s, siguienteCorrelativo(s, usado)))}</code></td>
-              <td style="text-align:center;">${s.es_cpe ? '✅' : '📄 Físico'}</td>
+              <td style="text-align:center;">${s.es_cpe ? '✅' : '📄 Físico'}${s.acepta_dni ? '<br><small style="color:var(--color-info);">acepta DNI</small>' : ''}</td>
               <td>${s.aplica_a ? _esc(NOMBRE_TIPO_SERIE[s.aplica_a]) : '—'}</td>
               <td style="white-space:nowrap;">${_guiaDestino(s)}</td>
               <td style="text-align:right;">${s.dias_validez ?? '—'}</td>
@@ -195,7 +195,8 @@ function _asegurarModalSerie() {
         <hr style="border:none; border-top:1px solid var(--border-color); margin:6px 0 12px;">
         <strong style="${_SEC}">Opciones</strong>
         <div style="display:flex; gap:22px; flex-wrap:wrap;">
-          <label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" id="serieCPE" checked> Electrónico (NUBEFACT / SUNAT)</label>
+          <label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" id="serieCPE" checked onchange="window._onCambiarTipoSerie()"> Electrónico (NUBEFACT / SUNAT)</label>
+          <label id="serieDNIGrupo" style="display:flex; gap:8px; align-items:center;" title="Solo facturas físicas (no electrónicas): SUNAT no acepta factura electrónica a DNI"><input type="checkbox" id="serieAceptaDNI"> Acepta clientes con DNI</label>
           <label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" id="serieDefault"> Serie por defecto</label>
           <label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" id="serieActivo" checked> Activa</label>
         </div>
@@ -237,6 +238,12 @@ window._onCambiarTipoSerie = function () {
   document.getElementById('serieEnlacesBloque').style.display = (t === 'PK' || t === '01' || t === '03' || t === '07' || t === '08' || t === '09') ? '' : 'none'
   const cpe = document.getElementById('serieCPE')
   if (t === 'PK') { cpe.checked = false; cpe.disabled = true } else cpe.disabled = false
+  // "Acepta DNI": solo Factura física (una factura electrónica a DNI la rechaza SUNAT)
+  const dniOk = t === '01' && !cpe.checked
+  document.getElementById('serieDNIGrupo').style.display = t === '01' ? 'flex' : 'none'
+  const chkDni = document.getElementById('serieAceptaDNI')
+  chkDni.disabled = !dniOk
+  if (!dniOk) chkDni.checked = false
 }
 
 window.abrirModalSerie = async function (id = null) {
@@ -260,6 +267,7 @@ window.abrirModalSerie = async function (id = null) {
   set('serieAplicaA', s?.aplica_a || '01')
   set('serieValidez', s?.dias_validez || 15)
   set('serieCPE', s ? s.es_cpe : true)
+  set('serieAceptaDNI', s?.acepta_dni || false)
   set('serieDefault', s?.por_defecto || false)
   set('serieActivo', s ? s.activo : true)
   // Selectores de guía (para 01/03) y destino (para 09)
@@ -310,6 +318,7 @@ window.guardarSerie = async function () {
       correlativo_inicial: inicial, digitos,
       ...(ultimoEditado || !id ? { ultimo_correlativo: ultimo } : {}),
       es_cpe: tipo === 'PK' ? false : document.getElementById('serieCPE').checked,
+      acepta_dni: tipo === '01' && !document.getElementById('serieCPE').checked && document.getElementById('serieAceptaDNI').checked,
       aplica_a: esNota ? document.getElementById('serieAplicaA').value : null,
       dias_validez: tipo === 'PK' ? (parseInt(document.getElementById('serieValidez').value) || 15) : null,
       serie_guia: (tipo === '01' || tipo === '03') ? (document.getElementById('serieGuia').value || null) : null,

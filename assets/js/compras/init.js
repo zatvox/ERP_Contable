@@ -86,13 +86,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     _activarBuscadoresCompras()
 
     // Botón "Consultar" en el modal Nuevo Proveedor (RUC o DNI, según Tipo Documento)
-    attachConsultaDocumento({
-      btnId: 'btnConsultarProvRUC', tipoDocId: 'provTipoDocumento', numeroId: 'provRUC',
-      nombreId: 'provNombre', direccionId: 'provDireccion', distritoId: 'provDistrito', paisId: 'provPais',
-      sunatSectionId: 'provDatosSunat', estadoId: 'provEstadoSunat', condicionId: 'provCondicionSunat',
-      buenContribuyenteId: 'provBuenContribuyenteSunat', agenteRetencionId: 'provSujetoRetencion',
-      agenteRetencionBadgeId: 'provAgenteRetencionSunat'
-    })
+    // Consultar RUC/DNI: ahora vive en el modal único (shared/contacto-modal.js)
   } catch (error) {
     console.error('Error en DOMContentLoaded:', error)
     showToast('Error al cargar el módulo de compras', 'danger')

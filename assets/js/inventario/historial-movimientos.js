@@ -5,7 +5,7 @@
 import { S } from './state.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { colStyle, colMenuHtml } from '../col-menu.js'
-import { getItems, getLotes, getLoteById, getAlmacenes, getUbicaciones, getStockUbicaciones, addStockUbicacion, updateStockUbicacion, deleteStockUbicacion, updateLoteBulto, getKardex, addKardexMovimiento, obtenerSiguienteNumeroSecuencia } from '../supabase-data.js'
+import { getItems, getLotes, getLoteById, getAlmacenes, getUbicaciones, getStockUbicaciones, addStockUbicacion, updateStockUbicacion, deleteStockUbicacion, updateLoteBulto, getKardex, addKardexMovimiento, obtenerSiguienteNumeroSecuencia, getVentas, getCompras, getContacts } from '../supabase-data.js'
 import { showToast, formatQty } from '../helpers.js'
 import { _aplicarOrdenFilas } from './resumen-stock.js'
 
@@ -42,9 +42,25 @@ export async function renderHistorialMovimientos() {
     if (!container) return
     container.innerHTML = '<p style="text-align:center; color:var(--text-secondary); padding:20px;">Cargando...</p>'
 
-    const [kardex, items, lotes, zonas, almacenes] = await Promise.all([
-      getKardex(), getItems(true), getLotes(), getUbicaciones(), getAlmacenes()
+    const [kardex, items, lotes, zonas, almacenes, ventas, compras, contactos] = await Promise.all([
+      getKardex(), getItems(true), getLotes(), getUbicaciones(), getAlmacenes(),
+      getVentas().catch(() => []), getCompras().catch(() => []), getContacts().catch(() => [])
     ])
+    // Contacto del movimiento: cliente (venta) o proveedor (compra); traslados/ajustes no tienen — 2026-10-08
+    const ventasById = new Map((ventas || []).map(v => [v.id, v]))
+    const comprasById = new Map((compras || []).map(c => [c.id, c]))
+    const contactosById = new Map((contactos || []).map(c => [c.id, c]))
+    const contactoDe = (k) => {
+      if (k.venta_id) {
+        const v = ventasById.get(k.venta_id)
+        return (v && contactosById.get(v.contact_id)?.nombre) || (v ? '—' : `Venta #${k.venta_id}`)
+      }
+      if (k.compra_id) {
+        const c = comprasById.get(k.compra_id)
+        return (c && (contactosById.get(c.contact_id)?.nombre || c.proveedor_nombre)) || (c ? '—' : `Compra #${k.compra_id}`)
+      }
+      return '—'
+    }
 
     const itemsById = new Map((items || []).map(i => [i.id, i]))
     const lotesById = new Map((lotes || []).map(l => [l.id, l]))
@@ -63,6 +79,7 @@ export async function renderHistorialMovimientos() {
       fecha: k.fecha,
       documento: k.numero_documento || '—',
       docReferencia: k.documento_referencia || '—',
+      contacto: contactoDe(k),
       producto: itemsById.get(k.item_id)?.nombre || itemsById.get(k.item_id)?.name || '(producto eliminado)',
       lote: lotesById.get(k.lote_id)?.numero_lote || '—',
       tipo: k.tipo_movimiento,
@@ -74,6 +91,17 @@ export async function renderHistorialMovimientos() {
       unidadEntrada: parseFloat(k.cantidad_unidades_entrada) || 0,
       unidadSalida: parseFloat(k.cantidad_unidades_salida) || 0
     }))
+    // Texto de búsqueda general: TODAS las columnas (+ SKU y concepto) — 2026-10-08
+    for (const f of _historialMovFilasCache) {
+      const it = itemsById.get(f.raw.item_id) || {}
+      const fechaDMY = f.fecha ? String(f.fecha).slice(0, 10).split('-').reverse().join('/') : ''
+      f._txt = [
+        f.fecha, fechaDMY, f.documento, f.docReferencia, f.contacto, f.producto, it.sku, f.lote,
+        f.tipo, f.tipoLabel, f.desde, f.a, f.raw.concepto,
+        f.cantidadEntrada || '', f.cantidadSalida || '', f.unidadEntrada || '', f.unidadSalida || '',
+        f.cantidadEntrada ? formatQty(f.cantidadEntrada) : '', f.cantidadSalida ? formatQty(f.cantidadSalida) : ''
+      ].filter(v => v !== null && v !== undefined && v !== '').join(' | ').toLowerCase()
+    }
 
     const opcionesZonaHtml = (zonas || [])
       .slice()
@@ -97,7 +125,7 @@ export async function renderHistorialMovimientos() {
         </div>
         <div class="kardex-filtros-grid">
           <div class="kardex-filtros-fila">
-            <input type="text" id="historialBuscarProducto" placeholder="Buscar producto o lote..." oninput="window.aplicarFiltrosHistorial()">
+            <input type="text" id="historialBuscarProducto" placeholder="Buscar en todas las columnas: producto, lote, documento, zona, tipo, fecha, cantidad..." title="Varias palabras = deben aparecer todas (ej: venta zona b)" oninput="window.aplicarFiltrosHistorial()">
             <select id="historialFiltroTipo" onchange="window.aplicarFiltrosHistorial()">
               <option value="">Tipo: todos</option>${opcionesTipoHtml}
             </select>
@@ -126,6 +154,7 @@ export async function renderHistorialMovimientos() {
 
 window.aplicarFiltrosHistorial = function () {
   const q = (document.getElementById('historialBuscarProducto')?.value || '').trim().toLowerCase()
+  const terminos = q.split(/\s+/).filter(Boolean)   // varias palabras = todas deben aparecer (AND)
   const tipo = document.getElementById('historialFiltroTipo')?.value || ''
   const desdeId = parseInt(document.getElementById('historialFiltroDesde')?.value || 0)
   const aId = parseInt(document.getElementById('historialFiltroA')?.value || 0)
@@ -133,7 +162,7 @@ window.aplicarFiltrosHistorial = function () {
   const fHasta = document.getElementById('historialFechaHasta')?.value || ''
 
   let filas = _historialMovFilasCache.filter(f => {
-    if (q && !f.producto.toLowerCase().includes(q) && !f.lote.toLowerCase().includes(q)) return false
+    if (terminos.length && !terminos.every(t => (f._txt || '').includes(t))) return false
     if (tipo && f.tipo !== tipo) return false
     if (desdeId && f.raw.ubicacion_origen_id !== desdeId) return false
     if (aId && f.raw.ubicacion_destino_id !== aId) return false
@@ -146,6 +175,7 @@ window.aplicarFiltrosHistorial = function () {
     fecha:     f => f.fecha || '',
     documento: f => f.documento,
     docReferencia: f => f.docReferencia,
+    contacto:  f => f.contacto,
     producto:  f => f.producto,
     lote:      f => f.lote,
     tipo:      f => f.tipoLabel,
@@ -192,6 +222,7 @@ function _pintarTablaHistorial(filas) {
             ${_thOrdenHistorial('fecha', 'Fecha')}
             ${_thOrdenHistorial('documento', 'N° Documento')}
             ${_thOrdenHistorial('docReferencia', 'Doc. Referencia')}
+            ${_thOrdenHistorial('contacto', 'Contacto')}
             ${_thOrdenHistorial('producto', 'Producto')}
             ${_thOrdenHistorial('lote', 'Lote')}
             ${_thOrdenHistorial('tipo', 'Tipo')}
@@ -231,6 +262,7 @@ function _pintarTablaHistorial(filas) {
                 <td data-col-tabla="historial-movimientos" data-col="fecha"${colStyle('historial-movimientos', 'fecha')}>${f.fecha ? new Date(f.fecha + 'T00:00:00').toLocaleDateString('es-PE') : '-'}</td>
                 <td data-col-tabla="historial-movimientos" data-col="documento"${colStyle('historial-movimientos', 'documento')}>${f.documento}</td>
                 <td data-col-tabla="historial-movimientos" data-col="docReferencia"${colStyle('historial-movimientos', 'docReferencia')}>${f.docReferencia}</td>
+                <td data-col-tabla="historial-movimientos" data-col="contacto"${colStyle('historial-movimientos', 'contacto')} style="font-size:0.82rem;">${f.contacto}</td>
                 <td data-col-tabla="historial-movimientos" data-col="producto"${colStyle('historial-movimientos', 'producto')}>${f.producto}</td>
                 <td data-col-tabla="historial-movimientos" data-col="lote"${colStyle('historial-movimientos', 'lote')}>${f.lote}</td>
                 <td data-col-tabla="historial-movimientos" data-col="tipo"${colStyle('historial-movimientos', 'tipo')}>${f.tipoLabel}</td>
@@ -281,6 +313,7 @@ function _filaTotalesHistorial(filas) {
       <td data-col-tabla="historial-movimientos" data-col="fecha"${colStyle('historial-movimientos', 'fecha')}>Total — ${filas.length} mov.</td>
       <td data-col-tabla="historial-movimientos" data-col="documento"${colStyle('historial-movimientos', 'documento')}></td>
       <td data-col-tabla="historial-movimientos" data-col="docReferencia"${colStyle('historial-movimientos', 'docReferencia')}></td>
+      <td data-col-tabla="historial-movimientos" data-col="contacto"${colStyle('historial-movimientos', 'contacto')}></td>
       <td data-col-tabla="historial-movimientos" data-col="producto"${colStyle('historial-movimientos', 'producto')}></td>
       <td data-col-tabla="historial-movimientos" data-col="lote"${colStyle('historial-movimientos', 'lote')}></td>
       <td data-col-tabla="historial-movimientos" data-col="tipo"${colStyle('historial-movimientos', 'tipo')}></td>

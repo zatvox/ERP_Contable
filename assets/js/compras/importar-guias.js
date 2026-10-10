@@ -2,6 +2,7 @@
 // compras/importar-guias.js — parte de compras.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
+import { costoNetoLineaCompra } from './compra-nueva.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { getCompras, getCompraDetalles, getLoteById, getLotes, addLote, updateLote, getItems, getMarcas, getGuiasIngresoCompra, addGuiaIngresoCompra, addDetalleGuiaIngresoCompra, getAlmacenes, getUbicaciones, addStockUbicacion, getUbicacionVendors, addKardexMovimiento, updateStockUbicacion, getStockUbicacionesByLote } from '../supabase-data.js'
 import { showToast, formatQty } from '../helpers.js'
@@ -280,7 +281,7 @@ window.procesarImportacionGuias = async function () {
         const tcCompra = monedaCompra === 'USD' ? (parseFloat(g.compra.tipo_cambio) || 1) : 1
 
         for (const l of g.lineas) {
-          const costoOriginal = parseFloat(l.detalleCompra?.precio_unitario) || 0
+          const costoOriginal = costoNetoLineaCompra(l.detalleCompra)   // sin IGV (2026-10-09)
           const costoPen = parseFloat((costoOriginal * tcCompra).toFixed(4))
           const pesoPorUnidad = l.unidades > 0 ? parseFloat((l.cantidad / l.unidades).toFixed(4)) : null
 

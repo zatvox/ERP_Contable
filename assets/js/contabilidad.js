@@ -33,6 +33,7 @@ import { initModuleNavDropdowns, initSubtabs } from './main.js'
 import { renderConfiguracionTab, aplicarPreferenciasVista, getModuloConfig } from './config-modulo.js'
 import { cacheado, invalidarTodo } from './data-cache.js'
 import { crearReporte, nombreMes, mesActual } from './reportes.js'
+import { renderPDT621 } from './pdt621.js'
 
 const MODULO_CONTA = 'contabilidad'
 let _cfgConta = getModuloConfig(MODULO_CONTA)
@@ -111,6 +112,8 @@ function initTabsContabilidad() {
 async function construirReporteConta(panelId) {
   if (_reportesContaListos[panelId]) return
   _reportesContaListos[panelId] = true
+  // PDT 621: módulo propio (no usa asientos) — 2026-10-09
+  if (panelId === 'repc-pdt621') { await renderPDT621(panelId); return }
   const cont = document.getElementById(panelId)
   if (cont) cont.innerHTML = '<div class="card"><p class="reporte-vacio">Calculando reporte…</p></div>'
 

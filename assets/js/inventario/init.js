@@ -30,6 +30,8 @@ registrarColumnas('lotes', [
   { key: 'peso_unidad',    label: 'Peso/Unidad' },
   { key: 'costo_unit',     label: 'Costo Unit.' },
   { key: 'costo_total',    label: 'Costo Total Lote' },
+  { key: 'costo_cif',      label: 'Costo CIF / factura' },
+  { key: 'costo_real',     label: 'Costo real (editable)' },
   { key: 'vencimiento',    label: 'Vencimiento' },
   { key: 'dias_restantes', label: 'Días Restantes' }
 ])
@@ -80,6 +82,7 @@ registrarColumnas('historial-movimientos', [
   { key: 'fecha',        label: 'Fecha' },
   { key: 'documento',    label: 'N° Documento' },
   { key: 'docReferencia', label: 'Doc. Referencia' },
+  { key: 'contacto',     label: 'Contacto' },
   { key: 'producto',     label: 'Producto' },
   { key: 'lote',        label: 'Lote' },
   { key: 'tipo',        label: 'Tipo' },

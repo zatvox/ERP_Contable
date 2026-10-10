@@ -118,9 +118,9 @@ window.onCambiarLineaPrecioEdicionCompra = function (idx) {
   const igvValor = document.getElementById(`ecLineaTipo-${idx}`)?.value || '18'
   const cantidad = parseFloat(d.cantidad) || 0
 
-  const { subtotal, igvMonto, total, igvPct } = _calcularMontosDetalleCompra(cantidad, precio, 0, igvValor)
+  const { subtotal, igvMonto, total, igvPct, precioNeto } = _calcularMontosDetalleCompra(cantidad, precio, 0, igvValor)
 
-  d._precioNuevo = precio
+  d._precioNuevo = precioNeto   // se guarda sin IGV (2026-10-09)
   d._tipoBaseNuevo = igvPct > 0 ? 'gravada' : 'exonerada'
   d._igvPorcentajeNuevo = igvPct
   d._subtotalNuevo = parseFloat(subtotal.toFixed(2))

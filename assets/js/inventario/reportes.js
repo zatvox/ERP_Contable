@@ -8,6 +8,7 @@ import { showToast } from '../helpers.js'
 import { getModuloConfig } from '../config-modulo.js'
 import { cacheado } from '../data-cache.js'
 import { crearReporte, nombreMes } from '../reportes.js'
+import { visualKardexLote } from './reportes-visual-lote.js'
 
 // ============================================================================
 // REPORTES — Stock por Partida (bloque de reportes del módulo)
@@ -416,7 +417,9 @@ export async function construirReporteInv(panelId) {
             { key: 'tipo', label: 'Tipo de movimiento', tipo: 'multi', opciones: clases }
           ],
           agruparPorDefecto: ['mes'], orden: { key: '_etiqueta', dir: 'asc' },
-          medidasPorDefecto: ['entrada', 'salida', 'valor_entrada', 'valor_salida', 'neto_valor', 'costo_venta']
+          medidasPorDefecto: ['entrada', 'salida', 'valor_entrada', 'valor_salida', 'neto_valor', 'costo_venta'],
+          // 1 lote → ciclo de vida (columnas + stock + agotamiento); 2+ lotes → mapa de calor
+          visual: (filtrados, ctx) => visualKardexLote(filtrados, filasK, ctx)
         })
       }
 

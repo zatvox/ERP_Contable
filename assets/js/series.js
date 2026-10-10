@@ -14,11 +14,12 @@
 import { supabase, getAll, insert, update, deleteRecord } from './supabase-client.js'
 
 let _seriesPromise = null
+let _seriesCache = []   // última lista cargada (para reglas síncronas, ej. acepta_dni)
 
 export function invalidarSeries() { _seriesPromise = null }
 
 export async function getSeries(forzar = false) {
-  if (forzar || !_seriesPromise) _seriesPromise = getAll('series_documentos').then(r => r || [])
+  if (forzar || !_seriesPromise) _seriesPromise = getAll('series_documentos').then(r => { _seriesCache = r || []; return _seriesCache })
   return await _seriesPromise
 }
 
@@ -79,10 +80,12 @@ export async function serieEsCPE(tipo, serie) {
  *   fallback      → única opción si la tabla aún no tiene series del tipo
  * Devuelve la serie que quedó seleccionada.
  */
-export async function poblarSelectSeries(sel, tipo, { preferida = null, incluirActual = null, fallback = null } = {}) {
+export async function poblarSelectSeries(sel, tipo, { preferida = null, incluirActual = null, fallback = null, clienteDNI = false } = {}) {
   if (!sel) return ''
   let lista = []
   try { lista = await seriesDeTipo(tipo) } catch { /* tabla no disponible */ }
+  // Cliente con DNI + Factura: solo las series que aceptan DNI (ej. NV01 física) — 2026-10-08
+  if (clienteDNI && tipo === '01') { lista = lista.filter(s => s.acepta_dni); fallback = null }
   const esc = v => String(v ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
   const opts = lista.map(s => ({ v: s.serie, l: `${s.serie}${s.es_cpe ? '' : ' · física'}`, t: s.descripcion || '', d: s.por_defecto }))
   if (incluirActual && !opts.some(o => o.v === incluirActual)) opts.unshift({ v: incluirActual, l: `${incluirActual} (no registrada)`, t: 'Serie histórica: no está activa en Configuración → Series' })
@@ -99,11 +102,28 @@ export async function poblarSelectSeries(sel, tipo, { preferida = null, incluirA
  *   RUC (11 dígitos) → Factura (01) preferida; Boleta permitida
  *   Exterior (VAT, pasaporte…) / sin dato → ambos
  */
+/** ¿El contacto se identifica con DNI? (tipo DNI, o 8 dígitos sin ser RUC) */
+export function esClienteDNI(contacto) {
+  if (!contacto) return false
+  const doc = String(contacto.nro_documento || '').replace(/\D/g, '')
+  const td = String(contacto.tipo_documento || '').toUpperCase()
+  return td === 'DNI' || (td !== 'RUC' && doc.length === 8)
+}
+/** Series de Factura activas marcadas "Acepta clientes con DNI" (SQL 79). */
+export function seriesFacturaParaDNI() {
+  return _seriesCache.filter(s => s.activo && s.tipo_documento === '01' && s.acepta_dni)
+}
+
 export function tiposComprobantePorCliente(contacto) {
   if (!contacto) return { permitidos: ['01', '03'], preferido: null, motivo: '' }
   const doc = String(contacto.nro_documento || '').replace(/\D/g, '')
   const td = String(contacto.tipo_documento || '').toUpperCase()
-  if (td === 'DNI' || (td !== 'RUC' && doc.length === 8)) return { permitidos: ['03'], preferido: '03', motivo: 'Cliente con DNI: solo Boleta' }
+  if (esClienteDNI(contacto)) {
+    const nv = seriesFacturaParaDNI()
+    return nv.length
+      ? { permitidos: ['03', '01'], preferido: '03', motivo: '', soloSeriesDNI: true }
+      : { permitidos: ['03'], preferido: '03', motivo: 'Cliente con DNI: solo Boleta' }
+  }
   if (td === 'RUC' || doc.length === 11) return { permitidos: ['01', '03'], preferido: '01', motivo: '' }
   return { permitidos: ['01', '03'], preferido: null, motivo: '' }
 }

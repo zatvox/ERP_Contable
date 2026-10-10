@@ -14,7 +14,7 @@ import { _poblarSelectClientes, _poblarSelectVendedores } from './helpers.js'
 import { _esc } from './init.js'
 import { _guardarCuotasDeCxC } from './venta-nueva.js'
 import { _ventasListaEnriquecida, renderVentas } from './ventas-lista.js'
-import { getSeries, seriesDeTipo, getSerie, siguienteCorrelativo, NOMBRE_TIPO_SERIE, poblarSelectSeries } from '../series.js'
+import { getSeries, seriesDeTipo, getSerie, siguienteCorrelativo, NOMBRE_TIPO_SERIE, poblarSelectSeries, esClienteDNI } from '../series.js'
 import { generarNumeroVenta, getContactById } from '../supabase-data.js'
 
 // ─── Editar Venta (solo cabecera: no se tocan líneas/stock ya descontado) ────
@@ -546,7 +546,9 @@ window._onCambiarTipoEdicionVenta = async function () {
   const antes = sel.value
   // El selector se rehace solo con las series del nuevo tipo; si la serie
   // actual sirve (ej. BBOL al pasar a Boleta) se conserva con su número.
-  await poblarSelectSeries(sel, tipo, { preferida: antes })
+  const idCli = parseInt(document.getElementById('evContactId')?.value || 0)
+  const cli = (S._clientes || []).find(x => x.id === idCli) || null
+  await poblarSelectSeries(sel, tipo, { preferida: antes, clienteDNI: esClienteDNI(cli) })
   if (sel.value === antes) {
     showToast(`Serie ${antes} válida para ${NOMBRE_TIPO_SERIE[tipo]} — se conserva la numeración.`, 'success')
   } else {
@@ -617,8 +619,8 @@ window.guardarEdicionVenta = async function () {
       const cli = await getContactById(contactId)
       const docCli = String(cli?.nro_documento || '').replace(/\D/g, '')
       const esDNI = String(cli?.tipo_documento || '').toUpperCase() === 'DNI' || docCli.length === 8
-      if (tipoComp === '01' && esDNI) {
-        showToast('Una Factura no se emite a DNI: el cliente necesita RUC. Con DNI corresponde Boleta.', 'danger', 8000)
+      if (tipoComp === '01' && esDNI && !(await getSerie('01', serie))?.acepta_dni) {
+        showToast(`La serie ${serie} no se emite a DNI: el cliente necesita RUC. Con DNI corresponde Boleta o una serie que acepte DNI.`, 'danger', 8000)
         return
       }
       if (tipoComp === '03' && docCli.length === 11 && tipoComp !== c.venta.tipo_comprobante &&

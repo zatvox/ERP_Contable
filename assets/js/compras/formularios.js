@@ -136,7 +136,7 @@ window.calculoTotalNewOC = async function () {
 // ============================================================================
 
 window.abrirFormularioProveedor = function() {
-  window.openModal('modal-nuevo-proveedor')
+  window.abrirModalNuevoProveedor?.()   // modal único de contactos (compras/proveedores.js)
 }
 
 window.abrirFormularioProducto = function() {

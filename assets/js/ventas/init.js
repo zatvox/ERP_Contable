@@ -107,13 +107,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     attachRucAutocomplete('ventaClienteRUC', 'ventaClienteNombre', 'ventaClienteDireccion', 'ventaClienteEstado')
 
     // Botón "Consultar" en el modal Nuevo Cliente (RUC o DNI, según Tipo Documento)
-    attachConsultaDocumento({
-      btnId: 'btnConsultarCliRUC', tipoDocId: 'cliTipoDocumento', numeroId: 'cliRUC',
-      nombreId: 'cliNombre', direccionId: 'cliDireccion', distritoId: 'cliDistrito', paisId: 'cliPais',
-      sunatSectionId: 'cliDatosSunat', estadoId: 'cliEstadoSunat', condicionId: 'cliCondicionSunat',
-      buenContribuyenteId: 'cliBuenContribuyenteSunat', agenteRetencionId: 'cliSujetoRetencion',
-      agenteRetencionBadgeId: 'cliAgenteRetencionSunat'
-    })
+    // Consultar RUC/DNI: ahora vive en el modal único (shared/contacto-modal.js)
 
     // TC automático (SBS/APIs.pe) DESACTIVADO temporalmente: el endpoint no
     // responde en este entorno (ERR_SSL_PROTOCOL_ERROR). El campo de tipo de

@@ -2119,3 +2119,51 @@ body.dark-mode td.costo-promedio { background: rgba(245, 158, 11, 0.22); color: 
 .input-recibo { width: 110px; padding: 4px 8px; font-size: 0.85rem; background: transparent; border: 1px dashed var(--border-color); border-radius: var(--radius-sm); color: var(--text-primary); }
 .input-recibo:hover { border-style: solid; }
 .input-recibo:focus { background: var(--bg-primary); border-style: solid; border-color: var(--color-primary); outline: none; }
+
+/* Modal único de contactos (shared/contacto-modal.js) — 2026-10-07 */
+@media (max-width: 600px) { .ct-grid { grid-template-columns: 1fr !important; } }
+
+/* ── PDT: formulario con diseño de constancia SUNAT (pdt-constancia.js) — 2026-10-09 ── */
+.pdtf-vistas { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:16px 0 10px; }
+.pdtf-papel { display:flex; flex-direction:column; gap:18px; align-items:center; overflow-x:auto; padding:6px 0; }
+.pdtf-hoja { background:#fff; color:#000; width:820px; min-width:820px; padding:26px 30px 34px; border-radius:4px;
+  box-shadow:0 2px 10px rgba(0,0,0,.35); font-family:Arial, Helvetica, sans-serif; font-size:10.5px; line-height:1.15; }
+.pdtf-hoja table { border-collapse:collapse; width:100%; margin:0; background:#fff; color:#000; }
+.pdtf-hoja th, .pdtf-hoja td { padding:2px 5px; height:17px; font-weight:normal; color:#000; background:transparent; border:none; text-transform:none; letter-spacing:0; font-size:10.5px; }
+.pdtf-hoja .b { border:1px solid #000 !important; }
+.pdtf-hoja .sin { border:none !important; }
+.pdtf-hoja .c { text-align:center; }
+.pdtf-cab { margin-bottom:22px !important; }
+.pdtf-logo { width:150px; text-align:center; padding:0 !important; }
+.pdtf-sunat { font-size:20px; font-weight:bold; border-bottom:1px solid #000; padding:4px 0; }
+.pdtf-decl { font-size:12px; padding:6px 0 2px; }
+.pdtf-form { font-size:14px; font-weight:bold; padding:4px 0 6px; }
+.pdtf-tit { text-align:center; font-weight:bold !important; }
+.pdtf-esq { width:96px; text-align:center; font-size:8px !important; }
+.pdtf-k { width:96px; }
+.pdtf-bloque { margin-bottom:16px; }
+.pdtf-btit { text-align:left !important; font-weight:bold !important; vertical-align:bottom; }
+.pdtf-tabla thead th.b { text-align:center; }
+.pdtf-cg { width:22px; } .pdtf-cs { width:96px; } .pdtf-csp { width:10px; }
+.pdtf-ccas { width:38px; } .pdtf-cval { width:120px; }
+.pdtf-vert { width:22px; padding:0 !important; text-align:center; }
+.pdtf-vert span { writing-mode:vertical-rl; transform:rotate(180deg); font-weight:bold; font-size:9px; }
+.pdtf-cas, .pdtf-val { cursor:help; transition:background .12s; }
+.pdtf-val { text-align:center; font-variant-numeric:tabular-nums; }
+.pdtf-input { width:100%; border:none !important; background:#fff7d6 !important; color:#000 !important; text-align:center;
+  font:inherit !important; padding:0 !important; height:15px; box-shadow:none !important; border-radius:0 !important; }
+.pdtf-hoja .pdt-target { background:#fde047 !important; }
+.pdtf-hoja .pdt-dep { background:#93c5fd !important; }
+.pdtf-hoja .pdt-difiere { box-shadow:inset 4px 0 0 #dc2626; }
+.pdtf-hoja .pdt-cuadra { box-shadow:inset 4px 0 0 #16a34a; }
+.pdt-tip { position:fixed; z-index:4000; display:none; max-width:380px; background:#111827; color:#f9fafb; border:1px solid #374151;
+  padding:9px 12px; border-radius:8px; font-size:12.5px; line-height:1.5; pointer-events:none; box-shadow:0 8px 24px rgba(0,0,0,.45); }
+.pdt-tip hr { border:none; border-top:1px solid #374151; margin:6px 0; }
+.pdt-tip b { color:#fde047; }
+/* PDT hoja: neutraliza estilos globales de tablas (zebra / thead oscuro / hover) dentro del papel */
+.pdtf-hoja tr, .pdtf-hoja tr:nth-child(even), .pdtf-hoja tr:nth-child(odd), .pdtf-hoja tr:hover,
+.pdtf-hoja thead, .pdtf-hoja thead tr, .pdtf-hoja thead th, .pdtf-hoja tbody td, .pdtf-hoja td, .pdtf-hoja th {
+  background:#fff !important; color:#000 !important; }
+.pdtf-hoja td.pdt-target, .pdtf-hoja th.pdt-target { background:#fde047 !important; }
+.pdtf-hoja td.pdt-dep, .pdtf-hoja th.pdt-dep { background:#93c5fd !important; }
+body.dark-mode .pdtf-hoja .pdtf-input, .pdtf-hoja .pdtf-input { background:#fff7d6 !important; color:#000 !important; }

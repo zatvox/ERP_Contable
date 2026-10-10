@@ -2,6 +2,7 @@
 // compras/guias-ingreso-nueva.js — parte de compras.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
+import { costoNetoLineaCompra } from './compra-nueva.js'
 import { S } from './state.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { getComprasPage, getCompraById, getCompraDetalles, getLoteById, getLotes, addLote, updateLote, getItems, getMarcas, getGuiasIngresoCompra, addGuiaIngresoCompra, addDetalleGuiaIngresoCompra, getTodosDetalleCompras, getTodosDetalleGuiasIngresoCompra, getAlmacenes, getUbicaciones, addStockUbicacion, getUbicacionVendors, addKardexMovimiento, ultimoErrorInsert, updateStockUbicacion, getStockUbicacionesByLote, generarAsientoGuiaRemision, addLoteBulto, recalcularLoteDesdeBultos } from '../supabase-data.js'
@@ -193,7 +194,7 @@ window.onSeleccionarCompraGuia = async function () {
         cantidad_comprada:   comprado,
         ya_recibido:         yaRecibido,
         unidades_compradas: parseFloat(d.unidades) || null,
-        precio_unitario:     parseFloat(d.precio_unitario) || 0,
+        precio_unitario:     costoNetoLineaCompra(d),   // costo sin IGV = subtotal/cantidad (2026-10-09)
         marca_default_id:    marcaDefault,
         // Una línea comprada puede recibirse en 1 o más lotes/zonas distintos
         // (ej: 1000kg llegan repartidos en 2 lotes), y también en más de una

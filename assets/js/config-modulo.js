@@ -73,7 +73,25 @@ const DEFAULTS = {
     tramosAntiguedad:   '30,60,90',
     monedaDefault:      'PEN',
     autoMovBanco:       true,     // crea movimiento bancario al cobrar/pagar
-    tablaCompacta:      false
+    tablaCompacta:      false,
+    // Cuentas contables que usan los asientos de cobros, pagos y letras
+    // (2026-10-07). Deben existir en el plan de cuentas.
+    ctaCxcMN:           '12111',
+    ctaCxcME:           '12112',
+    ctaCxpMN:           '42111',
+    ctaCxpME:           '42122',
+    ctaLetrasCobrar:    '12131',
+    ctaLetrasPagar:     '42131',
+    ctaBancoDefault:    '10411',
+    ctaGastosBancarios: '679218',
+    ctaComisionRenov:   '679214',
+    ctaInteresCobrado:  '772110',
+    ctaInteresPagado:   '679220',
+    ctaDifGanancia:     '776111',
+    ctaDifPerdida:      '6761111',
+    ctaRetencionIgv:    '401141',
+    tasaMoratoriaAnual: 0,
+    ctaInteresRefin:    '772110'
   },
   bancos: {
     monedaDefault:      'PEN',
@@ -247,7 +265,25 @@ const CAMPOS_POR_MODULO = {
     SEP('Integración'),
     { key: 'autoMovBanco',     label: 'Registrar movimiento bancario al cobrar/pagar', tipo: 'checkbox', hint: 'Crea automáticamente el ingreso/egreso en la cuenta bancaria elegida y actualiza su saldo.' },
     { key: 'monedaDefault',    label: 'Moneda por defecto', tipo: 'select', opciones: ['PEN', 'USD'] },
-    { key: 'tablaCompacta',    label: 'Tablas compactas en este módulo', tipo: 'checkbox' }
+    { key: 'tablaCompacta',    label: 'Tablas compactas en este módulo', tipo: 'checkbox' },
+    SEP('Cuentas contables (asientos de cobros, pagos y letras)'),
+    { key: 'ctaCxcMN',           label: 'Facturas por cobrar PEN', tipo: 'text' },
+    { key: 'ctaCxcME',           label: 'Facturas por cobrar USD', tipo: 'text' },
+    { key: 'ctaCxpMN',           label: 'Facturas por pagar PEN', tipo: 'text' },
+    { key: 'ctaCxpME',           label: 'Facturas por pagar USD', tipo: 'text' },
+    { key: 'ctaLetrasCobrar',    label: 'Letras por cobrar', tipo: 'text' },
+    { key: 'ctaLetrasPagar',     label: 'Letras por pagar', tipo: 'text' },
+    { key: 'ctaBancoDefault',    label: 'Banco por defecto (si la cuenta bancaria no tiene cuenta contable)', tipo: 'text' },
+    { key: 'ctaGastosBancarios', label: 'Gastos bancarios (portes, comisiones de cobranza)', tipo: 'text', hint: 'Plan actual: 679218 COMISIONES BANCARIAS.' },
+    { key: 'ctaComisionRenov',   label: 'Comisión por renovación / canje de letra', tipo: 'text', hint: 'Plan actual: 679214 COMISION POR CANJE DE LETRA.' },
+    { key: 'ctaInteresCobrado',  label: 'Intereses / mora COBRADOS en letras (ingreso)', tipo: 'text', hint: 'Plan actual: 772110 INTERESES POR LETRAS.' },
+    { key: 'ctaInteresPagado',   label: 'Intereses / mora PAGADOS en letras (gasto)', tipo: 'text', hint: 'Plan actual: 679220 INTERESES MORATORIOS.' },
+    { key: 'ctaDifGanancia',     label: 'Diferencia de cambio — ganancia', tipo: 'text' },
+    { key: 'ctaDifPerdida',      label: 'Diferencia de cambio — pérdida', tipo: 'text' },
+    { key: 'ctaRetencionIgv',    label: 'Retenciones de IGV', tipo: 'text' },
+    { key: 'ctaInteresRefin',    label: 'Interés de refinanciación (al unificar/renovar letras)', tipo: 'text', hint: 'Plan actual: 772110. Se abona cuando el interés se suma a las nuevas letras.' },
+    SEP('Letras — interés moratorio'),
+    { key: 'tasaMoratoriaAnual', label: 'Tasa moratoria anual (%) para sugerir el interés', tipo: 'number', hint: 'Interés sugerido = saldo × tasa/360 × días de atraso. 0 = no sugiere (lo escribes a mano).' }
   ],
   bancos: [
     SEP('Cuentas'),

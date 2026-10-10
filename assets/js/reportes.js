@@ -292,7 +292,8 @@ const _registro = new Map()   // id -> config viva (para re-render en eventos)
  *   medidasPorDefecto: ['total'],
  *   orden: { key, dir },
  *   grafico: true,
- *   kpis: (filasFiltradas) => [{ label, valor, formato, color }]
+ *   kpis: (filasFiltradas) => [{ label, valor, formato, color }],
+ *   visual: (filasFiltradas, { grupos, estado, idBuscar }) => html | null  // gráfico propio
  * }
  */
 export function crearReporte(containerId, config) {
@@ -505,7 +506,13 @@ export function refrescarReporte(id) {
   // --- Gráfico
   const gCont = document.getElementById(`rp-grafico-${id}`)
   if (gCont) {
-    if (config.grafico === false || grupos.length === 0 || estado.agrupar.length === 0) gCont.innerHTML = ''
+    // config.visual(filtrados, ctx) → HTML propio del reporte (o null = barras por defecto)
+    let vis = null
+    if (config.visual) {
+      try { vis = config.visual(filtrados, { grupos, estado, idBuscar: `rp-f-${id}-buscar` }) } catch (e) { console.warn('visual', e) }
+    }
+    if (vis) gCont.innerHTML = vis
+    else if (config.grafico === false || grupos.length === 0 || estado.agrupar.length === 0) gCont.innerHTML = ''
     else gCont.innerHTML = _barras(grupos.slice(0, 12), medidasUsar[0])
   }
 }
