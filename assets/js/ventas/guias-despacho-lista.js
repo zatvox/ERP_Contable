@@ -4,7 +4,7 @@
 // ============================================================================
 import { S } from './state.js'
 import { registrarColumnas, colStyle } from '../col-menu.js'
-import { getCustomers, getLoteById, getVentas, updateVenta, getDetalleVentas, ultimoErrorDelete, getKardexByVenta, deleteKardexMovimiento, getGuiasDespachoVenta, getGuiaDespachoVentaById, deleteGuiaDespachoVenta, getDetalleGuiasDespachoVenta, getDetalleGuiasDespachoVentaByVenta, invalidateGuiasDespachoVentaCache, recalcularLoteDesdeBultos, revertirBultosDeDetalleGuiaDespacho } from '../supabase-data.js'
+import { getCustomers, getLoteById, getVentas, updateVenta, getDetalleVentas, ultimoErrorDelete, getKardexByVenta, deleteKardexMovimiento, getGuiasDespachoVenta, getGuiaDespachoVentaById, deleteGuiaDespachoVenta, getDetalleGuiasDespachoVenta, getDetalleGuiasDespachoVentaByVenta, invalidateGuiasDespachoVentaCache, recalcularLoteDesdeBultos, revertirBultosDeDetalleGuiaDespacho, borrarKardexDeGuiaEstricto } from '../supabase-data.js'
 import { showToast } from '../helpers.js'
 import { menuAccionesFila } from '../main.js'
 import { estaAnulado, badgeAnulado, ESTILO_FILA_ANULADA } from '../anulacion.js'
@@ -88,16 +88,9 @@ export async function _revertirStockGuiaDespacho(id) {
   // los lotes tocados por esta guía específica (documento_referencia =
   // numero_guia de esta guía).
   if (guiaActual.venta_id) {
-    const kardexVenta = await getKardexByVenta(guiaActual.venta_id)
-    for (const k of (kardexVenta || [])) {
-      if (k.documento_referencia === guiaActual.numero_guia) {
-        const okKardex = await deleteKardexMovimiento(k.id)
-        if (!okKardex) {
-          const motivo = ultimoErrorDelete()
-          throw new Error(`No se pudo eliminar el movimiento de Kardex #${k.id} de la guía ${guiaActual.numero_guia}: ${motivo?.mensaje || 'motivo desconocido'}. Se detiene el borrado para no dejar el Kardex descuadrado.`)
-        }
-      }
-    }
+    // Estricto: lanza si la lectura/borrado falla o si queda alguna fila
+    // (antes un error de lectura devolvía [] y la guía se borraba igual).
+    await borrarKardexDeGuiaEstricto(guiaActual.venta_id, guiaActual.numero_guia)
   }
 
   return { guiaActual, detalles: detalles || [] }

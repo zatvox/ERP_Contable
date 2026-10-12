@@ -2590,6 +2590,44 @@ export async function getKardexByVenta(ventaId) { return await query('kardex', {
 export async function addKardexMovimiento(k) { return await insert('kardex', k) }
 export async function deleteKardexMovimiento(id) { return await deleteRecord('kardex', id) }
 
+/**
+ * Borra TODAS las filas de Kardex que generó una guía de despacho
+ * (venta_id + documento_referencia = N° guía) de forma ESTRICTA:
+ * - la consulta lanza error si falla (query() devolvía [] en silencio y la
+ *   guía se borraba igual dejando el kardex huérfano — caso GN01-00000007),
+ * - el delete pide .select() para confirmar cuántas filas borró de verdad
+ *   (RLS puede "borrar 0" sin error),
+ * - al final re-verifica que no quede ninguna.
+ * Devuelve el n° de filas borradas. Lanza Error si algo no cuadra.
+ */
+export async function borrarKardexDeGuiaEstricto(ventaId, numeroGuia) {
+  if (!ventaId || !numeroGuia) return 0
+  const leer = async () => {
+    const { data, error } = await supabase.from('kardex').select('id')
+      .eq('venta_id', ventaId).eq('documento_referencia', numeroGuia)
+    if (error) throw new Error(`No se pudo leer el Kardex de la guía ${numeroGuia}: ${error.message}`)
+    return data || []
+  }
+  const filas = await leer()
+  if (filas.length === 0) return 0
+  const { data: borradas, error } = await supabase.from('kardex').delete()
+    .in('id', filas.map(f => f.id)).select('id')
+  if (error) throw new Error(`No se pudo eliminar el Kardex de la guía ${numeroGuia}: ${error.message}`)
+  const quedan = await leer()
+  if (quedan.length > 0 || (borradas || []).length !== filas.length) {
+    throw new Error(`El Kardex de la guía ${numeroGuia} no se borró completo (quedan ${quedan.length} fila(s): #${quedan.map(q => q.id).join(', #')}). Se detiene para no dejar el stock descuadrado.`)
+  }
+  return borradas.length
+}
+
+/** Filas de Kardex que ya existen para venta + N° guía (para detectar huérfanos antes de crear una guía). */
+export async function getKardexDeGuia(ventaId, numeroGuia) {
+  const { data, error } = await supabase.from('kardex').select('id, lote_id, cantidad_salida, created_at')
+    .eq('venta_id', ventaId).eq('documento_referencia', numeroGuia)
+  if (error) throw new Error(`No se pudo verificar el Kardex de ${numeroGuia}: ${error.message}`)
+  return data || []
+}
+
 // Ubicaciones virtuales de terceros (modelo Odoo: Partners/Vendors y
 // Partners/Customers), para que compras y ventas también tengan un
 // origen/destino en el Kardex, igual que los traslados internos.

@@ -591,7 +591,7 @@ window._pkAbrirLinea = function (idx = null) {
   val('pkUdm', l?.unidad_medida || 'KG')
   val('pkUnid', l?.cantidad_unidades || '')
   val('pkPrecio', l?.precio_unitario || '')
-  val('pkIGV', l ? (l.tipo_base || 'gravada') : 'gravada')
+  val('pkIGV', l ? (l.tipo_base || 'gravada') : (_pkSerieActual?.tipo_igv_defecto || 'gravada'))
   document.getElementById('pkLineaTitulo').textContent = l ? `Editar línea ${idx + 1}` : 'Agregar Producto al PK'
   document.getElementById('pkBtnLineaOk').textContent = l ? '💾 Guardar línea' : '+ Agregar'
   window._pkPreviewLinea()

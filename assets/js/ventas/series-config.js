@@ -9,6 +9,8 @@
 //   · no se elimina una serie ya usada (tiene documentos) → se desactiva.
 // ============================================================================
 import { getSeries, addSerie, updateSerie, deleteSerie, siguienteCorrelativo, formatearNumero, NOMBRE_TIPO_SERIE, parseNumeroGuia } from '../series.js'
+
+const NOMBRE_TIPO_IGV_SERIE = { gravada: 'Gravada 18%', gravada_incluido: '18% incluido', exonerada: 'Exonerada', inafecta: 'Inafecta' }
 import { getVentas, getUbicaciones, getAlmacenes } from '../supabase-data.js'
 import { supabase } from '../supabase-client.js'
 import { showToast } from '../helpers.js'
@@ -113,7 +115,7 @@ export async function renderSeriesConfig(containerId) {
               <td style="text-align:right;">${s.correlativo_inicial}</td>
               <td style="text-align:right;">${usado || '—'}</td>
               <td><code>${_esc(formatearNumero(s, siguienteCorrelativo(s, usado)))}</code></td>
-              <td style="text-align:center;">${s.es_cpe ? '✅' : '📄 Físico'}${s.acepta_dni ? '<br><small style="color:var(--color-info);">acepta DNI</small>' : ''}</td>
+              <td style="text-align:center;">${s.es_cpe ? '✅' : '📄 Físico'}${s.acepta_dni ? '<br><small style="color:var(--color-info);">acepta DNI</small>' : ''}${s.tipo_igv_defecto ? `<br><small style="color:var(--color-warning);">IGV: ${_esc(NOMBRE_TIPO_IGV_SERIE[s.tipo_igv_defecto] || s.tipo_igv_defecto)}</small>` : ''}</td>
               <td>${s.aplica_a ? _esc(NOMBRE_TIPO_SERIE[s.aplica_a]) : '—'}</td>
               <td style="white-space:nowrap;">${_guiaDestino(s)}</td>
               <td style="text-align:right;">${s.dias_validez ?? '—'}</td>
@@ -192,6 +194,15 @@ function _asegurarModalSerie() {
             <div class="form-group" id="serieDestinoGrupo" style="grid-column:1/-1;"><label>Destino de la venta (kardex)</label>
               <select id="serieDestino"></select>
               <small style="color:var(--text-secondary);">A qué zona / ubicación sale la mercadería con esta guía (virtuales como Partners o cualquier almacén). La NC con devolución reingresa desde aquí.</small></div>
+            <div class="form-group" id="serieIGVGrupo"><label>Tipo de IGV por defecto</label>
+              <select id="serieTipoIGV">
+                <option value="">— Sin definir (respeta cada línea) —</option>
+                <option value="gravada">Gravada 18%</option>
+                <option value="gravada_incluido">Gravada 18% (precio incluye IGV)</option>
+                <option value="exonerada">Exonerada</option>
+                <option value="inafecta">Inafecta</option>
+              </select>
+              <small style="color:var(--text-secondary);">Al elegir esta serie en Nueva venta, las líneas se ajustan a este tipo (siguen editables). En blanco = se respeta lo que traiga cada línea (ej. desde un PK).</small></div>
             <div class="form-group" id="serieValidezGrupo"><label>Validez por defecto (días)</label><input type="number" id="serieValidez" min="1" step="1" value="15"></div>
           </div>
         </div>
@@ -238,6 +249,7 @@ window._onCambiarTipoSerie = function () {
   document.getElementById('serieValidezGrupo').style.display = t === 'PK' ? '' : 'none'
   document.getElementById('serieGuiaGrupo').style.display = (t === '01' || t === '03') ? '' : 'none'
   document.getElementById('serieDestinoGrupo').style.display = t === '09' ? '' : 'none'
+  document.getElementById('serieIGVGrupo').style.display = (t === '01' || t === '03' || t === 'PK') ? '' : 'none'
   // Bloque "Enlaces" solo si el tipo tiene algo que enlazar
   document.getElementById('serieEnlacesBloque').style.display = (t === 'PK' || t === '01' || t === '03' || t === '07' || t === '08' || t === '09') ? '' : 'none'
   const cpe = document.getElementById('serieCPE')
@@ -272,6 +284,7 @@ window.abrirModalSerie = async function (id = null) {
   set('serieValidez', s?.dias_validez || 15)
   set('serieCPE', s ? s.es_cpe : true)
   set('serieAceptaDNI', s?.acepta_dni || false)
+  set('serieTipoIGV', s?.tipo_igv_defecto || '')
   set('serieDefault', s?.por_defecto || false)
   set('serieActivo', s ? s.activo : true)
   // Selectores de guía (para 01/03) y destino (para 09)
@@ -324,6 +337,9 @@ window.guardarSerie = async function () {
       ...(ultimoEditado || !id ? { ultimo_correlativo: ultimo } : {}),
       es_cpe: tipo === 'PK' ? false : document.getElementById('serieCPE').checked,
       acepta_dni: tipo === '01' && !document.getElementById('serieCPE').checked && document.getElementById('serieAceptaDNI').checked,
+      // Solo se envía si la columna ya existe (sql/85) o si se eligió un valor
+      ...(((anterior && 'tipo_igv_defecto' in anterior) || document.getElementById('serieTipoIGV').value)
+        ? { tipo_igv_defecto: (tipo === '01' || tipo === '03' || tipo === 'PK') ? (document.getElementById('serieTipoIGV').value || null) : null } : {}),
       aplica_a: esNota ? document.getElementById('serieAplicaA').value : null,
       dias_validez: tipo === 'PK' ? (parseInt(document.getElementById('serieValidez').value) || 15) : null,
       serie_guia: (tipo === '01' || tipo === '03') ? (document.getElementById('serieGuia').value || null) : null,

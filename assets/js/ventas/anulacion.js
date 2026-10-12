@@ -2,7 +2,7 @@
 // ventas/anulacion.js — parte de ventas.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
-import { getLoteById, getVentaById, updateVenta, getCuentasCobrarByVenta, updateCuentaCobrar, reversarAsiento, ultimoErrorDelete, getKardexByVenta, deleteKardexMovimiento, getGuiasDespachoVenta, getGuiaDespachoVentaById, updateGuiaDespachoVenta, getDetalleGuiasDespachoVenta, recalcularLoteDesdeBultos, revertirBultosDeDetalleGuiaDespacho } from '../supabase-data.js'
+import { getLoteById, getVentaById, updateVenta, getCuentasCobrarByVenta, updateCuentaCobrar, reversarAsiento, ultimoErrorDelete, getKardexByVenta, deleteKardexMovimiento, getGuiasDespachoVenta, getGuiaDespachoVentaById, updateGuiaDespachoVenta, getDetalleGuiasDespachoVenta, recalcularLoteDesdeBultos, revertirBultosDeDetalleGuiaDespacho, borrarKardexDeGuiaEstricto } from '../supabase-data.js'
 import { showToast, formatNumber, formatQty } from '../helpers.js'
 import { abrirModalAnulacion, camposAnulacion, estaAnulado, ESTADO_COMPROBANTE } from '../anulacion.js'
 import { esNota, getMotivosNota } from '../notas.js'
@@ -265,16 +265,7 @@ window.anularGuiaDespachoVenta = async function (id) {
 
         // 2. Borrar el kardex de esta guía (se identifica por documento_referencia)
         if (guia.venta_id) {
-          const kardexVenta = await getKardexByVenta(guia.venta_id)
-          for (const k of (kardexVenta || [])) {
-            if (k.documento_referencia === guia.numero_guia) {
-              const okKardex = await deleteKardexMovimiento(k.id)
-              if (!okKardex) {
-                const motivo = ultimoErrorDelete()
-                throw new Error(`No se pudo eliminar el movimiento de Kardex #${k.id} de la guía ${guia.numero_guia}: ${motivo?.mensaje || 'motivo desconocido'}. Se detiene la anulación para no dejar el Kardex descuadrado.`)
-              }
-            }
-          }
+          await borrarKardexDeGuiaEstricto(guia.venta_id, guia.numero_guia)
         }
 
         // 3. Marcar la guía como anulada (el detalle se conserva: es el

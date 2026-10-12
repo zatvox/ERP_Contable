@@ -46,6 +46,7 @@ registrarColumnas('ventas', [
   { key: 'base',        label: 'Base Imp.' },
   { key: 'igv',         label: 'IGV' },
   { key: 'total',       label: 'Total' },
+  { key: 'pago',        label: 'Estado de pago' },
   { key: 'cpe',         label: 'CPE' },
   { key: 'despacho',    label: 'Guía de despacho' },
   { key: 'packing',     label: 'Packing vinculado' },
@@ -72,6 +73,7 @@ function _valorOrdenVenta({ v, cliente, vendedor }, campo) {
     case 'cpe':          return v.cpe_estado || ''
     case 'despacho':     return _ORDEN_DESPACHO[_estadoDespachoVenta(v)] ?? 9
     case 'packing':      return _packingPorIdCache.get(v.packing_id)?.numero || ''
+    case 'pago':         return _ORDEN_PAGO[_estadoPagoVenta(v)?.estado] ?? 9
     case 'notas':        return (_notasPorVenta().get(v.id) || []).length || (v.venta_referencia_id ? -1 : 0)
     default: return ''
   }
@@ -102,6 +104,32 @@ let _aplicadoPorAnticipoVentaCache = new Map()
 // Debajo se listan los N° de las guías VIGENTES de esa venta.
 let _guiasPorVentaCache = new Map() // venta_id -> ['T001-00000743', ...]
 let _packingPorIdCache = new Map() // packing.id -> { id, numero, estado }
+let _cxcPorVentaCache = new Map()   // venta.id -> cuenta por cobrar (estado de pago)
+
+// ── Estado de pago (mismos estados que Cuentas x Cobrar) ─────────────────────
+const _ORDEN_PAGO = { pendiente: 0, parcial: 1, cobrado: 2 }
+const _LBL_PAGO = { pendiente: 'Pendiente', parcial: 'Parcial', cobrado: 'Cancelado' }
+function _estadoPagoVenta(v) {
+  const c = _cxcPorVentaCache.get(v.id)
+  if (!c || c.estado === 'anulado') return null
+  const total = (+c.monto_total || 0) + (+c.monto_notas_debito || 0) - (+c.monto_notas_credito || 0)
+  const saldo = Math.max(0, total - (+c.monto_cobrado || 0) - (+c.monto_retenido || 0) - (+c.monto_canjeado || 0) - (+c.monto_anticipo_aplicado || 0))
+  const hoy = new Date().toISOString().slice(0, 10)
+  const atraso = c.estado !== 'cobrado' && c.fecha_vencimiento && c.fecha_vencimiento < hoy
+    ? Math.round((new Date(hoy) - new Date(c.fecha_vencimiento)) / 86400000) : 0
+  return { estado: c.estado, saldo, moneda: c.moneda || v.moneda || 'PEN', canjeado: +c.monto_canjeado || 0, atraso }
+}
+function _celdaPagoVenta(v) {
+  const p = _estadoPagoVenta(v)
+  if (!p) return '<span style="color:var(--text-secondary);">—</span>'
+  const cls = p.estado === 'cobrado' ? 'badge-success' : p.estado === 'parcial' ? 'badge-warning' : 'badge-danger'
+  const simb = p.moneda === 'USD' ? 'US$' : 'S/'
+  const extra = []
+  if (p.estado !== 'cobrado') extra.push(`saldo ${simb} ${formatNumber(p.saldo)}`)
+  if (p.canjeado > 0.01) extra.push('en letras')
+  if (p.atraso > 0) extra.push(`<span style="color:var(--color-danger);">vencida ${p.atraso} d</span>`)
+  return `<span class="badge ${cls}">${_LBL_PAGO[p.estado] || p.estado}</span>${extra.length ? `<br><small style="color:var(--text-secondary); white-space:nowrap;">${extra.join(' · ')}</small>` : ''}`
+}
 let _seriesNoCPE = new Set()        // 'tipo|serie' de series físicas (es_cpe=false): no se envían a NUBEFACT
 const _ORDEN_DESPACHO = { pendiente: 0, parcial: 1, despachado: 2, na: 3 }
 
@@ -148,6 +176,23 @@ export async function renderVentas(forzar = false) {
           for (const p of (pks || [])) _packingPorIdCache.set(p.id, p)
         } catch (e) { console.warn('Packing vinculado:', e) }
       }
+      // Estado de pago: cuenta por cobrar de cada venta
+      _cxcPorVentaCache = new Map()
+      try {
+        let desde = 0
+        for (;;) {
+          const { data, error } = await supabase.from('cuentas_cobrar')
+            .select('venta_id, estado, moneda, monto_total, monto_cobrado, monto_retenido, monto_canjeado, monto_anticipo_aplicado, monto_notas_credito, monto_notas_debito, fecha_vencimiento')
+            .not('venta_id', 'is', null).range(desde, desde + 999)
+          if (error) throw error
+          for (const c of (data || [])) {
+            const prev = _cxcPorVentaCache.get(c.venta_id)
+            if (!prev || prev.estado === 'anulado') _cxcPorVentaCache.set(c.venta_id, c)   // la vigente manda sobre una anulada
+          }
+          if ((data || []).length < 1000) break
+          desde += 1000
+        }
+      } catch (e) { console.warn('Estado de pago (CxC):', e) }
       _aplicadoPorAnticipoVentaCache = new Map()
       for (const a of (anticiposAplicadosTodos || [])) {
         _aplicadoPorAnticipoVentaCache.set(a.venta_anticipo_id, (_aplicadoPorAnticipoVentaCache.get(a.venta_anticipo_id) || 0) + (parseFloat(a.monto_aplicado) || 0))
@@ -189,6 +234,13 @@ export async function renderVentas(forzar = false) {
             <option value="todos">Vigentes y anulados</option>
             <option value="anulados">Solo anulados</option>
           </select>
+          <select id="filtroPagoVentas" onchange="window.filtrarVentas()" style="max-width:170px;" title="Estado de pago (Cuentas x Cobrar)">
+            <option value="">Pago: todos</option>
+            <option value="pendiente">Pendiente</option>
+            <option value="parcial">Parcial</option>
+            <option value="por_cobrar">Pendiente + Parcial</option>
+            <option value="cobrado">Cancelado</option>
+          </select>
           <select id="filtroDespachoVentas" onchange="window.filtrarVentas()" style="max-width:190px;" title="Estado de emisión de la guía de despacho">
             <option value="">Despacho: todos</option>
             <option value="pendiente">Pendiente</option>
@@ -211,6 +263,7 @@ export async function renderVentas(forzar = false) {
                 ${_thOrdenableVentas('Base Imp.', 'base')}
                 ${_thOrdenableVentas('IGV', 'igv')}
                 ${_thOrdenableVentas('Total', 'total')}
+                ${_thOrdenableVentas('Estado pago', 'pago')}
                 ${_thOrdenableVentas('CPE', 'cpe')}
                 ${_thOrdenableVentas('Guía', 'despacho')}
                 ${_thOrdenableVentas('Packing', 'packing')}
@@ -312,6 +365,7 @@ function _pintarFilasVentas() {
   const modoAnul = document.getElementById('filtroAnuladasVentas')?.value || 'activos'
   const fTipo = document.getElementById('filtroTipoComprobanteVentas')?.value || ''
   const fDesp = document.getElementById('filtroDespachoVentas')?.value || ''
+  const fPago = document.getElementById('filtroPagoVentas')?.value || ''
 
   let listaFiltrada = (_ventasListaEnriquecida || []).filter(({ v }) => {
     const anul = estaAnulado(v)
@@ -319,6 +373,10 @@ function _pintarFilasVentas() {
     if (modoAnul === 'anulados' && !anul) return false
     if (fTipo && String(v.tipo_comprobante) !== fTipo) return false
     if (fDesp && _estadoDespachoVenta(v) !== fDesp) return false
+    if (fPago) {
+      const ep = _estadoPagoVenta(v)?.estado
+      if (fPago === 'por_cobrar' ? !(ep === 'pendiente' || ep === 'parcial') : ep !== fPago) return false
+    }
     return true
   })
 
@@ -326,7 +384,8 @@ function _pintarFilasVentas() {
     listaFiltrada = listaFiltrada.filter(({ v, cliente, vendedor }) => {
       const comprobante = `${v.serie || ''}-${String(v.correlativo || '').padStart(8, '0')}`
       const pk = _packingPorIdCache.get(v.packing_id)?.numero || ''
-      return `${comprobante} ${pk} ${cliente || ''} ${vendedor || ''} ${v.moneda || ''} ${v.tipo_comprobante || ''}`
+      const pago = _LBL_PAGO[_estadoPagoVenta(v)?.estado] || ''
+      return `${comprobante} ${pk} ${pago} ${cliente || ''} ${vendedor || ''} ${v.moneda || ''} ${v.tipo_comprobante || ''}`
         .toLowerCase().includes(busqueda)
     })
   }
@@ -339,7 +398,7 @@ function _pintarFilasVentas() {
   }
 
   if (listaFiltrada.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="15" style="text-align:center;">${busqueda ? 'Sin resultados para la búsqueda' : (modoAnul === 'anulados' ? 'No hay comprobantes anulados' : 'Sin ventas registradas')}</td></tr>`
+    tbody.innerHTML = `<tr><td colspan="16" style="text-align:center;">${busqueda ? 'Sin resultados para la búsqueda' : (modoAnul === 'anulados' ? 'No hay comprobantes anulados' : 'Sin ventas registradas')}</td></tr>`
     return
   }
 
@@ -369,6 +428,7 @@ function _pintarFilasVentas() {
       <td data-col-tabla="ventas" data-col="base" style="text-align:right;${estiloMonto}${colStyle('ventas','base') ? ' display:none;' : ''}">${formatNumber(bi)}</td>
       <td data-col-tabla="ventas" data-col="igv" style="text-align:right;${estiloMonto}${colStyle('ventas','igv') ? ' display:none;' : ''}">${formatNumber(igv)}</td>
       <td data-col-tabla="ventas" data-col="total" style="text-align:right; font-weight:bold;${estiloMonto}${colStyle('ventas','total') ? ' display:none;' : ''}">${formatNumber(tot)}</td>
+      <td data-col-tabla="ventas" data-col="pago"${colStyle('ventas','pago')}>${_celdaPagoVenta(v)}</td>
       <td data-col-tabla="ventas" data-col="cpe"${colStyle('ventas','cpe')}>${statusBadge(v)}${revertida ? ` <span class="badge badge-warning" title="Sus Notas de Crédito ya cubrieron el 100% del importe — sigue aceptado en SUNAT, no está anulado">REVERTIDO</span>` : ''}</td>
       <td data-col-tabla="ventas" data-col="despacho"${colStyle('ventas','despacho')}>${_badgeDespachoVenta(v)}</td>
       <td data-col-tabla="ventas" data-col="packing"${colStyle('ventas','packing')}>${_celdaPackingVenta(v)}</td>

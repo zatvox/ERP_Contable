@@ -108,6 +108,16 @@ async function _cargarDatos() {
   const packMap = new Map(packs.map(p => [p.id, p.numero]))
   const contMap = new Map(_st.contactos.map(c => [c.id, c]))
 
+  // Abonos por factura (vertical en el estado de cuenta): recibos de cobro
+  // (incluye los repartidos por un cobro masivo), retenciones, NC y anticipos.
+  const cobros = await _enLotes('cobros', 'id, cxc_id, fecha, monto, numero_recibo, lote_id, monto_retencion, numero_comprobante_retencion', 'cxc_id', facturas.map(f => f.id))
+  let lotesCobro = []
+  try { lotesCobro = await _enLotes('cobros_lote', 'id, numero_recibo', 'id', cobros.map(c => c.lote_id)) } catch (_) {}
+  const reciboLote = new Map(lotesCobro.map(l => [l.id, l.numero_recibo]))
+  let terminos = []
+  try { terminos = await _q('terminos_pago', 'id, nombre') } catch (_) {}
+  const terminoMap = new Map(terminos.map(t => [t.id, t.nombre]))
+
   const docTxt = c => `${c.serie ? c.serie + '-' : ''}${String(c.numero_comprobante || '').replace(/^0+/, '')}`
   const filasF = facturas.map(c => {
     const v = ventaMap.get(c.venta_id)
@@ -118,10 +128,24 @@ async function _cargarDatos() {
       total: parseFloat(d.total_linea) || 0
     }))
     const total = _n(parseFloat(c.monto_total || 0) + parseFloat(c.monto_notas_debito || 0) - parseFloat(c.monto_notas_credito || 0))
+    // Abonos: un renglón por recibo (y por retención), en orden de fecha.
+    const abonos = []
+    cobros.filter(x => x.cxc_id === c.id).sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)) || a.id - b.id).forEach(x => {
+      const rec = x.numero_recibo || reciboLote.get(x.lote_id) || ''
+      if (parseFloat(x.monto) > 0) abonos.push({ fecha: x.fecha, txt: rec ? `REC-${rec}` : 'Cobro', monto: _n(x.monto), masivo: !!x.lote_id })
+      if (parseFloat(x.monto_retencion) > 0) abonos.push({ fecha: x.fecha, txt: x.numero_comprobante_retencion ? `RET-${x.numero_comprobante_retencion}` : 'Retención', monto: _n(x.monto_retencion) })
+    })
+    // Lo cobrado que no tiene renglón (cobros antiguos/importados) se muestra como un solo abono
+    const sinDetalle = _n(parseFloat(c.monto_cobrado || 0) + parseFloat(c.monto_retenido || 0) - abonos.reduce((t, a) => t + a.monto, 0))
+    if (sinDetalle > 0.009) abonos.push({ fecha: null, txt: 'Abonos ant.', monto: sinDetalle })
+    if (parseFloat(c.monto_notas_credito) > 0) abonos.push({ fecha: null, txt: 'N. crédito', monto: _n(c.monto_notas_credito) })
+    if (parseFloat(c.monto_anticipo_aplicado) > 0) abonos.push({ fecha: null, txt: 'Anticipo', monto: _n(c.monto_anticipo_aplicado) })
     return {
+      cond: terminoMap.get(c.termino_pago_id) || '', abonos,
       id: c.id, cliente: contMap.get(c.contact_id)?.nombre || '', moneda: c.moneda || 'PEN',
       packing: packMap.get(v?.packing_id) || '—', doc: docTxt(c), emision: c.fecha_emision, venc: c.fecha_vencimiento || v?.fecha_vencimiento,
       lineas: lineas.length ? lineas : [{ articulo: '(sin detalle)', lote: '—', cajas: 0, cantidad: 0, um: '', precio: 0, total }],
+      bruto: _n(parseFloat(c.monto_total || 0) + parseFloat(c.monto_notas_debito || 0)),
       total, cobrado: _n(parseFloat(c.monto_cobrado || 0) + parseFloat(c.monto_retenido || 0) + parseFloat(c.monto_anticipo_aplicado || 0)),
       canjeado: _n(c.monto_canjeado), saldo: _saldoCxC(c)
     }
@@ -158,6 +182,54 @@ function _saldoFinal(d) {
   const fx = _porMoneda(d.filasF, ['saldo']), lx = _porMoneda(d.filasL, ['saldo'])
   const mons = [...new Set([...Object.keys(fx), ...Object.keys(lx)])].sort((a, b) => (a === 'USD' ? -1 : 1))
   return mons.map(m => ({ moneda: m, facturas: fx[m]?.saldo || 0, letras: lx[m]?.saldo || 0, total: _n((fx[m]?.saldo || 0) + (lx[m]?.saldo || 0)) }))
+}
+
+// ── Cuadro 1 como modelo de filas (lo usan la vista previa y el PDF) ─────────
+// Por comprobante: renglón(es) de artículo con el importe en SU columna de
+// moneda (US$ o S/), luego un renglón por abono (recibo, retención, NC,
+// anticipo) en negativo en esa misma columna, y el renglón "Saldo" del
+// comprobante. "Letras" = parte canjeada en letras (se detalla en el cuadro 2).
+// Columnas sin datos (otra moneda, letras, lote, cajas, cond.) no se muestran.
+function _modeloComprobantes(d) {
+  const F = d.filasF
+  const hay = {
+    USD: F.some(f => f.moneda === 'USD'), PEN: F.some(f => f.moneda !== 'USD'),
+    letras: F.some(f => f.canjeado > 0.009), lote: F.some(f => f.lineas.some(l => l.lote && l.lote !== '—')),
+    cajas: F.some(f => f.lineas.some(l => l.cajas)), cond: F.some(f => f.cond)
+  }
+  const cols = [
+    { k: 'packing', t: 'Packing' }, { k: 'doc', t: 'Comprobante' }, { k: 'emision', t: 'Emisión' },
+    hay.cond && { k: 'cond', t: 'Cond. pago' }, { k: 'articulo', t: 'Artículo', w: 1 },
+    hay.lote && { k: 'lote', t: 'Lote' }, hay.cajas && { k: 'cajas', t: 'Cajas', r: 1 },
+    { k: 'cantidad', t: 'Cantidad', r: 1 }, { k: 'precio', t: 'Precio', r: 1 },
+    hay.USD && { k: 'USD', t: 'Total US$', r: 1, mon: 1 }, hay.PEN && { k: 'PEN', t: 'Total S/', r: 1, mon: 1 },
+    hay.letras && { k: 'letras', t: 'En letras', r: 1 }, { k: 'dias', t: 'Días', r: 1 }
+  ].filter(Boolean)
+  const fm = v => formatNumber(v, 2)
+  const rows = []
+  const tot = { USD: 0, PEN: 0, letrasUSD: 0, letrasPEN: 0 }
+  F.forEach(f => {
+    const m = f.moneda === 'USD' ? 'USD' : 'PEN'
+    const atraso = _dias(f.venc, _st.corte)
+    const diasE = _dias(f.emision, _st.corte)
+    f.lineas.forEach((ln, i) => rows.push({ tipo: 'art', ini: i === 0, c: {
+      packing: i ? '' : f.packing, doc: i ? '' : f.doc, sub: i || !d.multiCliente ? '' : f.cliente,
+      emision: i ? '' : fechaDMY(f.emision), cond: i ? '' : f.cond, articulo: ln.articulo, lote: ln.lote === '—' ? '' : ln.lote,
+      cajas: ln.cajas ? formatNumber(ln.cajas, 0) : '', cantidad: formatNumber(ln.cantidad, 2), precio: formatNumber(ln.precio, 2),
+      [m]: fm(f.lineas.length === 1 ? f.bruto : ln.total),
+      letras: i || !(f.canjeado > 0.009) ? '' : `-${fm(f.canjeado)}`,
+      dias: i ? '' : (diasE ?? '')
+    }, vencido: !i && f.saldo > 0.009 && atraso > 0 }))
+    // Como la hoja de siempre: fecha bajo Cantidad, N° de recibo bajo Precio, importe al costado
+    f.abonos.forEach(a => rows.push({ tipo: 'abono', masivo: a.masivo, c: {
+      cantidad: a.fecha ? fechaDMY(a.fecha) : '', precio: a.txt, [m]: `-${fm(a.monto)}`
+    } }))
+    if (f.abonos.length || f.canjeado > 0.009 || f.lineas.length > 1) rows.push({ tipo: 'saldo', c: { [m]: `${_SIMB(m)} ${fm(f.saldo)}` } })
+    else rows[rows.length - 1].saldoEnLinea = m
+    tot[m] = _n(tot[m] + f.saldo)
+    if (f.canjeado > 0.009) tot['letras' + m] = _n(tot['letras' + m] + f.canjeado)
+  })
+  return { cols, rows, tot, hay }
 }
 
 // ── Vista previa (hoja blanca, independiente del tema) ───────────────────────
@@ -197,29 +269,38 @@ const _CSS = `
 .ecc-paper table.ecc-t td.ecc-ok { color:#047857 !important; }
 .ecc-paper table.ecc-t .r { text-align:right !important; } .ecc-paper table.ecc-t .c { text-align:center !important; }
 .ecc-paper table.ecc-t td.art { min-width:170px; }
+.ecc-paper table.ecc-t1 tr.abono td { color:#b91c1c !important; font-size:9px !important; border-bottom:0 !important; padding-top:1px !important; padding-bottom:1px !important; }
+.ecc-paper table.ecc-t1 tr.abono td { font-style:italic; }
+.ecc-paper table.ecc-t1 tr.saldo td { font-weight:700 !important; border-bottom:1px solid #9ca3af !important; }
+.ecc-paper table.ecc-t1 tr.saldo td.ecc-sal { border-top:1px solid #111827 !important; }
+.ecc-paper table.ecc-t1 tr.saldo td.art { text-align:right; color:#374151 !important; }
+.ecc-paper table.ecc-t1 td.ecc-sal { background:#fde68a !important; font-weight:700 !important; }
+.ecc-paper table.ecc-t1 td.mon { min-width:84px; }
+.ecc-paper table.ecc-t1 th.r { text-align:right !important; }
+.ecc-paper table.ecc-t1 td.neg { color:#b91c1c !important; }
+.ecc-paper table.ecc-t1 tfoot tr.tot td { background:#fde68a !important; font-size:10.5px !important; font-weight:800 !important; color:#111827 !important; }
 `
 
 function _htmlPaper(d) {
   const e = _empresa()
   const corte = fechaDMY(_st.corte)
   const fm = v => formatNumber(v, 2)
-  const totF = _porMoneda(d.filasF, ['total', 'cobrado', 'canjeado', 'saldo'])
   const totL = _porMoneda(d.filasL, ['importe', 'pagado', 'saldo'])
   const cli = d.multiCliente
-  const filasF = d.filasF.map(f => f.lineas.map((ln, i) => {
-    const atraso = _dias(f.venc, _st.corte)
-    return `<tr class="${i === 0 ? 'doc-ini' : ''}">
-      ${i === 0 ? `<td>${_esc(f.packing)}</td><td><b>${_esc(f.doc)}</b>${cli ? `<br><small style="color:#6b7280;">${_esc(f.cliente)}</small>` : ''}</td><td>${fechaDMY(f.emision)}</td>` : '<td></td><td></td><td></td>'}
-      <td class="art">${_esc(ln.articulo)}</td><td>${_esc(ln.lote)}</td>
-      <td class="r">${ln.cajas ? formatNumber(ln.cajas, 0) : ''}</td><td class="r">${formatNumber(ln.cantidad, 2)}</td>
-      <td class="r">${formatNumber(ln.precio, 2)}</td><td class="r">${fm(ln.total)}</td>
-      ${i === 0 ? `<td class="c">${f.moneda}</td><td class="r">${fm(f.total)}</td><td class="r">${f.cobrado ? fm(f.cobrado) : '—'}</td><td class="r">${f.canjeado ? fm(f.canjeado) : '—'}</td>
-        <td class="r"><b>${fm(f.saldo)}</b></td><td class="r">${_dias(f.emision, _st.corte) ?? '—'}</td>
-        <td class="r ${atraso > 0 && f.saldo > 0.009 ? 'ecc-venc' : ''}">${f.saldo > 0.009 && atraso !== null ? (atraso > 0 ? '+' : '') + atraso : '—'}</td>`
-        : '<td></td><td></td><td></td><td></td><td></td><td></td><td></td>'}
-    </tr>`
-  }).join('')).join('')
-  const pieF = Object.entries(totF).map(([m, t]) => `<tr><td colspan="9">Subtotal comprobantes ${m}</td><td class="c">${m}</td><td class="r">${fm(t.total)}</td><td class="r">${fm(t.cobrado)}</td><td class="r">${fm(t.canjeado)}</td><td class="r">${_SIMB(m)} ${fm(t.saldo)}</td><td colspan="2"></td></tr>`).join('')
+  const M = _modeloComprobantes(d)
+  const celda = (r, col) => {
+    const v = r.c[col.k] ?? ''
+    if (col.k === 'doc') return `<td><b>${_esc(v)}</b>${r.c.sub ? `<br><small>${_esc(r.c.sub)}</small>` : ''}</td>`
+    const cls = [col.r ? 'r' : '', col.mon ? 'mon' : '', col.k === 'articulo' ? 'art' : '',
+      col.k === 'dias' && r.vencido ? 'ecc-venc' : '', col.k === 'letras' && v && r.tipo === 'art' ? 'neg' : '', (r.saldoEnLinea === col.k || (r.tipo === 'saldo' && col.mon && v)) ? 'ecc-sal' : ''].filter(Boolean).join(' ')
+    const tip = r.masivo && col.k === 'precio' ? ' title="Parte de un cobro masivo (un depósito repartido en varios comprobantes)"' : ''
+    return `<td class="${cls}"${tip}>${r.saldoEnLinea === col.k && v ? `${_SIMB(col.k)} ${_esc(v)}` : _esc(v)}</td>`
+  }
+  const filasF = M.rows.map(r => `<tr class="${r.tipo}${r.ini ? ' doc-ini' : ''}">${M.cols.map(col => celda(r, col)).join('')}</tr>`).join('')
+  const iMon = M.cols.findIndex(c => c.mon)
+  const pieF = `<tr class="tot"><td colspan="${iMon}" class="r">${d.filasL.length ? 'SALDO COMPROBANTES' : 'SALDO'} AL ${corte}</td>${M.cols.slice(iMon).map(col =>
+    col.mon ? `<td class="r mon">${_SIMB(col.k)} ${fm(M.tot[col.k])}</td>`
+    : col.k === 'letras' ? `<td class="r">${['USD', 'PEN'].filter(m => M.tot['letras' + m]).map(m => `${_SIMB(m)} ${fm(M.tot['letras' + m])}`).join('<br>')}</td>` : '<td></td>').join('')}</tr>`
   const filasL = d.filasL.map(l => `<tr>
       <td class="r ${l.dias > 0 ? 'ecc-venc' : 'ecc-ok'}">${l.dias === null ? '—' : (l.dias > 0 ? '+' : '') + l.dias}</td>
       <td><b>${_esc(l.numero)}</b>${cli ? `<br><small style="color:#6b7280;">${_esc(l.cliente)}</small>` : ''}</td>
@@ -238,18 +319,17 @@ function _htmlPaper(d) {
     <div class="ecc-cli">${d.clientes.map(c => `<div><span>RUC ${_esc(c.nro_documento || '—')}</span> <b>${_esc(c.nombre)}</b></div>`).join('')}</div>
 
     <div class="ecc-sec">1 · Comprobantes pendientes (${d.filasF.length})</div>
-    ${d.filasF.length ? `<table class="ecc-t"><thead><tr>
-      <th>Packing</th><th>Comprobante</th><th>Emisión</th><th>Artículo</th><th>Lote</th><th class="r">Cajas</th><th class="r">Cantidad</th><th class="r">Precio</th><th class="r">Importe</th>
-      <th class="c">Mon.</th><th class="r">Total doc.</th><th class="r">Cobrado</th><th class="r">En letras</th><th class="r">Saldo</th><th class="r">Días</th><th class="r">Atraso</th>
-    </tr></thead><tbody>${filasF}</tbody><tfoot>${pieF}</tfoot></table>` : '<div class="ecc-vacio">Sin comprobantes pendientes.</div>'}
+    ${d.filasF.length ? `<table class="ecc-t ecc-t1"><thead><tr>${M.cols.map(c => `<th class="${c.r ? 'r' : ''}">${c.t}</th>`).join('')}</tr></thead>
+      <tbody>${filasF}</tbody><tfoot>${pieF}</tfoot></table>` : '<div class="ecc-vacio">Sin comprobantes pendientes.</div>'}
 
-    <div class="ecc-sec">2 · Letras pendientes (${d.filasL.length})</div>
-    ${d.filasL.length ? `<table class="ecc-t"><thead><tr>
+    ${d.filasL.length ? `<div class="ecc-sec">2 · Letras pendientes (${d.filasL.length})</div>
+    <table class="ecc-t"><thead><tr>
       <th class="r" title="− faltan días · + vencida">Días</th><th>N° Letra</th><th>Emisión</th><th>Vencimiento</th><th>Factura</th><th class="c">Mon.</th>
       <th class="r">Importe</th><th class="r">Pagado</th><th class="r">Saldo</th><th>N° único</th><th>Banco</th><th>Estado</th>
-    </tr></thead><tbody>${filasL}</tbody><tfoot>${pieL}</tfoot></table>` : '<div class="ecc-vacio">Sin letras pendientes.</div>'}
+    </tr></thead><tbody>${filasL}</tbody><tfoot>${pieL}</tfoot></table>
 
-    ${saldos.map(s => `<div class="ecc-saldo"><div>SALDO AL ${corte} (${s.moneda})<small>Comprobantes ${_SIMB(s.moneda)} ${fm(s.facturas)} + Letras ${_SIMB(s.moneda)} ${fm(s.letras)}</small></div><div>${_SIMB(s.moneda)} ${fm(s.total)}</div></div>`).join('') || '<div class="ecc-saldo"><div>SALDO</div><div>0.00</div></div>'}
+    <div class="ecc-saldo"><div>SALDO TOTAL AL ${corte}<small>Comprobantes + letras</small></div>
+      <div style="display:flex; gap:28px;">${saldos.map(s => `<div style="text-align:right;">${_SIMB(s.moneda)} ${fm(s.total)}<small>Comp. ${fm(s.facturas)} + Letras ${fm(s.letras)}</small></div>`).join('')}</div></div>` : ''}
     <div class="ecc-pie">${_esc(e.pie)}</div>
   </div>`
 }
@@ -276,7 +356,7 @@ export async function renderEstadoCuentaCliente(cont, opts = {}) {
     <div class="card reporte-card">
       <div class="card-header">
         <div><h3 class="card-title">Estado de cuenta del cliente</h3>
-          <div class="reporte-desc">Comprobantes pendientes (con lote) y letras por cobrar de uno o varios clientes. Descárgalo en PDF (A4) o PNG para enviarlo.</div></div>
+          <div class="reporte-desc">Comprobantes pendientes con sus recibos de cobro (US$ y S/ en columnas separadas) y letras por cobrar de uno o varios clientes. Descárgalo en PDF (A4) o PNG para enviarlo.</div></div>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
           ${opts.onMovimientos ? '<button class="btn btn-secondary btn-small" id="ecc-mov" title="Tabla dinámica de todos los movimientos (cargos y abonos)">📊 Movimientos</button>' : ''}
           <button class="btn btn-secondary btn-small" id="ecc-png">⬇ PNG</button>
@@ -388,47 +468,63 @@ async function _pdf() {
     const sec = (t) => { doc.setFontSize(8.5).setFont('helvetica', 'bold').setTextColor(17).text(t, M, y); y += 1.5 }
 
     sec(`1 · COMPROBANTES PENDIENTES (${d.filasF.length})`)
-    const bodyF = []
-    d.filasF.forEach(f => f.lineas.forEach((ln, i) => {
-      const atraso = _dias(f.venc, _st.corte)
-      bodyF.push([
-        i ? '' : f.packing, i ? '' : (d.multiCliente ? `${f.doc}\n${f.cliente}` : f.doc), i ? '' : fechaDMY(f.emision),
-        ln.articulo, ln.lote, ln.cajas ? formatNumber(ln.cajas, 0) : '', formatNumber(ln.cantidad, 2), formatNumber(ln.precio, 2), fm(ln.total),
-        i ? '' : f.moneda, i ? '' : fm(f.total), i ? '' : (f.cobrado ? fm(f.cobrado) : '—'), i ? '' : (f.canjeado ? fm(f.canjeado) : '—'),
-        i ? '' : fm(f.saldo), i ? '' : String(_dias(f.emision, _st.corte) ?? '—'),
-        i ? '' : (f.saldo > 0.009 && atraso !== null ? (atraso > 0 ? '+' : '') + atraso : '—')
-      ])
+    const MC = _modeloComprobantes(d)
+    const iMon = MC.cols.findIndex(c => c.mon)
+    const bodyF = MC.rows.map(r => MC.cols.map(col => {
+      let v = r.c[col.k] ?? ''
+      if (col.k === 'doc' && r.c.sub) v = `${v}\n${r.c.sub}`
+      if (r.saldoEnLinea === col.k && v) v = `${_SIMB(col.k)} ${v}`
+      return String(v)
     }))
-    const totF = _porMoneda(d.filasF, ['total', 'cobrado', 'canjeado', 'saldo'])
+    const footF = [[{ content: `${d.filasL.length ? 'SALDO COMPROBANTES' : 'SALDO'} AL ${corte}`, colSpan: iMon, styles: { halign: 'right' } },
+      ...MC.cols.slice(iMon).map(col => col.mon ? `${_SIMB(col.k)} ${fm(MC.tot[col.k])}`
+        : col.k === 'letras' ? ['USD', 'PEN'].filter(m => MC.tot['letras' + m]).map(m => `${_SIMB(m)} ${fm(MC.tot['letras' + m])}`).join('\n') : '')]]
+    const colSt = {}
+    MC.cols.forEach((col, idx) => { colSt[idx] = { halign: col.r ? 'right' : 'left', ...(col.k === 'articulo' ? { cellWidth: 'auto', minCellWidth: 50 } : {}), ...(col.mon ? { minCellWidth: 22 } : {}) } })
     doc.autoTable({ ...comun, startY: y,
-      head: [['Packing', 'Comprobante', 'Emisión', 'Artículo', 'Lote', 'Cajas', 'Cantidad', 'Precio', 'Importe', 'Mon.', 'Total doc.', 'Cobrado', 'En letras', 'Saldo', 'Días', 'Atraso']],
-      body: bodyF.length ? bodyF : [['', 'Sin comprobantes pendientes', '', '', '', '', '', '', '', '', '', '', '', '', '', '']],
-      foot: Object.entries(totF).map(([m, t]) => [{ content: `Subtotal comprobantes ${m}`, colSpan: 9 }, m, fm(t.total), fm(t.cobrado), fm(t.canjeado), `${_SIMB(m)} ${fm(t.saldo)}`, '', '']),
-      columnStyles: { 3: { cellWidth: 62 }, 5: { halign: 'right' }, 6: { halign: 'right' }, 7: { halign: 'right' }, 8: { halign: 'right' }, 9: { halign: 'center' }, 10: { halign: 'right' }, 11: { halign: 'right' }, 12: { halign: 'right' }, 13: { halign: 'right', fontStyle: 'bold' }, 14: { halign: 'right' }, 15: { halign: 'right' } },
-      didParseCell: (c) => { if (c.section === 'body' && c.column.index === 15 && String(c.cell.raw).startsWith('+')) c.cell.styles.textColor = [185, 28, 28] }
+      head: [MC.cols.map(c => c.t)],
+      body: bodyF.length ? bodyF : [[{ content: 'Sin comprobantes pendientes', colSpan: MC.cols.length }]],
+      foot: bodyF.length ? footF : [], footStyles: { ...foot, fillColor: [253, 230, 138], fontSize: 7.5 },
+      columnStyles: colSt,
+      didParseCell: (c) => {
+        if (c.section !== 'body') return
+        const r = MC.rows[c.row.index]; const col = MC.cols[c.column.index]
+        if (!r || !col) return
+        if (r.tipo === 'abono') { c.cell.styles.textColor = [185, 28, 28]; c.cell.styles.fontSize = 6.4; c.cell.styles.fontStyle = 'italic'; c.cell.styles.overflow = 'visible' }
+        if (r.tipo === 'saldo') { c.cell.styles.fontStyle = 'bold'; if (col.k === 'articulo') c.cell.styles.halign = 'right' }
+        if (r.ini) c.cell.styles.lineWidth = { top: 0.25, bottom: 0.1, left: 0, right: 0 }
+        if ((r.saldoEnLinea === col.k || (r.tipo === 'saldo' && col.mon)) && c.cell.raw) { c.cell.styles.fillColor = [253, 230, 138]; c.cell.styles.fontStyle = 'bold' }
+        if (col.k === 'letras' && r.tipo === 'art' && c.cell.raw) c.cell.styles.textColor = [185, 28, 28]
+        if (col.k === 'dias' && r.vencido) { c.cell.styles.textColor = [185, 28, 28]; c.cell.styles.fontStyle = 'bold' }
+      }
     })
     y = doc.lastAutoTable.finalY + 6
-    if (y > doc.internal.pageSize.getHeight() - 30) { doc.addPage(); cabecera(); y = 26 }
-    sec(`2 · LETRAS PENDIENTES (${d.filasL.length})`)
-    const totL = _porMoneda(d.filasL, ['importe', 'pagado', 'saldo'])
-    doc.autoTable({ ...comun, startY: y,
-      head: [['Días', 'N° Letra', 'Emisión', 'Vencimiento', 'Factura', 'Mon.', 'Importe', 'Pagado', 'Saldo', 'N° único', 'Banco', 'Estado']],
-      body: d.filasL.length ? d.filasL.map(l => [l.dias === null ? '—' : (l.dias > 0 ? '+' : '') + l.dias, d.multiCliente ? `${l.numero}\n${l.cliente}` : l.numero, fechaDMY(l.emision), fechaDMY(l.venc), l.factura, l.moneda, fm(l.importe), l.pagado ? fm(l.pagado) : '—', fm(l.saldo), l.unico || '', l.ubicacion, l.estado])
-        : [['', 'Sin letras pendientes', '', '', '', '', '', '', '', '', '', '']],
-      foot: Object.entries(totL).map(([m, t]) => [{ content: `Subtotal letras ${m}`, colSpan: 5 }, m, fm(t.importe), fm(t.pagado), `${_SIMB(m)} ${fm(t.saldo)}`, '', '', '']),
-      columnStyles: { 0: { halign: 'right' }, 5: { halign: 'center' }, 6: { halign: 'right' }, 7: { halign: 'right' }, 8: { halign: 'right', fontStyle: 'bold' } },
-      didParseCell: (c) => { if (c.section === 'body' && c.column.index === 0) c.cell.styles.textColor = String(c.cell.raw).startsWith('+') ? [185, 28, 28] : [4, 120, 87] }
-    })
-    y = doc.lastAutoTable.finalY + 5
-    const saldos = _saldoFinal(d)
-    if (y + 10 * saldos.length + 14 > doc.internal.pageSize.getHeight()) { doc.addPage(); cabecera(); y = 26 }
-    saldos.forEach(s => {
-      doc.setFillColor(253, 230, 138).setDrawColor(245, 158, 11).setLineWidth(0.6).rect(M, y, W - 2 * M, 9, 'FD')
-      doc.setTextColor(17).setFont('helvetica', 'bold').setFontSize(10).text(`SALDO AL ${corte} (${s.moneda})`, M + 3, y + 5.2)
-      doc.setFont('helvetica', 'normal').setFontSize(7).text(`Comprobantes ${_SIMB(s.moneda)} ${fm(s.facturas)} + Letras ${_SIMB(s.moneda)} ${fm(s.letras)}`, M + 75, y + 5.2)
-      doc.setFont('helvetica', 'bold').setFontSize(12).text(`${_SIMB(s.moneda)} ${fm(s.total)}`, W - M - 3, y + 6, { align: 'right' })
-      y += 11
-    })
+    if (d.filasL.length) {
+      if (y > doc.internal.pageSize.getHeight() - 30) { doc.addPage(); cabecera(); y = 26 }
+      sec(`2 · LETRAS PENDIENTES (${d.filasL.length})`)
+      const totL = _porMoneda(d.filasL, ['importe', 'pagado', 'saldo'])
+      doc.autoTable({ ...comun, startY: y,
+        head: [['Días', 'N° Letra', 'Emisión', 'Vencimiento', 'Factura', 'Mon.', 'Importe', 'Pagado', 'Saldo', 'N° único', 'Banco', 'Estado']],
+        body: d.filasL.map(l => [l.dias === null ? '—' : (l.dias > 0 ? '+' : '') + l.dias, d.multiCliente ? `${l.numero}\n${l.cliente}` : l.numero, fechaDMY(l.emision), fechaDMY(l.venc), l.factura, l.moneda, fm(l.importe), l.pagado ? fm(l.pagado) : '—', fm(l.saldo), l.unico || '', l.ubicacion, l.estado]),
+        foot: Object.entries(totL).map(([m, t]) => [{ content: `Subtotal letras ${m}`, colSpan: 5 }, m, fm(t.importe), fm(t.pagado), `${_SIMB(m)} ${fm(t.saldo)}`, '', '', '']),
+        columnStyles: { 0: { halign: 'right' }, 5: { halign: 'center' }, 6: { halign: 'right' }, 7: { halign: 'right' }, 8: { halign: 'right', fontStyle: 'bold' } },
+        didParseCell: (c) => { if (c.section === 'body' && c.column.index === 0) c.cell.styles.textColor = String(c.cell.raw).startsWith('+') ? [185, 28, 28] : [4, 120, 87] }
+      })
+      y = doc.lastAutoTable.finalY + 5
+      const saldos = _saldoFinal(d)
+      if (y + 26 > doc.internal.pageSize.getHeight()) { doc.addPage(); cabecera(); y = 26 }
+      doc.setFillColor(253, 230, 138).setDrawColor(245, 158, 11).setLineWidth(0.6).rect(M, y, W - 2 * M, 11, 'FD')
+      doc.setTextColor(17).setFont('helvetica', 'bold').setFontSize(10).text(`SALDO TOTAL AL ${corte}`, M + 3, y + 5)
+      doc.setFont('helvetica', 'normal').setFontSize(6.8).text('Comprobantes + letras', M + 3, y + 9)
+      let x = W - M - 3
+      saldos.slice().reverse().forEach(sx => {
+        doc.setFont('helvetica', 'bold').setFontSize(11.5).text(`${_SIMB(sx.moneda)} ${fm(sx.total)}`, x, y + 5.5, { align: 'right' })
+        doc.setFont('helvetica', 'normal').setFontSize(6.3).text(`Comp. ${fm(sx.facturas)} + Letras ${fm(sx.letras)}`, x, y + 9.3, { align: 'right' })
+        x -= 55
+      })
+      y += 13
+    }
+    if (y + 12 > doc.internal.pageSize.getHeight()) { doc.addPage(); cabecera(); y = 26 }
     doc.setFillColor(254, 243, 199).rect(M, y, W - 2 * M, 8, 'F')
     doc.setFont('helvetica', 'bold').setFontSize(7).setTextColor(60)
     doc.text(doc.splitTextToSize(e.pie, W - 2 * M - 6), W / 2, y + 3.5, { align: 'center' })

@@ -68,6 +68,7 @@ window.abrirModalNuevaVenta = async function() {
     // Candados cerrados, campos opcionales plegados y correlativo sugerido
     // según la serie que quedó arriba.
     await window._prepararCamposVenta()
+    await _aplicarIGVDeSerieVenta()
 
     // Cronograma: se re-renderiza en cada apertura para tomar el término del
     // cliente elegido y limpiar lo que quedó de la venta anterior.
@@ -114,6 +115,8 @@ window.abrirModalNuevaVenta = async function() {
 /** Abre el modal de "Agregar Producto a la Venta" (espejo de compras). */
 window.abrirModalLineaVenta = function () {
   S._ventaLineaEditIdx = null
+  const tipoSel = document.getElementById('ventaLineTipoBase')
+  if (tipoSel) { tipoSel.value = S._ventaIGVSerie || 'gravada'; window._actualizarPreviewLineaVenta?.() }
   _setEv('tituloModalLineaVenta', 'Agregar Producto a la Venta')
   const btn = document.getElementById('btnAgregarLineaVenta')
   if (btn) btn.textContent = '+ Agregar'
@@ -790,6 +793,7 @@ window.onCambiarTipoCompVenta = async function () {
   // de ese tipo: es imposible dejar una serie de Boleta en una Factura.
   await _poblarDatalistSeriesVenta()
   await _sugerirCorrelativoVenta()
+  await _aplicarIGVDeSerieVenta()
 }
 
 /** Selector de Serie: series activas del tipo elegido (tabla series_documentos).
@@ -810,6 +814,78 @@ async function _poblarDatalistSeriesVenta() {
 
 window.onCambiarSerieVenta = function () {
   _sugerirCorrelativoVenta()
+  _aplicarIGVDeSerieVenta({ avisar: true })
+}
+
+// ── Tipo de IGV por defecto de la serie (sql/85) ──────────────────────────
+// Serie con tipo_igv_defecto (ej. NV01 → Inafecta): las líneas ya cargadas
+// se recalculan a ese tipo conservando el precio unitario SIN IGV, y las
+// nuevas líneas lo proponen. Serie en blanco (ej. FFFI): no se toca nada,
+// cada línea conserva lo que trae (ej. +18% desde el PK). Siempre editable
+// por línea con ✏️.
+const _NOMBRE_IGV = { gravada: 'Gravada 18%', gravada_incluido: 'Gravada 18% (incluido)', exonerada: 'Exonerada', inafecta: 'Inafecta' }
+
+function _recalcularLineaTipoIGV(l, tipo) {
+  const tipoBase = tipo === 'gravada_incluido' ? 'gravada' : tipo
+  const pct = tipoBase === 'gravada' ? 18 : 0
+  const subtotal = parseFloat(((+l.cantidad || 0) * (+l.precio_unitario || 0)).toFixed(2))
+  const igv = parseFloat((subtotal * pct / 100).toFixed(2))
+  // _tipo_orig: el tipo con que llegó la línea (ej. +18% del PK) para poder
+  // restaurarlo si luego se elige una serie sin tipo por defecto.
+  return { ...l, _tipo_orig: l._tipo_orig ?? (l.tipo_base || 'gravada'), tipo_base: tipoBase, igv_porcentaje: pct, subtotal, igv_monto: igv, total_linea: parseFloat((subtotal + igv).toFixed(2)) }
+}
+
+async function _aplicarIGVDeSerieVenta({ avisar = false } = {}) {
+  const tipo  = document.getElementById('ventaTipoComp')?.value || '01'
+  const serie = document.getElementById('ventaSerie')?.value?.trim()
+  const row = serie ? await getSerie(tipo, serie).catch(() => null) : null
+  const def = row?.tipo_igv_defecto || null
+  S._ventaIGVSerie = def
+  _pintarAvisoIGVSerie(null)
+  if (!def) {
+    // Serie sin tipo propio: las líneas que esta función había ajustado
+    // vuelven al tipo con que llegaron.
+    let restauradas = 0
+    S._ventaLineas = (S._ventaLineas || []).map(l => {
+      if (!l._tipo_orig || l._tipo_orig === l.tipo_base) return l
+      restauradas++
+      const { _tipo_orig, ...r } = _recalcularLineaTipoIGV(l, l._tipo_orig)
+      return r
+    })
+    if (restauradas) {
+      _renderLineasVenta()
+      _pintarAvisoIGVSerie(`🧾 Serie ${serie || ''}: sin tipo de IGV propio — ${restauradas} línea(s) volvieron a su tipo original.`)
+    }
+    return
+  }
+  const destino = def === 'gravada_incluido' ? 'gravada' : def
+  let cambiadas = 0
+  S._ventaLineas = (S._ventaLineas || []).map(l => {
+    if ((l.tipo_base || 'gravada') === destino) return l
+    cambiadas++
+    return _recalcularLineaTipoIGV(l, def)
+  })
+  if (cambiadas) _renderLineasVenta()
+  if (avisar || cambiadas) {
+    _pintarAvisoIGVSerie(cambiadas
+      ? `🧾 Serie ${serie}: tipo de IGV ajustado a <strong>${_NOMBRE_IGV[def]}</strong> en ${cambiadas} línea(s) (precio unitario sin IGV se mantiene). Puedes cambiarlo por línea con ✏️.`
+      : `🧾 Serie ${serie}: las líneas nuevas usarán <strong>${_NOMBRE_IGV[def]}</strong> por defecto (editable por línea).`)
+  }
+}
+
+function _pintarAvisoIGVSerie(html) {
+  let av = document.getElementById('ventaAvisoIGVSerie')
+  if (!html) { if (av) av.style.display = 'none'; return }
+  if (!av) {
+    const ref = document.getElementById('ventaLineas')?.closest('table')
+    if (!ref) { showToast(html.replace(/<[^>]+>/g, ''), 'info', 6000); return }
+    av = document.createElement('div')
+    av.id = 'ventaAvisoIGVSerie'
+    av.style.cssText = 'margin:0 0 8px; padding:8px 12px; border-radius:var(--radius-md); background:rgba(245,158,11,.12); color:var(--color-warning); font-size:0.85rem;'
+    ;(ref.closest('.table-container') || ref).before(av)
+  }
+  av.innerHTML = html
+  av.style.display = ''
 }
 
 window._prepararCamposVenta = async function () {
@@ -1045,6 +1121,7 @@ window.abrirNuevaVentaDesdePacking = async function (pk, lineasPk) {
     precio_pk: l.precio_pk ?? (+l.precio_unitario)
   }))
   _renderLineasVenta()
+  await _aplicarIGVDeSerieVenta()   // FFFI (en blanco) respeta el IGV del PK; NV01 lo ajusta con aviso
   // Cronograma con el total ya cargado y el término de pago del PK (si tiene)
   await _prepararCronogramaVenta(true, pk.termino_pago_id || null)
 

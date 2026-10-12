@@ -4,7 +4,7 @@
 // ============================================================================
 import { S } from './state.js'
 import { getCurrentUser } from '../auth-supabase.js'
-import { getCustomers, getLotes, getLoteById, updateLote, getVentas, getVentaById, getDetalleVentas, updateDetalleVenta, getAlmacenes, getStockUbicaciones, updateStockUbicacion, deleteStockUbicacion, getUbicacionCustomers, addKardexMovimiento, getGuiasDespachoVenta, getGuiaDespachoVentaById, addGuiaDespachoVenta, updateGuiaDespachoVenta, getDetalleGuiasDespachoVenta, getDetalleGuiasDespachoVentaByVenta, addDetalleGuiaDespachoVenta, deleteDetalleGuiaDespachoVenta, getLoteBultosDisponiblesZona, updateLoteBulto, recalcularLoteDesdeBultos } from '../supabase-data.js'
+import { getCustomers, getLotes, getLoteById, updateLote, getVentas, getVentaById, getDetalleVentas, updateDetalleVenta, getAlmacenes, getStockUbicaciones, updateStockUbicacion, deleteStockUbicacion, getUbicacionCustomers, addKardexMovimiento, getGuiasDespachoVenta, getGuiaDespachoVentaById, addGuiaDespachoVenta, updateGuiaDespachoVenta, getDetalleGuiasDespachoVenta, getDetalleGuiasDespachoVentaByVenta, addDetalleGuiaDespachoVenta, deleteDetalleGuiaDespachoVenta, getLoteBultosDisponiblesZona, updateLoteBulto, recalcularLoteDesdeBultos, getKardexDeGuia } from '../supabase-data.js'
 import { showToast, formatQty } from '../helpers.js'
 import { getUbicaciones, getKardexByVenta } from '../supabase-data.js'
 import { estaAnulado } from '../anulacion.js'
@@ -705,6 +705,15 @@ window.guardarGuiaDespachoVenta = async function () {
     if (!_confirmarDestinoRealGuia()) return
 
     const venta = await getVentaById(ventaId)
+
+    // Guardia anti-huérfanos: si ya hay Kardex de esta venta con este mismo
+    // N° de guía (restos de una guía borrada a medias), no se crea otra
+    // encima — se duplicaría la salida/traslado del stock.
+    const restos = await getKardexDeGuia(ventaId, numeroGuia)
+    if (restos.length > 0) {
+      showToast(`Ya existen ${restos.length} movimiento(s) de Kardex con ${numeroGuia} para esta venta (#${restos.map(r => r.id).join(', #')}) sin guía vigente. Revísalos antes de volver a emitirla.`, 'danger', 9000)
+      return
+    }
 
     const guia = await addGuiaDespachoVenta({
       venta_id:      ventaId,
