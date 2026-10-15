@@ -3,6 +3,7 @@
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
 import { S } from './state.js'
+import { declararEmpresaModal } from '../empresa.js'
 import { getCustomers, getContactsByType, getVentas, getVentaById, updateVenta, getDetalleVentas, updateDetalleVenta, getCuentasCobrarByVenta, updateCuentaCobrar, getCuotasCobrarByCxC, deleteCuotaCobrar, getGuiasDespachoVenta } from '../supabase-data.js'
 import { showToast, formatNumber } from '../helpers.js'
 import { estaAnulado } from '../anulacion.js'
@@ -174,6 +175,8 @@ window.editarVenta = async function (id) {
     await _pintarCronogramaEdicion()
     _pintarVinculados()
 
+    // El modal dice de qué empresa es ESTE documento, no la del switch.
+    declararEmpresaModal('modal-editar-venta', v.empresa_id)
     window.openModal('modal-editar-venta')
   } catch (error) {
     console.error('Error en editarVenta:', error)

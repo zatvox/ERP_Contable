@@ -1,3 +1,4 @@
+import { fechaDMY } from '../helpers.js'
 // ============================================================================
 // compras/devolucion-proveedor.js — parte de compras.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
@@ -147,7 +148,7 @@ export async function renderDevolucionesPendientes(forzar = false) {
               const compra = comprasMap[g.compra_id]
               return `<tr>
                 <td><strong>${g.numero_guia}</strong></td>
-                <td>${g.fecha_guia || '-'}</td>
+                <td>${fechaDMY(g.fecha_guia, '-')}</td>
                 <td>${compra?.referencia || `Compra #${g.compra_id}`}</td>
                 <td>${compra?.proveedor_nombre || '-'}</td>
                 <td>${g.observaciones || '-'}</td>

@@ -22,6 +22,20 @@
 
 const MEM = new Map()
 const PREFIJO = 'jhiro_cache_'
+
+// MULTIEMPRESA: la caché se recarga con la página al cambiar de empresa, pero
+// sessionStorage SOBREVIVE a la recarga. Sin este sufijo, Benji vería el
+// dataset de Jhiro durante 5 minutos. Dos selecciones distintas = dos cachés.
+let _sufijoEmpresa = ''
+export function setSufijoEmpresaCache(s) { _sufijoEmpresa = s || '' }
+function _k(clave) { return _sufijoEmpresa + clave }
+
+// Mientras el sufijo esté vacío el contexto de empresa todavía no se resolvió.
+// Guardar con una clave sin empresa es peligroso: la siguiente carga, ya en
+// otra empresa, podría acertarle a esa misma clave y servir datos ajenos. En
+// esa ventana la caché se desactiva — se consulta siempre a Supabase, que ya
+// viene filtrado. Perder unos milisegundos es barato; mezclar empresas no.
+function _cacheActiva() { return _sufijoEmpresa !== '' }
 const TTL_DEFECTO = 5 * 60 * 1000   // 5 minutos
 const MAX_PERSIST_BYTES = 900 * 1024 // no persistir payloads gigantes en sessionStorage
 
@@ -39,20 +53,22 @@ export async function cacheado(clave, fetcher, opciones = {}) {
   const persistir = opciones.persistir !== false
   const ahora     = Date.now()
 
-  const enMemoria = MEM.get(clave)
+  if (!_cacheActiva()) return await fetcher()
+
+  const enMemoria = MEM.get(_k(clave))
   if (enMemoria && (ahora - enMemoria.t) < ttl) { _statsHits++; return enMemoria.v }
 
   if (persistir) {
     try {
-      const crudo = sessionStorage.getItem(PREFIJO + clave)
+      const crudo = sessionStorage.getItem(PREFIJO + _k(clave))
       if (crudo) {
         const entrada = JSON.parse(crudo)
         if ((ahora - entrada.t) < ttl) {
-          MEM.set(clave, entrada)
+          MEM.set(_k(clave), entrada)
           _statsHits++
           return entrada.v
         }
-        sessionStorage.removeItem(PREFIJO + clave)
+        sessionStorage.removeItem(PREFIJO + _k(clave))
       }
     } catch (e) { /* storage lleno o JSON corrupto: se ignora y se re-consulta */ }
   }
@@ -60,13 +76,13 @@ export async function cacheado(clave, fetcher, opciones = {}) {
   _statsMiss++
   const valor = await fetcher()
   const entrada = { t: ahora, v: valor }
-  MEM.set(clave, entrada)
+  MEM.set(_k(clave), entrada)
 
   if (persistir) {
     try {
       const serializado = JSON.stringify(entrada)
       if (serializado.length < MAX_PERSIST_BYTES) {
-        sessionStorage.setItem(PREFIJO + clave, serializado)
+        sessionStorage.setItem(PREFIJO + _k(clave), serializado)
       }
     } catch (e) {
       // QuotaExceeded: limpiamos lo viejo y seguimos solo con memoria.
@@ -78,15 +94,23 @@ export async function cacheado(clave, fetcher, opciones = {}) {
 
 /** Invalida por prefijo: invalidar('ventas') borra 'ventas', 'ventas:2026-08', etc. */
 export function invalidar(prefijo) {
+  // MULTIEMPRESA: las claves llevan delante el sufijo de empresas activas
+  // ('e1_ventas:2026-08'). Se ignora ese sufijo al comparar, así una escritura
+  // en Benji también limpia lo cacheado de Jhiro: invalidar de más es
+  // inofensivo; dejar en pantalla data vieja de otra empresa no lo es.
+  const _sinSufijo = (k) => k.replace(/^e[\d-]+_/, '')
+  const _coincide  = (k) => {
+    const c = _sinSufijo(k)
+    return c === prefijo || c.startsWith(prefijo + ':')
+  }
   for (const k of Array.from(MEM.keys())) {
-    if (k === prefijo || k.startsWith(prefijo + ':')) MEM.delete(k)
+    if (_coincide(k)) MEM.delete(k)
   }
   try {
     for (let i = sessionStorage.length - 1; i >= 0; i--) {
       const k = sessionStorage.key(i)
       if (!k || !k.startsWith(PREFIJO)) continue
-      const limpio = k.slice(PREFIJO.length)
-      if (limpio === prefijo || limpio.startsWith(prefijo + ':')) sessionStorage.removeItem(k)
+      if (_coincide(k.slice(PREFIJO.length))) sessionStorage.removeItem(k)
     }
   } catch (e) { /* noop */ }
 }

@@ -1,3 +1,4 @@
+import { fechaDMY } from '../helpers.js'
 // ============================================================================
 // compras/guias-ingreso-detalle.js — parte de compras.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
@@ -113,7 +114,7 @@ window.verDetalleGuiaIngreso = async function (id) {
     document.getElementById('dgi-titulo-modal').textContent = `Detalle de Guía ${guia.numero_guia || ''}`
     document.getElementById('dgi-cabecera').innerHTML = `
       <div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">Guía de Ingreso</div>
-      <div style="font-weight:600; font-size:1.05rem; margin-top:2px;">${guia.numero_guia || ''} — ${guia.fecha_guia || ''}</div>
+      <div style="font-weight:600; font-size:1.05rem; margin-top:2px;">${guia.numero_guia || ''} — ${fechaDMY(guia.fecha_guia, '')}</div>
       <div style="font-size:0.85rem; color:var(--text-secondary); margin-top:2px;">
         ${compra?.proveedor_nombre || '-'} · Compra: ${compra?.referencia || 'Compra #' + guia.compra_id}
         ${guia.observaciones ? ` · ${_escCompras(guia.observaciones)}` : ''}
@@ -265,7 +266,7 @@ window.editarGuiaIngreso = async function (id) {
     document.getElementById('ngInfoCompra').innerHTML = `
       <strong>Proveedor:</strong> ${compra?.proveedor_nombre || '-'} (${compra?.proveedor_ruc || '-'}) &nbsp;|&nbsp;
       <strong>Comprobante:</strong> ${compra?.serie ? compra.serie + '-' + compra.numero : (compra?.numero || '-')} &nbsp;|&nbsp;
-      <strong>Fecha compra:</strong> ${compra?.fecha_emision || '-'}
+      <strong>Fecha compra:</strong> ${fechaDMY(compra?.fecha_emision, '-')}
     `
 
     const titulo = document.getElementById('ng-titulo-modal')

@@ -1,3 +1,4 @@
+import { fechaDMY } from '../helpers.js'
 // ============================================================================
 // compras/guias-ingreso-nueva.js — parte de compras.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
@@ -97,7 +98,7 @@ async function _cargarComprasSelectGuia() {
 
   select.innerHTML = '<option value="">-- Selecciona una compra registrada --</option>' +
     S._guiaComprasCache.map(c =>
-      `<option value="${c.id}">${c.referencia} — ${c.proveedor_nombre} (${c.fecha_emision})</option>`
+      `<option value="${c.id}">${c.referencia} — ${c.proveedor_nombre} (${fechaDMY(c.fecha_emision)})</option>`
     ).join('')
   refrescarBuscador(select)
 }
@@ -134,7 +135,7 @@ window.onSeleccionarCompraGuia = async function () {
     infoDiv.innerHTML = `
       <strong>Proveedor:</strong> ${compra?.proveedor_nombre || '-'} (${compra?.proveedor_ruc || '-'}) &nbsp;|&nbsp;
       <strong>Comprobante:</strong> ${compra?.serie ? compra.serie + '-' + compra.numero : (compra?.numero || '-')} &nbsp;|&nbsp;
-      <strong>Fecha compra:</strong> ${compra?.fecha_emision || '-'}
+      <strong>Fecha compra:</strong> ${fechaDMY(compra?.fecha_emision, '-')}
     `
 
     const itemsMap = {}

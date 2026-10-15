@@ -1,3 +1,4 @@
+import { fechaDMY } from './helpers.js'
 // ============================================================================
 // TC-EN-VIVO.JS — T.C. que se llena solo según la fecha (2026-10-02)
 // ============================================================================
@@ -57,7 +58,7 @@ export function vincularTCEnVivo({ idFecha, idMoneda, idTC, idAviso = null, tipo
     const av = aviso()
     if (!_fechaPlausible(fecha)) { if (av) av.textContent = 'Fecha inválida o futura: el T.C. no se consulta'; return }
     const mio = ++seq
-    if (av) av.textContent = `Buscando T.C. ${tipo} del ${fecha}...`
+    if (av) av.textContent = `Buscando T.C. ${tipo} del ${fechaDMY(fecha)}...`
     const r = await (tipo === 'compra' ? getTCCompra : getTCVenta)(fecha, { permitirApi: true })
     if (mio !== seq || manual) return            // llegó una respuesta vieja o el usuario abrió el candado
     if (r.error) { if (av) av.textContent = `⚠ ${r.error} — abre el candado e ingrésalo a mano`; return }

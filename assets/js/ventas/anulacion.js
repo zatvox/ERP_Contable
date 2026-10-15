@@ -1,3 +1,4 @@
+import { fechaDMY } from '../helpers.js'
 // ============================================================================
 // ventas/anulacion.js — parte de ventas.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
@@ -104,7 +105,7 @@ window.anularVenta = async function (id) {
     abrirModalAnulacion({
       titulo: 'Anular Factura de Venta',
       documento: `${venta.tipo_comprobante === '01' ? 'Factura' : venta.tipo_comprobante === '03' ? 'Boleta' : 'Comprobante'} ${numero}`,
-      detalle: `${venta.fecha_emision || ''} · ${venta.moneda || 'PEN'} ${formatNumber(venta.total)}`,
+      detalle: `${fechaDMY(venta.fecha_emision, '')} · ${venta.moneda || 'PEN'} ${formatNumber(venta.total)}`,
       efectos, bloqueos,
       onConfirmar: async ({ motivo, fecha, usuarioId }) => {
         // 1. Marcar el comprobante
@@ -181,7 +182,7 @@ window.verMotivoAnulacion = async function (tipo, id) {
     const esRevertida = doc.estado === 'revertida'
     alert(
       `Documento: ${etiqueta}\n` +
-      `Fecha de ${esRevertida ? 'reversión' : 'anulación'}: ${doc.fecha_anulacion || '(no registrada)'}\n\n` +
+      `Fecha de ${esRevertida ? 'reversión' : 'anulación'}: ${fechaDMY(doc.fecha_anulacion, '(no registrada)')}\n\n` +
       `Motivo:\n${doc.motivo_anulacion || '(sin motivo registrado)'}`
     )
   } catch (e) {
@@ -237,7 +238,7 @@ window.anularGuiaDespachoVenta = async function (id) {
       titulo: 'Anular Guía de Despacho',
       documento: `Guía ${guia.numero_guia}`,
       detalle: venta
-        ? `Venta ${venta.serie || ''}-${String(venta.correlativo || '').padStart(8, '0')} · ${guia.fecha_guia || ''}`
+        ? `Venta ${venta.serie || ''}-${String(venta.correlativo || '').padStart(8, '0')} · ${fechaDMY(guia.fecha_guia, '')}`
         : (guia.fecha_guia || ''),
       efectos, bloqueos,
       onConfirmar: async ({ motivo, fecha, usuarioId }) => {

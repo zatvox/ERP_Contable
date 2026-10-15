@@ -1,3 +1,4 @@
+import { fechaDMY } from '../helpers.js'
 // ============================================================================
 // ventas/ventas-lista.js — parte de ventas.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
@@ -125,7 +126,7 @@ function _celdaPagoVenta(v) {
   const cls = p.estado === 'cobrado' ? 'badge-success' : p.estado === 'parcial' ? 'badge-warning' : 'badge-danger'
   const simb = p.moneda === 'USD' ? 'US$' : 'S/'
   const extra = []
-  if (p.estado !== 'cobrado') extra.push(`saldo ${simb} ${formatNumber(p.saldo)}`)
+  if (p.estado === 'parcial') extra.push(`saldo ${simb} ${formatNumber(p.saldo)}`)
   if (p.canjeado > 0.01) extra.push('en letras')
   if (p.atraso > 0) extra.push(`<span style="color:var(--color-danger);">vencida ${p.atraso} d</span>`)
   return `<span class="badge ${cls}">${_LBL_PAGO[p.estado] || p.estado}</span>${extra.length ? `<br><small style="color:var(--text-secondary); white-space:nowrap;">${extra.join(' · ')}</small>` : ''}`
@@ -339,7 +340,7 @@ function _celdaNotasVenta(v) {
     const sg = signoDocumento(n.tipo_comprobante)
     const tipo = String(n.tipo_comprobante) === '07' ? 'NC' : 'ND'
     const color = anul ? 'var(--text-secondary)' : (sg < 0 ? 'var(--color-danger)' : 'var(--color-success)')
-    return `<a href="#" onclick="event.preventDefault(); window.verDetalleNotaVenta(${n.id})" title="${anul ? 'ANULADA — ' : ''}${tipo} ${_numDocVenta(n)} del ${n.fecha_emision || ''}: ${n.motivo_nota_texto || ''}"
+    return `<a href="#" onclick="event.preventDefault(); window.verDetalleNotaVenta(${n.id})" title="${anul ? 'ANULADA — ' : ''}${tipo} ${_numDocVenta(n)} del ${fechaDMY(n.fecha_emision, '')}: ${n.motivo_nota_texto || ''}"
       style="display:block; white-space:nowrap; text-decoration:${anul ? 'line-through' : 'none'}; color:${color}; font-size:0.85rem;">${tipo} ${_numDocVenta(n)} · ${formatNumber(parseFloat(n.total || 0) * sg)}</a>`
   }).join('')
 }
@@ -423,7 +424,7 @@ function _pintarFilasVentas() {
       <td data-col-tabla="ventas" data-col="tipo"${colStyle('ventas','tipo')}>${badgeTipoDocumento(v.tipo_comprobante)}${v.venta_referencia_id ? `<br><small style="color:var(--text-secondary);">ref. ${v.doc_referencia_serie || ''}-${String(v.doc_referencia_numero || '').padStart(8,'0')}</small>` : ''}${_badgeAnticipoVenta(v)}</td>
       <td data-col-tabla="ventas" data-col="cliente"${colStyle('ventas','cliente')}>${cliente}</td>
       <td data-col-tabla="ventas" data-col="vendedor"${colStyle('ventas','vendedor')}>${vendedor}</td>
-      <td data-col-tabla="ventas" data-col="fecha"${colStyle('ventas','fecha')}>${v.fecha_emision || '-'}</td>
+      <td data-col-tabla="ventas" data-col="fecha"${colStyle('ventas','fecha')}>${fechaDMY(v.fecha_emision, '-')}</td>
       <td data-col-tabla="ventas" data-col="moneda"${colStyle('ventas','moneda')}>${v.moneda || 'PEN'}</td>
       <td data-col-tabla="ventas" data-col="base" style="text-align:right;${estiloMonto}${colStyle('ventas','base') ? ' display:none;' : ''}">${formatNumber(bi)}</td>
       <td data-col-tabla="ventas" data-col="igv" style="text-align:right;${estiloMonto}${colStyle('ventas','igv') ? ' display:none;' : ''}">${formatNumber(igv)}</td>

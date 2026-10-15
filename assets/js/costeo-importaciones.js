@@ -1,3 +1,5 @@
+import { renderCostosLedger } from './importaciones/costos-ledger.js'
+import { fechaDMY } from './helpers.js'
 // ============================================================================
 // COSTEO-IMPORTACIONES.JS - Módulo Costeo de Importaciones (Async/Await)
 // ============================================================================
@@ -153,11 +155,9 @@ function initTabsCosteo() {
       if (tab === 'dam') await renderDAM()
       if (tab === 'productos') await cargarContenedoresEnSelect('productoContenedor')
       if (tab === 'guia-remision') await renderGuiaRemision()
-      if (tab === 'gastos-locales') await renderGastosLocales()
+      if (tab === 'costos') await renderCostosLedger()
       if (tab === 'pagos') await renderPagos()
-      if (tab === 'despacho') await renderDespacho()
-      if (tab === 'financieros') await renderFinancieros()
-      if (tab === 'resumen') await renderResumenFinal()
+      if (tab === 'resumen' && typeof renderResumenFinal === 'function') await renderResumenFinal()
     })
   })
 }
@@ -1413,7 +1413,7 @@ async function renderBillOfLadings() {
           <td><strong>${bl.nro_bill_lading || '-'}</strong></td>
           <td>${bl.contenedor_number || '-'}</td>
           <td>${bl.numero_precinto || '-'}</td>
-          <td>${bl.fecha || '-'}</td>
+          <td>${fechaDMY(bl.fecha, '-')}</td>
           <td>${bl.estado || '-'}</td>
           <td>
             <button class="btn btn-small btn-secondary" onclick="window.editarBL('${bl.id}')">Editar</button>
@@ -1635,7 +1635,7 @@ async function renderDAM() {
       html += `
         <tr>
           <td><strong>${dam.numero_dam || '-'}</strong></td>
-          <td>${dam.fecha_dam || '-'}</td>
+          <td>${fechaDMY(dam.fecha_dam, '-')}</td>
           <td>$${(dam.ad_valorem_usd || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td>$${(dam.imp_usd || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td>$${(dam.igv_usd || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
@@ -1948,7 +1948,7 @@ async function renderGuiaRemision() {
         <tr>
           <td><strong>${guia.numero_guia || '-'}</strong></td>
           <td>${nombreProveedor}</td>
-          <td>${guia.fecha_guia || '-'}</td>
+          <td>${fechaDMY(guia.fecha_guia, '-')}</td>
           <td>${(guia.peso_bruto || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td>${guia.lugar_destino || '-'}</td>
           <td>${guia.dam_relacionado || '-'}</td>
@@ -2475,7 +2475,7 @@ async function renderPagos() {
           <td>${pago.referencia || '-'}</td>
           <td>$${(pago.monto_usd || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td>S/ ${(pago.monto_sol || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td>${pago.fecha_pago || '-'}</td>
+          <td>${fechaDMY(pago.fecha_pago, '-')}</td>
           <td>${pago.medio_pago || '-'}</td>
           <td>
             <button class="btn btn-small btn-secondary" onclick="window.editarPago('${pago.id}')">Editar</button>

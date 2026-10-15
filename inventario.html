@@ -922,18 +922,20 @@
         <button class="modal-close" onclick="window.closeModal('modal-importar-traslados')">✕</button>
       </div>
       <div style="padding: 20px;">
-        <p style="color: var(--text-secondary); margin-bottom: 12px;">
-          Sube un archivo Excel (.xlsx) o CSV con las columnas:
-          <code>sku, numero_lote, zona_origen, zona_destino, cantidad, fecha, documento_referencia, descripcion</code>.
-          Cada fila crea un traslado interno independiente (mismo efecto que hacerlo manual, uno por uno).
-        </p>
-        <p style="margin-bottom: 16px;">
-          <a href="assets/sql/plantilla_importar_traslados_internos.xlsx" download style="color: var(--color-info);">📄 Descargar plantilla de ejemplo</a>
-        </p>
+        <p class="imp-resumen"><strong>Sí mueve stock:</strong> cada fila es un traslado interno independiente, con su propio N° de documento y su kardex.</p>
+        <details class="imp-detalle">
+          <summary>Columnas y reglas</summary>
+          <div>Columnas: <code>sku, numero_lote, zona_origen, zona_destino, cantidad, fecha, documento_referencia, descripcion</code>.<br>A diferencia de los demás importadores, aquí <strong>cada fila es un traslado independiente</strong> con su propio N° y su kardex: no se agrupan filas, ni por <code>documento_referencia</code>. Para mover varios lotes en un solo movimiento, una fila por lote.<br>Se valida que el lote tenga stock suficiente en la zona de origen.</div>
+        </details>
+        <p class="imp-plantilla"><a href="assets/sql/plantilla_importar_traslados_internos.xlsx" download>📄 Descargar plantilla de ejemplo</a></p>
         <div class="form-group">
           <label>Archivo (.xlsx / .csv) *</label>
           <input type="file" id="fileImportarTraslados" accept=".xlsx,.xls,.csv">
         </div>
+        <label class="imp-check">
+          <input type="checkbox" id="chkSimularTraslados" checked>
+          <span>Sólo simular: valida todo el archivo sin grabar nada.</span>
+        </label>
         <div id="importar-traslados-resumen" style="margin-top: 16px;"></div>
         <div id="importar-traslados-log" style="margin-top: 12px; max-height: 260px; overflow-y: auto; font-size: 13px;"></div>
       </div>

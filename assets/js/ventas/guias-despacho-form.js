@@ -1,3 +1,4 @@
+import { fechaDMY } from '../helpers.js'
 // ============================================================================
 // ventas/guias-despacho-form.js — parte de ventas.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
@@ -271,7 +272,7 @@ window.onSeleccionarVentaGuiaDespacho = async function () {
     infoDiv.innerHTML = `
       <strong>Cliente:</strong> ${cliente?.razon_social || cliente?.nombre || '-'} &nbsp;|&nbsp;
       <strong>Comprobante:</strong> ${venta?.serie || ''}-${String(venta?.correlativo || '').padStart(8,'0')} &nbsp;|&nbsp;
-      <strong>Fecha venta:</strong> ${venta?.fecha_emision || '-'} &nbsp;|&nbsp;
+      <strong>Fecha venta:</strong> ${fechaDMY(venta?.fecha_emision, '-')} &nbsp;|&nbsp;
       <strong>Estado despacho:</strong> ${venta?.estado_despacho || 'pendiente'}
     `
     await _sugerirNumeroGuia(venta)

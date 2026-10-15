@@ -2,7 +2,7 @@
 // SUPABASE-DATA.JS - Gestión de datos con Supabase
 // ============================================================================
 
-import { supabase, getAll, getById, insert, update, deleteRecord, query, ultimoErrorDelete, ultimoErrorInsert } from './supabase-client.js'
+import { supabase, getAll, getById, insert, update, deleteRecord, query, ultimoErrorDelete, ultimoErrorInsert  , empresaTrabajoCtx } from './supabase-client.js'
 
 // Se re-exporta para que los módulos puedan explicar en pantalla por qué
 // falló un borrado (qué tabla sigue referenciando el registro).
@@ -1428,13 +1428,14 @@ export function formatCurrency(value, currency = 'PEN') {
 }
 
 export function formatDate(dateStr) {
+  // DD/MM/AAAA. Fechas 'AAAA-MM-DD' se leen tal cual (new Date() las toma en
+  // UTC y en Lima mostraba el día anterior); timestamps → fecha local.
   if (!dateStr) return ''
-  const date = new Date(dateStr)
-  return date.toLocaleDateString('es-PE', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  })
+  const m = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`
+  const d = new Date(dateStr)
+  if (isNaN(d)) return String(dateStr)
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`
 }
 
 export function formatNumber(value) {
@@ -2434,8 +2435,15 @@ export async function deleteDetalleVenta(id) { return await deleteRecord('detall
  * venta en adelante chocaba con la restricción UNIQUE de `numero` y el
  * guardado fallaba en silencio (el error solo aparecía en consola).
  */
+// MULTIEMPRESA: Jhiro y Benji comparten los nombres de serie (FFFI, T001…).
+// El siguiente número NO puede salir de las empresas ACTIVAS del switch: con
+// las dos marcadas, Benji continuaría la numeración de Jhiro. Se acota a la
+// EMPRESA DE TRABAJO, que es la que va a firmar el documento.
 export async function generarNumeroVenta(tipoComprobante = '01', serie = null) {
-  const ventas = await getVentas()
+  const emp = empresaTrabajoCtx()
+  let qv = supabase.from('ventas').select('numero')
+  if (emp != null) qv = qv.eq('empresa_id', emp)
+  const { data: ventas } = await qv
   const prefix = serie || (tipoComprobante === '01' ? 'F001' : 'B001')
   const existing = ventas.filter(v => v.numero && v.numero.startsWith(prefix + '-'))
   let max = 0
@@ -2633,15 +2641,25 @@ export async function getKardexDeGuia(ventaId, numeroGuia) {
 // origen/destino en el Kardex, igual que los traslados internos.
 // Se resuelven por código, no por nombre (evita romper si alguien
 // traduce/edita el nombre visible).
-export async function getUbicacionVendors() {
+// MULTIEMPRESA: cada empresa tiene su propio Partners/Vendors y Partners/
+// Customers (SQL 87 parte 5). getUbicaciones() ya viene recortado a las
+// empresas ACTIVAS, pero con 2+ activas habría varias zonas 'VENDORS' y un
+// `find` devolvería la de la empresa equivocada — y el trigger del kardex
+// rechazaría el movimiento. El origen/destino externo lo decide la empresa de
+// TRABAJO, igual que la serie del documento.
+async function _ubicacionPartners(codigo) {
   const ubicaciones = await getUbicaciones()
-  return ubicaciones.find(u => u.codigo === 'VENDORS') || null
+  const emp = empresaTrabajoCtx()
+  const candidatas = ubicaciones.filter(u => u.codigo === codigo)
+  if (emp != null) {
+    const propia = candidatas.find(u => Number(u.empresa_id) === Number(emp))
+    if (propia) return propia
+  }
+  return candidatas[0] || null
 }
 
-export async function getUbicacionCustomers() {
-  const ubicaciones = await getUbicaciones()
-  return ubicaciones.find(u => u.codigo === 'CUSTOMERS') || null
-}
+export async function getUbicacionVendors()   { return await _ubicacionPartners('VENDORS') }
+export async function getUbicacionCustomers() { return await _ubicacionPartners('CUSTOMERS') }
 
 // ============================================================================
 // PERIODOS CONTABLES

@@ -6,6 +6,7 @@ import { getCurrentUser } from '../auth-supabase.js'
 import { serieDeNumeroGuia, registrarUsoGuia } from '../series.js'
 import { getLotes, getLoteById, updateLote, getItems, getVentas, getDetalleVentas, getAlmacenes, getUbicaciones, getStockUbicaciones, getStockUbicacionesByLote, updateStockUbicacion, getUbicacionCustomers, addKardexMovimiento, getGuiasDespachoVenta, addGuiaDespachoVenta, getDetalleGuiasDespachoVenta, addDetalleGuiaDespachoVenta } from '../supabase-data.js'
 import { showToast, formatQty } from '../helpers.js'
+import { mostrarCarga, actualizarCarga, tituloCarga, ocultarCarga } from '../animaciones/index.js'
 import { estaAnulado } from '../anulacion.js'
 import { _invalidarCacheVentas } from './anulacion.js'
 import { _recalcularEstadoDespachoVenta, renderGuiasDespachoVenta } from './guias-despacho-lista.js'
@@ -149,9 +150,37 @@ window.procesarImportacionGuiasDespacho = async function () {
     const guiasValidas = []
     let filasConError = 0
 
+    await mostrarCarga({
+      titulo: 'Validando el archivo',
+      subtitulo: `${grupos.size} guía${grupos.size === 1 ? '' : 's'} de despacho`,
+      total: grupos.size
+    })
+
     for (const [clave, grupo] of grupos) {
+      actualizarCarga(undefined, grupo.numeroGuia)
       const errores = []
+      // La guía de DESPACHO la emitimos nosotros: su número no se puede
+      // repetir dentro de la empresa (a diferencia de la de INGRESO, cuya
+      // numeración es del proveedor).
       if (guiasYaUsadas.has(clave)) errores.push(`la guía ${grupo.numeroGuia} ya existe`)
+
+      // ── La cabecera tiene que ser la misma en todas las filas del grupo ──
+      // Se lee solo de la PRIMERA fila. Repetir el N° significa "estas filas
+      // son el detalle de la misma guía", así que su venta y su fecha deben
+      // coincidir. Si no coinciden no es detalle: es un N° repetido por error.
+      const ventasEnGrupo = new Set()
+      const fechasEnGrupo = new Set()
+      for (const { fila } of grupo.filas) {
+        ventasEnGrupo.add(_valorFilaV(fila, 'venta_numero', 'venta', 'comprobante', 'numero_documento').toUpperCase())
+        const f = _parseFechaImportVentas(_valorFilaV(fila, 'fecha_guia', 'fecha'))
+        if (f) fechasEnGrupo.add(f)
+      }
+      if (ventasEnGrupo.size > 1) {
+        errores.push(`sus filas apuntan a ${ventasEnGrupo.size} ventas distintas (${[...ventasEnGrupo].join(', ')}): una guía despacha una sola venta`)
+      }
+      if (fechasEnGrupo.size > 1) {
+        errores.push(`sus filas traen ${fechasEnGrupo.size} fechas distintas (${[...fechasEnGrupo].join(', ')})`)
+      }
 
       const primera = grupo.filas[0].fila
       const ventaClave = _valorFilaV(primera, 'venta_numero', 'venta', 'comprobante', 'numero_documento').toUpperCase()
@@ -282,7 +311,12 @@ window.procesarImportacionGuiasDespacho = async function () {
     const zonaClientes = await getUbicacionCustomers()
     const ventasTocadas = new Set()
 
+    tituloCarga('Despachando y descontando stock',
+                `${guiasValidas.length} guía${guiasValidas.length === 1 ? '' : 's'}`,
+                guiasValidas.length)
+
     for (const g of guiasValidas) {
+      actualizarCarga(undefined, g.numeroGuia)
       try {
         const guia = await addGuiaDespachoVenta({
           venta_id: g.venta.id, numero_guia: g.numeroGuia, fecha_guia: g.fechaGuia,
@@ -370,6 +404,7 @@ window.procesarImportacionGuiasDespacho = async function () {
     console.error('procesarImportacionGuiasDespacho:', error)
     _htmlV('importar-guias-despacho-resumen', `<p style="color:var(--color-danger);">Error inesperado: ${_esc(error.message)}</p>`)
   } finally {
+    ocultarCarga()
     if (btn) { btn.disabled = false; btn.textContent = 'Procesar' }
   }
 }

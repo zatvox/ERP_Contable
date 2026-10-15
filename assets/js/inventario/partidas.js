@@ -1,3 +1,4 @@
+import { fechaDMY } from '../helpers.js'
 // ============================================================================
 // inventario/partidas.js — parte de inventario.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
@@ -48,8 +49,8 @@ export async function renderPartidas() {
         <td>${prodMap[p.product_id]?.sku || '-'}</td>
         <td>${prodMap[p.product_id]?.nombre || '-'}</td>
         <td style="font-size:0.85rem;">${p.descripcion || '-'}</td>
-        <td>${p.fecha_inicio || '-'}</td>
-        <td>${p.fecha_fin || '-'}</td>
+        <td>${fechaDMY(p.fecha_inicio, '-')}</td>
+        <td>${fechaDMY(p.fecha_fin, '-')}</td>
         <td><span class="badge badge-${badgeColor}">${p.status || '-'}</span></td>
         <td>
           <button class="btn btn-small btn-danger" onclick="window.eliminarPartida(${p.id})">Eliminar</button>

@@ -62,11 +62,9 @@
           <button class="tab-btn" data-tab="billoflading">2. Bill of Lading</button>
           <button class="tab-btn" data-tab="dam">3. DAM</button>
           <button class="tab-btn" data-tab="guia-remision">4. Guia de Remision</button>
-          <button class="tab-btn" data-tab="gastos-locales">5. Gastos locales</button>
-          <button class="tab-btn" data-tab="pagos">6. Pagos facturas e impuestos</button>
-          <button class="tab-btn" data-tab="despacho">7. Gastos Despacho</button>
-          <button class="tab-btn" data-tab="financieros">8. Gastos Financieros</button>
-          <button class="tab-btn" data-tab="resumen">9. Resumen Final</button>
+          <button class="tab-btn" data-tab="costos">5. Costos y Gastos</button>
+          <button class="tab-btn" data-tab="pagos">6. Pagos y CxP</button>
+          <button class="tab-btn" data-tab="resumen">7. Resumen Final</button>
         </div>
 
         <!-- TAB 1: CI y PO -->
@@ -231,19 +229,34 @@
         </div>
 
         <!-- TAB 5: GASTOS LOCALES -->
-        <div id="tab-gastos-locales" class="tab-content">
+        <!-- TAB 5: COSTOS Y GASTOS — ledger unico (locales + despacho + financieros) -->
+        <div id="tab-costos" class="tab-content">
           <div class="card">
-            <div class="card-header">
-              <h3 class="card-title">Gastos Locales</h3>
-              <button class="btn btn-primary btn-small" onclick="openModal('modal-nuevo-gasto-local'); cargarImportacionesEnSelect('newGastoLocalImportacionSelector')">+ Agregar Gasto</button>
+            <div class="card-header" style="flex-direction:column; align-items:stretch; gap:10px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding-right:34px;">
+                <h3 class="card-titulo-tab">Costos y Gastos de la Importacion</h3>
+                <div class="card-acciones" style="display:flex; gap:8px;">
+                  <button class="btn btn-secondary btn-small" onclick="openModal('modal-nuevo-contenedor')">+ Contenedor</button>
+                  <button class="btn btn-primary btn-small" id="btnNuevoCostoImportacion" onclick="window.abrirModalLineaCosto()">+ Nuevo costo</button>
+                </div>
+              </div>
+              <div id="filtros-grupo-costos" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+              <div class="bsq-caja" style="position:relative; max-width:460px;">
+                <input type="text" class="bsq-input" id="bsqCostosImportacion"
+                       placeholder="Buscar por concepto, documento, proveedor, clasificacion..."
+                       oninput="window.buscarCostosImportacion(this.value)">
+                <button type="button" class="bsq-limpiar" id="bsqLimpiarCostos" style="display:none;"
+                        onclick="window.limpiarBusquedaCostos()">&#10005;</button>
+              </div>
             </div>
-            <div id="tabla-gastos-locales" class="table-container">
-              <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Sin registros</p>
+            <div id="aviso-carpeta-cerrada" style="display:none; margin:0 0 12px;"></div>
+            <div id="resumen-costos-importacion"></div>
+            <div id="tabla-costos-importacion" class="table-container">
+              <p style="text-align:center; color:var(--text-secondary); padding:20px;">Selecciona una importacion arriba.</p>
             </div>
           </div>
         </div>
 
-        <!-- TAB 6: PAGOS -->
         <div id="tab-pagos" class="tab-content">
           <div class="card">
             <div class="card-header">
@@ -253,64 +266,6 @@
             <div id="tabla-pagos" class="table-container">
               <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Sin registros</p>
             </div>
-          </div>
-        </div>
-
-        <!-- TAB 7: GASTOS DESPACHO -->
-        <div id="tab-despacho" class="tab-content">
-          <div class="card">
-            <div class="card-header">
-              <h3 class="card-title">Gastos de Despacho y Importación</h3>
-            </div>
-            <div class="costeo-selector" style="margin-bottom: 20px;">
-              <label>Selecciona Contenedor:</label>
-              <select id="despachoContenedor" onchange="renderDespacho()">
-                <option value="">-- Selecciona --</option>
-              </select>
-            </div>
-            <button class="btn btn-primary btn-small" onclick="openModal('modal-nuevo-gasto-despacho')" id="btnNewGasto" style="display:none; margin-bottom: 20px;">+ Agregar Gasto</button>
-            <div id="tabla-gastos-despacho" class="table-container">
-              <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Selecciona un contenedor primero</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- TAB 8: GASTOS FINANCIEROS -->
-        <div id="tab-financieros" class="tab-content">
-          <div class="card">
-            <div class="card-header">
-              <h3 class="card-title">Gastos Financieros</h3>
-            </div>
-            <div class="costeo-selector" style="margin-bottom: 20px;">
-              <label>Selecciona Contenedor:</label>
-              <select id="financierosContenedor" onchange="renderFinancieros()">
-                <option value="">-- Selecciona --</option>
-              </select>
-            </div>
-            <form id="formFinancieros" class="costeo-form">
-              <div class="grid grid-2">
-                <div class="form-group">
-                  <label>Comisión Transferencia BCP ADELANTO (S/)</label>
-                  <input type="number" id="finComisionAdelanto" placeholder="0.00" step="0.01" onchange="calcularFinancieros()">
-                </div>
-                <div class="form-group">
-                  <label>Comisión Transferencia BCP BALANCE (S/)</label>
-                  <input type="number" id="finComisionBalance" placeholder="0.00" step="0.01" onchange="calcularFinancieros()">
-                </div>
-              </div>
-
-              <div class="form-group">
-                <label>Interés Moratorio SUNAT (S/) - Ajuste Manual</label>
-                <input type="number" id="finInteres" placeholder="0.00" step="0.01" onchange="calcularFinancieros()">
-              </div>
-
-              <div style="margin-top: 20px; padding: 15px; background-color: var(--bg-secondary); border-radius: 8px;">
-                <div class="flex-between">
-                  <strong>TOTAL GASTOS FINANCIEROS:</strong>
-                  <input type="number" id="finTotal" readonly disabled style="width: 150px; text-align: right; font-weight: bold; font-size: 16px;">
-                </div>
-              </div>
-            </form>
           </div>
         </div>
 
@@ -1071,140 +1026,6 @@
     </div>
   </div>
 
-<!-- MODAL: NUEVO GASTO LOCAL -->
-  <div id="modal-nuevo-gasto-local" class="modal">
-    <div class="modal-content" style="max-width: 800px;">
-      <div class="modal-header">
-        <h3 class="modal-title">Nuevo Gasto Local</h3>
-        <button class="modal-close" onclick="closeModal('modal-nuevo-gasto-local')">✕</button>
-      </div>
-      <form id="formNewGastoLocal">
-        <!-- SECCIÓN 1: INFORMACIÓN BÁSICA -->
-        <div style="padding: 20px; border-bottom: 1px solid var(--border-color);">
-          <h4 style="margin-bottom: 15px; color: var(--text-primary);">Información Básica</h4>
-              
-          <div class="grid grid-2">
-            <div class="form-group">
-              <label>Número de Importación</label>
-              <select id="newGastoLocalImportacionSelector">
-                <option value="">-- Selecciona una importación --</option>
-              </select>
-            </div>
-            
-            <div class="form-group">
-              <label>Proveedor *</label>
-              <div style="display: flex; gap: 8px;">
-                <select id="newGastoLocalProveedorSelector" required style="flex: 1;">
-                  <option value="">-- Selecciona --</option>
-                </select>
-                <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioProveedorCosteo()" style="margin-bottom: 0; white-space: nowrap;">+ Nuevo</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="grid grid-2">
-            <div class="form-group">
-              <label>Fecha de Emisión</label>
-              <input type="date" id="newGastoLocalFechaEmision" required>
-            </div>
-            <div class="form-group">
-              <label>Tipo Comprobante</label>
-              <select id="newGastoLocalTipoDoc" required>
-                <option value="">-- Selecciona --</option>
-                <option value="01">Factura</option>
-                <option value="02">Boleta de venta</option>
-                <option value="03">Boleta de compra (importación)</option>
-                <option value="08">Letra de cambio (también)</option>
-                <option value="09">Nota de crédito</option>
-                <option value="10">Nota de débito</option>
-                <option value="12">Comprobante por operaciones que no generan renta</option>
-                <option value="18">Boleta de venta simplificada</option>
-                <option value="91">Documentos de importación (DUA, etc.)</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="grid grid-3">
-            <div class="form-group">
-              <label>Serie del Comprobante</label>
-              <input type="text" id="newGastoLocalSerieDoc" placeholder="Ej: F001" required>
-            </div>
-            <div class="form-group">
-              <label>Número del Comprobante</label>
-              <input type="text" id="newGastoLocalNumeroDoc" placeholder="Ej: 6956" required>
-            </div>          
-            <div class="form-group">
-              <label>Moneda *</label>
-              <select id="newGastoLocalCurrency" required>
-                <option value="USD">USD</option>
-                <option value="PEN">PEN</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <!-- SECCIÓN 2: TÉRMINOS COMERCIALES -->
-        <div style="padding: 20px; border-bottom: 1px solid var(--border-color);">
-          <h4 style="margin-bottom: 15px; color: var(--text-primary);">Términos Comerciales</h4>
-          
-          <div class="form-group">
-            <div style="display: flex; gap: 8px;">
-              <label>Tipo Compra</label>
-              <select id="newGastoLocalTipoCompra" required style="flex: 1;">
-                <option value="1">Mercaderia</option>
-                <option value="2">Servicio</option>
-              </select>              
-              <div class="form-group">
-                <label>Aplica Detraccion?</label>
-                <input type="checkbox" id="newGastoLocalAplicaDetraccion">   <!--onchange="toggleCampoDetraccionGastoLocal()"-->
-              </div>
-            </div>
-          </div>
-
-          <div class="grid grid-2">
-            <div class="form-group">
-              <label>Cantidad *</label>
-              <input type="number" id="newGastoLocalCantidad" placeholder="0" step="0.01" required>
-            </div>
-            <div class="form-group">
-              <label>Precio Unitario *</label>
-              <input type="number" id="newGastoLocalPrecioUnitario" placeholder="0.0000" step="0.0001" required onchange="calcularSubtotalGastoLocal()">
-            </div>
-          </div>
-
-          <div class="grid grid-3">
-            <div class="form-group">
-              <label>Subtotal (Auto)</label>
-              <input type="number" id="newGastoLocalSubtotal" readonly disabled>
-            </div>
-            <div class="form-group">
-              <label>IGV %</label>
-              <input type="number" id="newGastoLocalIGV" placeholder="18" step="0.01" value="18" onchange="calcularTotalGastoLocal()">
-            </div>
-            <div class="form-group">
-              <label>Total (Auto)</label>
-              <input type="number" id="newGastoLocalTotal" readonly disabled>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label>Estado</label>
-            <select id="newGastoLocalStatus">
-              <option value="pendiente">Pendiente</option>
-              <option value="pagado">Pagado</option>
-              <option value="cancelado">Cancelado</option>
-            </select>
-          </div>
-        </div>
-  
-      </form>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeModal('modal-nuevo-gasto-local')">Cancelar</button>
-        <button class="btn btn-primary" onclick="crearGastoLocal()">Crear</button>
-      </div>
-    </div>
-  </div>
-
   <!-- MODAL: NUEVO PAGO -->
   <div id="modal-nuevo-pago" class="modal">
     <div class="modal-content" style="max-width: 700px;">
@@ -1407,130 +1228,73 @@
     </div>
   </div>
 
-  <!-- MODAL NUEVO CONTENEDOR 
+  <!-- MODAL: NUEVO CONTENEDOR (tabla contenedores, SQL 86) -->
   <div id="modal-nuevo-contenedor" class="modal">
-    <div class="modal-content" style="max-width: 500px;">
+    <div class="modal-content" style="width:min(94vw, 700px); max-width:min(94vw, 700px);">
       <div class="modal-header">
-        <h3 class="modal-title">Nuevo Contenedor/DAM</h3>
-        <button class="modal-close" onclick="closeModal('modal-nuevo-contenedor')">✕</button>
+        <h3 class="modal-title">Nuevo contenedor</h3>
+        <button class="modal-close" onclick="closeModal('modal-nuevo-contenedor')">&#10005;</button>
       </div>
-      <form id="formNewContenedor">
-        <div class="form-group">
-          <label>Número DAM *</label>
-          <input type="text" id="newDAM" placeholder="Ej: 108799" required>
+      <div style="padding:16px 20px 0;">
+        <strong style="display:block; margin-bottom:8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Datos del contenedor</strong>
+        <div style="display:grid; grid-template-columns:1.3fr 0.8fr 1fr; gap:10px;">
+          <div class="form-group">
+            <label>Numero de contenedor *</label>
+            <input type="text" id="newContenedorNumero" placeholder="ONEU1234567">
+          </div>
+          <div class="form-group">
+            <label>Tipo</label>
+            <select id="newContenedorTipo">
+              <option value="40HC">40 HC</option>
+              <option value="40GP">40 GP</option>
+              <option value="20GP">20 GP</option>
+              <option value="LCL">LCL (carga suelta)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Precinto</label>
+            <input type="text" id="newContenedorPrecinto" placeholder="Opcional">
+          </div>
         </div>
-        <div class="form-group">
-          <label>Número Contenedor *</label>
-          <input type="text" id="newContenedor" placeholder="Ej: CONT-001" required>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
+          <div class="form-group">
+            <label>Peso bruto (KG)</label>
+            <input type="number" id="newContenedorPesoBruto" step="0.01" placeholder="0.00">
+          </div>
+          <div class="form-group">
+            <label>Bultos</label>
+            <input type="number" id="newContenedorBultos" step="1" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label>Canal de control</label>
+            <select id="newContenedorCanal">
+              <option value="">-- Sin asignar --</option>
+              <option value="verde">Verde</option>
+              <option value="naranja">Naranja</option>
+              <option value="rojo">Rojo</option>
+            </select>
+          </div>
         </div>
-        <div class="form-group">
-          <label>Fecha Llegada</label>
-          <input type="date" id="newFechaLlegada">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="form-group">
+            <label>ETA</label>
+            <input type="date" id="newContenedorETA">
+          </div>
+          <div class="form-group">
+            <label>Fecha de llegada</label>
+            <input type="date" id="newContenedorLlegada">
+          </div>
         </div>
-        <div class="form-group">
-          <label>Estado</label>
-          <select id="newEstadoContenedor">
-            <option value="pendiente">Pendiente</option>
-            <option value="recibido">Recibido</option>
-            <option value="despachado">Despachado</option>
-          </select>
-        </div>
-      </form>
+        <small style="display:block; color:var(--text-secondary); line-height:1.4;">
+          El contenedor es una dimension del costeo: una DAM puede traer varios y un contenedor puede repartirse entre 2 DAMs.
+        </small>
+      </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeModal('modal-nuevo-contenedor')">Cancelar</button>
-        <button class="btn btn-primary" onclick="crearContenedor()">Crear</button>
+        <button class="btn btn-primary" onclick="window.crearContenedor()">&#128230; Crear contenedor</button>
       </div>
     </div>
   </div>
-
-  -- MODAL NUEVO PRODUCTO FOB 
-  <div id="modal-nuevo-producto-fob" class="modal">
-    <div class="modal-content" style="max-width: 600px;">
-      <div class="modal-header">
-        <h3 class="modal-title">Agregar Producto FOB</h3>
-        <button class="modal-close" onclick="closeModal('modal-nuevo-producto-fob')">✕</button>
-      </div>
-      <form id="formNewProductoFOB">
-        <div class="form-group">
-          <div style="display: flex; gap: 10px; align-items: flex-end;">
-            <div style="flex: 1;">
-              <label>Producto *</label>
-              <select id="newProdDesc" required>
-                <option value="">-- Selecciona --</option>
-              </select>
-            </div>
-            <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioProductoCosteo()" style="margin-bottom: 0;">+ Nuevo</button>
-          </div>
-        </div>
-        <div class="grid grid-2">
-          <div class="form-group">
-            <label>FOB USD Unitario</label>
-            <input type="number" id="newProdFOBUSD" placeholder="0.00" step="0.01" required>
-          </div>
-          <div class="form-group">
-            <label>Cantidad Total KG *</label>
-            <input type="number" id="newProdCantidad" placeholder="0" step="0.01" required>
-          </div>
-        </div>
-        <div class="form-group">
-          <label>FOB S/ (Automático)</label>
-          <input type="number" id="newProdFOBSol" readonly disabled>
-        </div>
-      </form>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeModal('modal-nuevo-producto-fob')">Cancelar</button>
-        <button class="btn btn-primary" onclick="crearProductoFOB()">Agregar</button>
-      </div>
-    </div>
-  </div>
-
-  ---- MODAL NUEVO GASTO DESPACHO 
-  <div id="modal-nuevo-gasto-despacho" class="modal">
-    <div class="modal-content" style="max-width: 700px;">
-      <div class="modal-header">
-        <h3 class="modal-title">Agregar Gasto de Despacho</h3>
-        <button class="modal-close" onclick="closeModal('modal-nuevo-gasto-despacho')">✕</button>
-      </div>
-      <form id="formNewGastoDespacho">
-        <div class="form-group">
-          <label>Concepto *</label>
-          <input type="text" id="newGastoCon" placeholder="Ej: Comisión de Agencia" required>
-        </div>
-        <div class="form-group">
-          <label>Número de Documento</label>
-          <input type="text" id="newGastoDoc" placeholder="Ej: F001-6956">
-        </div>
-        <div class="grid grid-3">
-          <div class="form-group">
-            <label>Costo USD *</label>
-            <input type="number" id="newGastoUSD" placeholder="0.00" step="0.01" required>
-          </div>
-          <div class="form-group">
-            <label>Fecha</label>
-            <input type="date" id="newGastoFecha">
-          </div>
-          <div class="form-group">
-            <label>T.C.</label>
-            <input type="number" id="newGastoTC" placeholder="3.37" step="0.001" value="3.37">
-          </div>
-        </div>
-        <div class="grid grid-2">
-          <div class="form-group">
-            <label>Costo S/ (Automático)</label>
-            <input type="number" id="newGastoSol" readonly disabled>
-          </div>
-          <div class="form-group">
-            <label>IGV %</label>
-            <input type="number" id="newGastoIGV" placeholder="18" step="0.01" value="18" style="width: 100%;">
-          </div>
-        </div>
-      </form>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeModal('modal-nuevo-gasto-despacho')">Cancelar</button>
-        <button class="btn btn-primary" onclick="crearGastoDespacho()">Agregar</button>
-      </div>
-    </div>
-  </div>-->
 
   <script type="module" src="assets/js/config.js"></script>
   <script type="module" src="assets/js/supabase-client.js"></script>
@@ -1540,5 +1304,6 @@
   <script type="module" src="assets/js/helpers.js"></script>
   <script type="module" src="assets/js/main.js"></script>
   <script type="module" src="assets/js/costeo-importaciones.js"></script>
+  <script type="module" src="assets/js/importaciones/costos-ledger.js"></script>
 </body>
 </html>

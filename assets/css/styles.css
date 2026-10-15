@@ -2208,3 +2208,296 @@ body.dark-mode .pdtf-hoja .pdtf-input, .pdtf-hoja .pdtf-input { background:#fff7
   color: var(--text-primary) !important; padding: 4px 6px; margin: 0 !important; cursor: pointer; border-radius: 4px; }
 .col-menu-dropdown label:hover { background: var(--bg-tertiary, rgba(127,127,127,.12)); }
 .col-menu-dropdown label input { width: auto !important; margin: 0 !important; flex: none; }
+
+/* ==========================================================================
+   MULTIEMPRESA — switch de empresa en la cabecera (estilo Odoo)
+   --------------------------------------------------------------------------
+   Reutiliza el panel flotante `.acciones-menu` que ya existe, así el
+   desplegable hereda sombra, bordes, modo oscuro y transición sin CSS nuevo.
+   Lo único propio es el chip y el semáforo de color.
+   ========================================================================== */
+
+.emp-switch { display: flex; align-items: center; margin-left: auto; }
+
+.emp-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color .12s ease, border-color .12s ease;
+}
+.emp-chip:hover { background-color: var(--bg-tertiary); border-color: var(--color-primary); }
+.emp-chip .emp-caret { color: var(--text-secondary); font-size: 0.72rem; }
+.emp-chip .emp-extra {
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background-color: var(--color-primary);
+  color: #fff;
+  font-size: 0.7rem;
+}
+
+.emp-punto { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+
+/* Semáforo: con 2+ empresas activas, esta franja es lo que evita emitir un
+   documento en la empresa equivocada. */
+.emp-barra-aviso {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  width: 100%;
+  padding: 5px 16px;
+  border-bottom: 1px solid var(--border-color);
+  border-top: 3px solid var(--emp, var(--color-primary));
+  background-color: var(--bg-secondary);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+.emp-barra-aviso .emp-barra-sep { opacity: .5; }
+.emp-barra-aviso strong { color: var(--text-primary); }
+.emp-barra-aviso .emp-pill {
+  display: inline-block;
+  margin: 0 2px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--emp) 45%, transparent);
+  background: color-mix(in srgb, var(--emp) 14%, transparent);
+  color: var(--emp);
+  font-weight: 700;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+}
+
+.emp-panel { min-width: 288px; max-width: 360px; }
+.emp-panel-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 11px 9px;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 4px;
+}
+.emp-panel-head small { color: var(--text-secondary); font-size: 0.72rem; }
+
+.emp-fila {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: var(--radius-sm);
+}
+.emp-fila:hover { background-color: var(--bg-tertiary); }
+.emp-fila.activa .emp-fila-nombre strong { color: var(--color-primary); }
+
+.emp-check { display: flex; align-items: center; padding: 0 4px 0 8px; cursor: pointer; }
+.emp-check input { cursor: pointer; }
+
+.emp-fila-nombre {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  padding: 8px 6px;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.86rem;
+  text-align: left;
+  cursor: pointer;
+}
+.emp-fila-nombre span { display: flex; flex-direction: column; line-height: 1.25; }
+.emp-fila-nombre small { color: var(--text-secondary); font-size: 0.72rem; }
+
+.emp-sello {
+  width: 30px;
+  padding: 7px 0;
+  margin-right: 5px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.emp-sello:hover { background-color: var(--bg-primary); }
+.emp-sello.on { background-color: rgba(37, 99, 235, .12); }
+
+/* En móvil el chip no compite con los tabs del módulo */
+@media (max-width: 720px) {
+  .emp-chip .emp-nombre { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+/* ==========================================================================
+   MULTIEMPRESA — cintillo de empresa en los modales
+   --------------------------------------------------------------------------
+   Riel de color + emblema. Deben leerse de reojo, no competir con el título.
+   El riel va sticky para que siga visible al scrollear un modal largo.
+   ========================================================================== */
+
+.modal-content.emp-con-riel {
+  box-shadow: inset 0 3px 0 0 var(--emp, var(--color-primary)), var(--shadow-lg);
+}
+
+/* Desajuste: el registro es de otra empresa. Riel más grueso y en ámbar —
+   el ojo lo lee como "atención", no como "otra marca". */
+.modal-content.emp-con-riel.emp-desajuste {
+  box-shadow: inset 0 4px 0 0 var(--color-warning), var(--shadow-lg);
+}
+
+/* Catálogo compartido: riel apagado y discontinuo — no es "otra empresa",
+   es "de todas". */
+.modal-content.emp-con-riel.emp-riel-compartido {
+  box-shadow: inset 0 3px 0 0 var(--border-color), var(--shadow-lg);
+}
+.emp-emblema.emp-compartido .emp-mono {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.emp-emblema.emp-compartido .emp-ident strong { letter-spacing: 0.07em; }
+
+.emp-emblema {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-left: auto;
+  padding: 0 14px 0 0;
+  line-height: 1.15;
+  user-select: none;
+}
+
+.emp-emblema .emp-mono {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--emp, #2563eb) 16%, transparent);
+  color: var(--emp, var(--color-primary));
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+body.dark-mode .emp-emblema .emp-mono {
+  background: color-mix(in srgb, var(--emp, #2563eb) 26%, transparent);
+}
+
+.emp-emblema .emp-ident { display: flex; flex-direction: column; gap: 1px; }
+
+.emp-emblema .emp-ident strong {
+  font-size: 0.715rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+
+.emp-emblema .emp-ident small {
+  font-size: 0.655rem;
+  letter-spacing: 0.035em;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.emp-emblema .emp-desajuste-nota {
+  margin-left: 2px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, .16);
+  color: var(--color-warning);
+  font-size: 0.66rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* En pantallas angostas el emblema se queda con el monograma: el código y el
+   RUC caben en el title del elemento, no vale la pena romper la cabecera. */
+@media (max-width: 640px) {
+  .emp-emblema .emp-ident,
+  .emp-emblema .emp-desajuste-nota { display: none; }
+}
+
+/* ==========================================================================
+   MODALES DE IMPORTACIÓN MASIVA — texto compacto
+   --------------------------------------------------------------------------
+   Antes cada modal abría con un párrafo de 8 líneas que nadie lee entero y
+   que empujaba el selector de archivo fuera de la vista. Ahora: una línea
+   que dice qué hace (y sobre todo si toca el stock), y el resto plegado.
+   ========================================================================== */
+
+.imp-resumen {
+  margin: 0 0 10px;
+  padding: 9px 12px;
+  border-left: 3px solid var(--color-info);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.imp-detalle { margin-bottom: 14px; }
+.imp-detalle > summary {
+  cursor: pointer;
+  color: var(--color-info);
+  font-size: 0.85rem;
+  user-select: none;
+  list-style: none;
+}
+.imp-detalle > summary::-webkit-details-marker { display: none; }
+.imp-detalle > summary::before { content: '▸ '; display: inline-block; transition: transform .12s ease; }
+.imp-detalle[open] > summary::before { content: '▾ '; }
+.imp-detalle > div {
+  padding: 9px 2px 0 14px;
+  color: var(--text-secondary);
+  font-size: 0.83rem;
+  line-height: 1.7;
+}
+.imp-detalle code,
+.imp-resumen code { font-size: 0.93em; }
+
+.imp-plantilla { margin: 0 0 14px; }
+.imp-plantilla a { color: var(--color-info); }
+.imp-plantilla small {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+/* Checkbox "Sólo simular" de los modales de importación masiva.
+   Nace de un bug real: la regla global `input { width:100% }` estira el
+   checkbox a todo el ancho del label y empuja el texto al extremo derecho.
+   Esta clase lo devuelve a su tamaño y alinea el par casilla+texto. */
+.imp-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 14px;
+  font-weight: 500;
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.imp-check input[type="checkbox"] {
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+.imp-check span { flex: 1 1 auto; line-height: 1.4; }

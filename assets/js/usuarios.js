@@ -8,7 +8,7 @@
 
 import { supabase } from './supabase-client.js'
 import { getCurrentUser } from './auth-supabase.js'
-import { showToast } from './helpers.js'
+import { showToast, formatDate } from './helpers.js'
 
 // ============================================================================
 // INIT
@@ -85,7 +85,7 @@ window.cargarUsuarios = async function () {
                   ? '<span class="badge badge-success">Activo</span>'
                   : '<span class="badge badge-danger">Inactivo</span>'}
               </td>
-              <td>${u.created_at ? new Date(u.created_at).toLocaleDateString('es-PE') : '-'}</td>
+              <td>${u.created_at ? formatDate(u.created_at) : '-'}</td>
             </tr>
           `).join('')}
         </tbody>

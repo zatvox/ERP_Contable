@@ -1,3 +1,4 @@
+import { fechaDMY } from './helpers.js'
 // ============================================================================
 // CONTABILIDAD.JS - Módulo Contabilidad (Versión Async/Await)
 // ============================================================================
@@ -450,7 +451,7 @@ async function renderAsientosContables() {
           <tr>
             <td><strong>${a.id}</strong></td>
             <td>${contactosMap[a.contact_id] || 'Sin nombre'}</td>
-            <td>${a.fecha}</td>
+            <td>${fechaDMY(a.fecha)}</td>
             <td>${a.periodo_contable}</td>
             <td>${a.numero_asiento || '-'}</td>
             <td>${a.documento_referencia || '-'}</td>
@@ -532,7 +533,7 @@ async function renderApuntesContables() {
         
         const descripcionAsiento = asiento ? asiento.descripcion : '-'
         const nombreCuenta = cuenta ? `${cuenta.codigo} - ${cuenta.nombre}` : '-'
-        const fechaAsiento = asiento ? asiento.fecha : '-'
+        const fechaAsiento = asiento ? fechaDMY(asiento.fecha, '-') : '-'
         
         html += `
           <tr>
@@ -611,7 +612,7 @@ async function renderLibroDiario(filtroMes = null) {
       html += `
         <tr style="border-bottom:1px solid var(--border-color); background:var(--bg-secondary); font-weight:600;">
           <td>${entry.numero_asiento || entry.id}</td>
-          <td>${entry.fecha || '-'}</td>
+          <td>${fechaDMY(entry.fecha, '-')}</td>
           <td>${entry.descripcion || '-'}</td>
           <td>${entry.documento_referencia || '-'}</td>
           <td style="font-size:0.82rem;">${entry.tipo_movimiento || '-'} ${entry.tipo_documento ? `<br><small>${getNombreTipoDocumentoSync(entry.tipo_documento)}</small>` : ''}</td>
@@ -703,7 +704,7 @@ async function renderLineasAsiento(entryId) {
         <tr>
           <td>${cuenta ? `${cuenta.codigo} - ${cuenta.nombre}` : `Cuenta #${linea.account_id}`}</td>
           <td>${linea.descripcion || '-'}</td>
-          <td>${linea.fecha || '-'}</td>
+          <td>${fechaDMY(linea.fecha, '-')}</td>
           <td style="text-align:right;">${linea.tipo_cambio ? parseFloat(linea.tipo_cambio).toFixed(3) : '-'}</td>
           <td style="text-align: right;">${parseFloat(linea.debe || 0) > 0 ? parseFloat(linea.debe).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}</td>
           <td style="text-align: right;">${parseFloat(linea.haber || 0) > 0 ? parseFloat(linea.haber).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}</td>
@@ -1141,7 +1142,7 @@ window.cargarMayor = async function() {
       const haber = parseFloat(l.haber || 0)
       saldo += debe - haber
       html += `<tr>
-        <td>${l.fecha || '-'}</td>
+        <td>${fechaDMY(l.fecha, '-')}</td>
         <td>${l.numero_asiento || '-'}</td>
         <td>${l.descripcion || l.glosa_linea || '-'}</td>
         <td style="text-align:right;">${debe  > 0 ? debe.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })  : ''}</td>
@@ -1557,7 +1558,7 @@ async function renderCobrosPagos() {
           <h4>Últimos Pagos a Proveedores</h4>
           ${pagosProv.slice(-5).reverse().map(p => `
             <div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid var(--border-color);">
-              <span>${p.fecha} — ${p.medio_pago}</span>
+              <span>${fechaDMY(p.fecha)} — ${p.medio_pago}</span>
               <strong>S/ ${parseFloat(p.monto).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
             </div>
           `).join('') || '<p style="color:var(--text-secondary);">Sin pagos registrados</p>'}
@@ -1603,7 +1604,7 @@ async function renderPeriodosContables() {
           <td>${p.ano}</td>
           <td>${meses[p.mes] || p.mes}</td>
           <td><span class="badge badge-${p.estado === 'abierto' ? 'success' : 'danger'}">${p.estado}</span></td>
-          <td>${p.fecha_cierre || '—'}</td>
+          <td>${fechaDMY(p.fecha_cierre, '—')}</td>
           <td>
             ${p.estado === 'abierto'
               ? `<button class="btn btn-small btn-warning" onclick="window.cerrarPeriodoUI('${p.periodo}', ${p.id})">Cerrar</button>`

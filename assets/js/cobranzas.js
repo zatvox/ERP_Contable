@@ -234,6 +234,37 @@ function _saldoCxC(c) {
        - parseFloat(c.monto_canjeado || 0)
        - parseFloat(c.monto_anticipo_aplicado || 0)
 }
+// ── Validación contra BD (2026-10-13) ───────────────────────────────────────
+// Las listas en memoria (_cxcList/_cxpList) pueden estar viejas si otro usuario
+// cobró/pagó desde otra PC. Antes de registrar se relee el documento de la BD.
+async function _docFrescoCP(esCobro, id) {
+  const d = esCobro ? await getCuentaCobrarById(id) : await getCuentaPagarById(id)
+  if (d) {   // actualiza la caché para que la tabla muestre lo real
+    const lista = esCobro ? _cxcList : _cxpList
+    const i = lista.findIndex(x => x.id === id)
+    if (i >= 0) lista[i] = { ...lista[i], ...d }
+  }
+  return d
+}
+/** Mismo documento + misma fecha + mismo importe ya registrado → posible duplicado. */
+async function _posibleDuplicadoCP(esCobro, docId, fecha, monto) {
+  try {
+    const { data } = await supabase.from(esCobro ? 'cobros' : 'pagos_proveedores').select('id, fecha, monto, created_at')
+      .eq(esCobro ? 'cxc_id' : 'cxp_id', docId).eq('fecha', fecha)
+    return (data || []).find(x => Math.abs(parseFloat(x.monto) - monto) < 0.01) || null
+  } catch { return null }
+}
+/** Suma de lo cobrado/pagado por los OTROS registros del documento (para revertir sin descuadrar). */
+async function _sumaOtrosCP(esCobro, docId, excluirId) {
+  try {
+    const { data, error } = await supabase.from(esCobro ? 'cobros' : 'pagos_proveedores')
+      .select(esCobro ? 'id, monto, monto_retencion' : 'id, monto').eq(esCobro ? 'cxc_id' : 'cxp_id', docId).neq('id', excluirId)
+    if (error) throw error
+    return { monto: _r2((data || []).reduce((s, x) => s + (parseFloat(x.monto) || 0), 0)),
+             ret:   _r2((data || []).reduce((s, x) => s + (parseFloat(x.monto_retencion) || 0), 0)) }
+  } catch (e) { console.warn('_sumaOtrosCP:', e.message); return { monto: 0, ret: 0 } }
+}
+
 function _saldoCxP(c) {
   return parseFloat(c.monto_total || 0)
        + parseFloat(c.monto_notas_debito || 0)
@@ -548,8 +579,14 @@ window.registrarCobro = async function() {
     if (!fecha)     { showToast('Ingresa la fecha del cobro', 'warning'); return }
     if (monto <= 0) { showToast('El importe debe ser mayor a 0', 'warning'); return }
 
-    const cxc = _cxcList.find(c => c.id === cxcId)
-    if (!cxc) { showToast('Cuenta por Cobrar no encontrada', 'danger'); return }
+    const cxcCache = _cxcList.find(c => c.id === cxcId)
+    if (!cxcCache) { showToast('Cuenta por Cobrar no encontrada', 'danger'); return }
+    const cxc = await _docFrescoCP(true, cxcId)   // saldo REAL de la BD, no el de la pantalla
+    if (!cxc) { showToast('No se pudo leer la Cuenta por Cobrar de la base de datos. Reintenta.', 'danger'); return }
+    if (Math.abs(_saldoCxC(cxc) - _saldoCxC(cxcCache)) > 0.01) {
+      showToast(`⚠️ Esta factura cambió desde que abriste la pantalla (alguien más registró un cobro). Saldo real: ${formatNumber(Math.max(0, _saldoCxC(cxc)))}`, 'warning', 9000)
+      if (_saldoCxC(cxc) <= 0.01) { window.onSelectCxC?.(); _refrescarTodo(); cargarCxC(); cargarCobrosRecientes(); return }
+    }
 
     const contacto = _contactsMap[cxc.contact_id]
     const chkRet   = document.getElementById('cobroAplicarRetencion')
@@ -564,6 +601,8 @@ window.registrarCobro = async function() {
     }
 
     if (!_reciboValidoParaCliente(numeroRecibo, cxc.contact_id, null)) return
+    const dupC = await _posibleDuplicadoCP(true, cxcId, fecha, monto)
+    if (dupC && !confirm(`⚠️ Ya existe un cobro de ${formatNumber(dupC.monto)} para esta factura con fecha ${fechaDMY(dupC.fecha)}.\n\n¿Es un cobro DIFERENTE y quieres registrarlo igual?`)) return
 
     const cobro = await addCobro({
       numero_recibo: numeroRecibo,
@@ -919,8 +958,14 @@ window.registrarPagoProveedor = async function() {
     if (!fecha)     { showToast('Ingresa la fecha del pago', 'warning'); return }
     if (monto <= 0) { showToast('El monto debe ser mayor a 0', 'warning'); return }
 
-    const cxp = _cxpList.find(c => c.id === cxpId)
-    if (!cxp) { showToast('Cuenta por Pagar no encontrada', 'danger'); return }
+    const cxpCache = _cxpList.find(c => c.id === cxpId)
+    if (!cxpCache) { showToast('Cuenta por Pagar no encontrada', 'danger'); return }
+    const cxp = await _docFrescoCP(false, cxpId)   // saldo REAL de la BD
+    if (!cxp) { showToast('No se pudo leer la Cuenta por Pagar de la base de datos. Reintenta.', 'danger'); return }
+    if (Math.abs(_saldoCxP(cxp) - _saldoCxP(cxpCache)) > 0.01) {
+      showToast(`⚠️ Esta compra cambió desde que abriste la pantalla (alguien más registró un pago). Saldo real: ${formatNumber(Math.max(0, _saldoCxP(cxp)))}`, 'warning', 9000)
+      if (_saldoCxP(cxp) <= 0.01) { _refrescarTodo(); cargarCxP(); cargarPagosRecientes(); return }
+    }
     const moneda = cxp.moneda || 'PEN'   // monto = importe aplicado en la moneda de la factura
 
     const saldo = _saldoCxP(cxp)
@@ -928,6 +973,8 @@ window.registrarPagoProveedor = async function() {
       showToast(`El pago (${formatNumber(monto)}) supera el saldo pendiente (${formatNumber(saldo)})`, 'warning')
       return
     }
+    const dupP = await _posibleDuplicadoCP(false, cxpId, fecha, monto)
+    if (dupP && !confirm(`⚠️ Ya existe un pago de ${formatNumber(dupP.monto)} para esta compra con fecha ${fechaDMY(dupP.fecha)}.\n\n¿Es un pago DIFERENTE y quieres registrarlo igual?`)) return
 
     const pago = await addPagoProveedor({
       cxp_id: cxpId, compra_id: cxp.compra_id, contact_id: cxp.contact_id,
@@ -2548,8 +2595,10 @@ async function _aplicarEfectosCobro(cobro, cxc, opts = {}) {
     monedaMonto: cxc.moneda || 'PEN', tc: parseFloat(cobro.tipo_cambio) || 1
   })
 
-  const cobrado  = _r2(parseFloat(cxc.monto_cobrado || 0) + monto)
-  const retenido = _r2(parseFloat(cxc.monto_retenido || 0) + ret)
+  const cxcBD = (await getCuentaCobrarById(cxc.id)) || cxc   // acumula sobre lo real, no sobre la caché
+  const cobrado  = _r2(parseFloat(cxcBD.monto_cobrado || 0) + monto)
+  const retenido = _r2(parseFloat(cxcBD.monto_retenido || 0) + ret)
+  cxc = cxcBD
   await updateCuentaCobrar(cxc.id, { monto_cobrado: cobrado, monto_retenido: retenido, estado: _estadoCxCCalc(cxc, cobrado, retenido) })
 
   await _refrescarCuotasDoc(true, cxc.id)
@@ -2583,7 +2632,9 @@ async function _aplicarEfectosPago(pago, cxp) {
     monedaMonto: cxp.moneda || 'PEN', tc: parseFloat(pago.tipo_cambio) || 1
   })
 
-  const pagado = _r2(parseFloat(cxp.monto_pagado || 0) + monto)
+  const cxpBD = (await getCuentaPagarById(cxp.id)) || cxp   // acumula sobre lo real, no sobre la caché
+  const pagado = _r2(parseFloat(cxpBD.monto_pagado || 0) + monto)
+  cxp = cxpBD
   await updateCuentaPagar(cxp.id, { monto_pagado: pagado, estado: _estadoCxPCalc(cxp, pagado) })
 
   return await _imputarACuotasPagar(cxp.id, monto)
@@ -2691,21 +2742,32 @@ async function _revertirEfectosCP(tipo, reg) {
     ? 'hay varios movimientos bancarios parecidos: revisa el módulo Bancos'
     : 'no se encontró movimiento bancario')
 
+  // 2026-10-13: lo que se descuenta del documento nunca lo deja por debajo de lo
+  // que suman los OTROS cobros/pagos (caso duplicado que no llegó a sumar en la
+  // CxC). Las cuotas se desimputan solo por lo que realmente bajó el documento.
   if (esCobro && reg.cxc_id) {
-    await _refrescarCuotasDoc(true, reg.cxc_id)
-    await _desimputarCuotas(_cuotasDe(reg.cxc_id), monto, ret, true)
     const cxc = await getCuentaCobrarById(reg.cxc_id)
     if (cxc) {
-      const cobrado  = Math.max(0, _r2(parseFloat(cxc.monto_cobrado || 0) - monto))
-      const retenido = Math.max(0, _r2(parseFloat(cxc.monto_retenido || 0) - ret))
+      const otros = await _sumaOtrosCP(true, reg.cxc_id, reg.id)
+      const actC = parseFloat(cxc.monto_cobrado || 0), actR = parseFloat(cxc.monto_retenido || 0)
+      const cobrado  = Math.max(0, otros.monto, _r2(actC - monto))
+      const retenido = Math.max(0, otros.ret,   _r2(actR - ret))
+      const bajaC = Math.max(0, _r2(actC - cobrado)), bajaR = Math.max(0, _r2(actR - retenido))
+      if (bajaC < monto - 0.01) avisos.push(`la CxC solo bajó ${formatNumber(bajaC)} (el resto ya no estaba sumado: registro duplicado)`)
+      await _refrescarCuotasDoc(true, reg.cxc_id)
+      await _desimputarCuotas(_cuotasDe(reg.cxc_id), bajaC, bajaR, true)
       await updateCuentaCobrar(cxc.id, { monto_cobrado: cobrado, monto_retenido: retenido, estado: _estadoCxCCalc(cxc, cobrado, retenido) })
     }
   } else if (!esCobro && reg.cxp_id) {
-    await _refrescarCuotasDoc(false, reg.cxp_id)
-    await _desimputarCuotas(_cuotasPagarDe(reg.cxp_id), monto, 0, false)
     const cxp = await getCuentaPagarById(reg.cxp_id)
     if (cxp) {
-      const pagado = Math.max(0, _r2(parseFloat(cxp.monto_pagado || 0) - monto))
+      const otros = await _sumaOtrosCP(false, reg.cxp_id, reg.id)
+      const act = parseFloat(cxp.monto_pagado || 0)
+      const pagado = Math.max(0, otros.monto, _r2(act - monto))
+      const baja = Math.max(0, _r2(act - pagado))
+      if (baja < monto - 0.01) avisos.push(`la CxP solo bajó ${formatNumber(baja)} (el resto ya no estaba sumado: registro duplicado)`)
+      await _refrescarCuotasDoc(false, reg.cxp_id)
+      await _desimputarCuotas(_cuotasPagarDe(reg.cxp_id), baja, 0, false)
       await updateCuentaPagar(cxp.id, { monto_pagado: pagado, estado: _estadoCxPCalc(cxp, pagado) })
     }
   }
@@ -3495,6 +3557,13 @@ async function _recalcularLetra(l, estadoSiSinAbonos = null) {
  * d = { ubicacion, medio, bancoId, fecha, numOp, recibo, tcDia, amort, interes, portes, comision, otros, obs }
  */
 async function _registrarAbonoLetra(l, d, abonoId = null) {
+  if (!abonoId) {   // 2026-10-13: saldo real desde la BD (otro usuario pudo cobrarla)
+    const abs = await _abonosDeLetra(l.id)
+    const pagadoBD = _r2(abs.reduce((s, a) => s + _n(a.monto_amortizado), 0))
+    const saldoBD = _r2(_n(l.monto) - pagadoBD)
+    if (_n(d.amort) > saldoBD + 0.005) throw new Error(`la letra ${l.numero_letra} ya tiene abonos registrados; saldo real ${formatNumber(Math.max(0, saldoBD))}. Recarga la pantalla.`)
+    l.monto_pagado = pagadoBD
+  }
   const emitida = l.tipo === 'emitida'
   const saldoAntes = _r2(_n(l.monto) - _n(l.monto_pagado))
   const tipoAbono = Math.abs(_n(d.amort) - saldoAntes) < 0.005 ? 'total' : 'parcial'
@@ -5228,7 +5297,7 @@ window._tcDefaultCP = async function (tipo) {
   try {
     const r = await getTipoCambioDia(fecha, { permitirApi: false })
     const v = tipo === 'cobro' ? r?.venta : r?.compra
-    if (v > 0) { tc = v; fuente = `SUNAT ${tipo === 'cobro' ? 'venta' : 'compra'} del ${fecha}` }
+    if (v > 0) { tc = v; fuente = `SUNAT ${tipo === 'cobro' ? 'venta' : 'compra'} del ${fechaDMY(fecha)}` }
   } catch (e) { /* sin caché: queda el de la factura */ }
   if (tc > 0) {
     $(k.tc).value = tc

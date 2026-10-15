@@ -301,6 +301,14 @@ window.confirmarCobroMasivo = async function () {
   if (!sel.length) { showToast('Aplica el importe a al menos un documento (⚡ Distribuir)', 'warning'); return }
   if (sel.some(f => f.moneda === 'USD' || f.moneda !== mon) && !(tc > 0)) { showToast('Ingresa el T.C. del día', 'warning'); return }
   for (const f of sel) if (f.aplicar > _maxAplicable(f) + 0.009) { showToast(`${f.doc}: lo aplicado supera su saldo (${formatNumber(_maxAplicable(f))})`, 'warning'); return }
+  // 2026-10-13: saldo REAL de la BD (otro usuario pudo cobrar mientras tanto)
+  for (const f of sel.filter(x => x.tipo === 'factura')) {
+    const { data: fr } = await supabase.from('cuentas_cobrar').select('*').eq('id', f.obj.id).maybeSingle()
+    if (!fr) { showToast(`${f.doc}: no se pudo releer de la BD. Reintenta.`, 'danger'); return }
+    const real = _r2(C.saldoCxC(fr))
+    if (f.aplicar + _retAplicada(f) > real + 0.009) { showToast(`${f.doc}: ya fue cobrada por otro usuario. Saldo real ${formatNumber(Math.max(0, real))}. Cierra y vuelve a abrir el cobro masivo.`, 'warning', 9000); return }
+    f.obj = { ...f.obj, ...fr }
+  }
   const aplicado = _r2(sel.reduce((s, f) => s + _aCta(f.aplicar, f.moneda), 0))
   const tol = sel.some(f => f.moneda !== mon) ? 0.05 : 0.009
   if (Math.abs(recibido - aplicado) > tol) { showToast(`No cuadra: recibido ${formatNumber(recibido)} vs aplicado ${formatNumber(aplicado)}`, 'warning'); return }

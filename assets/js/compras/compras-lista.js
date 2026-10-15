@@ -1,3 +1,5 @@
+import { fechaDMY } from '../helpers.js'
+import { declararEmpresaModal } from '../empresa.js'
 // ============================================================================
 // compras/compras-lista.js — parte de compras.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
@@ -238,7 +240,7 @@ export async function renderCompras(forzar = false) {
             : `<input type="checkbox" class="compra-sel" value="${c.id}" onchange="window.actualizarBotonEliminarComprasSeleccionadas()">`}</td>
           <td data-col-tabla="compras" data-col="id"${colStyle('compras','id')}><strong>${c.id}</strong></td>
           <td data-col-tabla="compras" data-col="proveedor"${colStyle('compras','proveedor')}>${c.proveedor_nombre || '-'}</td>
-          <td data-col-tabla="compras" data-col="fecha"${colStyle('compras','fecha')}>${c.fecha_emision || '-'}</td>
+          <td data-col-tabla="compras" data-col="fecha"${colStyle('compras','fecha')}>${fechaDMY(c.fecha_emision, '-')}</td>
           <td data-col-tabla="compras" data-col="comprobante"${colStyle('compras','comprobante')}>${comprobante}</td>
           <td data-col-tabla="compras" data-col="referencia"${colStyle('compras','referencia')}>${referencia || '-'}</td>
           <td data-col-tabla="compras" data-col="descripcion"${colStyle('compras','descripcion')}>${c.descripcion || '-'}</td>
@@ -344,6 +346,10 @@ window.editarCompra = async function (id) {
     S._ecModoVista = true
     _aplicarModoVistaEdicionCompra()
     _pintarLineasEdicionCompra()
+
+    // El modal dice de qué empresa es ESTE documento, no la del switch.
+
+    declararEmpresaModal('modal-editar-compra', c.empresa_id)
 
     window.openModal('modal-editar-compra')
   } catch (error) {

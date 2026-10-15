@@ -653,7 +653,7 @@
 
   <!-- MODAL: Registrar Cobro de Cliente (flota sobre la tabla; mismos IDs que el formulario anterior) -->
   <div id="modal-registrar-cobro" class="modal">
-    <div class="modal-content" style="width:min(94vw, 720px); max-width:min(94vw, 720px); max-height:calc(100vh - 48px); overflow-y:auto;">
+    <div class="modal-content" style="width:min(96vw, 1040px); max-width:min(96vw, 1040px); max-height:calc(100vh - 48px); overflow-y:auto;">
       <div class="modal-header">
         <h3 class="modal-title">Registrar Cobro de Cliente</h3>
         <button class="modal-close" onclick="window.closeModal('modal-registrar-cobro')">&times;</button>
@@ -674,7 +674,7 @@
               <!-- 2. DATOS DEL COBRO -->
               <div style="padding-top:12px; border-top:1px solid var(--border-color);">
                 <strong style="display:block; margin:4px 0 8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Datos del cobro</strong>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <div style="display:grid; grid-template-columns:0.9fr 1.1fr 1.4fr; gap:12px;">
                   <div class="form-group"><label>Fecha de Cobro *</label><input type="date" id="cobroFecha" onchange="window._tcDefaultCP('cobro')"></div>
                   <div class="form-group">
                     <label>Medio de Pago</label>
@@ -693,15 +693,15 @@
                     <small id="cobro-banco-aviso" style="color:var(--text-secondary); font-size:0.72rem;"></small>
                   </div>
                   <div class="form-group"><label>N° Operación / Referencia</label><input type="text" id="cobroReferencia" placeholder="N° transferencia o cheque"></div>
-                  <div class="form-group"><label>N° Recibo de cobranza</label><div style="display:flex; gap:6px;"><input type="text" id="cobroNumeroRecibo" placeholder="N° del talonario físico (opcional)" style="flex:1; min-width:0;"><button type="button" class="btn btn-small btn-secondary" title="Sugerir el siguiente N° del correlativo" onclick="window._sugerirRecibo('cobroNumeroRecibo')">⏭</button></div>
-                    <small style="color:var(--text-secondary); font-size:0.72rem;">Varios vouchers del mismo cliente pueden llevar el mismo N° de recibo.</small></div>
+                  <div class="form-group"><label>N° Recibo de cobranza</label><div style="display:flex; gap:6px;"><input type="text" id="cobroNumeroRecibo" placeholder="N° del talonario físico (opcional)" style="flex:1; min-width:0;"><button type="button" class="btn btn-small btn-secondary" title="Sugerir el siguiente N° del correlativo" onclick="window._sugerirRecibo('cobroNumeroRecibo')">⏭</button></div></div>
+                  <small style="color:var(--text-secondary); font-size:0.75rem; line-height:1.4; align-self:center;">Varios vouchers del mismo cliente pueden llevar el mismo N° de recibo.</small>
                 </div>
               </div>
 
               <!-- 3. IMPORTES -->
               <div style="padding-top:12px; border-top:1px solid var(--border-color);">
                 <strong style="display:block; margin:4px 0 8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Importes</strong>
-                <div style="display:grid; grid-template-columns:0.8fr 0.8fr 1.2fr; gap:12px;">
+                <div style="display:grid; grid-template-columns:0.9fr 1.1fr 1.4fr; gap:12px;">
                   <div class="form-group">
                     <label>Moneda del cobro</label>
                     <select id="cobroMonedaCobro" onchange="window._cpRecalc('cobro','moneda')">
@@ -719,8 +719,8 @@
                     <input type="number" id="cobroMontoRecibido" step="0.01" min="0" placeholder="0.00" oninput="window._cpRecalc('cobro','recibido')">
                   </div>
                 </div>
-                <div id="cobroAplicadoGroup" style="display:grid; grid-template-columns:1.6fr 1.2fr; gap:12px; align-items:end;">
-                  <small style="color:var(--text-secondary); line-height:1.4; padding-bottom:8px;">El cobro se convierte a la moneda de la factura con el tipo de cambio. Puedes digitar cualquiera de los dos importes.</small>
+                <div id="cobroAplicadoGroup" style="display:grid; grid-template-columns:0.9fr 1.1fr 1.4fr; gap:12px; align-items:end;">
+                  <small style="grid-column:span 2; color:var(--text-secondary); line-height:1.4; padding-bottom:8px;">El cobro se convierte a la moneda de la factura con el tipo de cambio. Puedes digitar cualquiera de los dos importes.</small>
                   <div class="form-group">
                     <label id="cobroLblAplicado">Se aplica a la factura</label>
                     <input type="number" id="cobroMonto" step="0.01" min="0.01" placeholder="0.00" oninput="window._cpRecalc('cobro','aplicado')">
@@ -753,7 +753,7 @@
 
   <!-- MODAL: Registrar Pago a Proveedor (flota sobre la tabla; mismos IDs que el formulario anterior) -->
   <div id="modal-registrar-pago" class="modal">
-    <div class="modal-content" style="width:min(94vw, 720px); max-width:min(94vw, 720px); max-height:calc(100vh - 48px); overflow-y:auto;">
+    <div class="modal-content" style="width:min(96vw, 1040px); max-width:min(96vw, 1040px); max-height:calc(100vh - 48px); overflow-y:auto;">
       <div class="modal-header">
         <h3 class="modal-title">Registrar Pago a Proveedor</h3>
         <button class="modal-close" onclick="window.closeModal('modal-registrar-pago')">&times;</button>
@@ -774,7 +774,7 @@
               <!-- 2. DATOS DEL PAGO -->
               <div style="padding-top:12px; border-top:1px solid var(--border-color);">
                 <strong style="display:block; margin:4px 0 8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Datos del pago</strong>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <div style="display:grid; grid-template-columns:0.9fr 1.1fr 1.4fr; gap:12px;">
                   <div class="form-group"><label>Fecha de Pago *</label><input type="date" id="pagoFecha" onchange="window._tcDefaultCP('pago')"></div>
                   <div class="form-group">
                     <label>Medio de Pago</label>
@@ -799,7 +799,7 @@
               <!-- 3. IMPORTES -->
               <div style="padding-top:12px; border-top:1px solid var(--border-color);">
                 <strong style="display:block; margin:4px 0 8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Importes</strong>
-                <div style="display:grid; grid-template-columns:0.8fr 0.8fr 1.2fr; gap:12px;">
+                <div style="display:grid; grid-template-columns:0.9fr 1.1fr 1.4fr; gap:12px;">
                   <div class="form-group">
                     <label>Moneda del pago</label>
                     <select id="pagoMoneda" onchange="window._cpRecalc('pago','moneda')">
@@ -817,8 +817,8 @@
                     <input type="number" id="pagoMontoMoneda" step="0.01" min="0" placeholder="0.00" oninput="window._cpRecalc('pago','recibido')">
                   </div>
                 </div>
-                <div id="pagoAplicadoGroup" style="display:grid; grid-template-columns:1.6fr 1.2fr; gap:12px; align-items:end;">
-                  <small style="color:var(--text-secondary); line-height:1.4; padding-bottom:8px;">El pago se convierte a la moneda de la factura con el tipo de cambio. Puedes digitar cualquiera de los dos importes.</small>
+                <div id="pagoAplicadoGroup" style="display:grid; grid-template-columns:0.9fr 1.1fr 1.4fr; gap:12px; align-items:end;">
+                  <small style="grid-column:span 2; color:var(--text-secondary); line-height:1.4; padding-bottom:8px;">El pago se convierte a la moneda de la factura con el tipo de cambio. Puedes digitar cualquiera de los dos importes.</small>
                   <div class="form-group">
                     <label id="pagoLblAplicado">Se aplica a la factura</label>
                     <input type="number" id="pagoMonto" step="0.01" min="0.01" placeholder="0.00" oninput="window._cpRecalc('pago','aplicado')">

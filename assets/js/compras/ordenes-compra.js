@@ -1,3 +1,4 @@
+import { fechaDMY } from '../helpers.js'
 // ============================================================================
 // compras/ordenes-compra.js — parte de compras.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
@@ -73,7 +74,7 @@ export async function renderOrdenes() {
         <tr>
           <td><strong>${oc.id}</strong></td>
           <td>${proveedoresMap[oc.contact_id] || '-'}</td>
-          <td>${oc.fecha || '-'}</td>
+          <td>${fechaDMY(oc.fecha, '-')}</td>
           <td>${oc.currency || 'PEN'}</td>
           <td>${(oc.total_subtotal || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td>${(oc.total_igv || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
@@ -127,7 +128,7 @@ window.verOC = async function (id) {
     const mensaje = `
           OC #${oc.id}
           Proveedor: ${prov?.nombre || '-'}
-          Fecha: ${oc.fecha || '-'}
+          Fecha: ${fechaDMY(oc.fecha, '-')}
           Moneda: ${oc.currency || 'PEN'}
           Estado: ${oc.status || '-'}
 

@@ -1,3 +1,6 @@
+import { fechaDMY } from '../helpers.js'
+import { declararEmpresaModal } from '../empresa.js'
+import { exigirEmpresaDeTrabajo } from '../empresa.js'
 // ============================================================================
 // ventas/packing.js — TAB "Packing (PK)": cotización / orden de venta (2026-09-30)
 // ============================================================================
@@ -11,11 +14,11 @@
 import { S } from './state.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { getTerminosPago, getContactById, subirAdjuntos, validarArchivoAdjunto, getAdjuntos, getConteoAdjuntos, getUrlAdjunto, eliminarAdjuntosDe } from '../supabase-data.js'
-import { supabase, insert, update, deleteRecord } from '../supabase-client.js'
+import { supabase, insert, update, deleteRecord , empresaTrabajoCtx } from '../supabase-client.js'
 import { showToast, formatNumber, pintarDocumentoContacto } from '../helpers.js'
 import { convertirEnBuscador, refrescarBuscador } from '../buscador-select.js'
 import { serieDefault, siguienteCorrelativo, formatearNumero, registrarUsoSerie } from '../series.js'
-import { _nombreCliente, _nombreVendedor, _stockTotalPorItem } from './helpers.js'
+import { _nombreCliente, _nombreVendedor, _stockTotalPorItem, _refrescarStockLoteEnVivo } from './helpers.js'
 import { menuAccionesFila } from '../main.js'
 import { getTCVenta, textoAvisoTC } from '../sunat-api.js'
 import { vincularTCEnVivo } from '../tc-en-vivo.js'
@@ -81,11 +84,27 @@ async function _facturacionPK(packingId) {
     const vigPk = (vsPk || []).filter(v => !estaAnulado(v)).map(v => v.id)
     if (vigPk.length) {
       const { data: sueltas } = await supabase.from('detalle_ventas').select('item_id, cantidad').in('venta_id', vigPk).is('detalle_packing_id', null)
+      const sinPar = []
       for (const d of (sueltas || [])) {
         const mismas = lineas.filter(l => l.item_id === d.item_id)
-        if (!mismas.length) continue
+        if (!mismas.length) { sinPar.push(d); continue }
         const destino = mismas.find(l => (porLinea[l.id] || 0) < (+l.cantidad) - _TOL) || mismas[mismas.length - 1]
         porLinea[destino.id] = (porLinea[destino.id] || 0) + (parseFloat(d.cantidad) || 0)
+      }
+      // Parche 2026-10-13: producto CAMBIADO al facturar (ej. PK-018357 pedía
+      // 150/48-2 y la NV01-15 salió con 160D/144F). Esa línea de la factura no
+      // tiene par por producto: se toma como sustituto y llena, por cantidad,
+      // las líneas del PK que aún tengan saldo (en orden).
+      for (const d of sinPar) {
+        let resto = parseFloat(d.cantidad) || 0
+        for (const l of lineas) {
+          if (resto <= _TOL) break
+          const saldo = (+l.cantidad) - (porLinea[l.id] || 0)
+          if (saldo <= _TOL) continue
+          const toma = Math.min(saldo, resto)
+          porLinea[l.id] = (porLinea[l.id] || 0) + toma
+          resto -= toma
+        }
       }
     }
   }
@@ -122,8 +141,15 @@ export async function recalcularEstadoPacking(packingId) {
 }
 window.recalcularEstadoPacking = recalcularEstadoPacking
 
+// MULTIEMPRESA: Jhiro y Benji comparten los nombres de serie (FFFI, T001…).
+// El siguiente número NO puede salir de las empresas ACTIVAS del switch: con
+// las dos marcadas, Benji continuaría la numeración de Jhiro. Se acota a la
+// EMPRESA DE TRABAJO, que es la que va a firmar el documento.
 async function _maxCorrelativoPK(serie) {
-  const { data } = await supabase.from('packing').select('correlativo').eq('serie', serie).order('correlativo', { ascending: false }).limit(1)
+  const emp = empresaTrabajoCtx()
+  let q = supabase.from('packing').select('correlativo').eq('serie', serie)
+  if (emp != null) q = q.eq('empresa_id', emp)
+  const { data } = await q.order('correlativo', { ascending: false }).limit(1)
   return data?.[0]?.correlativo || 0
 }
 
@@ -137,6 +163,7 @@ export async function renderPacking(forzar = true) {
         <h3 class="card-title">Packing (PK) — Cotizaciones / Órdenes de venta</h3>
         <div style="display:flex; gap:8px; align-items:center;">
           <button class="btn btn-primary btn-small" onclick="window.abrirModalPacking()">+ Nuevo PK</button>
+          <button class="btn btn-secondary btn-small" onclick="window.abrirModalImportarPacking()" title="Cargar PK masivamente desde Excel (carga retroactiva)">📥 Importar masivo</button>
           ${menuAccionesFila([
             { icono: '🚫', label: 'Anular correlativo sin emitir (formato dañado)', onclick: 'window.abrirAnularCorrelativoPK()', peligro: true }
           ])}
@@ -211,8 +238,8 @@ window.filtrarPacking = function () {
     const vencido = abierto && p.fecha_validez && p.fecha_validez < hoy
     return `<tr style="${p.estado === 'anulado' ? 'opacity:.55;' : ''}">
       <td><strong>${_esc(p.numero)}</strong>${p._adjuntos ? ` <span title="${p._adjuntos} adjunto(s)" style="cursor:pointer;" onclick="window.verAdjuntosPacking(${p.id})">📎</span>` : ''}</td>
-      <td>${_esc(p.fecha_emision || '')}</td>
-      <td style="${vencido ? 'color:var(--color-danger); font-weight:600;' : ''}" title="${vencido ? 'Validez vencida' : ''}">${_esc(p.fecha_validez || '—')}</td>
+      <td>${_esc(fechaDMY(p.fecha_emision, ''))}</td>
+      <td style="${vencido ? 'color:var(--color-danger); font-weight:600;' : ''}" title="${vencido ? 'Validez vencida' : ''}">${_esc(fechaDMY(p.fecha_validez, '—'))}</td>
       <td>${p._sinEmitir ? `<em style="color:var(--text-secondary);">Formato anulado sin emitir${p.observaciones ? ' — ' + _esc(p.observaciones.replace(/^ANULADO SIN EMITIR:\s*/, '')) : ''}</em>` : _esc(p._cliente || '-')}</td>
       <td>${_esc(_nombreVendedor(p.vendedor_id))}</td>
       <td>${_esc(p.orden_compra_cliente || '—')}</td>
@@ -515,6 +542,18 @@ function _poblarSelects() {
   refrescarBuscador('pkCliente'); refrescarBuscador('pkItem')
 }
 
+/** Buscador de productos del PK: solo ítems con stock > 0 (todas las zonas
+ *  reales), con el stock disponible al costado. Al editar una línea se
+ *  conserva su producto aunque hoy no tenga stock. */
+function _poblarItemsConStockPK(itemActual = null) {
+  const el = document.getElementById('pkItem')
+  if (!el) return
+  const ops = (S._items || []).map(i => ({ i, kg: _stockTotalPorItem(i.id)?.totalKg || 0 }))
+    .filter(o => o.kg > 0 || o.i.id === itemActual)
+  el.innerHTML = '<option value="">-- Selecciona producto --</option>' + ops.map(({ i, kg }) =>
+    `<option value="${i.id}">${i.sku ? '[' + _esc(i.sku) + '] ' : ''}${_esc(i.nombre)} — ${kg > 0 ? formatNumber(kg) + ' ' + _esc(i.unidad_medida || 'kg') : 'sin stock'}</option>`).join('')
+}
+
 /** Deja el candado cerrado con el valor automático (toggleCandado vive en venta-nueva.js). */
 function _resetCandado(idInput, idBoton, idAviso, valor) {
   const input = document.getElementById(idInput), boton = document.getElementById(idBoton)
@@ -585,7 +624,15 @@ window._pkAbrirLinea = function (idx = null) {
   _pkLineaEditIdx = idx
   const l = idx != null ? _pkLineas[idx] : null
   const val = (k, v) => { document.getElementById(k).value = v ?? '' }
+  _poblarItemsConStockPK(l?.item_id || null)
   val('pkItem', l?.item_id || ''); refrescarBuscador('pkItem')
+  // Stock fresco (otra venta/guía pudo moverlo): se repinta sin perder la selección
+  _refrescarStockLoteEnVivo().then(() => {
+    const sel = document.getElementById('pkItem'); const actual = sel?.value || ''
+    _poblarItemsConStockPK(l?.item_id || null)
+    if (sel) sel.value = actual
+    refrescarBuscador('pkItem')
+  }).catch(e => console.warn('Stock en vivo PK:', e))
   val('pkNotaLinea', l?.nota || '')
   val('pkCant', l?.cantidad || '')
   val('pkUdm', l?.unidad_medida || 'KG')
@@ -757,6 +804,8 @@ window.abrirModalPacking = async function (id = null) {
     if (abierto && pk?.estado === 'parcial') { aviso.style.display = 'block'; aviso.textContent = 'PK facturado parcialmente: puedes editarlo, pero no bajar una línea por debajo de lo ya facturado.' }
     else aviso.textContent = abierto ? '' : (pk.estado === 'facturado' ? `Facturado en ${_pkVentasMap.get(pk.venta_id) || 'la venta #' + pk.venta_id} — solo lectura.` : 'PK anulado — solo lectura.')
     window._pkOnMoneda()
+    // El modal dice de qué empresa es ESTE documento, no la del switch.
+    declararEmpresaModal('modal-packing', pk?.empresa_id)
     window.openModal('modal-packing')
     _pintarAdjuntosPK(pk?.id || null)
   } catch (e) { showToast('Error: ' + e.message, 'danger') }
@@ -1126,6 +1175,7 @@ function _asegurarModalFacturarPK() {
 }
 
 window.facturarPacking = async function (id) {
+  if (!await exigirEmpresaDeTrabajo('packing', id, 'El PK')) return
   try {
     const pk = _pkLista.find(p => p.id === id) || (await supabase.from('packing').select('*').eq('id', id).single()).data
     if (!pk) return
@@ -1347,9 +1397,9 @@ window.imprimirPacking = async function (id) {
     <span class="k">TÉRMINO PAGO</span><span>${_esc(termino)}</span>
     <span class="k">DIRECCIÓN</span><span>${_esc(cliente?.direccion || '')}</span>
     <span class="k">VENDEDOR</span><span>${_esc(_nombreVendedor(pk.vendedor_id))}</span>
-    <span class="k">F. EMISIÓN</span><span>${_esc(pk.fecha_emision)}</span>
+    <span class="k">F. EMISIÓN</span><span>${_esc(fechaDMY(pk.fecha_emision))}</span>
     <span class="k">ORDEN DE COMPRA</span><span>${_esc(pk.orden_compra_cliente || '')}</span>
-    <span class="k">F. VALIDEZ</span><span>${_esc(pk.fecha_validez || '')}</span>
+    <span class="k">F. VALIDEZ</span><span>${_esc(fechaDMY(pk.fecha_validez, ''))}</span>
     <span class="k">MONEDA</span><span>${pk.moneda === 'USD' ? 'DÓLARES' : 'SOLES'}</span>
   </div>
   <table class="l"><thead><tr><th>Descripción</th><th>Cantidad</th><th>UdM</th><th>Precio unitario</th><th>Total</th></tr></thead><tbody>

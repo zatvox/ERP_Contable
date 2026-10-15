@@ -1,3 +1,4 @@
+import { fechaDMY } from '../helpers.js'
 // ============================================================================
 // ventas/guias-despacho-lista.js — parte de ventas.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
@@ -281,7 +282,7 @@ export async function renderGuiasDespachoVenta(forzar = false) {
               <td data-col-tabla="guias-despacho" data-col="numero_guia"${colStyle('guias-despacho','numero_guia')}>${g.numero_guia}</td>
               <td data-col-tabla="guias-despacho" data-col="venta"${colStyle('guias-despacho','venta')}>${g.ventaNumero}</td>
               <td data-col-tabla="guias-despacho" data-col="cliente"${colStyle('guias-despacho','cliente')}>${g.clienteNombre}</td>
-              <td data-col-tabla="guias-despacho" data-col="fecha"${colStyle('guias-despacho','fecha')}>${g.fecha_guia || '-'}</td>
+              <td data-col-tabla="guias-despacho" data-col="fecha"${colStyle('guias-despacho','fecha')}>${fechaDMY(g.fecha_guia, '-')}</td>
               <td data-col-tabla="guias-despacho" data-col="estado"${colStyle('guias-despacho','estado')}>${anulada ? badgeAnulado(g) : (revertida ? `<span class="badge badge-warning" title="Su mercadería reingresó por una Nota de Crédito${g.motivo_anulacion ? ' — ' + _esc(g.motivo_anulacion) : ''}">REVERTIDA</span>` : '<span class="badge badge-success">Emitida</span>')}</td>
               <td data-col-tabla="guias-despacho" data-col="observaciones"${colStyle('guias-despacho','observaciones')}>${g.observaciones ? _esc(g.observaciones) : (inactiva && g.motivo_anulacion ? `<em style="color:var(--text-secondary);">${anulada ? 'Anulado' : 'Revertida'}: ${_esc(g.motivo_anulacion)}</em>` : '-')}</td>
               <td data-col-tabla="guias-despacho" data-col="acciones" class="col-acciones" style="text-decoration:none; opacity:1;${colStyle('guias-despacho','acciones') ? ' display:none;' : ''}">

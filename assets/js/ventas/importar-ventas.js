@@ -4,8 +4,9 @@
 // ============================================================================
 import { S } from './state.js'
 import { getCurrentUser } from '../auth-supabase.js'
-import { getCustomers, getLotes, getItems, addVenta, addDetalleVenta, addCuentaCobrar, getAlmacenes, getUbicaciones, getStockUbicaciones } from '../supabase-data.js'
+import { getCustomers, getLotes, getItems, addVenta, addDetalleVenta, addCuentaCobrar, getAlmacenes, getUbicaciones, getStockUbicaciones, getVentas } from '../supabase-data.js'
 import { showToast } from '../helpers.js'
+import { mostrarCarga, actualizarCarga, ocultarCarga } from '../animaciones/index.js'
 import { getTerminosConCuotas, generarCronograma, cronogramaDesdeTexto } from '../cronograma.js'
 import { _guardarCuotasDeCxC } from './venta-nueva.js'
 import { renderVentas } from './ventas-lista.js'
@@ -26,6 +27,8 @@ window.abrirModalImportarVentas = function () {
   const log = document.getElementById('importar-ventas-log')
   if (resumen) resumen.innerHTML = ''
   if (log) log.innerHTML = ''
+  const chk = document.getElementById('chkSimularVentas')
+  if (chk) chk.checked = true
   window.openModal('modal-importar-ventas')
 }
 
@@ -33,8 +36,11 @@ export async function _leerArchivoImportVentas(file) {
   const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm')
   const buffer = await file.arrayBuffer()
   const wb = XLSX.read(buffer, { type: 'array', cellDates: true })
-  const primeraHoja = wb.SheetNames[0]
-  const ws = wb.Sheets[primeraHoja]
+  // Las plantillas nuevas traen varias hojas (DATOS + INSTRUCCIONES +
+  // catálogos para hacer VLOOKUP). Se lee la hoja DATOS si existe; si no,
+  // la primera, para no romper los archivos de una sola hoja de siempre.
+  const hoja = wb.SheetNames.find(n => String(n).trim().toUpperCase() === 'DATOS') || wb.SheetNames[0]
+  const ws = wb.Sheets[hoja]
   return XLSX.utils.sheet_to_json(ws, { defval: null, raw: true })
 }
 
@@ -65,7 +71,8 @@ window.procesarImportacionVentas = async function () {
   if (!file) { showToast('Selecciona un archivo primero', 'warning'); return }
 
   try {
-    if (btn) { btn.disabled = true; btn.textContent = 'Procesando...' }
+    const simular = !!document.getElementById('chkSimularVentas')?.checked
+    if (btn) { btn.disabled = true; btn.textContent = simular ? 'Simulando...' : 'Procesando...' }
     if (resumenEl) resumenEl.innerHTML = '<p style="color:var(--text-secondary);">Leyendo archivo...</p>'
     if (logEl) logEl.innerHTML = ''
 
@@ -124,10 +131,72 @@ window.procesarImportacionVentas = async function () {
     let ok = 0, fallidas = 0
     const logLineas = []
 
+    // El N° de venta es NUESTRO: dentro de una empresa no se puede repetir.
+    // `getVentas()` ya viene recortado a la empresa, así que el duplicado se
+    // mide solo por el número.
+    const ventasYaUsadas = new Set(
+      ((await getVentas()) || []).flatMap(v => [v.numero, v.referencia])
+        .map(n => String(n || '').trim().toUpperCase()).filter(Boolean)
+    )
+
+    // La cabecera se lee SOLO de la primera fila del grupo. Repetir el N°
+    // significa "estas filas son el detalle del mismo comprobante", así que
+    // los datos de cabecera deben coincidir en todas. Si no coinciden no es
+    // detalle: es un número repetido por error.
+    // `norm` normaliza antes de comparar: una fecha leída de Excel llega como
+    // Date y dos celdas iguales se verían distintas (y el mensaje saldría con
+    // el Date completo, ilegible).
+    const _incoherencias = (filasDelGrupo, campos) => {
+      const malas = []
+      for (const [etiqueta, alias, norm] of campos) {
+        const vistos = new Set()
+        for (const { fila } of filasDelGrupo) {
+          let crudo = null
+          for (const a of alias) {
+            if (fila[a] != null && String(fila[a]).trim() !== '') { crudo = fila[a]; break }
+          }
+          vistos.add(crudo == null ? '' : (norm ? (norm(crudo) || '') : String(crudo).trim().toUpperCase()))
+        }
+        if (vistos.size > 1) malas.push(`${etiqueta} (${[...vistos].map(v => v || '(vacío)').join(' / ')})`)
+      }
+      return malas
+    }
+    const _normFechaV = (v) => _parseFechaImportVentas(v) || String(v).trim().toUpperCase()
+    const _normTipoV  = (v) => String(v).trim().padStart(2, '0')
+    const CAMPOS_CABECERA_VENTA = [
+      ['cliente_ruc',      ['cliente_ruc', 'clienteRuc']],
+      ['fecha_emision',    ['fecha_emision', 'fechaEmision'], _normFechaV],
+      ['tipo_comprobante', ['tipo_comprobante', 'tipoComprobante'], _normTipoV],
+      ['moneda',           ['moneda']],
+      ['tipo_cambio',      ['tipo_cambio', 'tipoCambio']],
+      ['termino_pago',     ['termino_pago', 'terminoPago']]
+    ]
+
+    await mostrarCarga({
+      titulo: simular ? 'Simulando importación de ventas' : 'Importando ventas',
+      subtitulo: `${grupos.size} comprobante${grupos.size === 1 ? '' : 's'}`,
+      total: grupos.size
+    })
+
     for (const [numeroDocumento, filasGrupo] of grupos) {
+      actualizarCarga(undefined, numeroDocumento || '(sin N°)')
       if (!numeroDocumento) {
         fallidas += filasGrupo.length
         logLineas.push(`Fila ${filasGrupo[0].numFila}: falta "numero_documento".`)
+        continue
+      }
+
+      const _numVenta = numeroDocumento.toUpperCase()
+      if (ventasYaUsadas.has(_numVenta)) {
+        fallidas += filasGrupo.length
+        logLineas.push(`Venta "${numeroDocumento}": ya está registrada en esta empresa. Se omite para no duplicarla.`)
+        continue
+      }
+
+      const malas = _incoherencias(filasGrupo, CAMPOS_CABECERA_VENTA)
+      if (malas.length) {
+        fallidas += filasGrupo.length
+        logLineas.push(`Venta "${numeroDocumento}": sus ${filasGrupo.length} filas no coinciden en ${malas.join(', ')}. Si son dos comprobantes distintos, diferéncialos; si es uno solo, repite la cabecera igual en todas sus filas.`)
         continue
       }
 
@@ -148,7 +217,8 @@ window.procesarImportacionVentas = async function () {
         continue
       }
 
-      const tipoComprobante = String(primera.tipo_comprobante ?? primera.tipoComprobante ?? '01').trim()
+      // Excel/CSV suelen leer "01" como el número 1: se rellena a 2 dígitos.
+      const tipoComprobante = (String(primera.tipo_comprobante ?? primera.tipoComprobante ?? '01').trim() || '01').padStart(2, '0')
       if (!['01', '03', '07', '08'].includes(tipoComprobante)) {
         fallidas += filasGrupo.length
         logLineas.push(`Venta "${numeroDocumento}": tipo_comprobante "${tipoComprobante}" inválido (usa 01, 03, 07 u 08).`)
@@ -271,6 +341,15 @@ window.procesarImportacionVentas = async function () {
         }
         const fechaVencCrono = crono.cuotas[crono.cuotas.length - 1].fecha_vencimiento
 
+        // Se marca ANTES de la simulación: así el mismo N° repetido dos veces
+        // dentro del archivo también se detecta en modo simular.
+        ventasYaUsadas.add(_numVenta)
+
+        // Simulación: se valida TODO el archivo y no se escribe nada. Es la
+        // red antes de una carga masiva — deshacer 47 comprobantes a mano no
+        // es una opción.
+        if (simular) { ok += filasGrupo.length; continue }
+
         const venta = await addVenta({
           numero:           numeroDocumento,
           tipo_comprobante: tipoComprobante,
@@ -359,9 +438,9 @@ window.procesarImportacionVentas = async function () {
     if (resumenEl) {
       resumenEl.innerHTML = `
         <div style="display:flex; gap:20px;">
-          <div><strong style="color:var(--color-success);">${ok}</strong> líneas importadas</div>
+          <div><strong style="color:var(--color-success);">${ok}</strong> líneas ${simular ? 'válidas' : 'importadas'}</div>
           <div><strong style="color:${fallidas > 0 ? 'var(--color-danger)' : 'var(--text-secondary)'};">${fallidas}</strong> filas con error</div>
-        </div>`
+        </div>${simular ? '<p style="color:var(--color-info); margin-top:8px;">Simulación: no se escribió nada. Desmarca «Sólo simular» para importar de verdad.</p>' : ''}`
     }
     if (logEl) {
       logEl.innerHTML = logLineas.length > 0
@@ -380,6 +459,7 @@ window.procesarImportacionVentas = async function () {
     console.error('Error en procesarImportacionVentas:', error)
     showToast('Error al procesar la importación', 'danger')
   } finally {
+    ocultarCarga()
     if (btn) { btn.disabled = false; btn.textContent = 'Procesar Importación' }
   }
 }

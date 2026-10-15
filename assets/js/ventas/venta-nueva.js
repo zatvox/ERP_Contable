@@ -296,7 +296,9 @@ window.agregarLineaVenta = function() {
   const editando = S._ventaLineaEditIdx !== null
   if (editando) {
     const prev = S._ventaLineas[S._ventaLineaEditIdx]
-    if (prev?.detalle_packing_id && prev.item_id === lineaGuardada.item_id) {
+    // Se conserva el enlace con la línea del PK aunque se cambie el producto
+    // (sustituto): la línea editada reemplaza a esa misma línea del pedido.
+    if (prev?.detalle_packing_id) {
       lineaGuardada.detalle_packing_id = prev.detalle_packing_id
       lineaGuardada.precio_pk = prev.precio_pk
     }

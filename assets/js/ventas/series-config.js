@@ -12,7 +12,7 @@ import { getSeries, addSerie, updateSerie, deleteSerie, siguienteCorrelativo, fo
 
 const NOMBRE_TIPO_IGV_SERIE = { gravada: 'Gravada 18%', gravada_incluido: '18% incluido', exonerada: 'Exonerada', inafecta: 'Inafecta' }
 import { getVentas, getUbicaciones, getAlmacenes } from '../supabase-data.js'
-import { supabase } from '../supabase-client.js'
+import { supabase , empresaTrabajoCtx } from '../supabase-client.js'
 import { showToast } from '../helpers.js'
 
 const _esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
@@ -31,8 +31,14 @@ async function _destinosVirtuales() {
     .sort((a, b) => (b.virtual - a.virtual) || a.label.localeCompare(b.label))
 }
 
+// MULTIEMPRESA: Jhiro y Benji comparten los nombres de serie (FFFI, T001…).
+// El siguiente número NO puede salir de las empresas ACTIVAS del switch: con
+// las dos marcadas, Benji continuaría la numeración de Jhiro. Se acota a la
+// EMPRESA DE TRABAJO, que es la que va a firmar el documento.
 async function _maxUsadoPorSerie() {
   const max = {}
+  const emp = empresaTrabajoCtx()
+  const _filtrar = (q) => emp != null ? q.eq('empresa_id', emp) : q
   const ventas = await getVentas()
   for (const v of (ventas || [])) {
     const k = `${v.tipo_comprobante}|${v.serie}`
@@ -40,13 +46,13 @@ async function _maxUsadoPorSerie() {
     if (n > (max[k] || 0)) max[k] = n
   }
   try {
-    const { data } = await supabase.from('packing').select('serie, correlativo')
+    const { data } = await _filtrar(supabase.from('packing').select('serie, correlativo'))
     for (const p of (data || [])) { const k = `PK|${p.serie}`; if (p.correlativo > (max[k] || 0)) max[k] = p.correlativo }
   } catch { /* tabla packing aún no creada */ }
   // Guías (09): T001 la comparten guías de venta y de devolución a proveedor.
   for (const tabla of ['guias_despacho_venta', 'guias_devolucion_compra']) {
     try {
-      const { data } = await supabase.from(tabla).select('numero_guia')
+      const { data } = await _filtrar(supabase.from(tabla).select('numero_guia'))
       for (const g of (data || [])) {
         const { serie, correlativo } = parseNumeroGuia(g.numero_guia)
         if (!serie) continue

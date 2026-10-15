@@ -231,13 +231,14 @@ function formatCurrency(value, currency = 'PEN') {
 }
 
 function formatDate(dateStr) {
-  if (!dateStr) return '';
-  const date = new Date(dateStr);
-  return date.toLocaleDateString('es-PE', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  });
+  // DD/MM/AAAA. Fechas 'AAAA-MM-DD' se leen tal cual (new Date() las toma en
+  // UTC y en Lima mostraba el día anterior); timestamps → fecha local.
+  if (!dateStr) return ''
+  const m = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`
+  const d = new Date(dateStr)
+  if (isNaN(d)) return String(dateStr)
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`
 }
 
 function formatNumber(value) {

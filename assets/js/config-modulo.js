@@ -13,6 +13,8 @@
 // parámetros de negocio se leen al abrir cada modal/listado.
 // ============================================================================
 
+import { ESTILOS_CARGA, estiloActual, estiloPorId } from './animaciones/index.js'
+
 const DEFAULTS = {
   apariencia: {
     tema:              'auto',      // 'auto' | 'claro' | 'oscuro'
@@ -382,6 +384,12 @@ function _campoHtml(modulo, campo, valorActual) {
  * Siempre incluye, además de los campos del módulo, la sección global de
  * Apariencia (para que se pueda ajustar el diseño desde cualquier pantalla).
  */
+/** Escape local: este archivo arma HTML con nombres del catálogo. */
+function _esCfg(t) {
+  return String(t ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+}
+
 export function renderConfiguracionTab(modulo, containerId, opciones = {}) {
   const container = document.getElementById(containerId)
   if (!container) return
@@ -421,6 +429,19 @@ export function renderConfiguracionTab(modulo, containerId, opciones = {}) {
           </div>
         </div>
       </div>` : ''}
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-header"><h3 class="card-title">🎬 Animación de carga (este navegador)</h3></div>
+      <div class="cfg-body">
+        <div class="cfg-fila">
+          <div class="cfg-fila-texto">
+            <label>Estilo: <strong>${_esCfg(estiloPorId(estiloActual()).nombre)}</strong></label>
+            <div class="cfg-hint">Es lo que tapa la pantalla mientras corre un proceso largo — una importación masiva, por ejemplo — con el logo y el color de la empresa de trabajo. Hay ${ESTILOS_CARGA.length} estilos: ${ESTILOS_CARGA.map(e => _esCfg(e.nombre)).join(', ')}. La velocidad no se elige: la calcula el sistema según cuánto pese la carga.</div>
+          </div>
+          <button class="btn btn-secondary btn-small" onclick="window.abrirCatalogoAnimaciones()">Ver catálogo</button>
+        </div>
+      </div>
     </div>
 
     <div class="card" style="margin-top:16px;">

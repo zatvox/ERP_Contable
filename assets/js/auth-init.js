@@ -14,9 +14,20 @@ import {
   getCurrentUser,
   isAuthenticated
 } from './auth-supabase.js'
+import { initEmpresaContexto } from './empresa.js'
 
 // Top-level await — restaura sesión antes de que el DOM esté listo
 await initAuthState()
+
+// MULTIEMPRESA: el contexto de empresa se resuelve aquí mismo, dentro del
+// top-level await, para que el filtro por empresa_id ya esté puesto en
+// supabase-client.js antes de que el primer módulo consulte algo. Si esto
+// corriera en DOMContentLoaded, la primera pantalla alcanzaría a leer datos
+// de todas las empresas.
+if (isAuthenticated()) {
+  try { await initEmpresaContexto() }
+  catch (e) { console.error('Multiempresa: no se pudo iniciar el contexto', e) }
+}
 
 // ── Funciones globales ────────────────────────────────────────────────────────
 

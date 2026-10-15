@@ -1,3 +1,4 @@
+import { fechaDMY } from '../helpers.js'
 // ============================================================================
 // inventario/historial-movimientos.js — parte de inventario.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
@@ -80,7 +81,8 @@ export async function renderHistorialMovimientos() {
       documento: k.numero_documento || '—',
       docReferencia: k.documento_referencia || '—',
       contacto: contactoDe(k),
-      producto: itemsById.get(k.item_id)?.nombre || itemsById.get(k.item_id)?.name || '(producto eliminado)',
+      // "(SKU) NOMBRE" — mismo formato que el buscador del Kardex
+      producto: (() => { const it = itemsById.get(k.item_id); if (!it) return '(producto eliminado)'; const nom = it.nombre || it.name || ''; return it.sku ? `(${it.sku}) ${nom}` : nom })(),
       lote: lotesById.get(k.lote_id)?.numero_lote || '—',
       tipo: k.tipo_movimiento,
       tipoLabel: TIPOS_MOVIMIENTO_HISTORIAL[k.tipo_movimiento] || k.tipo_movimiento,
@@ -125,7 +127,12 @@ export async function renderHistorialMovimientos() {
         </div>
         <div class="kardex-filtros-grid">
           <div class="kardex-filtros-fila">
-            <input type="text" id="historialBuscarProducto" placeholder="Buscar en todas las columnas: producto, lote, documento, zona, tipo, fecha, cantidad..." title="Varias palabras = deben aparecer todas (ej: venta zona b)" oninput="window.aplicarFiltrosHistorial()">
+            <div class="bsq-caja">
+              <input type="text" id="historialBuscarProducto" class="bsq-input" autocomplete="off" placeholder="Escribe para buscar: SKU, producto, lote, documento, contacto, zona..." title="Busca en todas las columnas. Varias palabras = deben aparecer todas (ej: venta zona b)"
+                oninput="this.nextElementSibling.style.display = this.value ? '' : 'none'; window.aplicarFiltrosHistorial()">
+              <button type="button" class="bsq-limpiar" title="Limpiar búsqueda" style="display:none;"
+                onclick="const i = this.previousElementSibling; i.value = ''; this.style.display = 'none'; i.focus(); window.aplicarFiltrosHistorial()">✕</button>
+            </div>
             <select id="historialFiltroTipo" onchange="window.aplicarFiltrosHistorial()">
               <option value="">Tipo: todos</option>${opcionesTipoHtml}
             </select>
@@ -259,7 +266,7 @@ function _pintarTablaHistorial(filas) {
             }
             return `
               <tr>
-                <td data-col-tabla="historial-movimientos" data-col="fecha"${colStyle('historial-movimientos', 'fecha')}>${f.fecha ? new Date(f.fecha + 'T00:00:00').toLocaleDateString('es-PE') : '-'}</td>
+                <td data-col-tabla="historial-movimientos" data-col="fecha"${colStyle('historial-movimientos', 'fecha')}>${fechaDMY(f.fecha, '-')}</td>
                 <td data-col-tabla="historial-movimientos" data-col="documento"${colStyle('historial-movimientos', 'documento')}>${f.documento}</td>
                 <td data-col-tabla="historial-movimientos" data-col="docReferencia"${colStyle('historial-movimientos', 'docReferencia')}>${f.docReferencia}</td>
                 <td data-col-tabla="historial-movimientos" data-col="contacto"${colStyle('historial-movimientos', 'contacto')} style="font-size:0.82rem;">${f.contacto}</td>

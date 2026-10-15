@@ -4,8 +4,10 @@
 // ============================================================================
 import { costoNetoLineaCompra } from './compra-nueva.js'
 import { getCurrentUser } from '../auth-supabase.js'
-import { getCompras, getCompraDetalles, getLoteById, getLotes, addLote, updateLote, getItems, getMarcas, getGuiasIngresoCompra, addGuiaIngresoCompra, addDetalleGuiaIngresoCompra, getAlmacenes, getUbicaciones, addStockUbicacion, getUbicacionVendors, addKardexMovimiento, updateStockUbicacion, getStockUbicacionesByLote } from '../supabase-data.js'
+import { getCompras, getCompraDetalles, getLoteById, getLotes, addLote, updateLote, getItems, getMarcas, getGuiasIngresoCompra, addGuiaIngresoCompra, addDetalleGuiaIngresoCompra, getTodosDetalleGuiasIngresoCompra, getAlmacenes, getUbicaciones, addStockUbicacion, getUbicacionVendors, addKardexMovimiento, updateStockUbicacion, getStockUbicacionesByLote } from '../supabase-data.js'
+import { empresaTrabajoCtx } from '../supabase-client.js'
 import { showToast, formatQty } from '../helpers.js'
+import { mostrarCarga, actualizarCarga, tituloCarga, ocultarCarga } from '../animaciones/index.js'
 import { _invalidarCacheCompras } from './anulacion.js'
 import { _escCompras } from './buscadores.js'
 import { renderCompras } from './compras-lista.js'
@@ -87,9 +89,24 @@ window.procesarImportacionGuias = async function () {
     }
 
     // ── Catálogos para resolver los textos del archivo a ids ──────────────
-    const [compras, items, marcas, zonas, almacenes, lotes, guiasExistentes] = await Promise.all([
+    const [_compras, items, marcas, _zonas, _almacenes, _lotes, _guiasExistentes] = await Promise.all([
       getCompras(), getItems(), getMarcas(), getUbicaciones(), getAlmacenes(), getLotes(), getGuiasIngresoCompra()
     ])
+
+    // MULTIEMPRESA: los get* vienen recortados a las empresas ACTIVAS del
+    // switch, que con dos marcadas incluye a Jhiro. Una guía de ingreso crea
+    // stock, así que todo lo que resuelve debe ser de la EMPRESA DE TRABAJO:
+    // de lo contrario el archivo podría enganchar la "Zona A" de Jhiro o
+    // sumar cantidad a un lote suyo. El trigger del kardex lo rechazaría,
+    // pero el error llegaría a mitad de la importación y sin explicar por qué.
+    // `items` y `marcas` no se filtran: son catálogo compartido.
+    const _emp = empresaTrabajoCtx()
+    const _deEmpresa = (arr) => _emp == null ? (arr || []) : (arr || []).filter(x => Number(x.empresa_id) === Number(_emp))
+    const compras         = _deEmpresa(_compras)
+    const zonas           = _deEmpresa(_zonas)
+    const almacenes       = _deEmpresa(_almacenes)
+    const lotes           = _deEmpresa(_lotes)
+    const guiasExistentes = _deEmpresa(_guiasExistentes)
 
     // Una compra se puede referenciar por su N° de comprobante, por
     // serie-numero o por su referencia interna: se indexan las tres formas.
@@ -101,7 +118,44 @@ window.procesarImportacionGuias = async function () {
     const itemPorSku   = new Map((items || []).filter(i => i.sku).map(i => [String(i.sku).trim().toUpperCase(), i]))
     const marcaPorNom  = new Map((marcas || []).map(m => [String(m.nombre || '').trim().toUpperCase(), m]))
     const almacenPorId = new Map((almacenes || []).map(a => [a.id, a]))
-    const guiasYaUsadas = new Set((guiasExistentes || []).map(g => String(g.numero_guia || '').trim().toUpperCase()))
+    // El N° de Guía de Remisión lo pone el PROVEEDOR, no nosotros: dos
+    // proveedores distintos pueden traer la misma numeración. Caso real: las
+    // guías T001-xxx que Benji recibe de Jhiro conviven con las T001-xxx que
+    // Jhiro emite. Por eso la unicidad es por (proveedor, N° de guía) y no
+    // global: si fuera global, la segunda guía legítima se rechazaría.
+    const compraPorId  = new Map((compras || []).map(c => [c.id, c]))
+    const _provDeCompra = (c) => (c && c.contact_id != null) ? String(c.contact_id) : '?'
+    const guiasYaUsadas  = new Set()   // "proveedor|N°"
+    const numerosYaUsados = new Map()  // N° -> Set de proveedores que ya lo usaron
+    for (const g of (guiasExistentes || [])) {
+      const num = String(g.numero_guia || '').trim().toUpperCase()
+      if (!num) continue
+      const prov = _provDeCompra(compraPorId.get(g.compra_id))
+      guiasYaUsadas.add(`${prov}|${num}`)
+      if (!numerosYaUsados.has(num)) numerosYaUsados.set(num, new Set())
+      numerosYaUsados.get(num).add(prov)
+    }
+
+    // Cuánto se recibió ya de cada PRODUCTO de cada compra, sumando TODAS sus
+    // guías: una compra se puede recibir en varias guías parciales, así que el
+    // tope no es "lo de esta guía" sino lo acumulado.
+    //
+    // Se mide por (compra, producto) y NO por línea de compra a propósito: una
+    // misma factura puede traer el mismo SKU en dos líneas con precios
+    // distintos (caso real: F002-00006556 trae 0090-009006 a 12.2881 y a
+    // 11.4407). Contra una sola de esas líneas, una recepción legítima de
+    // 3,056.5 parecería un exceso sobre 710.
+    const _todosDetGuia = await getTodosDetalleGuiasIngresoCompra()
+    const _compraDeGuia = new Map((guiasExistentes || []).map(g => [g.id, g.compra_id]))
+    const recibidoPorItem = new Map()     // "compraId|itemId" -> cantidad
+    for (const d of (_todosDetGuia || [])) {
+      const compraId = _compraDeGuia.get(d.guia_id)
+      if (compraId == null || d.item_id == null) continue
+      const k = `${compraId}|${d.item_id}`
+      recibidoPorItem.set(k, (recibidoPorItem.get(k) || 0) + parseFloat(d.cantidad || 0))
+    }
+    // Lo que va sumando este mismo archivo (solo guías ya aceptadas).
+    const recibidoEnArchivo = new Map()
 
     // Zona: se busca por "almacen + zona"; si el archivo solo trae zona y su
     // nombre es único en todo el sistema, también se acepta.
@@ -135,12 +189,15 @@ window.procesarImportacionGuias = async function () {
     const guiasValidas = []
     let filasConError = 0
 
-    for (const [clave, grupo] of grupos) {
-      const errores = []
+    await mostrarCarga({
+      titulo: 'Validando el archivo',
+      subtitulo: `${grupos.size} guía${grupos.size === 1 ? '' : 's'} de ingreso`,
+      total: grupos.size
+    })
 
-      if (guiasYaUsadas.has(clave)) {
-        errores.push(`la guía ${grupo.numeroGuia} ya existe en el sistema`)
-      }
+    for (const [clave, grupo] of grupos) {
+      actualizarCarga(undefined, grupo.numeroGuia)
+      const errores = []
 
       const primera = grupo.filas[0].fila
       const compraClave = _valorFila(primera, 'compra_numero', 'compra', 'numero_comprobante', 'referencia').toUpperCase()
@@ -152,16 +209,56 @@ window.procesarImportacionGuias = async function () {
 
       const observaciones = _valorFila(primera, 'observaciones', 'observacion') || null
 
+      // ── La cabecera tiene que ser la misma en todas las filas del grupo ──
+      // La cabecera se lee solo de la PRIMERA fila. Repetir el N° de guía
+      // significa "estas filas son el detalle de la misma guía", así que su
+      // compra y su fecha deben coincidir. Si no coinciden, no es detalle:
+      // es un N° repetido por error o dos guías que comparten número. Antes
+      // se ignoraba en silencio y la guía quedaba con la cabecera de la 1ª.
+      const comprasEnGrupo = new Set()
+      const fechasEnGrupo  = new Set()
+      for (const { fila } of grupo.filas) {
+        comprasEnGrupo.add(_valorFila(fila, 'compra_numero', 'compra', 'numero_comprobante', 'referencia').toUpperCase())
+        const f = _parseFechaImportGenerico(_valorFila(fila, 'fecha_guia', 'fecha'))
+        if (f) fechasEnGrupo.add(f)
+      }
+      if (comprasEnGrupo.size > 1) {
+        errores.push(`sus filas apuntan a ${comprasEnGrupo.size} compras distintas (${[...comprasEnGrupo].join(', ')}): si son dos guías distintas que comparten número, diferéncialas`)
+      }
+      if (fechasEnGrupo.size > 1) {
+        errores.push(`sus filas traen ${fechasEnGrupo.size} fechas distintas (${[...fechasEnGrupo].join(', ')})`)
+      }
+
+      // ── Duplicado: por (proveedor, N° de guía), no por N° suelto ─────────
+      const provGuia = _provDeCompra(compra)
+      if (guiasYaUsadas.has(`${provGuia}|${clave}`)) {
+        errores.push(`la guía ${grupo.numeroGuia} ya está registrada para este proveedor`)
+      } else if (numerosYaUsados.get(clave)?.size) {
+        anotar('aviso', `Guía ${grupo.numeroGuia}: ese N° ya existe pero de OTRO proveedor — se registra igual, la numeración es del proveedor.`)
+      }
+
       // Detalle de la compra: cada línea del archivo debe corresponder a un
       // producto realmente comprado, para poder enlazar detalle_compra_id.
       const detallesCompra = compra ? await getCompraDetalles(compra.id) : []
       const detallePorItem = new Map()
-      for (const d of (detallesCompra || [])) if (d.item_id) detallePorItem.set(d.item_id, d)
+      const compradoPorItem = new Map()
+      for (const d of (detallesCompra || [])) {
+        if (!d.item_id) continue
+        if (!detallePorItem.has(d.item_id)) detallePorItem.set(d.item_id, d)   // para enlazar detalle_compra_id
+        compradoPorItem.set(d.item_id, (compradoPorItem.get(d.item_id) || 0) + parseFloat(d.cantidad || 0))
+      }
 
       const lineas = []
       // Reserva local: si dos filas usan el mismo lote nuevo, la segunda debe
       // saber que la primera ya lo va a crear (si no, se crearía dos veces).
       const lotesNuevosEnEsteArchivo = new Set()
+      // Lo que esta guía va sumando por línea de compra. Se vuelca a
+      // `recibidoEnArchivo` solo si la guía entera resulta válida: si se cae,
+      // su consumo no debe penalizar a las guías siguientes.
+      const recibidoEnGuia = new Map()
+      // Par (sku, lote) ya visto en esta guía con la misma cantidad: es la
+      // misma línea repetida, no detalle nuevo.
+      const lineasVistas = new Set()
 
       for (const { fila, nroFila } of grupo.filas) {
         const errFila = []
@@ -202,11 +299,37 @@ window.procesarImportacionGuias = async function () {
           errFila.push(`el producto ${item.nombre} no figura en el detalle de la compra ${compra.numero || compra.referencia}`)
         }
 
+        // ── Tope: no se puede recibir más de lo comprado ─────────────────
+        // El mismo lote SÍ puede entrar en varias guías (entregas parciales);
+        // lo que no puede pasar es que el acumulado supere la línea de la
+        // compra. Ese exceso es, casi siempre, la misma recepción registrada
+        // dos veces. Atraparlo aquí evita inflar el stock en silencio.
+        if (compra && item && cantidad > 0) {
+          const claveTope = `${compra.id}|${item.id}`
+          const compradoIt = compradoPorItem.get(item.id) || 0
+          const yaIt = (recibidoPorItem.get(claveTope) || 0) +
+                       (recibidoEnArchivo.get(claveTope) || 0) +
+                       (recibidoEnGuia.get(claveTope) || 0)
+          if (compradoIt > 0 && yaIt + cantidad > compradoIt + 0.001) {
+            errFila.push(`se recibirían ${formatQty(yaIt + cantidad)} de "${item?.nombre || sku}" pero la compra ${compra?.numero || compraClave} solo lleva ${formatQty(compradoIt)} (ya recibido antes: ${formatQty(yaIt)})`)
+          }
+        }
+
         // ¿El lote ya existe? Si sí, se sumará; si no, se creará.
         const claveLote = item ? `${item.id}|${numeroLote.toUpperCase()}` : null
         const loteExistente = claveLote ? lotePorItemNumero.get(claveLote) : null
         const yaEnArchivo = claveLote ? lotesNuevosEnEsteArchivo.has(claveLote) : false
         if (claveLote && !loteExistente) lotesNuevosEnEsteArchivo.add(claveLote)
+
+        // Línea calcada: mismo SKU, mismo lote y misma cantidad dentro de la
+        // misma guía. Detalle legítimo sería el mismo lote con OTRA cantidad.
+        const claveLinea = `${sku}|${numeroLote.toUpperCase()}|${cantidad}`
+        if (!errFila.length && lineasVistas.has(claveLinea)) {
+          filasConError++
+          anotar('error', `Fila ${nroFila} (guía ${grupo.numeroGuia}): línea repetida — mismo SKU ${sku}, mismo lote ${numeroLote} y misma cantidad ${formatQty(cantidad)} ya vienen en esta guía.`)
+          continue
+        }
+        lineasVistas.add(claveLinea)
 
         if (errFila.length > 0) {
           filasConError++
@@ -222,6 +345,10 @@ window.procesarImportacionGuias = async function () {
           loteExistenteId: loteExistente?.id || null,
           seSumaALoteExistente: !!loteExistente || yaEnArchivo
         })
+        if (compra && item) {
+          const k = `${compra.id}|${item.id}`
+          recibidoEnGuia.set(k, (recibidoEnGuia.get(k) || 0) + cantidad)
+        }
       }
 
       if (errores.length > 0 || lineas.length === 0) {
@@ -230,7 +357,12 @@ window.procesarImportacionGuias = async function () {
       }
 
       guiasValidas.push({ numeroGuia: grupo.numeroGuia, fechaGuia, compra, observaciones, lineas })
-      guiasYaUsadas.add(clave)  // evita duplicados dentro del mismo archivo
+      guiasYaUsadas.add(`${provGuia}|${clave}`)  // evita duplicados dentro del mismo archivo
+      if (!numerosYaUsados.has(clave)) numerosYaUsados.set(clave, new Set())
+      numerosYaUsados.get(clave).add(provGuia)
+      for (const [k, cant] of recibidoEnGuia) {
+        recibidoEnArchivo.set(k, (recibidoEnArchivo.get(k) || 0) + cant)
+      }
     }
 
     // ── Resumen ───────────────────────────────────────────────────────────
@@ -268,7 +400,12 @@ window.procesarImportacionGuias = async function () {
     let creadas = 0, fallidas = 0
     const vendorsZona = await getUbicacionVendors()
 
+    tituloCarga('Creando guías, lotes y kardex',
+                `${guiasValidas.length} guía${guiasValidas.length === 1 ? '' : 's'}`,
+                guiasValidas.length)
+
     for (const g of guiasValidas) {
+      actualizarCarga(undefined, g.numeroGuia)
       try {
         const guia = await addGuiaIngresoCompra({
           compra_id: g.compra.id, numero_guia: g.numeroGuia, fecha_guia: g.fechaGuia,
@@ -398,6 +535,7 @@ window.procesarImportacionGuias = async function () {
     console.error('procesarImportacionGuias:', error)
     _html('importar-guias-resumen', `<p style="color:var(--color-danger);">Error inesperado: ${_escCompras(error.message)}</p>`)
   } finally {
+    ocultarCarga()
     if (btn) { btn.disabled = false; btn.textContent = 'Procesar' }
   }
 }
@@ -405,9 +543,11 @@ window.procesarImportacionGuias = async function () {
 /** Log compartido por los importadores: errores primero, con scroll. */
 function _pintarLogImport(idContenedor, log) {
   const errores = log.filter(l => l.tipo === 'error')
+  const avisos  = log.filter(l => l.tipo === 'aviso')
   const oks     = log.filter(l => l.tipo === 'ok')
   _html(idContenedor, [
     ...errores.map(l => `<div style="padding:4px 0; color:var(--color-danger);">✕ ${_escCompras(l.texto)}</div>`),
+    ...avisos.map(l => `<div style="padding:4px 0; color:var(--color-warning);">⚠ ${_escCompras(l.texto)}</div>`),
     ...oks.map(l => `<div style="padding:4px 0; color:var(--color-success);">✓ ${_escCompras(l.texto)}</div>`)
   ].join('') || '<div style="color:var(--text-secondary);">Sin observaciones.</div>')
 }

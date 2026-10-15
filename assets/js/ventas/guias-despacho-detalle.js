@@ -1,3 +1,4 @@
+import { fechaDMY } from '../helpers.js'
 // ============================================================================
 // ventas/guias-despacho-detalle.js — parte de ventas.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
@@ -109,7 +110,7 @@ window.verDetalleGuiaDespachoVenta = async function (id) {
     document.getElementById('dgd-titulo-modal').textContent = `Detalle de Guía ${guia.numero_guia || ''}`
     document.getElementById('dgd-cabecera').innerHTML = `
       <div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">Guía de Despacho</div>
-      <div style="font-weight:600; font-size:1.05rem; margin-top:2px;">${guia.numero_guia || ''} — ${guia.fecha_guia || ''}</div>
+      <div style="font-weight:600; font-size:1.05rem; margin-top:2px;">${guia.numero_guia || ''} — ${fechaDMY(guia.fecha_guia, '')}</div>
       <div style="font-size:0.85rem; color:var(--text-secondary); margin-top:2px;">
         ${_esc(cliente?.razon_social || cliente?.nombre || '-')} · Venta: ${venta?.serie || ''}-${String(venta?.correlativo || '').padStart(8, '0')}
         ${guia.observaciones ? ` · ${_esc(guia.observaciones)}` : ''}
@@ -155,7 +156,7 @@ window.editarGuiaDespachoVenta = async function (id) {
       infoDiv.innerHTML = `
         <strong>Cliente:</strong> ${_esc(cliente?.razon_social || cliente?.nombre || '-')} &nbsp;|&nbsp;
         <strong>Comprobante:</strong> ${venta?.serie || ''}-${String(venta?.correlativo || '').padStart(8,'0')} &nbsp;|&nbsp;
-        <strong>Fecha venta:</strong> ${venta?.fecha_emision || '-'} &nbsp;|&nbsp;
+        <strong>Fecha venta:</strong> ${fechaDMY(venta?.fecha_emision, '-')} &nbsp;|&nbsp;
         <strong>Estado despacho:</strong> ${venta?.estado_despacho || 'pendiente'}
       `
     }

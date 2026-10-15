@@ -12,18 +12,142 @@ import { SUPABASE_CONFIG } from './config.js'
 export const supabase = createClient(SUPABASE_CONFIG.URL, SUPABASE_CONFIG.ANON_KEY)
 
 // ============================================================================
+// CONTEXTO MULTIEMPRESA — EL ÚNICO PUNTO DE FILTRADO DEL SISTEMA
+// ============================================================================
+// El filtro por empresa NO se pone pantalla por pantalla: son ~150 funciones
+// get* en supabase-data.js y basta que a una se le olvide para que se vea
+// data de otra empresa. Se pone aquí, en el cuello de botella por donde
+// pasan todas.
+//
+// `empresa.js` se registra con `registrarContextoEmpresa()` durante el
+// top-level await de auth-init.js, ANTES de que cualquier módulo consulte.
+// Mientras no esté registrado no se filtra nada — eso es a propósito: así
+// `empresa.js` puede leer `empresa_config` para arrancar.
+
+let _ctxEmpresa = null
+
+export function registrarContextoEmpresa(ctx) { _ctxEmpresa = ctx }
+
+/**
+ * Espera a que el contexto de empresa esté resuelto.
+ *
+ * El problema que resuelve: `initEmpresaContexto()` es asíncrono, y la
+ * primera pantalla de un módulo (el tab por defecto) dispara sus consultas
+ * mientras todavía está en vuelo. Antes eso devolvía la tabla COMPLETA de las
+ * 3 empresas — por eso Ventas y Compras mostraban data de Jhiro estando en
+ * Benji, mientras Packing y Guías (que cargan al hacer clic, ya con el
+ * contexto listo) salían bien.
+ *
+ * Todas las lecturas y escrituras del helper CRUD pasan por aquí primero.
+ */
+export async function esperarContextoEmpresa() {
+  if (_ctxEmpresa?.listo?.()) return
+  if (!_ctxEmpresa?.promesa) return
+  await _ctxEmpresa.promesa
+}
+export function empresasActivasCtx() { return _ctxEmpresa?.listo?.() ? _ctxEmpresa.activas() : null }
+export function empresaTrabajoCtx()  { return _ctxEmpresa?.listo?.() ? _ctxEmpresa.trabajo() : null }
+
+// Tablas y vistas DUEÑAS: tienen columna empresa_id propia y se filtran.
+// Lo que NO está aquí es catálogo compartido (items, contacts, plan_cuentas,
+// tipos_cambio, terminos_pago, marcas, categorias, partidas…) o
+// tabla hija que hereda la empresa por FK (detalle_*, lote_bultos, cuotas_*).
+// Un solo menú de restaurante, tres despensas distintas.
+export const TABLAS_EMPRESA = new Set([
+  // Ventas y compras
+  'ventas', 'compras', 'packing', 'orden_compra', 'sales_quotes',
+  'guias_ingreso_compra', 'guias_despacho_venta', 'guias_devolucion_compra', 'guias_remision',
+  // Inventario
+  'lotes', 'kardex', 'almacenes', 'ubicaciones', 'familias',
+  // Cobranzas y tesorería
+  'cuentas_cobrar', 'cuentas_pagar', 'cobros', 'cobros_lote', 'pagos', 'pagos_proveedores',
+  'letras_cambio', 'letras_refinanciacion', 'bancos', 'movimientos_banco',
+  // Documentos y correlativos
+  'series_documentos', 'secuencias_documentos',
+  // Contabilidad
+  'journal_entries', 'diarios', 'periodos_contables', 'pdt621_declaraciones',
+  // Importaciones
+  'carpetas_importacion', 'comercial_invoices', 'bill_of_ladings', 'dams',
+  'documentos_importacion', 'gastos_locales', 'importacion_parametros',
+  // Vistas que ya exponen empresa_id (SQL 87, parte 8)
+  'stock_ubicaciones', 'v_stock_bultos_zona', 'v_registro_ventas', 'v_registro_compras',
+  'v_cxc_pendientes', 'v_cxp_pendientes', 'v_antiguedad_cxc_cliente',
+  'v_libro_mayor', 'v_balance_comprobacion'
+])
+
+/** Aplica el filtro de empresas activas a una consulta, si corresponde. */
+export function filtrarPorEmpresa(q, table) {
+  if (!TABLAS_EMPRESA.has(table)) return q
+  const activas = empresasActivasCtx()
+  if (activas?.length) {
+    return activas.length === 1 ? q.eq('empresa_id', activas[0]) : q.in('empresa_id', activas)
+  }
+  // SIN contexto todavía: se filtra a NADA, no a TODO.
+  // Un filtro que "falla abierto" es peor que no tener filtro, porque enseña
+  // datos de otra empresa con cara de ser los correctos. Si todavía no sabes
+  // de quién es el almacén, no abres la puerta. El warning nombra la tabla
+  // para poder cazar a cualquier módulo que consulte demasiado pronto.
+  console.warn(`[multiempresa] "${table}" se consultó antes de tener contexto de empresa: se devuelve vacío. Revisa quién la llama.`)
+  return q.eq('empresa_id', -1)
+}
+
+// ── RED DE SEGURIDAD ────────────────────────────────────────────────────────
+// 96 llamadas del ERP usan `supabase.from(...)` directo, sin pasar por
+// getAll()/query(). Auditarlas una por una es caro y se escapa alguna, así que
+// se envuelve `from` UNA sola vez: cualquier `.select()` sobre una tabla dueña
+// sale ya filtrado por las empresas activas.
+//
+// Sólo se intercepta `select`. `insert`/`update`/`delete` quedan intactos a
+// propósito: ahí la protección son los triggers del SQL 87 (parte 7), que es
+// donde debe vivir una regla que no se puede permitir que falle.
+const _fromOriginal = supabase.from.bind(supabase)
+supabase.from = function (table) {
+  const qb = _fromOriginal(table)
+  if (!TABLAS_EMPRESA.has(table)) return qb
+  const _selectOriginal = qb.select.bind(qb)
+  qb.select = (...args) => filtrarPorEmpresa(_selectOriginal(...args), table)
+  return qb
+}
+
+/**
+ * Acceso CRUDO, sin el filtro de empresas activas.
+ *
+ * Existe para las pantallas de ADMINISTRACIÓN que deben ver las 3 empresas
+ * aunque el switch tenga una sola marcada (ej. el tab Multiempresa contando
+ * los lotes de cada una). Ojo: `from()` normal AGREGA su filtro, así que un
+ * `.eq('empresa_id', X)` sobre una empresa que no está activa daría 0 —
+ * los dos predicados se suman con AND, no se pisan.
+ *
+ * Fuera de administración NO se usa: saltarse el filtro es justamente lo que
+ * mezcla los datos de dos empresas.
+ */
+export function fromSinFiltro(table) { return _fromOriginal(table) }
+
+/** Sella un payload con la empresa de TRABAJO (una sola: el documento se firma con un solo sello). */
+export function sellarEmpresa(table, data) {
+  if (!TABLAS_EMPRESA.has(table) || !data || typeof data !== 'object') return data
+  if (data.empresa_id != null) return data            // el modal ya la eligió explícitamente
+  const emp = empresaTrabajoCtx()
+  if (emp == null) return data                        // deja que la BD reclame (NOT NULL): mejor que caiga en la empresa equivocada
+  return { ...data, empresa_id: emp }
+}
+
+
+// ============================================================================
 // HELPERS CRUD
 // ============================================================================
 
 export async function getAll(table) {
+  await esperarContextoEmpresa()
   try {
-    const { data, error } = await supabase.from(table).select('*')
+    const { data, error } = await supabase.from(table).select('*')   // el filtro de empresa lo pone el wrapper de `from`
     if (error) { console.error(`Error fetching ${table}:`, error); return [] }
     return data || []
   } catch (e) { console.error('Error en getAll:', e); return [] }
 }
 
 export async function getById(table, id) {
+  await esperarContextoEmpresa()
   try {
     const { data, error } = await supabase.from(table).select('*').eq('id', id).single()
     if (error) { console.error(`Error fetching ${table} by ID:`, error); return null }
@@ -41,7 +165,9 @@ export function ultimoErrorInsert() { return _ultimoErrorInsert }
 
 export async function insert(table, data) {
   _ultimoErrorInsert = null
+  await esperarContextoEmpresa()
   try {
+    data = sellarEmpresa(table, data)
     console.log("Datos a insertar:", data);
     const { data: result, error } = await supabase.from(table).insert([data]).select()
     if (error) {
@@ -73,6 +199,7 @@ function _interpretarErrorInsert(error, tabla) {
 }
 
 export async function update(table, id, data) {
+  await esperarContextoEmpresa()
   try {
     // Nunca enviar 'id' ni 'created_at' en el payload: las PK son GENERATED ALWAYS (error 428C9)
     const { id: _omit, created_at: _omit2, ...clean } = data || {}
@@ -138,8 +265,9 @@ function _interpretarErrorDelete(error, tabla) {
 }
 
 export async function query(table, filters = {}) {
+  await esperarContextoEmpresa()
   try {
-    let q = supabase.from(table).select('*')
+    let q = supabase.from(table).select('*')   // ídem: ya viene filtrado por empresa
     // Si un filtro llega en undefined/null (ej. función invocada sin argumento),
     // se ignora en vez de mandar "col=eq.undefined" a PostgREST, que Postgres
     // rechaza con 400 al castear y hacía que la consulta devolviera [] silenciosamente.

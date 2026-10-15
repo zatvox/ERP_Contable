@@ -11,7 +11,7 @@
 // packing). Así, aunque alguien escriba un número a mano, nunca se repite, y
 // una serie nueva con correlativo inicial 18642 arranca exactamente ahí.
 // ============================================================================
-import { supabase, getAll, insert, update, deleteRecord } from './supabase-client.js'
+import { supabase, getAll, insert, update, deleteRecord, empresaTrabajoCtx } from './supabase-client.js'
 
 let _seriesPromise = null
 let _seriesCache = []   // última lista cargada (para reglas síncronas, ej. acepta_dni)
@@ -19,7 +19,17 @@ let _seriesCache = []   // última lista cargada (para reglas síncronas, ej. ac
 export function invalidarSeries() { _seriesPromise = null }
 
 export async function getSeries(forzar = false) {
-  if (forzar || !_seriesPromise) _seriesPromise = getAll('series_documentos').then(r => { _seriesCache = r || []; return _seriesCache })
+  // MULTIEMPRESA: las series siguen a la EMPRESA DE TRABAJO, no al conjunto de
+  // empresas activas. Con Jhiro y Benji activas a la vez habría dos series
+  // FFFI y el correlativo saldría de cualquiera de las dos. Un correlativo se
+  // emite con un solo sello, igual que el documento que numera.
+  if (forzar || !_seriesPromise) {
+    _seriesPromise = getAll('series_documentos').then(r => {
+      const emp = empresaTrabajoCtx()
+      _seriesCache = (r || []).filter(s => emp == null || Number(s.empresa_id) === Number(emp))
+      return _seriesCache
+    })
+  }
   return await _seriesPromise
 }
 
@@ -259,11 +269,18 @@ export function parseNumeroGuia(numero) {
 }
 
 /** Mayor correlativo ya emitido con esa serie (guías de venta + devoluciones a proveedor). */
+// MULTIEMPRESA: Jhiro y Benji comparten los nombres de serie (FFFI, T001…).
+// El siguiente número NO puede salir de las empresas ACTIVAS del switch: con
+// las dos marcadas, Benji continuaría la numeración de Jhiro. Se acota a la
+// EMPRESA DE TRABAJO, que es la que va a firmar el documento.
 export async function maxCorrelativoGuia(serie) {
   let max = 0
+  const emp = empresaTrabajoCtx()
   for (const tabla of ['guias_despacho_venta', 'guias_devolucion_compra']) {
     try {
-      const { data } = await supabase.from(tabla).select('numero_guia').ilike('numero_guia', `${serie}-%`)
+      let q = supabase.from(tabla).select('numero_guia').ilike('numero_guia', `${serie}-%`)
+      if (emp != null) q = q.eq('empresa_id', emp)
+      const { data } = await q
       for (const g of (data || [])) { const n = parseNumeroGuia(g.numero_guia).correlativo; if (n > max) max = n }
     } catch { /* tabla aún no creada */ }
   }

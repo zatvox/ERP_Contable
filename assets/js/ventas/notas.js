@@ -1,3 +1,5 @@
+import { fechaDMY } from '../helpers.js'
+import { exigirEmpresaDeTrabajo } from '../empresa.js'
 // ============================================================================
 // ventas/notas.js — parte de ventas.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
@@ -27,8 +29,14 @@ import { serieDefault, getSerie, siguienteCorrelativo, registrarUsoSerie, series
 // Si el motivo anula la operación (01, 02 o 06 del Catálogo 09), además se
 // marca la venta original como anulada y su CxC como 'anulado'.
 
-window.abrirModalNotaCredito = function (ventaId) { _abrirNotaVenta(ventaId, TIPO_NC) }
-window.abrirModalNotaDebito  = function (ventaId) { _abrirNotaVenta(ventaId, TIPO_ND) }
+window.abrirModalNotaCredito = async function (ventaId) {
+  if (!await exigirEmpresaDeTrabajo('ventas', ventaId, 'La factura')) return
+  _abrirNotaVenta(ventaId, TIPO_NC)
+}
+window.abrirModalNotaDebito = async function (ventaId) {
+  if (!await exigirEmpresaDeTrabajo('ventas', ventaId, 'La factura')) return
+  _abrirNotaVenta(ventaId, TIPO_ND)
+}
 
 // ── Devolución de mercadería dentro de una NC ───────────────────────────────
 // Solo aplica a Notas de Crédito sobre una venta que SÍ tiene guía de
@@ -370,7 +378,7 @@ async function _abrirNotaVenta(ventaId, tipoNota) {
       tipoNota, contexto: 'venta',
       moneda: venta.moneda || 'PEN', tipoCambio: venta.tipo_cambio,
       documento: `${nombreTipoComprobante(venta.tipo_comprobante)} ${numeroOrigen}`,
-      detalle: `${cliente} · ${venta.fecha_emision || ''} · ${venta.moneda || 'PEN'} ${formatNumber(totalOrigen)}`,
+      detalle: `${cliente} · ${fechaDMY(venta.fecha_emision, '')} · ${venta.moneda || 'PEN'} ${formatNumber(totalOrigen)}`,
       totalOrigen: disponibleNC,
       saldoOrigen: saldo,
       igvPorcentaje: parseFloat(cfg.igvDefault) || 18,

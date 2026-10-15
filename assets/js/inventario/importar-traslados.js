@@ -5,6 +5,7 @@
 import { getCurrentUser } from '../auth-supabase.js'
 import { getItems, getLotes, getAlmacenes, getUbicaciones, getStockUbicaciones, addStockUbicacion, updateStockUbicacion, deleteStockUbicacion, addKardexMovimiento } from '../supabase-data.js'
 import { showToast } from '../helpers.js'
+import { mostrarCarga, actualizarCarga, ocultarCarga } from '../animaciones/index.js'
 import { _generarNumeroDocumentoTraslado } from './historial-movimientos.js'
 
 // ============================================================================
@@ -24,6 +25,8 @@ window.abrirModalImportarTraslados = function () {
   const log = document.getElementById('importar-traslados-log')
   if (resumen) resumen.innerHTML = ''
   if (log) log.innerHTML = ''
+  const chk = document.getElementById('chkSimularTraslados')
+  if (chk) chk.checked = true
   window.openModal('modal-importar-traslados')
 }
 
@@ -67,7 +70,8 @@ window.procesarImportacionTraslados = async function () {
   if (!file) { showToast('Selecciona un archivo primero', 'warning'); return }
 
   try {
-    if (btn) { btn.disabled = true; btn.textContent = 'Procesando...' }
+    const simular = !!document.getElementById('chkSimularTraslados')?.checked
+    if (btn) { btn.disabled = true; btn.textContent = simular ? 'Simulando...' : 'Procesando...' }
     if (resumenEl) resumenEl.innerHTML = '<p style="color:var(--text-secondary);">Leyendo archivo...</p>'
     if (logEl) logEl.innerHTML = ''
 
@@ -99,7 +103,14 @@ window.procesarImportacionTraslados = async function () {
     let ok = 0, fallidas = 0
     const logLineas = []
 
+    await mostrarCarga({
+      titulo: simular ? 'Simulando traslados internos' : 'Registrando traslados internos',
+      subtitulo: `${filas.length} traslado${filas.length === 1 ? '' : 's'}`,
+      total: filas.length
+    })
+
     for (let i = 0; i < filas.length; i++) {
+      actualizarCarga(i + 1)
       const numFila = i + 2 // fila 1 = encabezado
       const fila = filas[i]
       const skuRaw = fila.sku ?? fila.SKU
@@ -162,6 +173,12 @@ window.procesarImportacionTraslados = async function () {
         // agrupadas por documento), así que el número se genera POR FILA
         // aquí — a diferencia de guardarTrasladoInterno, donde un solo
         // traslado con varias líneas comparte un único numeroDocumento.
+        // Simulación: se valida TODO el archivo y no se escribe nada. Es la
+        // red antes de una carga masiva — deshacer 47 comprobantes a mano no
+        // es una opción. Ojo: los duplicados contra la BD no se detectan aquí,
+        // porque los atrapa el índice único recién al insertar.
+        if (simular) { ok++; continue }
+
         const almacenOrigenObjImport = almacenesById.get(zonaOrigen.almacen_id)
         const numeroDocumentoImport = await _generarNumeroDocumentoTraslado(almacenOrigenObjImport)
 
@@ -227,9 +244,9 @@ window.procesarImportacionTraslados = async function () {
     if (resumenEl) {
       resumenEl.innerHTML = `
         <div style="display:flex; gap:20px;">
-          <div><strong style="color:var(--color-success);">${ok}</strong> traslados creados</div>
+          <div><strong style="color:var(--color-success);">${ok}</strong> traslados ${simular ? 'válidos' : 'creados'}</div>
           <div><strong style="color:${fallidas > 0 ? 'var(--color-danger)' : 'var(--text-secondary)'};">${fallidas}</strong> filas con error</div>
-        </div>`
+        </div>${simular ? '<p style="color:var(--color-info); margin-top:8px;">Simulación: no se escribió nada. Desmarca «Sólo simular» para importar de verdad.</p>' : ''}`
     }
     if (logEl) {
       logEl.innerHTML = logLineas.length > 0
@@ -248,6 +265,7 @@ window.procesarImportacionTraslados = async function () {
     console.error('Error en procesarImportacionTraslados:', error)
     showToast('Error al procesar la importación', 'danger')
   } finally {
+    ocultarCarga()
     if (btn) { btn.disabled = false; btn.textContent = 'Procesar Importación' }
   }
 }

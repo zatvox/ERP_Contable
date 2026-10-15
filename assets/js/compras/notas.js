@@ -1,3 +1,4 @@
+import { fechaDMY } from '../helpers.js'
 // ============================================================================
 // compras/notas.js — parte de compras.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
@@ -333,7 +334,7 @@ async function _abrirNotaCompra(compraId, tipoNota) {
       tipoNota, contexto: 'compra',
       moneda: compra.currency || 'PEN', tipoCambio: compra.tipo_cambio,
       documento: `${compra.tipo_comprobante || ''} ${numeroOrigen}`.trim(),
-      detalle: `${compra.proveedor_nombre || ''} · ${compra.fecha_emision || ''} · ${compra.currency || 'PEN'} ${formatNumber(totalOrigen)}`,
+      detalle: `${compra.proveedor_nombre || ''} · ${fechaDMY(compra.fecha_emision, '')} · ${compra.currency || 'PEN'} ${formatNumber(totalOrigen)}`,
       totalOrigen: disponibleNC,
       saldoOrigen: saldo,
       igvPorcentaje: parseFloat(cfg.igvDefault) || 18,

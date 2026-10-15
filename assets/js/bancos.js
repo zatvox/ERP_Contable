@@ -1,3 +1,4 @@
+import { fechaDMY } from './helpers.js'
 // ============================================================================
 // BANCOS.JS — Tesorería: cuentas bancarias, movimientos, transferencias,
 // conciliación, reportes y configuración.
@@ -500,7 +501,7 @@ window.cargarMovimientos = function() {
                 const origen = _origenMov(m)
                 return `<tr>
                   <td style="font-family:monospace; font-weight:600;">${_numMB(m.id)}</td>
-                  <td>${m.fecha || '-'}</td>
+                  <td>${fechaDMY(m.fecha, '-')}</td>
                   ${bancoId ? '' : `<td>${_esc(_bancosMap[m.banco_id]?.nombre || '—')}</td>`}
                   <td><span class="badge ${esIngreso ? 'badge-success' : 'badge-danger'}">${m.tipo}</span></td>
                   <td>${_esc(m.concepto || '-')}</td>
@@ -777,7 +778,7 @@ window.cargarConciliacion = function() {
             <thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th style="text-align:right;">Monto</th><th>Acción</th></tr></thead>
             <tbody>
               ${sinConciliar.map(m => `<tr>
-                <td>${m.fecha}</td>
+                <td>${fechaDMY(m.fecha)}</td>
                 <td><span class="badge ${m.tipo === 'ingreso' ? 'badge-success' : 'badge-danger'}">${m.tipo}</span></td>
                 <td>${_esc(m.concepto || '')}</td>
                 <td style="text-align:right;">${formatNumber(m.monto)}</td>

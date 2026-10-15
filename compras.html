@@ -567,23 +567,20 @@
         <button class="modal-close" onclick="window.closeModal('modal-importar-compras')">✕</button>
       </div>
       <div style="padding: 20px;">
-        <p style="color: var(--text-secondary); margin-bottom: 12px;">
-          Sube un archivo Excel (.xlsx) o CSV con las columnas:
-          <code>proveedor_ruc, numero_comprobante, fecha_emision, moneda, tipo_cambio, sku, cantidad, precio_unitario, igv_porcentaje, termino_pago</code>.
-          Varias filas con el mismo <code>numero_comprobante</code> forman una sola compra con varias líneas.
-          Solo se llenan Compra + Detalle de Compra — <strong>no</strong> toca stock ni kardex: la Guía de Remisión de cada compra
-          importada queda pendiente, igual que si la hubieras registrado a mano.
-          Se crea también la Cuenta por Pagar (con su cronograma de cuotas) para cada comprobante.
-          <code>termino_pago</code> es opcional y texto libre — tal cual venga de tu ERP anterior (ej. <code>CONTADO</code>, <code>45 DIAS</code>, <code>60-75-90 DIAS</code>);
-          si viene vacío o no se reconoce, se usa el término habitual del proveedor o Contado.
-        </p>
-        <p style="margin-bottom: 16px;">
-          <a href="assets/sql/plantilla_importar_compras.xlsx" download style="color: var(--color-info);">📄 Descargar plantilla de ejemplo</a>
-        </p>
+        <p class="imp-resumen">Crea <strong>Compra + Detalle</strong> y su <strong>Cuenta por Pagar</strong>. <strong>No</strong> toca stock ni kardex: la guía de ingreso queda pendiente.</p>
+        <details class="imp-detalle">
+          <summary>Columnas y reglas</summary>
+          <div>Filas con el mismo <code>numero_comprobante</code> = <strong>una</strong> compra con varias líneas: repetir el número es la forma de cargar su detalle de productos. La cabecera (<code>proveedor_ruc, fecha_emision, moneda, tipo_cambio, tipo_comprobante, termino_pago</code>) debe venir <strong>igual en todas</strong> esas filas; si difiere, el documento se rechaza en vez de grabarse con los datos de la primera. Si el comprobante ya está registrado <strong>para ese mismo proveedor</strong>, se omite.<br>Columnas: <code>numero_comprobante, tipo_comprobante, proveedor_ruc, fecha_emision, moneda, tipo_cambio, termino_pago, sku, cantidad, precio_unitario, igv_porcentaje</code>.<br><code>tipo_comprobante</code> opcional, <strong>01</strong> por defecto. Con <strong>91</strong> (no domiciliado) la compra se marca <strong>importación</strong> y sus líneas van con <strong>IGV 0 y base no gravada</strong>: ese IGV se paga en aduanas con la DAM.<br><code>termino_pago</code> es texto libre (<code>CONTADO</code>, <code>45 DIAS</code>…). Si no se reconoce, usa el del proveedor o Contado.</div>
+        </details>
+        <p class="imp-plantilla"><a href="assets/sql/plantilla_importar_compras.xlsx" download>📄 Descargar plantilla de ejemplo</a></p>
         <div class="form-group">
           <label>Archivo (.xlsx / .csv) *</label>
           <input type="file" id="fileImportarCompras" accept=".xlsx,.xls,.csv">
         </div>
+        <label class="imp-check">
+          <input type="checkbox" id="chkSimularCompras" checked>
+          <span>Sólo simular: valida todo el archivo sin grabar nada.</span>
+        </label>
         <div id="importar-compras-resumen" style="margin-top: 16px;"></div>
         <div id="importar-compras-log" style="margin-top: 12px; max-height: 260px; overflow-y: auto; font-size: 13px;"></div>
       </div>
@@ -602,27 +599,19 @@
         <button class="modal-close" onclick="window.closeModal('modal-importar-guias')">✕</button>
       </div>
       <div style="padding: 20px;">
-        <p style="color: var(--text-secondary); margin-bottom: 12px;">
-          Sube un archivo Excel (.xlsx) o CSV con estas columnas:
-          <code>numero_guia, fecha_guia, compra_numero, sku, cantidad, numero_unidades, numero_lote, marca, codigo_partida, almacen, zona, observaciones</code>.
-        </p>
-        <ul style="color: var(--text-secondary); font-size: 0.85rem; margin: 0 0 12px 18px; line-height: 1.6;">
-          <li>Varias filas con el mismo <code>numero_guia</code> forman una sola guía con varias líneas.</li>
-          <li><code>compra_numero</code> es el N° de comprobante de la compra (o su referencia) a la que pertenece la guía.</li>
-          <li>Esta importación <strong>SÍ mueve stock</strong>: crea/suma lotes, escribe stock por zona y genera kardex — igual que registrar la guía a mano.</li>
-          <li>Si el <code>numero_lote</code> ya existe para ese producto, la cantidad <strong>se suma</strong> a ese lote (no se duplica).</li>
-          <li><code>numero_unidades</code> es <strong>obligatorio</strong> (N° de bultos/cajas, mayor a 0): sin esto el lote no puede calcular su peso por unidad y no se podrá sugerir unidades al vender.</li>
-        </ul>
-        <p style="margin-bottom: 16px;">
-          <a href="#" onclick="event.preventDefault(); window.descargarPlantillaGuiasCompra()" style="color: var(--color-info);">📄 Descargar plantilla de ejemplo</a>
-        </p>
+        <p class="imp-resumen"><strong>Sí mueve stock:</strong> crea o suma lotes, escribe stock por zona y genera kardex.</p>
+        <details class="imp-detalle">
+          <summary>Columnas y reglas</summary>
+          <div><code>numero_guia</code> es el N° de la <strong>Guía de Remisión del proveedor</strong>. Filas con el mismo número = <strong>una</strong> guía con varias líneas (producto + lote). La compra y la fecha deben coincidir en todas esas filas.<br>El duplicado se mide por <strong>proveedor + N° de guía</strong>: dos proveedores pueden usar la misma numeración y ambas guías son válidas.<br>Un mismo lote puede entrar en <strong>varias</strong> guías (entregas parciales), pero el total recibido <strong>no puede superar</strong> lo comprado en esa línea de la factura: ese exceso casi siempre es la misma recepción cargada dos veces.<br>Columnas: <code>numero_guia, fecha_guia, compra_numero, sku, cantidad, numero_unidades, numero_lote, marca, codigo_partida, almacen, zona, observaciones</code>.<br><code>compra_numero</code> es el comprobante (o la referencia) de la compra a la que pertenece.<br>Si el <code>numero_lote</code> ya existe para ese producto, la cantidad <strong>se suma</strong> a ese lote.<br><code>numero_unidades</code> es <strong>obligatorio</strong> (bultos, mayor a 0): sin él el lote no puede calcular su peso por unidad.</div>
+        </details>
+        <p class="imp-plantilla"><a href="#" onclick="event.preventDefault(); window.descargarPlantillaGuiasCompra()">📄 Descargar plantilla de ejemplo</a></p>
         <div class="form-group">
           <label>Archivo (.xlsx / .csv) *</label>
           <input type="file" id="fileImportarGuias" accept=".xlsx,.xls,.csv">
         </div>
-        <label style="display:flex; align-items:center; gap:8px; margin-top:10px; font-weight:normal; cursor:pointer;">
+        <label class="imp-check">
           <input type="checkbox" id="chkSimularGuias" checked>
-          <span>Simular primero (valida todo y muestra el resultado <strong>sin grabar nada</strong>)</span>
+          <span>Sólo simular: valida todo el archivo sin grabar nada.</span>
         </label>
         <div id="importar-guias-resumen" style="margin-top: 16px;"></div>
         <div id="importar-guias-log" style="margin-top: 12px; max-height: 300px; overflow-y: auto; font-size: 13px;"></div>

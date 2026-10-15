@@ -150,26 +150,19 @@
         <button class="modal-close" onclick="window.closeModal('modal-importar-guias-despacho')">✕</button>
       </div>
       <div style="padding: 20px;">
-        <p style="color: var(--text-secondary); margin-bottom: 12px;">
-          Sube un archivo Excel (.xlsx) o CSV con estas columnas:
-          <code>numero_guia, fecha_guia, venta_numero, sku, cantidad, numero_unidades, numero_lote, almacen, zona, observaciones</code>.
-        </p>
-        <ul style="color: var(--text-secondary); font-size: 0.85rem; margin: 0 0 12px 18px; line-height: 1.6;">
-          <li>Varias filas con el mismo <code>numero_guia</code> forman una sola guía con varias líneas.</li>
-          <li><code>venta_numero</code> es el comprobante de la venta (ej. <code>F001-00000123</code>).</li>
-          <li>Esta importación <strong>SÍ descuenta stock</strong>: valida el lote y la zona indicados, escribe kardex y actualiza el estado de despacho de la venta.</li>
-          <li>Una línea de venta se puede despachar desde varios lotes: repite la fila con el mismo <code>sku</code> y distinto <code>numero_lote</code>.</li>
-        </ul>
-        <p style="margin-bottom: 16px;">
-          <a href="#" onclick="event.preventDefault(); window.descargarPlantillaGuiasDespacho()" style="color: var(--color-info);">📄 Descargar plantilla de ejemplo</a>
-        </p>
+        <p class="imp-resumen"><strong>Sí descuenta stock:</strong> valida lote y zona, escribe kardex y actualiza el estado de despacho de la venta.</p>
+        <details class="imp-detalle">
+          <summary>Columnas y reglas</summary>
+          <div>Filas con el mismo <code>numero_guia</code> = <strong>una</strong> guía con varias líneas. Esta guía la emitimos <strong>nosotros</strong>: su número no se puede repetir en la empresa, y todas sus filas deben apuntar a la <strong>misma venta y fecha</strong>.<br>Columnas: <code>numero_guia, fecha_guia, venta_numero, sku, cantidad, numero_unidades, numero_lote, almacen, zona, observaciones</code>.<br><code>venta_numero</code> es el comprobante de la venta (ej. <code>F001-00000123</code>).<br>Una línea se puede despachar desde varios lotes: repite la fila con el mismo <code>sku</code> y distinto <code>numero_lote</code>.</div>
+        </details>
+        <p class="imp-plantilla"><a href="#" onclick="event.preventDefault(); window.descargarPlantillaGuiasDespacho()">📄 Descargar plantilla de ejemplo</a></p>
         <div class="form-group">
           <label>Archivo (.xlsx / .csv) *</label>
           <input type="file" id="fileImportarGuiasDespacho" accept=".xlsx,.xls,.csv">
         </div>
-        <label style="display:flex; align-items:center; gap:8px; margin-top:10px; font-weight:normal; cursor:pointer;">
+        <label class="imp-check">
           <input type="checkbox" id="chkSimularGuiasDespacho" checked>
-          <span>Simular primero (valida stock y muestra el resultado <strong>sin grabar nada</strong>)</span>
+          <span>Sólo simular: valida stock y todo el archivo sin grabar nada.</span>
         </label>
         <div id="importar-guias-despacho-resumen" style="margin-top: 16px;"></div>
         <div id="importar-guias-despacho-log" style="margin-top: 12px; max-height: 300px; overflow-y: auto; font-size: 13px;"></div>
@@ -182,6 +175,39 @@
   </div>
 
   <!-- MODAL: Importar Ventas Masivas (desde Excel/CSV) -->
+
+  <!-- IMPORTACIÓN MASIVA DE PACKINGS (ver assets/js/ventas/importar-packing.js) -->
+  <div id="modal-importar-packing" class="modal">
+    <div class="modal-content" style="max-width: 780px; max-height: 90vh; overflow-y: auto;">
+      <div class="modal-header">
+        <h3 class="modal-title">Importar Packings (masivo)</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-importar-packing')">✕</button>
+      </div>
+      <div style="padding: 20px;">
+        <div id="importar-packing-empresa"></div>
+        <p class="imp-resumen">Crea <strong>PK (cotización / orden de venta)</strong>. <strong>No</strong> mueve stock ni kardex; el lote queda informativo hasta facturar.</p>
+        <details class="imp-detalle">
+          <summary>Columnas y reglas</summary>
+          <div>Filas con el mismo <code>numero_documento</code> = <strong>un</strong> PK con varias líneas. La cabecera (<code>cliente_doc, fecha_emision, fecha_validez, moneda, tipo_cambio, termino_pago</code>) debe venir <strong>igual en todas</strong> esas filas.<br>Columnas: <code>numero_documento, cliente_doc, fecha_emision, fecha_validez, moneda, tipo_cambio, vendedor_doc, orden_compra_cliente, observaciones, estado, sku, numero_lote, descripcion, nota, cantidad, cantidad_unidades, precio_unitario, tipo_base, igv_porcentaje</code>.<br>Lee la hoja <code>DATOS</code>. Pensado para carga retroactiva: <code>cantidad_unidades</code> es opcional y por defecto 0.<br>Si una línea falla, <strong>no se importa ninguna línea de ese documento</strong>.</div>
+        </details>
+        <p class="imp-plantilla"><button type="button" class="btn btn-secondary btn-small" id="btnPlantillaPacking" onclick="window.descargarPlantillaPacking()">📄 Descargar plantilla de ejemplo</button><small>La plantilla se genera con tu catálogo vigente: trae <code>CAT_PRODUCTOS</code>, <code>CAT_LOTES</code>, <code>CAT_CLIENTES</code> y <code>CAT_SERIES_PK</code> de esta empresa.</small></p>
+        <div class="form-group">
+          <label>Archivo (.xlsx / .csv) *</label>
+          <input type="file" id="fileImportarPacking" accept=".xlsx,.xls,.csv">
+        </div>
+        <label class="imp-check">
+          <input type="checkbox" id="chkSimularPacking" checked>
+          <span>Sólo simular: valida todo el archivo sin grabar nada.</span>
+        </label>
+        <div id="importar-packing-resumen" style="margin-top: 16px;"></div>
+        <div id="importar-packing-log" style="margin-top: 4px; font-size: 13px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-importar-packing')">Cerrar</button>
+        <button class="btn btn-primary" id="btnProcesarImportarPacking" onclick="window.procesarImportacionPacking()">Procesar</button>
+      </div>
+    </div>
+  </div>
   <div id="modal-importar-ventas" class="modal">
     <div class="modal-content" style="max-width: 720px; max-height: 90vh; overflow-y: auto;">
       <div class="modal-header">
@@ -189,24 +215,20 @@
         <button class="modal-close" onclick="window.closeModal('modal-importar-ventas')">✕</button>
       </div>
       <div style="padding: 20px;">
-        <p style="color: var(--text-secondary); margin-bottom: 12px;">
-          Sube un archivo Excel (.xlsx) o CSV con las columnas:
-          <code>cliente_ruc, numero_documento, tipo_comprobante, fecha_emision, moneda, tipo_cambio, sku, numero_lote, zona_origen, cantidad, precio_unitario, igv_porcentaje, termino_pago</code>.
-          Varias filas con el mismo <code>numero_documento</code> forman una sola venta con varias líneas.
-          Cada línea se valida contra el stock EXACTO del lote y zona indicados (falla si no alcanza), igual que un traslado —
-          pero esta importación SOLO crea la venta y su detalle (el comprobante): NO descuenta stock ni genera kardex.
-          El despacho real (que sí mueve stock) se hace después, manual, en <strong>Guías de Despacho</strong>, una venta a la vez.
-          Se crea también la Cuenta por Cobrar (con su cronograma de cuotas) si el tipo de comprobante es Factura (01).
-          <code>termino_pago</code> es opcional y texto libre — tal cual venga de tu ERP anterior (ej. <code>CONTADO</code>, <code>45 DIAS</code>, <code>60-75-90 DIAS</code>);
-          si viene vacío o no se reconoce, se usa el término habitual del cliente o Contado.
-        </p>
-        <p style="margin-bottom: 16px;">
-          <a href="assets/sql/plantilla_importar_ventas.xlsx" download style="color: var(--color-info);">📄 Descargar plantilla de ejemplo</a>
-        </p>
+        <p class="imp-resumen">Crea <strong>Venta + Detalle</strong> y su <strong>Cuenta por Cobrar</strong> si es Factura. <strong>No</strong> descuenta stock: el despacho se hace después en Guías de Despacho.</p>
+        <details class="imp-detalle">
+          <summary>Columnas y reglas</summary>
+          <div>Filas con el mismo <code>numero_documento</code> = <strong>una</strong> venta con varias líneas. La cabecera (<code>cliente_ruc, tipo_comprobante, fecha_emision, moneda, tipo_cambio, termino_pago</code>) debe venir <strong>igual en todas</strong> esas filas. Si ese N° ya está registrado en la empresa, se omite.<br>Columnas: <code>numero_documento, cliente_ruc, tipo_comprobante, fecha_emision, moneda, tipo_cambio, termino_pago, sku, numero_lote, zona_origen, cantidad, precio_unitario, igv_porcentaje</code>.<br>Cada línea se <strong>valida</strong> contra el stock exacto del lote y zona indicados y falla si no alcanza, aunque no lo descuente.<br><code>termino_pago</code> es texto libre. Si no se reconoce, usa el del cliente o Contado.</div>
+        </details>
+        <p class="imp-plantilla"><a href="assets/sql/plantilla_importar_ventas.xlsx" download>📄 Descargar plantilla de ejemplo</a></p>
         <div class="form-group">
           <label>Archivo (.xlsx / .csv) *</label>
           <input type="file" id="fileImportarVentas" accept=".xlsx,.xls,.csv">
         </div>
+        <label class="imp-check">
+          <input type="checkbox" id="chkSimularVentas" checked>
+          <span>Sólo simular: valida todo el archivo sin grabar nada.</span>
+        </label>
         <div id="importar-ventas-resumen" style="margin-top: 16px;"></div>
         <div id="importar-ventas-log" style="margin-top: 12px; max-height: 260px; overflow-y: auto; font-size: 13px;"></div>
       </div>

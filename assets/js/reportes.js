@@ -537,7 +537,7 @@ export function refrescarReporte(id) {
           <tbody>
             ${filasMostrar.map(g => `
               <tr>
-                <td>${_esc(g._etiqueta)}</td>
+                <td>${_esc(String(g._etiqueta ?? '').replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, '$3/$2/$1'))}</td>
                 <td style="text-align:right; color:var(--text-secondary);">${g._filas.length}</td>
                 ${medidasUsar.map(m => `<td style="text-align:right;${_colorMedida(m, g[m.key])}">${formatearMedida(g[m.key], m.formato)}</td>`).join('')}
               </tr>`).join('')}

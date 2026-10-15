@@ -1,3 +1,5 @@
+import { fechaDMY } from './helpers.js'
+import { renderMultiempresa } from './multiempresa-config.js'
 // ============================================================================
 // PERFIL.JS — Mi Perfil (para todos los usuarios)
 // ============================================================================
@@ -56,6 +58,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 })
 
+/** El switch de empresa enlaza a perfil.html#multiempresa: abre ese tab solo. */
+function _abrirTabPorHash() {
+  const hash = (window.location.hash || '').replace('#', '')
+  if (!hash) return
+  const btn = document.querySelector(`#perfilTabs .tab-btn[data-tab="${hash}"]`)
+  if (btn) btn.click()
+}
+
 function initTabs() {
   const btns     = document.querySelectorAll('#perfilTabs .tab-btn')
   const contents = document.querySelectorAll('.tab-content')
@@ -68,8 +78,10 @@ function initTabs() {
       document.getElementById(`tab-${nombre}`)?.classList.add('active')
       if (nombre === 'actividad') cargarActividad()
       if (nombre === 'comandos') cargarComandos()
+      if (nombre === 'multiempresa') renderMultiempresa('perfil-multiempresa-container')
     })
   })
+  _abrirTabPorHash()
 }
 
 // El botón "Comandos" vive fuera del grupo "Perfil", así que initModuleNavDropdowns
@@ -271,7 +283,7 @@ async function cargarActividad() {
         <thead><tr><th>Fecha</th><th>Tipo</th><th>Documento</th><th style="text-align:right;">Monto</th><th></th></tr></thead>
         <tbody>
           ${registros.map(r => `<tr>
-            <td>${r.fecha || '-'}</td>
+            <td>${fechaDMY(r.fecha, '-')}</td>
             <td><span class="badge badge-info">${r.tipo}</span></td>
             <td>${_esc(r.doc)}</td>
             <td style="text-align:right;">${formatNumber(r.monto)}</td>

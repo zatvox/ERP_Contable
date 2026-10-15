@@ -1,3 +1,4 @@
+import { fechaDMY } from '../helpers.js'
 // ============================================================================
 // compras/anulacion.js — parte de compras.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
@@ -74,7 +75,7 @@ window.anularCompra = async function (id) {
     abrirModalAnulacion({
       titulo: 'Anular Factura de Compra',
       documento: comprobante || `Compra #${compra.id}`,
-      detalle: `${compra.proveedor_nombre || ''} · ${compra.fecha_emision || ''} · ${compra.currency || 'PEN'} ${formatNumber(compra.total)}`,
+      detalle: `${compra.proveedor_nombre || ''} · ${fechaDMY(compra.fecha_emision, '')} · ${compra.currency || 'PEN'} ${formatNumber(compra.total)}`,
       efectos, bloqueos,
       onConfirmar: async ({ motivo, fecha, usuarioId }) => {
         await updateCompra(id, camposAnulacion({ motivo, fecha, usuarioId }))
@@ -172,7 +173,7 @@ window.anularGuiaIngreso = async function (id) {
       titulo: 'Anular Guía de Ingreso',
       documento: `Guía ${guia.numero_guia}`,
       detalle: compra
-        ? `Compra ${compra.serie || ''}-${compra.numero || ''} · ${compra.proveedor_nombre || ''} · ${guia.fecha_guia || ''}`
+        ? `Compra ${compra.serie || ''}-${compra.numero || ''} · ${compra.proveedor_nombre || ''} · ${fechaDMY(guia.fecha_guia, '')}`
         : (guia.fecha_guia || ''),
       efectos, bloqueos,
       onConfirmar: async ({ motivo, fecha, usuarioId }) => {
@@ -253,7 +254,7 @@ window.verMotivoAnulacionCompra = async function (tipo, id) {
       : doc.numero_guia
     alert(
       `Documento: ${etiqueta}\n` +
-      `Fecha de anulación: ${doc.fecha_anulacion || '(no registrada)'}\n\n` +
+      `Fecha de anulación: ${fechaDMY(doc.fecha_anulacion, '(no registrada)')}\n\n` +
       `Motivo:\n${doc.motivo_anulacion || '(sin motivo registrado)'}`
     )
   } catch (e) {

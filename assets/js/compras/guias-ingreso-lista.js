@@ -1,3 +1,4 @@
+import { fechaDMY } from '../helpers.js'
 // ============================================================================
 // compras/guias-ingreso-lista.js — parte de compras.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
@@ -143,7 +144,7 @@ export async function renderGuias(forzar = false) {
     const busqueda = (document.getElementById('buscarGuia')?.value || '').trim().toLowerCase()
     const listaFiltrada = busqueda
       ? _guiasListaEnriquecida.filter(({ g, compra }) => {
-          return `${g.numero_guia || ''} ${g.fecha_guia || ''} ${g.observaciones || ''} ${compra?.referencia || ''} ${compra?.proveedor_nombre || ''}`
+          return `${g.numero_guia || ''} ${g.fecha_guia || ''} ${fechaDMY(g.fecha_guia, '')} ${g.observaciones || ''} ${compra?.referencia || ''} ${compra?.proveedor_nombre || ''}`
             .toLowerCase().includes(busqueda)
         })
       : _guiasListaEnriquecida
@@ -189,7 +190,7 @@ export async function renderGuias(forzar = false) {
             ? `<input type="checkbox" disabled title="Guía anulada: su stock ya fue retirado">`
             : `<input type="checkbox" class="gi-sel" value="${g.id}" onchange="window.actualizarBotonEliminarGuias()">`}</td>
           <td data-col-tabla="guias-ingreso" data-col="numero_guia"${colStyle('guias-ingreso','numero_guia')}><strong>${g.numero_guia}</strong></td>
-          <td data-col-tabla="guias-ingreso" data-col="fecha"${colStyle('guias-ingreso','fecha')}>${g.fecha_guia || '-'}</td>
+          <td data-col-tabla="guias-ingreso" data-col="fecha"${colStyle('guias-ingreso','fecha')}>${fechaDMY(g.fecha_guia, '-')}</td>
           <td data-col-tabla="guias-ingreso" data-col="referencia"${colStyle('guias-ingreso','referencia')}>${compra?.referencia || `Compra #${g.compra_id}`}</td>
           <td data-col-tabla="guias-ingreso" data-col="proveedor"${colStyle('guias-ingreso','proveedor')}>${compra?.proveedor_nombre || '-'}</td>
           <td data-col-tabla="guias-ingreso" data-col="num_productos" style="text-align:center;${colStyle('guias-ingreso','num_productos') ? ' display:none;' : ''}">${(detalles || []).length}</td>

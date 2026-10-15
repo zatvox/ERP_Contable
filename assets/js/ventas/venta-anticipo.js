@@ -1,3 +1,4 @@
+import { fechaDMY } from '../helpers.js'
 // ============================================================================
 // ventas/venta-anticipo.js — parte de ventas.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
@@ -304,7 +305,7 @@ export async function _cargarAnticiposDisponiblesCliente() {
             </td>
             <td style="padding:8px 10px;"><strong>${_esc(a.referencia || '—')}</strong>
               <div style="font-size:0.75rem; color:var(--text-secondary);">Factura de anticipo</div></td>
-            <td style="padding:8px 10px; white-space:nowrap;">${_esc(a.fecha || '')}</td>
+            <td style="padding:8px 10px; white-space:nowrap;">${_esc(fechaDMY(a.fecha, ''))}</td>
             <td style="padding:8px 10px; text-align:right; white-space:nowrap; font-weight:600;">${_esc(a.moneda)} ${fmt(a.saldo)}
               ${a.moneda !== monedaVenta ? `<div style="font-size:0.72rem; color:var(--color-warning); font-weight:400;">Moneda distinta a la venta (${_esc(monedaVenta)})</div>` : ''}</td>
             <td style="padding:8px 10px;">

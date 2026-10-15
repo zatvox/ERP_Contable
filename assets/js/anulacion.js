@@ -1,3 +1,4 @@
+import { fechaDMY } from './helpers.js'
 // ============================================================================
 // ANULACION.JS — Anulación de comprobantes (ventas, compras y guías)
 // ============================================================================
@@ -205,7 +206,7 @@ export function estaAnulado(doc) {
 /** Badge HTML uniforme para los listados. */
 export function badgeAnulado(doc) {
   if (!estaAnulado(doc)) return ''
-  const t = doc.fecha_anulacion ? ` title="Anulado el ${doc.fecha_anulacion}${doc.motivo_anulacion ? ' — ' + doc.motivo_anulacion : ''}"` : ''
+  const t = doc.fecha_anulacion ? ` title="Anulado el ${fechaDMY(doc.fecha_anulacion)}${doc.motivo_anulacion ? ' — ' + doc.motivo_anulacion : ''}"` : ''
   return `<span class="badge badge-danger"${t}>ANULADO</span>`
 }
 

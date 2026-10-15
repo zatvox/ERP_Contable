@@ -3,6 +3,8 @@
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
 import { getCurrentUser } from '../auth-supabase.js'
+import { empresaTrabajoCtx } from '../supabase-client.js'
+import { nombreEmpresa } from '../empresa.js'
 import { getItems, addItem, updateItem, deleteItem, getItemById, getLotes, getCategorias, getMarcas } from '../supabase-data.js'
 import { showToast } from '../helpers.js'
 import { cargarProductosSelect } from './formularios.js'
@@ -73,7 +75,22 @@ export async function renderProductos(forzar = false) {
     })
 
     if (filtrados.length === 0) {
-      container.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 20px;">Sin productos que coincidan con los filtros</p>'
+      // MULTIEMPRESA: `items` es catálogo COMPARTIDO por las 3 empresas, pero
+      // el stock sale de `lotes`, que sí tiene dueño. En una empresa sin lotes
+      // el filtro "Con stock" deja la tabla muda y parece que el catálogo no
+      // existe. Aquí se dice en voz alta qué pasó y se ofrece la salida.
+      const soloPorStock = fStock === 'con' && !fCat && !fBusqueda && productos.length > 0
+      container.innerHTML = soloPorStock
+        ? `<div style="text-align:center; padding:28px 20px; color:var(--text-secondary); line-height:1.6;">
+             <div style="font-size:1.6rem; margin-bottom:6px;">📦</div>
+             <strong style="color:var(--text-primary);">${productos.length} productos en el catálogo</strong><br>
+             El catálogo de productos es <strong>compartido</strong> por todas las empresas,
+             pero ninguno tiene stock en <strong>${_escProd(nombreEmpresa(empresaTrabajoCtx()))}</strong>.<br>
+             <small>El stock nace de los lotes, y los lotes son de cada empresa.</small><br>
+             <button class="btn btn-secondary btn-small" style="margin-top:12px;"
+                     onclick="window._prodVerTodos()">Ver todos los productos</button>
+           </div>`
+        : '<p style="text-align: center; color: var(--text-secondary); padding: 20px;">Sin productos que coincidan con los filtros</p>'
       return
     }
 
@@ -230,4 +247,18 @@ window.eliminarProducto = async function (prodId) {
     console.error('Error en eliminarProducto:', error)
     showToast('Error al eliminar producto', 'danger')
   }
+}
+
+
+/** Quita el filtro de stock y repinta — el catálogo compartido sí está ahí. */
+window._prodVerTodos = function () {
+  const sel = document.getElementById('filtroProdStock')
+  if (sel) sel.value = ''
+  if (typeof window.aplicarFiltrosProductos === 'function') window.aplicarFiltrosProductos()
+  else renderProductos(false)
+}
+
+function _escProd(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 }
