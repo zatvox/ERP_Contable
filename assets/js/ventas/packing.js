@@ -20,6 +20,7 @@ import { convertirEnBuscador, refrescarBuscador } from '../buscador-select.js'
 import { serieDefault, siguienteCorrelativo, formatearNumero, registrarUsoSerie } from '../series.js'
 import { _nombreCliente, _nombreVendedor, _stockTotalPorItem, _refrescarStockLoteEnVivo } from './helpers.js'
 import { menuAccionesFila } from '../main.js'
+import { registrarColumnas, colStyle } from '../col-menu.js'
 import { getTCVenta, textoAvisoTC } from '../sunat-api.js'
 import { vincularTCEnVivo } from '../tc-en-vivo.js'
 import { estaAnulado } from '../anulacion.js'
@@ -163,10 +164,12 @@ export async function renderPacking(forzar = true) {
         <h3 class="card-title">Packing (PK) — Cotizaciones / Órdenes de venta</h3>
         <div style="display:flex; gap:8px; align-items:center;">
           <button class="btn btn-primary btn-small" onclick="window.abrirModalPacking()">+ Nuevo PK</button>
+          <button id="btnEliminarPKSel" class="btn btn-danger btn-small" style="display:none;" onclick="window.eliminarPackingSeleccionados()">🗑 Eliminar seleccionados (0)</button>
           <button class="btn btn-secondary btn-small" onclick="window.abrirModalImportarPacking()" title="Cargar PK masivamente desde Excel (carga retroactiva)">📥 Importar masivo</button>
-          ${menuAccionesFila([
-            { icono: '🚫', label: 'Anular correlativo sin emitir (formato dañado)', onclick: 'window.abrirAnularCorrelativoPK()', peligro: true }
-          ])}
+          <div class="col-menu" id="pkColMenu">
+            <button type="button" class="card-menu-btn" onclick="window._pkColMenu(event)" title="Columnas a mostrar / ocultar y más opciones">⋮</button>
+            <div class="col-menu-dropdown" id="pkColMenuDD"></div>
+          </div>
         </div>
       </div>
       <div style="padding:12px 16px; border-bottom:1px solid var(--border-color); display:flex; gap:12px; flex-wrap:wrap;">
@@ -177,9 +180,11 @@ export async function renderPacking(forzar = true) {
         </select>
       </div>
       <div class="table-container"><table>
-        <thead><tr><th>N° PK</th><th>Emisión</th><th>Validez</th><th>Cliente</th><th>Vendedor</th><th>O/C</th>
-          <th>Moneda</th><th style="text-align:right;">Total</th><th>Estado</th><th>Factura</th><th>Acciones</th></tr></thead>
-        <tbody id="tabla-packing-body"><tr><td colspan="11" style="text-align:center;">Cargando...</td></tr></tbody>
+        <thead><tr>
+          ${_th('sel', '<input type="checkbox" id="selTodosPK" style="width:auto; margin:0;" onchange="window.toggleSelTodosPK(this.checked)" title="Seleccionar todos los eliminables">', 'width:32px;')}
+          ${_th('numero', 'N° PK')}${_th('emision', 'Emisión')}${_th('validez', 'Validez')}${_th('cliente', 'Cliente')}${_th('vendedor', 'Vendedor')}${_th('oc', 'O/C')}
+          ${_th('moneda', 'Moneda')}${_th('total', 'Total', 'text-align:right;')}${_th('estado', 'Estado')}${_th('factura', 'Factura')}${_th('acciones', 'Acciones')}</tr></thead>
+        <tbody id="tabla-packing-body"><tr><td colspan="12" style="text-align:center;">Cargando...</td></tr></tbody>
       </table></div>`
   }
   try {
@@ -219,8 +224,69 @@ export async function renderPacking(forzar = true) {
       for (const p of sospechosos) { try { await recalcularEstadoPacking(p.id) } catch (e) { console.warn('Recalculo PK', p.numero, e) } }
     }
   } catch (e) {
-    document.getElementById('tabla-packing-body').innerHTML = `<tr><td colspan="11" style="text-align:center; color:var(--color-danger);">${_esc(e.message)}</td></tr>`
+    document.getElementById('tabla-packing-body').innerHTML = `<tr><td colspan="12" style="text-align:center; color:var(--color-danger);">${_esc(e.message)}</td></tr>`
   }
+}
+
+// ─── Columnas (menú ⋮) y selección masiva — 2026-10-16 ─────────────────────
+registrarColumnas('packing', [
+  { key: 'sel', label: 'Selección (☑)' }, { key: 'numero', label: 'N° PK' }, { key: 'emision', label: 'Emisión' },
+  { key: 'validez', label: 'Validez' }, { key: 'cliente', label: 'Cliente' }, { key: 'vendedor', label: 'Vendedor' },
+  { key: 'oc', label: 'O/C' }, { key: 'moneda', label: 'Moneda' }, { key: 'total', label: 'Total' },
+  { key: 'estado', label: 'Estado' }, { key: 'factura', label: 'Factura' }, { key: 'acciones', label: 'Acciones' }
+])
+const _cs = k => colStyle('packing', k)
+const _csR = (k, extra = '') => { const oc = colStyle('packing', k) !== ''; return ` style="${extra}${oc ? ' display:none;' : ''}"` }
+const _td = (k, html, extra = '') => `<td data-col-tabla="packing" data-col="${k}"${extra ? _csR(k, extra) : _cs(k)}>${html}</td>`
+const _th = (k, lbl, extra = '') => `<th data-col-tabla="packing" data-col="${k}"${extra ? _csR(k, extra) : _cs(k)}>${lbl}</th>`
+
+/** Se puede eliminar: sin factura vigente y en borrador / enviado / anulado.
+ *  (El PK no mueve stock, CxC ni asientos: borrarlo no deja nada colgado.) */
+const _pkEliminable = p => !p.venta_id && !(p._facturas?.length) && ['borrador', 'enviado', 'anulado'].includes(p.estado)
+
+/** ⋮ del header: columnas para mostrar/ocultar + acción de correlativo. */
+window._pkColMenu = function (ev) {
+  ev?.stopPropagation()
+  window._colMenuToggle('packing', 'pkColMenu', 'pkColMenuDD')
+  const dd = document.getElementById('pkColMenuDD')
+  if (dd && document.getElementById('pkColMenu')?.classList.contains('open') && !dd.querySelector('.pk-extra')) {
+    dd.insertAdjacentHTML('beforeend', `<div class="col-menu-separador pk-extra"></div>
+      <label class="pk-extra" style="color:var(--color-danger);" onclick="document.getElementById('pkColMenu').classList.remove('open'); window.abrirAnularCorrelativoPK()">🚫 Anular correlativo sin emitir</label>`)
+  }
+}
+
+window.toggleSelTodosPK = function (checked) {
+  document.querySelectorAll('.pk-sel:not(:disabled)').forEach(cb => { cb.checked = checked })
+  window.actualizarBotonEliminarPK()
+}
+window.actualizarBotonEliminarPK = function () {
+  const n = document.querySelectorAll('.pk-sel:checked').length
+  const btn = document.getElementById('btnEliminarPKSel')
+  if (!btn) return
+  btn.style.display = n > 0 ? 'inline-flex' : 'none'
+  btn.textContent = `🗑 Eliminar seleccionados (${n})`
+}
+
+async function _eliminarPackingCore(pk) {
+  if (!_pkEliminable(pk)) throw new Error(`${pk.numero}: solo se eliminan PK sin factura (borrador, enviado o anulado)`)
+  try { await eliminarAdjuntosDe('packing', pk.id) } catch { /* sin adjuntos / tabla */ }
+  const ok = await deleteRecord('packing', pk.id)
+  if (!ok) throw new Error(`${pk.numero}: no se pudo eliminar (revisa permisos/RLS)`)
+}
+
+window.eliminarPackingSeleccionados = async function () {
+  const ids = [...document.querySelectorAll('.pk-sel:checked')].map(cb => parseInt(cb.value))
+  const pks = ids.map(id => _pkLista.find(p => p.id === id)).filter(Boolean)
+  if (!pks.length) { showToast('Selecciona al menos un PK', 'warning'); return }
+  const lista = pks.slice(0, 12).map(p => `• ${p.numero} — ${p._cliente || 's/cliente'} (${(ESTADOS[p.estado] || [p.estado])[0]})`).join('\n') + (pks.length > 12 ? `\n… y ${pks.length - 12} más` : '')
+  if (!confirm(`¿Eliminar definitivamente ${pks.length} PK?\n\n${lista}\n\nSe borran sus líneas y adjuntos. Los números NO se reutilizan.`)) return
+  let ok = 0; const errores = []
+  for (const pk of pks) {
+    try { await _eliminarPackingCore(pk); ok++ } catch (e) { errores.push(e.message) }
+  }
+  if (ok) showToast(`${ok} PK eliminado(s)`, 'success')
+  if (errores.length) showToast(`${errores.length} no se pudo(eron) eliminar: ${errores.join(' | ')}`, 'danger', 9000)
+  await renderPacking(true)
 }
 
 window.filtrarPacking = function () {
@@ -231,26 +297,32 @@ window.filtrarPacking = function () {
   const hoy = _hoy()
   const lista = _pkLista.filter(p => (!fe || p.estado === fe) &&
     (!q || `${p.numero} ${p._cliente || ''} ${p.orden_compra_cliente || ''}`.toLowerCase().includes(q)))
-  if (!lista.length) { tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;">Sin PK registrados</td></tr>'; return }
+  const selTodos = document.getElementById('selTodosPK'); if (selTodos) selTodos.checked = false
+  window.actualizarBotonEliminarPK?.()
+  if (!lista.length) { tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;">Sin PK registrados</td></tr>'; window.actualizarBotonEliminarPK(); return }
   tbody.innerHTML = lista.map(p => {
     const [lbl, cls] = ESTADOS[p.estado] || [p.estado, 'badge-secondary']
     const abierto = p.estado === 'borrador' || p.estado === 'enviado' || p.estado === 'parcial'
     const vencido = abierto && p.fecha_validez && p.fecha_validez < hoy
+    const elim = _pkEliminable(p)
     return `<tr style="${p.estado === 'anulado' ? 'opacity:.55;' : ''}">
-      <td><strong>${_esc(p.numero)}</strong>${p._adjuntos ? ` <span title="${p._adjuntos} adjunto(s)" style="cursor:pointer;" onclick="window.verAdjuntosPacking(${p.id})">📎</span>` : ''}</td>
-      <td>${_esc(fechaDMY(p.fecha_emision, ''))}</td>
-      <td style="${vencido ? 'color:var(--color-danger); font-weight:600;' : ''}" title="${vencido ? 'Validez vencida' : ''}">${_esc(fechaDMY(p.fecha_validez, '—'))}</td>
-      <td>${p._sinEmitir ? `<em style="color:var(--text-secondary);">Formato anulado sin emitir${p.observaciones ? ' — ' + _esc(p.observaciones.replace(/^ANULADO SIN EMITIR:\s*/, '')) : ''}</em>` : _esc(p._cliente || '-')}</td>
-      <td>${_esc(_nombreVendedor(p.vendedor_id))}</td>
-      <td>${_esc(p.orden_compra_cliente || '—')}</td>
-      <td>${_esc(p.moneda)}</td>
-      <td style="text-align:right; font-weight:600;">${formatNumber(p.total)}</td>
-      <td><span class="badge ${cls}">${lbl}</span></td>
-      <td>${p._facturas?.length
+      ${_td('sel', elim
+        ? `<input type="checkbox" class="pk-sel" value="${p.id}" style="width:auto; margin:0;" onchange="window.actualizarBotonEliminarPK()">`
+        : `<input type="checkbox" disabled style="width:auto; margin:0;" title="Tiene factura: no se puede eliminar">`, 'width:32px;')}
+      <td data-col-tabla="packing" data-col="numero"${_cs('numero')}><strong>${_esc(p.numero)}</strong>${p._adjuntos ? ` <span title="${p._adjuntos} adjunto(s)" style="cursor:pointer;" onclick="window.verAdjuntosPacking(${p.id})">📎</span>` : ''}</td>
+      ${_td('emision', _esc(fechaDMY(p.fecha_emision, '')))}
+      <td data-col-tabla="packing" data-col="validez"${_csR('validez', vencido ? 'color:var(--color-danger); font-weight:600;' : '')} title="${vencido ? 'Validez vencida' : ''}">${_esc(fechaDMY(p.fecha_validez, '—'))}</td>
+      <td data-col-tabla="packing" data-col="cliente"${_cs('cliente')}>${p._sinEmitir ? `<em style="color:var(--text-secondary);">Formato anulado sin emitir${p.observaciones ? ' — ' + _esc(p.observaciones.replace(/^ANULADO SIN EMITIR:\s*/, '')) : ''}</em>` : _esc(p._cliente || '-')}</td>
+      ${_td('vendedor', _esc(_nombreVendedor(p.vendedor_id)))}
+      ${_td('oc', _esc(p.orden_compra_cliente || '—'))}
+      ${_td('moneda', _esc(p.moneda))}
+      ${_td('total', formatNumber(p.total), 'text-align:right; font-weight:600;')}
+      ${_td('estado', `<span class="badge ${cls}">${lbl}</span>`)}
+      <td data-col-tabla="packing" data-col="factura"${_cs('factura')}>${p._facturas?.length
         ? `${p._facturas.map(f => `<div style="white-space:nowrap;">${_esc(f.numero)}</div>`).join('')}
            ${p.estado === 'parcial' ? `<div title="Facturado sobre el subtotal del PK" style="margin-top:3px; height:5px; background:var(--bg-secondary); border-radius:3px; overflow:hidden;"><div style="height:100%; width:${p._avance.toFixed(0)}%; background:var(--color-warning);"></div></div><small style="color:var(--text-secondary);">${p._avance.toFixed(0)} % facturado</small>` : ''}`
         : (p.venta_id ? _esc(_pkVentasMap.get(p.venta_id) || '#' + p.venta_id) : '—')}</td>
-      <td class="col-acciones">${menuAccionesFila([
+      <td class="col-acciones" data-col-tabla="packing" data-col="acciones"${_cs('acciones')}>${menuAccionesFila([
         abierto ? { icono: '🧾', label: 'Facturar', onclick: `window.facturarPacking(${p.id})` } : null,
         { icono: abierto ? '✏️' : '👁', label: abierto ? 'Editar' : 'Ver detalle', onclick: `window.abrirModalPacking(${p.id})` },
         { icono: '📑', label: 'Duplicar', onclick: `window.duplicarPacking(${p.id})` },   // cualquier estado, incluso anulado (2026-10-10)
@@ -258,8 +330,8 @@ window.filtrarPacking = function () {
         p._adjuntos ? { icono: '📎', label: `Ver adjunto${p._adjuntos > 1 ? 's (' + p._adjuntos + ')' : ''}`, onclick: `window.verAdjuntosPacking(${p.id})` } : null,
         abierto ? { separador: true } : null,
         (abierto && !p._facturas?.length) ? { icono: '🚫', label: 'Anular', onclick: `window.anularPacking(${p.id})`, peligro: true } : null,
-        (p.estado === 'anulado' && !p.venta_id) ? { separador: true } : null,
-        (p.estado === 'anulado' && !p.venta_id) ? { icono: '✕', label: 'Eliminar', onclick: `window.eliminarPacking(${p.id})`, peligro: true } : null
+        elim ? { separador: true } : null,
+        elim ? { icono: '✕', label: 'Eliminar', onclick: `window.eliminarPacking(${p.id})`, peligro: true } : null
       ])}</td></tr>`
   }).join('')
 }
@@ -451,7 +523,7 @@ function _asegurarModal() {
         </div>
         <div style="flex:0.9 1 120px;">
           <label style="font-size:0.8rem;">Precio Unit. *</label>
-          <input type="number" id="pkPrecio" step="0.0001" placeholder="0.00" oninput="window._pkPreviewLinea()">
+          <input type="number" id="pkPrecio" step="0.000001" placeholder="0.00" oninput="window._pkPreviewLinea()">
         </div>
         <div style="flex:1 1 140px;">
           <label style="font-size:0.8rem;">Tipo IGV</label>
@@ -603,7 +675,7 @@ function _calcLinea(cant, precio, igvTipo) {
   const incl = igvTipo === 'gravada_incluido'
   const pct = (igvTipo === 'gravada' || incl) ? 18 : 0
   let subtotal, igvMonto, total, precioBase
-  if (incl) { total = +(cant * precio).toFixed(2); subtotal = +(total / 1.18).toFixed(2); igvMonto = +(total - subtotal).toFixed(2); precioBase = +(subtotal / cant).toFixed(4) }
+  if (incl) { total = +(cant * precio).toFixed(2); subtotal = +(total / 1.18).toFixed(2); igvMonto = +(total - subtotal).toFixed(2); precioBase = +(subtotal / cant).toFixed(6) }
   else { subtotal = +(cant * precio).toFixed(2); igvMonto = +(subtotal * pct / 100).toFixed(2); total = +(subtotal + igvMonto).toFixed(2); precioBase = precio }
   return { subtotal, igv_monto: igvMonto, total_linea: total, precio_unitario: precioBase, tipo_base: incl ? 'gravada' : igvTipo, igv_porcentaje: pct }
 }
@@ -715,7 +787,7 @@ window._pkPintarLineas = function () {
     <td>${_esc(l.descripcion)}${l.nota ? `<br><small style="color:var(--text-secondary); font-style:italic;">${_esc(l.nota)}</small>` : ''}</td>
     <td style="text-align:right;">${formatNumber(l.cantidad)}${l.id && _pkFactPorLinea[l.id] ? `<br><small style="color:var(--color-success); white-space:nowrap;">fact. ${formatNumber(_pkFactPorLinea[l.id])}</small><br><small style="color:var(--color-warning); white-space:nowrap;">pend. ${formatNumber(Math.max(0, l.cantidad - _pkFactPorLinea[l.id]))}</small>` : ''}</td><td>${_esc(l.unidad_medida)}</td>
     <td style="text-align:right;">${l.cantidad_unidades || '—'}</td>
-    <td style="text-align:right;">${(+l.precio_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+    <td style="text-align:right;">${(+l.precio_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td>
     <td>${l.tipo_base === 'gravada' ? 'Gravada' : _esc(l.tipo_base)}</td>
     <td style="text-align:right;">${formatNumber(l.subtotal)}</td>
     <td style="text-align:right;">${formatNumber(l.igv_monto)}</td>
@@ -1102,12 +1174,10 @@ window.guardarAnularCorrelativoPK = async function () {
 window.eliminarPacking = async function (id) {
   const pk = _pkLista.find(p => p.id === id)
   if (!pk) return
-  if (pk.estado !== 'anulado' || pk.venta_id) { showToast('Solo se elimina un PK anulado y sin factura', 'warning'); return }
+  if (!_pkEliminable(pk)) { showToast('Solo se elimina un PK sin factura (borrador, enviado o anulado)', 'warning'); return }
   if (!confirm(`¿Eliminar definitivamente ${pk.numero}?\n\nSe borran sus líneas y adjuntos. El número NO se reutiliza.`)) return
   try {
-    try { await eliminarAdjuntosDe('packing', id) } catch { /* sin adjuntos / tabla */ }
-    const ok = await deleteRecord('packing', id)
-    if (!ok) throw new Error('No se pudo eliminar (revisa permisos/RLS)')
+    await _eliminarPackingCore(pk)
     showToast(`${pk.numero} eliminado`, 'success')
     await renderPacking(true)
   } catch (e) { showToast('Error: ' + e.message, 'danger', 7000) }
@@ -1232,7 +1302,7 @@ function _pkFacPintar() {
       <td style="padding:8px 10px;">
         <input type="number" step="1" min="0" value="${f.unid || 0}" ${!f.sel || f.retirar || completa ? 'disabled' : ''}
                oninput="window._pkFacUnid(${i}, this.value)" style="width:100%; text-align:right;"></td>
-      <td style="padding:8px 10px; text-align:right;">${(+l.precio_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+      <td style="padding:8px 10px; text-align:right;">${(+l.precio_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td>
       <td style="padding:8px 10px; text-align:right; font-weight:600;">${sub ? formatNumber(sub) : '—'}</td>
       <td style="padding:8px 10px; text-align:center;">
         ${completa ? '' : `<button type="button" class="btn btn-small ${f.retirar ? 'btn-secondary' : 'btn-danger'}" onclick="window._pkFacRetirar(${i})"
@@ -1404,7 +1474,7 @@ window.imprimirPacking = async function (id) {
   </div>
   <table class="l"><thead><tr><th>Descripción</th><th>Cantidad</th><th>UdM</th><th>Precio unitario</th><th>Total</th></tr></thead><tbody>
     ${lineas.map(l => `<tr><td>${_esc(l.descripcion)}</td><td class="c">${formatNumber(l.cantidad)}</td><td class="c">${_esc((l.unidad_medida || '').toLowerCase())}</td>
-      <td class="c">${sim} ${(+l.precio_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td><td class="r">${f(l.subtotal)}</td></tr>
+      <td class="c">${sim} ${(+l.precio_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td><td class="r">${f(l.subtotal)}</td></tr>
       ${l.nota ? `<tr class="nota"><td colspan="5">${_esc(l.nota)}</td></tr>` : ''}`).join('')}
     ${pk.observaciones ? `<tr class="nota"><td colspan="5">${_esc(pk.observaciones).replace(/\n/g, '<br>')}</td></tr>` : ''}
   </tbody></table>

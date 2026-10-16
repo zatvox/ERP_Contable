@@ -344,7 +344,7 @@ function _pintarLineasEdicionVenta() {
       <td style="text-align:right;">${(parseFloat(d.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 3 })}</td>
       <td>${_esc(d.unidad_medida || '-')}</td>
       <td style="text-align:right;">
-        <input type="number" step="0.0001" min="0.0001" value="${parseFloat(d.precio_unitario || 0)}"
+        <input type="number" step="0.000001" min="0.000001" value="${parseFloat(d.precio_unitario || 0)}"
           id="evLineaPrecio-${idx}" style="width:100px; text-align:right;" ${(_evModoVista || c.bloqueos.precios) ? 'disabled' : ''}
           oninput="window.onCambiarLineaPrecioEdicion(${idx})">
       </td>
@@ -387,7 +387,7 @@ window.onCambiarLineaPrecioEdicion = function (idx) {
     totalLinea = parseFloat((cantidad * precio).toFixed(2))
     subtotal   = parseFloat((totalLinea / 1.18).toFixed(2))
     igvMonto   = parseFloat((totalLinea - subtotal).toFixed(2))
-    precioGuardar = parseFloat((subtotal / cantidad).toFixed(4))
+    precioGuardar = parseFloat((subtotal / cantidad).toFixed(6))
   } else {
     subtotal  = parseFloat((cantidad * precio).toFixed(2))
     igvMonto  = parseFloat((subtotal * igvPct / 100).toFixed(2))

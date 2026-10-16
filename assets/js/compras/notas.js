@@ -174,7 +174,7 @@ function _renderDetalleNotaCompra() {
         <input type="number" id="nccDet-${idx}-cantidad" value="${l.cantidadDisponible}" step="0.01" min="0.01" max="${l.cantidadDisponible}" style="width:100%;" disabled oninput="window.onCambiarLineaDetalleNotaCompra(${idx})">
       </td>
       <td style="width:110px; padding:8px 10px;">
-        <input type="number" id="nccDet-${idx}-precio" value="${l.precioDefault}" step="0.0001" min="0" style="width:100%;" disabled oninput="window.onCambiarLineaDetalleNotaCompra(${idx})">
+        <input type="number" id="nccDet-${idx}-precio" value="${l.precioDefault}" step="0.000001" min="0" style="width:100%;" disabled oninput="window.onCambiarLineaDetalleNotaCompra(${idx})">
       </td>
       <td style="width:130px; padding:8px 10px;">
         <select id="nccDet-${idx}-igv" style="width:100%;" disabled onchange="window.onCambiarLineaDetalleNotaCompra(${idx})">

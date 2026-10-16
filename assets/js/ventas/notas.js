@@ -174,7 +174,7 @@ function _renderDevolucionStockNota() {
 // son editables; el importe de la NC se AUTOCALCULA (Σ cantidad × precio +
 // IGV de cada línea) pero sigue siendo editable abajo.
 function _fmtPrecioNC(n) {
-  return (parseFloat(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
+  return (parseFloat(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })
 }
 
 function _unidadesSugeridasNC(l, cantidad) {

@@ -141,7 +141,7 @@ function _celdaCostoReal(lote) {
   const v = lote.costo_real != null ? parseFloat(lote.costo_real) : ''
   return `<div style="display:flex; align-items:center; gap:4px;">
       <span style="color:var(--text-secondary); font-size:0.8rem;">${_simMoneda(lote.moneda)}</span>
-      <input type="number" step="0.0001" min="0" value="${v === '' ? '' : v}" placeholder="—"
+      <input type="number" step="0.000001" min="0" value="${v === '' ? '' : v}" placeholder="—"
              data-lote-real="${lote.id}" data-valor="${v === '' ? '' : v}"
              style="width:96px; padding:3px 6px; text-align:right;"
              onkeydown="if(event.key==='Enter'){this.blur()} if(event.key==='Escape'){this.value=this.dataset.valor; this.blur()}"
@@ -158,7 +158,7 @@ window.guardarCostoRealLote = async function (loteId, input) {
   }
   const cif = lote ? _cifDe(lote) : 0
   if (valor !== null && cif && valor < cif &&
-      !confirm(`El costo real (${valor}) es MENOR que el costo CIF (${cif.toFixed(4)}).\n\n¿Guardarlo igual?`)) {
+      !confirm(`El costo real (${valor}) es MENOR que el costo CIF (${cif.toFixed(6)}).\n\n¿Guardarlo igual?`)) {
     input.value = input.dataset.valor; return
   }
   input.disabled = true

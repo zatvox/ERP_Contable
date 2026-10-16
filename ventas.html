@@ -188,7 +188,7 @@
         <p class="imp-resumen">Crea <strong>PK (cotización / orden de venta)</strong>. <strong>No</strong> mueve stock ni kardex; el lote queda informativo hasta facturar.</p>
         <details class="imp-detalle">
           <summary>Columnas y reglas</summary>
-          <div>Filas con el mismo <code>numero_documento</code> = <strong>un</strong> PK con varias líneas. La cabecera (<code>cliente_doc, fecha_emision, fecha_validez, moneda, tipo_cambio, termino_pago</code>) debe venir <strong>igual en todas</strong> esas filas.<br>Columnas: <code>numero_documento, cliente_doc, fecha_emision, fecha_validez, moneda, tipo_cambio, vendedor_doc, orden_compra_cliente, observaciones, estado, sku, numero_lote, descripcion, nota, cantidad, cantidad_unidades, precio_unitario, tipo_base, igv_porcentaje</code>.<br>Lee la hoja <code>DATOS</code>. Pensado para carga retroactiva: <code>cantidad_unidades</code> es opcional y por defecto 0.<br>Si una línea falla, <strong>no se importa ninguna línea de ese documento</strong>.</div>
+          <div>Filas con el mismo <code>numero_documento</code> = <strong>un</strong> PK con varias líneas. La cabecera (<code>cliente_doc, fecha_emision, fecha_validez, moneda, tipo_cambio, termino_pago</code>) debe venir <strong>igual en todas</strong> esas filas.<br>Columnas: <code>numero_documento, cliente_doc, fecha_emision, fecha_validez, moneda, tipo_cambio, <strong>termino_pago</strong>, vendedor_doc, orden_compra_cliente, observaciones, estado, sku, numero_lote, descripcion, nota, cantidad, cantidad_unidades, precio_unitario, tipo_base, igv_porcentaje</code>.<br>Tres columnas que <strong>conviene dejar vacías</strong>: <code>cantidad_unidades</code> la calcula el sistema con el peso por unidad del lote; <code>descripcion</code> queda como <code>[SKU] NOMBRE</code>, igual que al crear un PK a mano; y <code>termino_pago</code> vacío toma el término habitual del cliente.<br><code>vendedor_doc</code> se busca entre los contactos con <strong>rol Vendedor</strong>.<br>Lee la hoja <code>DATOS</code>. Pensado para carga retroactiva: <code>cantidad_unidades</code> es opcional y por defecto 0.<br>Si una línea falla, <strong>no se importa ninguna línea de ese documento</strong>.</div>
         </details>
         <p class="imp-plantilla"><button type="button" class="btn btn-secondary btn-small" id="btnPlantillaPacking" onclick="window.descargarPlantillaPacking()">📄 Descargar plantilla de ejemplo</button><small>La plantilla se genera con tu catálogo vigente: trae <code>CAT_PRODUCTOS</code>, <code>CAT_LOTES</code>, <code>CAT_CLIENTES</code> y <code>CAT_SERIES_PK</code> de esta empresa.</small></p>
         <div class="form-group">
@@ -564,7 +564,7 @@
           </div>
           <div style="flex:0.9 1 120px;">
             <label style="font-size:0.8rem;">Precio Unit.</label>
-            <input type="number" id="ventaLineaPrecio" step="0.0001" placeholder="0.0000" oninput="window._actualizarPreviewLineaVenta()">
+            <input type="number" id="ventaLineaPrecio" step="0.000001" placeholder="0.000000" oninput="window._actualizarPreviewLineaVenta()">
           </div>
           <div style="flex:1 1 140px;">
             <label style="font-size:0.8rem;">Tipo IGV</label>
@@ -820,7 +820,7 @@
 
         <div class="form-group">
           <label>Precio Venta *</label>
-          <input type="number" id="cotPrecio" placeholder="0.0000" step="0.0001" required>
+          <input type="number" id="cotPrecio" placeholder="0.000000" step="0.000001" required>
         </div>
 
         <div class="form-group">
@@ -911,7 +911,7 @@
 
         <div class="form-group">
           <label>Costo Unitario</label>
-          <input type="number" id="loteCosto" placeholder="0.0000" step="0.0001" required>
+          <input type="number" id="loteCosto" placeholder="0.000000" step="0.000001" required>
         </div>
 
         <div class="form-group">

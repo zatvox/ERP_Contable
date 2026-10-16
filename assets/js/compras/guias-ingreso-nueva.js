@@ -694,7 +694,7 @@ export async function _aplicarRecepcionesAGuiaIngreso(guia, compra, compraId, re
     // como referencia (≠ 1). Solo se CONVIERTE cuando la moneda es USD.
     const tipoCambioCompra = monedaCompra === 'USD' ? (parseFloat(compra?.tipo_cambio) || 1) : 1
     const costoOriginal = parseFloat(l.precio_unitario) || 0
-    const costoPen = parseFloat((costoOriginal * tipoCambioCompra).toFixed(4))
+    const costoPen = parseFloat((costoOriginal * tipoCambioCompra).toFixed(6))
 
     // ¿El N° de lote ya existe para este producto? Si el usuario lo eligió
     // del datalist (o lo escribió igual), se SUMA al lote existente en vez
@@ -718,7 +718,7 @@ export async function _aplicarRecepcionesAGuiaIngreso(guia, compra, compraId, re
       // costos coincidían, el promedio da exactamente el mismo número.
       const costoPrevio = parseFloat(existente.costo_unitario) || 0
       costoFinalLote = cantidadResultante > 0
-        ? parseFloat((((cantPrevia * costoPrevio) + (l.cantidad * costoPen)) / cantidadResultante).toFixed(4))
+        ? parseFloat((((cantPrevia * costoPrevio) + (l.cantidad * costoPen)) / cantidadResultante).toFixed(6))
         : costoPen
 
       await updateLote(existente.id, {
@@ -952,7 +952,7 @@ window.guardarGuiaIngresoCompra = async function () {
 
       const costoExistente = parseFloat(existente.costo_unitario) || 0
       const tcConv = (compra?.currency || 'PEN') === 'USD' ? (parseFloat(compra?.tipo_cambio) || 1) : 1 // PEN no convierte (blindaje 2026-10-05)
-      const costoNuevo = parseFloat(((parseFloat(rec.precio_unitario) || 0) * tcConv).toFixed(4))
+      const costoNuevo = parseFloat(((parseFloat(rec.precio_unitario) || 0) * tcConv).toFixed(6))
       if (Math.abs(costoExistente - costoNuevo) >= 0.0001) {
         conflictosCosto.push({ rec, existente, costoExistente, costoNuevo })
       }
@@ -967,7 +967,7 @@ window.guardarGuiaIngresoCompra = async function () {
       const detalle = conflictosCosto.map(c =>
         `• ${c.rec.nombreProducto} — lote ${c.rec.numeroLote}\n` +
         `    ya registrado en esta factura: ${(parseFloat(c.existente.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} ${c.existente.unidad_medida || 'KG'} a S/ ${c.costoExistente.toFixed(4)}\n` +
-        `    ingresando ahora: ${c.rec.cantidad.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${c.rec.unidadMedida} a S/ ${c.costoNuevo.toFixed(4)}`
+        `    ingresando ahora: ${c.rec.cantidad.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${c.rec.unidadMedida} a S/ ${c.costoNuevo.toFixed(6)}`
       ).join('\n\n')
 
       const fusionar = confirm(
@@ -1076,7 +1076,7 @@ function _buscarLoteEnOtraCompra(itemId, numeroLote, compraId) {
 /** Costo unitario en soles que tendría esta recepción (para comparar con el lote existente). */
 function _costoRecepcionPen(linea, compra) {
   const tc = parseFloat(compra?.tipo_cambio) || 1
-  return parseFloat(((parseFloat(linea.precio_unitario) || 0) * tc).toFixed(4))
+  return parseFloat(((parseFloat(linea.precio_unitario) || 0) * tc).toFixed(6))
 }
 
 function _avisarLoteExistente(idx, subIdx, linea, recepcion) {
@@ -1093,7 +1093,7 @@ function _avisarLoteExistente(idx, subIdx, linea, recepcion) {
       // Mismo texto de N° de lote, pero de otra factura: identificación
       // específica por adquisición → se crea como capa de costo aparte,
       // no se fusiona ni se pregunta.
-      el.innerHTML = `<span style="color:var(--color-info);">↪ Este N° ya existe en otra factura (S/ ${(parseFloat(enOtraCompra.costo_unitario) || 0).toFixed(4)}). Se creará como registro aparte — no se fusiona.</span>`
+      el.innerHTML = `<span style="color:var(--color-info);">↪ Este N° ya existe en otra factura (S/ ${(parseFloat(enOtraCompra.costo_unitario) || 0).toFixed(6)}). Se creará como registro aparte — no se fusiona.</span>`
     } else {
       el.innerHTML = recepcion.numero_lote
         ? '<span style="color:var(--color-success);">Lote nuevo</span>'
@@ -1110,5 +1110,5 @@ function _avisarLoteExistente(idx, subIdx, linea, recepcion) {
   el.className = 'lote-aviso ' + (mismoCosto ? 'ok' : 'alerta')
   el.innerHTML = mismoCosto
     ? `↪ Ya existe: ${(parseFloat(existente.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} ${existente.unidad_medida || 'KG'}${zona ? ' en ' + _escCompras(zona) : ''}. <strong>Se sumará a ese lote.</strong>`
-    : `⚠ Ya existe con costo distinto (S/ ${costoExistente.toFixed(4)} vs S/ ${costoNuevo.toFixed(4)}). Se preguntará al guardar.`
+    : `⚠ Ya existe con costo distinto (S/ ${costoExistente.toFixed(6)} vs S/ ${costoNuevo.toFixed(6)}). Se preguntará al guardar.`
 }

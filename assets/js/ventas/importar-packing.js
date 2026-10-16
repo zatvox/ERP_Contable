@@ -21,8 +21,9 @@
 // clientes se validan contra esa misma empresa.
 // ============================================================================
 import { getCurrentUser } from '../auth-supabase.js'
-import { supabase, insert, empresaTrabajoCtx } from '../supabase-client.js'
-import { getCustomers, getLotes, getItems } from '../supabase-data.js'
+import { supabase, insert, empresaTrabajoCtx, fromSinFiltro } from '../supabase-client.js'
+import { getCustomers, getLotes, getItems, getStockUbicaciones } from '../supabase-data.js'
+import { getTerminosConCuotas } from '../cronograma.js'
 import { showToast } from '../helpers.js'
 import { mostrarCarga, actualizarCarga, ocultarCarga } from '../animaciones/index.js'
 import { getSerie, registrarUsoSerie, formatearNumero, seriesDeTipo } from '../series.js'
@@ -33,7 +34,7 @@ import { renderPacking } from './packing.js'
 
 const COLUMNAS = [
   'numero_documento', 'cliente_doc', 'fecha_emision', 'fecha_validez', 'moneda', 'tipo_cambio',
-  'vendedor_doc', 'orden_compra_cliente', 'observaciones', 'estado',
+  'termino_pago', 'vendedor_doc', 'orden_compra_cliente', 'observaciones', 'estado',
   'sku', 'numero_lote', 'descripcion', 'nota',
   'cantidad', 'cantidad_unidades', 'precio_unitario', 'tipo_base', 'igv_porcentaje'
 ]
@@ -49,6 +50,15 @@ function _val(fila, ...nombres) {
     if (fila[n] !== undefined && fila[n] !== null && String(fila[n]).trim() !== '') return String(fila[n]).trim()
   }
   return ''
+}
+/** Valor CRUDO, sin pasar por String(). Las celdas de fecha de Excel llegan
+ *  como Date: convertirlas a texto antes de parsearlas las rompe
+ *  ("Tue Sep 30 2026 19:00:00 GMT-0500..." no es una fecha parseable). */
+function _crudo(fila, ...nombres) {
+  for (const n of nombres) {
+    if (fila[n] !== undefined && fila[n] !== null && String(fila[n]).trim() !== '') return fila[n]
+  }
+  return null
 }
 function _num(fila, ...nombres) {
   const v = _val(fila, ...nombres)
@@ -148,17 +158,18 @@ window.descargarPlantillaPacking = async function () {
       ['fecha_validez', 'no', 'AAAA-MM-DD', 'Vacío = se calcula con los días de validez de la serie.'],
       ['moneda', 'no', 'PEN o USD', 'Por defecto PEN.'],
       ['tipo_cambio', 'si USD', '3.7520', 'Soles por 1 USD. Obligatorio sólo si moneda = USD.'],
-      ['vendedor_doc', 'no', 'RUC o DNI', 'Vacío = sin vendedor.'],
+      ['termino_pago', 'no', 'texto', 'Nombre tal cual del catálogo (ej. "Crédito 30/45"). Vacío = el término habitual del cliente.'],
+      ['vendedor_doc', 'no', 'RUC o DNI', 'Del contacto con rol Vendedor. Vacío = sin vendedor.'],
       ['orden_compra_cliente', 'no', 'texto', 'O/C del cliente.'],
       ['observaciones', 'no', 'texto', 'Nota general del PK (sale en el PDF).'],
       ['estado', 'no', 'borrador o enviado', 'Por defecto enviado. "facturado" NO se importa: eso lo marca la factura real.'],
       ['— LÍNEAS: una fila por producto —', '', '', ''],
       ['sku', 'SÍ', 'texto', 'SKU del producto. Debe existir en el catálogo (hoja CAT_PRODUCTOS).'],
       ['numero_lote', 'no', 'texto', 'Lote de referencia. Si lo pones, debe existir Y ser de esta empresa (hoja CAT_LOTES).'],
-      ['descripcion', 'no', 'texto', 'Vacío = se usa el nombre del producto.'],
+      ['descripcion', 'no', 'texto', 'Vacío = "[SKU] NOMBRE", igual que al crear un PK a mano.'],
       ['nota', 'no', 'texto', 'Ej. "18 BOLSAS (24.50 KG X BOLSA)".'],
       ['cantidad', 'SÍ', 'número > 0', 'Kilos de la línea.'],
-      ['cantidad_unidades', 'no', 'número', 'N° de bultos. Déjalo VACÍO en carga retroactiva: no se inventan bultos.'],
+      ['cantidad_unidades', 'no', 'número', 'Déjalo VACÍO: lo calcula el sistema con el peso por unidad del lote.'],
       ['precio_unitario', 'SÍ', '4 decimales', 'Precio SIN IGV, igual que en todo el ERP.'],
       ['tipo_base', 'no', TIPOS_BASE.join(' / '), 'Por defecto gravada.'],
       ['igv_porcentaje', 'no', 'número', 'Por defecto 18. Si tipo_base no es gravada se fuerza a 0.'],
@@ -259,6 +270,21 @@ window.procesarImportacionPacking = async function () {
       .map(p => String(p.numero || '').trim().toUpperCase()))
 
     const cliPorDoc  = new Map(clientes.filter(c => c.nro_documento).map(c => [String(c.nro_documento).trim(), c]))
+
+    // El vendedor se buscaba entre los CLIENTES, y un vendedor casi nunca lo
+    // es: la columna quedaba siempre vacía. Se busca entre los contactos con
+    // rol "vendedor" (catálogo compartido entre empresas, como el resto de
+    // contactos). Si el documento existe pero sin ese rol, el aviso lo dice:
+    // es un dato que se arregla en una pantalla, no un misterio.
+    const { data: _contactos } = await fromSinFiltro('contacts').select('id, nombre, nro_documento, tipo_contacto')
+    const vendPorDoc = new Map()
+    const contactoPorDoc = new Map()
+    for (const c of (_contactos || [])) {
+      const doc = String(c.nro_documento || '').trim()
+      if (!doc) continue
+      contactoPorDoc.set(doc, c)
+      if ((c.tipo_contacto || []).includes('vendedor')) vendPorDoc.set(doc, c)
+    }
     const itemPorSku = new Map(items.filter(i => i.sku).map(i => [String(i.sku).trim().toUpperCase(), i]))
     const lotePorNum = new Map()
     for (const l of (lotes || [])) {
@@ -277,6 +303,38 @@ window.procesarImportacionPacking = async function () {
 
     const seriesCache = new Map()
     const maxPorSerie = new Map()
+
+    // ── Término de pago ──────────────────────────────────────────────────
+    // La columna ya figuraba en la plantilla pero el importador grababa null:
+    // todos los PK entraban sin término y había que ponerlo a mano uno por uno.
+    // Se resuelve por nombre (texto libre del ERP anterior) y, si la fila no
+    // trae nada, cae al término habitual del cliente — que es lo que el
+    // usuario esperaría al abrir el PK.
+    const terminos = await getTerminosConCuotas()
+    const _normT = (t) => String(t || '').toUpperCase().normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z0-9]+/g, ' ').trim()
+    const terminoPorNombre = new Map()
+    for (const t of (terminos || [])) {
+      for (const k of [t.nombre, t.descripcion, t.codigo]) if (k) terminoPorNombre.set(_normT(k), t)
+    }
+    const terminoContado = (terminos || []).find(t => t.tipo === 'contado') || null
+
+    // ── Stock por lote, solo para AVISAR ─────────────────────────────────
+    // Un PK es una cotización: no mueve stock, así que cotizar algo que
+    // todavía no llegó es legítimo y bloquearlo sería un error. Pero cotizar
+    // 1,000 kg de un lote que tiene 12 es casi siempre un dedazo, y hasta hoy
+    // pasaba mudo. Se avisa, se importa igual.
+    // La fuente de verdad del stock es stock_ubicaciones (no lotes.cantidad,
+    // que se mantiene aparte y tiene huecos).
+    const stockPorLote = new Map()
+    for (const su of ((await getStockUbicaciones()) || [])) {
+      if (su.lote_id == null) continue
+      stockPorLote.set(su.lote_id, (stockPorLote.get(su.lote_id) || 0) + parseFloat(su.cantidad || 0))
+    }
+    // Lo que el propio archivo va comprometiendo del mismo lote: 5 PK de 100
+    // sobre un lote de 300 también es una sobreventa, aunque cada uno por
+    // separado se vea bien.
+    const comprometidoPorLote = new Map()
 
     // La cabecera se lee SOLO de la primera fila del grupo. Repetir el N°
     // significa "estas filas son el detalle del mismo PK", así que su
@@ -318,6 +376,9 @@ window.procesarImportacionPacking = async function () {
     for (const [numeroDoc, filasGrupo] of grupos) {
       actualizarCarga(undefined, numeroDoc || '(sin N°)')
       const falla = (msg) => { docsFallidos++; logLineas.push(msg) }
+      // Un aviso NO descarta el documento: se importa igual y queda anotado.
+      // Antes todo salía en rojo y un "se guarda sin vendedor" parecía error.
+      const avisar = (msg) => logLineas.push(MARCA_AVISO + msg)
 
       if (!numeroDoc) { falla(`Fila ${filasGrupo[0].numFila}: falta "numero_documento".`); continue }
       if (numerosUsados.has(numeroDoc)) { falla(`PK "${numeroDoc}": ya existe en ${nombreEmpresa(empresaId)}.`); continue }
@@ -346,7 +407,7 @@ window.procesarImportacionPacking = async function () {
       const cliente = cliPorDoc.get(docCli)
       if (!docCli || !cliente) { falla(`PK "${numeroDoc}": cliente "${docCli || '(vacío)'}" no existe o no tiene rol Cliente.`); continue }
 
-      const fecha = _parseFechaImportVentas(_val(primera, 'fecha_emision', 'fechaEmision'))
+      const fecha = _parseFechaImportVentas(_crudo(primera, 'fecha_emision', 'fechaEmision'))
       if (!fecha) { falla(`PK "${numeroDoc}": fecha_emision inválida.`); continue }
 
       const moneda = (_val(primera, 'moneda') || 'PEN').toUpperCase()
@@ -359,20 +420,42 @@ window.procesarImportacionPacking = async function () {
         falla(`PK "${numeroDoc}": estado "${estado}" no se importa (sólo ${ESTADOS_OK.join(' o ')}; "facturado" lo marca la factura real).`); continue
       }
 
-      let validez = _parseFechaImportVentas(_val(primera, 'fecha_validez', 'fechaValidez'))
+      let validez = _parseFechaImportVentas(_crudo(primera, 'fecha_validez', 'fechaValidez'))
       if (!validez && serieRow.dias_validez) {
         const d = new Date(fecha + 'T00:00:00')
         d.setDate(d.getDate() + parseInt(serieRow.dias_validez))
         validez = d.toISOString().slice(0, 10)
       }
 
+      if (validez && validez < fecha) {
+        falla(`PK "${numeroDoc}": fecha_validez (${validez}) es anterior a fecha_emision (${fecha}).`); continue
+      }
+
+      const txtTermino = _val(primera, 'termino_pago', 'terminoPago')
+      let termino = txtTermino ? terminoPorNombre.get(_normT(txtTermino)) : null
+      if (txtTermino && !termino && _normT(txtTermino) === 'CONTADO') termino = terminoContado
+      if (txtTermino && !termino) {
+        avisar(`PK "${numeroDoc}": término de pago "${txtTermino}" no existe — se usa el del cliente.`)
+      }
+      // Sin columna (o sin match) manda el término habitual del cliente.
+      const terminoId = termino?.id ?? cliente.termino_pago_id ?? null
+
       const docVend  = _val(primera, 'vendedor_doc', 'vendedor')
-      const vendedor = docVend ? cliPorDoc.get(docVend) : null
-      if (docVend && !vendedor) logLineas.push(`PK "${numeroDoc}": vendedor "${docVend}" no existe — se guarda sin vendedor.`)
+      const vendedor = docVend ? vendPorDoc.get(docVend) : null
+      if (docVend && !vendedor) {
+        const existe = contactoPorDoc.get(docVend)
+        avisar(existe
+          ? `PK "${numeroDoc}": "${existe.nombre}" existe pero no tiene el rol Vendedor — se guarda sin vendedor. Agrégaselo en Contactos y vuelve a importar.`
+          : `PK "${numeroDoc}": vendedor "${docVend}" no existe — se guarda sin vendedor.`)
+      }
 
       // ── Líneas: todo o nada por documento ────────────────────────────────
       const lineas = []
       let grupoValido = true
+      // Detalle legítimo es el mismo lote con OTRA cantidad o precio. Idéntico
+      // en los cuatro campos es la misma fila pegada dos veces, y duplicaría
+      // el total del PK sin que nadie lo note.
+      const lineasVistas = new Set()
       for (const { fila, numFila } of filasGrupo) {
         const sku  = _val(fila, 'sku', 'SKU')
         const item = itemPorSku.get(sku.toUpperCase())
@@ -413,6 +496,27 @@ window.procesarImportacionPacking = async function () {
           grupoValido = false; continue
         }
 
+        if (lote) {
+          const disp = stockPorLote.get(lote.id) || 0
+          const yaComp = comprometidoPorLote.get(lote.id) || 0
+          if (disp <= 0) {
+            avisar(`PK "${numeroDoc}" fila ${numFila}: el lote "${numLote}" no tiene stock disponible (se cotiza igual).`)
+          } else if (yaComp + cantidad > disp + 0.001) {
+            avisar(`PK "${numeroDoc}" fila ${numFila}: se cotizan ${(yaComp + cantidad).toLocaleString('es-PE')} del lote "${numLote}" y solo hay ${disp.toLocaleString('es-PE')}${yaComp ? ` (${yaComp.toLocaleString('es-PE')} ya comprometidos en este archivo)` : ''}.`)
+          }
+          comprometidoPorLote.set(lote.id, yaComp + cantidad)
+        }
+        if (precio === 0) {
+          avisar(`PK "${numeroDoc}" fila ${numFila}: precio_unitario en 0 (se cotiza igual).`)
+        }
+
+        const claveLinea = `${sku.toUpperCase()}|${numLote.toUpperCase()}|${cantidad}|${precio}`
+        if (lineasVistas.has(claveLinea)) {
+          logLineas.push(`PK "${numeroDoc}" fila ${numFila}: línea repetida — mismo SKU ${sku}, mismo lote ${numLote || '(sin lote)'}, misma cantidad y mismo precio ya vienen en este PK.`)
+          grupoValido = false; continue
+        }
+        lineasVistas.add(claveLinea)
+
         // Si la base no es gravada el IGV es 0 por definición: se fuerza en vez
         // de confiar en lo que diga el Excel.
         const igvPct   = tipoBase === 'gravada' ? (_num(fila, 'igv_porcentaje', 'igvPorcentaje') ?? 18) : 0
@@ -422,12 +526,20 @@ window.procesarImportacionPacking = async function () {
         lineas.push({
           item_id: item.id,
           lote_id: lote?.id || null,
-          descripcion: _val(fila, 'descripcion') || item.nombre,
+          // Mismo formato que "Nueva PK" (packing.js): "[SKU] NOMBRE". Antes el
+          // importador guardaba solo el nombre y los PK importados se veían
+          // distintos de los hechos a mano.
+          descripcion: _val(fila, 'descripcion') ||
+                       `${item.sku ? '[' + item.sku + '] ' : ''}${item.nombre}`,
           nota: _val(fila, 'nota') || null,
           cantidad,
           unidad_medida: item.unidad_medida || 'KG',
-          cantidad_unidades: _num(fila, 'cantidad_unidades', 'cantidadUnidades') || 0,
-          precio_unitario: +precio.toFixed(4),       // 4 decimales, como todo el ERP
+          // Si el archivo no lo trae, se CALCULA con el peso por unidad del
+          // lote — la misma regla de la guía de despacho. Antes quedaba en 0 y
+          // la columna "N° Unid." salía siempre en "—".
+          cantidad_unidades: _num(fila, 'cantidad_unidades', 'cantidadUnidades')
+            ?? (lote?.peso_por_unidad > 0 ? +(cantidad / lote.peso_por_unidad).toFixed(2) : 0),
+          precio_unitario: +precio.toFixed(6),       // 6 decimales, como todo el ERP
           tipo_base: tipoBase,
           igv_porcentaje: igvPct,
           subtotal,
@@ -459,7 +571,7 @@ window.procesarImportacionPacking = async function () {
         contact_id: cliente.id,
         fecha_emision: fecha, fecha_validez: validez,
         moneda, tipo_cambio: tc || 1,
-        termino_pago_id: null,
+        termino_pago_id: terminoId,
         vendedor_id: vendedor?.id || null,
         orden_compra_cliente: _val(primera, 'orden_compra_cliente', 'ordenCompraCliente') || null,
         observaciones: _val(primera, 'observaciones') || null,
@@ -500,6 +612,8 @@ window.procesarImportacionPacking = async function () {
         <div><strong style="color:var(--color-success);">${docsOk}</strong> PK ${simular ? 'válidos' : 'importados'}</div>
         <div><strong>${lineasOk}</strong> líneas</div>
         <div><strong style="color:${docsFallidos > 0 ? 'var(--color-danger)' : 'var(--text-secondary)'};">${docsFallidos}</strong> documentos con error</div>
+        ${(() => { const a = logLineas.filter(l => l.startsWith(MARCA_AVISO)).length
+                   return a ? `<div><strong style="color:var(--color-warning);">${a}</strong> con aviso</div>` : '' })()}
         <div style="color:var(--text-secondary);">en ${_esc(nombreEmpresa(empresaId))}</div>
       </div>
       ${simular ? '<p style="color:var(--color-info); margin-top:8px;">Simulación: no se escribió nada. Desmarca "Sólo simular" para importar de verdad.</p>' : ''}`)
@@ -522,13 +636,20 @@ window.procesarImportacionPacking = async function () {
 }
 
 /** Log con los errores primero y scroll, igual que los otros importadores. */
+const MARCA_AVISO = '\u26A0\uFE0F '   // prefijo interno: no se muestra tal cual
+
 function _pintarLogImportPK(lineas) {
   if (!lineas.length) { _htmlPK('importar-packing-log', ''); return }
   _htmlPK('importar-packing-log', `
     <div style="max-height:260px; overflow-y:auto; margin-top:10px; padding:10px;
                 border:1px solid var(--border-color); border-radius:var(--radius-md); background:var(--bg-secondary);">
-      <ul style="margin:0; padding-left:18px; color:var(--color-danger); font-size:0.84rem;">
-        ${lineas.map(l => `<li>${_esc(l)}</li>`).join('')}
+      <ul style="margin:0; padding-left:18px; font-size:0.84rem;">
+        ${lineas.map(l => {
+          const esAviso = l.startsWith(MARCA_AVISO)
+          const txt = esAviso ? l.slice(MARCA_AVISO.length) : l
+          const color = esAviso ? 'var(--color-warning)' : 'var(--color-danger)'
+          return `<li style="color:${color};">${esAviso ? '&#9888; ' : ''}${_esc(txt)}</li>`
+        }).join('')}
       </ul>
     </div>`)
 }

@@ -384,7 +384,7 @@ function _renderTablaDetalleCompra() {
           <td><input type="text" value="${(d.glosa || '').replace(/"/g, '&quot;')}" placeholder="${(d.nombre || '').replace(/"/g, '&quot;')}" oninput="window._setGlosaDetalleCompra(${idx}, this.value)" style="width:100%; min-width:120px;"></td>
           <td>${(parseFloat(d.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
           <td>${d.unidad_medida}</td>
-          <td style="text-align:right;">${parseFloat(d.precio_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+          <td style="text-align:right;">${parseFloat(d.precio_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td>
           <td style="text-align:right; font-weight:bold;">${parseFloat(d.total).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td>${d.unidades ? parseFloat(d.unidades).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '-'}</td>
           <td><button type="button" class="btn btn-small btn-danger" onclick="window.quitarDetalleCompraMercaderia(${idx})">✕</button></td>
@@ -533,7 +533,7 @@ window.guardarCompraMercaderia = async function () {
       descripcion:            `Compra directa - ${prov?.nombre || ''}`,
       cantidad:               cantidadTotal,
       total_unidades:         unidadesTotal,
-      precio_unitario:        parseFloat((subtotalC / cantidadTotal).toFixed(4)) || 0,
+      precio_unitario:        parseFloat((subtotalC / cantidadTotal).toFixed(6)) || 0,
       base_imponible_gravada: subtotalC,
       igv_gravado:            igvC,
       subtotal:               subtotalC,

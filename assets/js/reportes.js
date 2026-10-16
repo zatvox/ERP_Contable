@@ -188,7 +188,7 @@ export function formatearMedida(valor, formato) {
   const n = parseFloat(valor) || 0
   switch (formato) {
     case 'money':   return formatNumber(n, 2)
-    case 'money4':  return formatNumber(n, 4)
+    case 'money4':  return (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })   // unitarios: hasta 6 dec.
     case 'tc':      return n ? formatNumber(n, 3) : '—'
     case 'qty':     return formatQty(n)
     case 'int':     return Math.round(n).toLocaleString('en-US')
@@ -810,7 +810,7 @@ function _matrizExport(id) {
     return ((a[ok] ?? 0) - (b[ok] ?? 0)) * dir
   })
   const dims = estado.agrupar.length ? estado.agrupar.map(k => _labelDim(config, k)) : ['Total']
-  const dec = (m) => (m.formato === 'money4' ? 4 : (m.formato === 'int' ? 0 : ((m.formato === 'qty' || m.formato === 'tc') ? 3 : 2)))
+  const dec = (m) => (m.formato === 'money4' ? 6 : (m.formato === 'int' ? 0 : ((m.formato === 'qty' || m.formato === 'tc') ? 3 : 2)))
   const num = (m, v) => { const n = parseFloat(v) || 0; const p = 10 ** dec(m); return Math.round(n * p) / p }
   const cab = [...dims, 'N° registros', ...medidas.map(m => m.label)]
   const filas = grupos.map(g => [...(g._claves.length ? g._claves : ['Total']), g._filas.length, ...medidas.map(m => num(m, g[m.key]))])
@@ -840,7 +840,7 @@ export async function exportarExcel(id) {
   const aoa = [mx.cab, ...mx.filas, mx.filaTotal]
   const ws = XLSX.utils.aoa_to_sheet(aoa)
   // formato numérico por columna de medida
-  const fmt = (m) => m.formato === 'money4' ? '#,##0.0000' : (m.formato === 'int' ? '#,##0' : (m.formato === 'qty' ? '#,##0.###' : (m.formato === 'tc' ? '0.000' : '#,##0.00')))
+  const fmt = (m) => m.formato === 'money4' ? '#,##0.00####' : (m.formato === 'int' ? '#,##0' : (m.formato === 'qty' ? '#,##0.###' : (m.formato === 'tc' ? '0.000' : '#,##0.00')))
   for (let r = 1; r < aoa.length; r++) {
     mx.medidas.forEach((m, j) => {
       const ref = XLSX.utils.encode_cell({ r, c: mx.nDims + 1 + j })

@@ -25,6 +25,7 @@ import { marcarPackingFacturado } from './packing.js'
 window.abrirModalNuevaVenta = async function() {
   try {
     S._packingOrigen = null   // se fija DESPUÉS, solo si se abre desde "Facturar" un PK
+    S._terminoHeredado = null // término de pago heredado de un documento origen (PK)
     const avisoPk = document.getElementById('ventaAvisoPacking')
     if (avisoPk) avisoPk.remove()
     S._ventaLineas = []
@@ -69,6 +70,9 @@ window.abrirModalNuevaVenta = async function() {
     // según la serie que quedó arriba.
     await window._prepararCamposVenta()
     await _aplicarIGVDeSerieVenta()
+    // Período = mes de la FECHA DE EMISIÓN del formulario (no el mes de hoy):
+    // _resetearCandados borra el valor automático, así que se fija aquí.
+    await _sincronizarPeriodoVenta()
 
     // Cronograma: se re-renderiza en cada apertura para tomar el término del
     // cliente elegido y limpiar lo que quedó de la venta anterior.
@@ -271,7 +275,7 @@ window.agregarLineaVenta = function() {
     totalLine = parseFloat((cantidad * precio).toFixed(2))
     subtotal  = parseFloat((totalLine / 1.18).toFixed(2))
     igvMonto  = parseFloat((totalLine - subtotal).toFixed(2))
-    precioUnitarioGuardar = parseFloat((subtotal / cantidad).toFixed(4))
+    precioUnitarioGuardar = parseFloat((subtotal / cantidad).toFixed(6))
   } else {
     subtotal  = parseFloat((cantidad * precio).toFixed(2))
     igvMonto  = parseFloat((subtotal * igvPct / 100).toFixed(2))
@@ -290,7 +294,7 @@ window.agregarLineaVenta = function() {
     igv_monto: igvMonto, total_linea: totalLine,
     unidad_medida: unidadMedida, ubicacion_id: null,
     lote_id: null, stock_ubicacion_id: null, numero_lote: null,
-    costo_unitario: parseFloat(_costoPromedioFIFO(lotes, cantidad).toFixed(4))
+    costo_unitario: parseFloat(_costoPromedioFIFO(lotes, cantidad).toFixed(6))
   }
 
   const editando = S._ventaLineaEditIdx !== null
@@ -355,7 +359,7 @@ function _renderLineasVenta() {
         <td style="text-align:right;">${(parseFloat(l.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 3 })}</td>
         <td>${l.unidad_medida || '-'}</td>
         <td style="text-align:right;">${(parseFloat(l.cantidad_unidades) || 0) > 0 ? (parseFloat(l.cantidad_unidades) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '-'}</td>
-        <td style="text-align:right;">${(+l.precio_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+        <td style="text-align:right;">${(+l.precio_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td>
         <td>${_badgeTipoIGV(l.tipo_base)}</td>
         <td style="text-align:right;">${l.subtotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         <td><input type="number" step="0.01" min="0" value="${l.igv_monto.toFixed(2)}" style="width:90px; text-align:right;" title="Editable: ajusta por redondeo si hace falta" onchange="window.editarMontoIGVLineaVenta(${idx}, this.value)"></td>
@@ -416,7 +420,11 @@ window.guardarNuevaVenta = async function() {
     // 2026-10-05: en SOLES también se guarda el T.C. SUNAT del día como referencia
     // (reportes / registro). Solo CONVIERTE montos cuando la moneda es USD.
     const tipoCambio = parseFloat(document.getElementById('ventaTipoCambio')?.value || 0) || 1
-    const periodo       = document.getElementById('ventaPeriodo')?.value
+    // Candado cerrado → el período SIEMPRE es el mes de la fecha de emisión
+    // (evita guardar un período desfasado aunque algo no haya sincronizado).
+    const _perEl = document.getElementById('ventaPeriodo')
+    if (_perEl?.readOnly && fechaEmision) { _perEl.value = fechaEmision.slice(0, 7); try { await asegurarPeriodoAbierto(fechaEmision) } catch (_) { /* */ } }
+    const periodo       = _perEl?.value
     const vendedorId    = parseInt(document.getElementById('ventaVendedor')?.value || 0) || null
     const descripcion   = document.getElementById('ventaDescripcion')?.value?.trim() || null
     const observaciones = document.getElementById('ventaObservaciones')?.value?.trim() || null
@@ -428,7 +436,7 @@ window.guardarNuevaVenta = async function() {
       const difieren = S._ventaLineas.filter(l => l.detalle_packing_id && l.precio_pk != null && Math.abs((+l.precio_unitario) - (+l.precio_pk)) > 0.00005)
       if (difieren.length && !confirm(
         `⚠ ${difieren.length} línea(s) con precio distinto al del ${S._packingOrigen.numero}:\n\n` +
-        difieren.map(l => `• ${l.descripcion}: PK ${(+l.precio_pk).toFixed(4)} → factura ${(+l.precio_unitario).toFixed(4)}`).join('\n') +
+        difieren.map(l => `• ${l.descripcion}: PK ${(+l.precio_pk).toFixed(6)} → factura ${(+l.precio_unitario).toFixed(6)}`).join('\n') +
         `\n\n¿Facturar con el precio nuevo?`)) return
     }
 
@@ -942,16 +950,23 @@ async function _confirmarCamposManualesVenta(periodo, correlativo) {
 
 export let _cronogramaVentaListo = false
 
+/** Período contable = AAAA-MM de la fecha de emisión, salvo candado abierto
+ *  (edición manual). Además asegura que el período exista/esté abierto. */
+async function _sincronizarPeriodoVenta() {
+  const fecha = document.getElementById('ventaFechaEmision')?.value
+  const periodoEl = document.getElementById('ventaPeriodo')
+  if (!fecha || !periodoEl || !periodoEl.readOnly) return
+  periodoEl.value = fecha.slice(0, 7)
+  periodoEl.dataset.valorAutomatico = periodoEl.value
+  try { await asegurarPeriodoAbierto(fecha) } catch (e) { console.warn('Período contable:', e.message) }
+}
+
 window.onCambiarFechaEmisionVenta = function () {
   const fecha = document.getElementById('ventaFechaEmision')?.value
   if (!fecha) return
   // El período contable sigue a la fecha de emisión salvo que se haya
   // desbloqueado el candado para escribirlo a mano.
-  const periodoEl = document.getElementById('ventaPeriodo')
-  if (periodoEl && periodoEl.readOnly) {
-    periodoEl.value = fecha.slice(0, 7)
-    periodoEl.dataset.valorAutomatico = periodoEl.value
-  }
+  _sincronizarPeriodoVenta()
   if (_cronogramaVentaListo) actualizarCronograma('venta-cronograma', { fechaEmision: fecha })
 }
 
@@ -993,7 +1008,9 @@ async function _renderCronogramaVenta(terminoIdForzado = null) {
 
     await renderEditorCronograma('venta-cronograma', {
       total, fechaEmision, aplicaA: 'venta',
-      terminoId: terminoIdForzado || cliente?.termino_pago_id || null,
+      // Prioridad: forzado > heredado del PK (sobrevive a re-renders, p. ej.
+      // al cargarse el cliente en paralelo) > término de la ficha del cliente.
+      terminoId: terminoIdForzado || S._terminoHeredado || cliente?.termino_pago_id || null,
       onCambio: (crono) => {
         // La fecha de vencimiento del comprobante = última cuota.
         const ultima = crono?.cuotas?.[crono.cuotas.length - 1]
@@ -1099,17 +1116,38 @@ void getCuentasCobrar
 window.abrirNuevaVentaDesdePacking = async function (pk, lineasPk) {
   await window.abrirModalNuevaVenta()
   S._packingOrigen = { id: pk.id, numero: pk.numero }
+  // Hereda el término de pago del PK ANTES de cargar el cliente: el cambio de
+  // cliente re-pinta el cronograma y antes lo pisaba con el término del contacto.
+  S._terminoHeredado = pk.termino_pago_id || null
   const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v }
 
+  // Fecha de emisión = la del PK (editable). Se dispara su "change" para que
+  // período contable, vencimiento/cronograma y T.C. del día la sigan.
+  if (pk.fecha_emision) {
+    const fe = document.getElementById('ventaFechaEmision')
+    if (fe) {
+      fe.value = String(pk.fecha_emision).slice(0, 10)
+      const fv = document.getElementById('ventaFechaVencimiento'); if (fv) fv.value = fe.value
+      fe.dispatchEvent(new Event('change', { bubbles: true }))
+      await _sincronizarPeriodoVenta()
+    }
+  }
   set('ventaTipoComp', '01')
   window.onCambiarTipoCompVenta()
   set('ventaContactId', pk.contact_id)
   _refrescarBuscadorPK('ventaContactId')
-  window.onCambiarClienteVenta?.()
+  await window.onCambiarClienteVenta?.()
   set('ventaMoneda', pk.moneda)
   document.getElementById('ventaMoneda')?.dispatchEvent(new Event('change', { bubbles: true }))
   if (pk.moneda === 'USD' && parseFloat(pk.tipo_cambio) > 1) set('ventaTipoCambio', pk.tipo_cambio)
   if (pk.vendedor_id) { set('ventaVendedor', pk.vendedor_id); _refrescarBuscadorPK('ventaVendedor') }
+  // Observaciones heredadas: O/C del cliente + observaciones del PK (campo opcional abierto)
+  const obsPk = [pk.orden_compra_cliente ? `O/C cliente: ${pk.orden_compra_cliente}` : '', pk.observaciones || ''].filter(Boolean).join('\n').trim()
+  if (obsPk) {
+    document.getElementById('grupo-venta-observaciones')?.classList.add('abierto')
+    const chk = document.getElementById('chkVentaObservaciones'); if (chk) chk.checked = true
+    set('ventaObservaciones', obsPk)
+  }
 
   S._ventaLineas = lineasPk.map(l => ({
     item_id: l.item_id, descripcion: l.descripcion + (l.nota ? ` — ${l.nota}` : ''),
@@ -1117,7 +1155,7 @@ window.abrirNuevaVentaDesdePacking = async function (pk, lineasPk) {
     precio_unitario: +l.precio_unitario, subtotal: +l.subtotal, tipo_base: l.tipo_base,
     igv_porcentaje: +l.igv_porcentaje, igv_monto: +l.igv_monto, total_linea: +l.total_linea,
     unidad_medida: l.unidad_medida, ubicacion_id: null, lote_id: null, stock_ubicacion_id: null, numero_lote: null,
-    costo_unitario: parseFloat(_costoPromedioFIFO(_stockTotalPorItem(l.item_id).lotes || [], +l.cantidad).toFixed(4)) || 0,
+    costo_unitario: parseFloat(_costoPromedioFIFO(_stockTotalPorItem(l.item_id).lotes || [], +l.cantidad).toFixed(6)) || 0,
     // Enlace con la línea del PK (facturación parcial, sql/70) y su precio original
     detalle_packing_id: l.detalle_packing_id ?? l.id ?? null,
     precio_pk: l.precio_pk ?? (+l.precio_unitario)
@@ -1137,6 +1175,6 @@ window.abrirNuevaVentaDesdePacking = async function (pk, lineasPk) {
   const _av = document.getElementById('ventaAvisoPacking')
   if (_av) {
     _av.style.display = ''
-    _av.textContent = `📦 Facturando ${pk.numero}: revisa serie, cronograma, cantidades y precios. Si facturas más que lo pedido, el PK se actualiza con la cantidad real; al guardar el PK queda "Parcial" o "Facturado".`
+    _av.textContent = `📦 Facturando ${pk.numero}: se heredaron cliente, vendedor, fecha, moneda/T.C., término de pago${obsPk ? ', observaciones' : ''} y productos. Revisa serie y cantidades. Si facturas más que lo pedido, el PK se actualiza con la cantidad real; al guardar el PK queda "Parcial" o "Facturado".`
   }
 }

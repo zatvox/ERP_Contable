@@ -2595,8 +2595,14 @@ async function _aplicarEfectosCobro(cobro, cxc, opts = {}) {
     monedaMonto: cxc.moneda || 'PEN', tc: parseFloat(cobro.tipo_cambio) || 1
   })
 
-  const cxcBD = (await getCuentaCobrarById(cxc.id)) || cxc   // acumula sobre lo real, no sobre la caché
-  const cobrado  = _r2(parseFloat(cxcBD.monto_cobrado || 0) + monto)
+  // OJO: el trigger trg_actualizar_estado_cxc (02_functions.sql) YA recalcula
+  // cuentas_cobrar.monto_cobrado = SUM(cobros.monto) al insertar/borrar un cobro.
+  // Sumar 'monto' encima lo duplicaba (bug 2026-10-13 → 15). Fuente de verdad:
+  // la suma de cobros de la BD. La retención no la toca el trigger → se acumula.
+  const cxcBD = (await getCuentaCobrarById(cxc.id)) || cxc
+  const { data: _cbs, error: _eCbs } = await supabase.from('cobros').select('monto').eq('cxc_id', cxc.id)
+  if (_eCbs) throw new Error('No se pudo leer los cobros de la factura: ' + _eCbs.message)
+  const cobrado  = _r2((_cbs || []).reduce((s, x) => s + (parseFloat(x.monto) || 0), 0))
   const retenido = _r2(parseFloat(cxcBD.monto_retenido || 0) + ret)
   cxc = cxcBD
   await updateCuentaCobrar(cxc.id, { monto_cobrado: cobrado, monto_retenido: retenido, estado: _estadoCxCCalc(cxc, cobrado, retenido) })

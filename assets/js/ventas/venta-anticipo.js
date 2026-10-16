@@ -95,7 +95,8 @@ window.guardarVentaAnticipo = async function () {
     const tipoCambio   = moneda === 'USD'
       ? (parseFloat(document.getElementById('ventaTipoCambio')?.value || 0) || 1)
       : 1
-    const periodo      = document.getElementById('ventaPeriodo')?.value
+    const _perEl       = document.getElementById('ventaPeriodo')
+    const periodo      = (_perEl?.readOnly && fechaEmision) ? fechaEmision.slice(0, 7) : _perEl?.value   // candado cerrado → mes de la emisión
     const vendedorId   = parseInt(document.getElementById('ventaVendedor')?.value || 0) || null
     const descripcion  = document.getElementById('atvDescripcion')?.value?.trim() || 'ANTICIPO'
     const refPedido    = document.getElementById('atvReferenciaPedido')?.value?.trim() || ''

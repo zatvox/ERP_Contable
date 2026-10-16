@@ -329,7 +329,7 @@ window.procesarImportacionCompras = async function () {
           descripcion:            `${esNoDomiciliado ? 'Importación' : 'Compra directa'} (importada) - ${prov.nombre || ''}`,
           cantidad:               cantidadTotal,
           total_unidades:         null,
-          precio_unitario:        parseFloat((subtotalC / cantidadTotal).toFixed(4)) || 0,
+          precio_unitario:        parseFloat((subtotalC / cantidadTotal).toFixed(6)) || 0,
           base_imponible_gravada:    baseGravadaC,
           base_imponible_no_gravada: baseNoGravadaC,
           igv_gravado:               igvC,

@@ -77,8 +77,13 @@ export async function renderStockZonas() {
     // un producto de una lista, uno por uno).
     const fBusqueda = (document.getElementById('buscarResumenStock')?.value || '').trim().toLowerCase()
 
+    // Categoría (filtro compartido con la vista General) — 2026-10-16: antes
+    // esta vista lo ignoraba y mostraba todas las categorías.
+    const fCat = document.getElementById('filtroResumenCategoria')?.value || ''
+
     let stockConCantidad = (stock || []).filter(s => (parseFloat(s.cantidad) || 0) > 0)
     if (fZona) stockConCantidad = stockConCantidad.filter(s => s.ubicacion_id === fZona)
+    if (fCat) stockConCantidad = stockConCantidad.filter(s => String(itemMap[loteMap[s.lote_id]?.item_id]?.categoria_id) === fCat)
     if (fBusqueda) {
       stockConCantidad = stockConCantidad.filter(s => {
         const lote = loteMap[s.lote_id]
@@ -97,7 +102,7 @@ export async function renderStockZonas() {
     }
 
     if (stockConCantidad.length === 0) {
-      container.innerHTML = (fZona || fBusqueda)
+      container.innerHTML = (fZona || fBusqueda || fCat)
         ? '<p style="text-align:center; color:var(--text-secondary); padding:20px;">Sin stock con ese filtro.</p>'
         : '<p style="text-align:center; color:var(--text-secondary); padding:20px;">Sin stock registrado por zona todavía (se genera al recibir una Guía de Remisión).</p>'
       return
@@ -222,7 +227,9 @@ export async function renderStockZonas() {
       moneda:    g => g.moneda || '',
       tc:        g => g.tc,
       costo_orig: g => g.costoOrig ?? -1,
-      costo:     g => g.costo
+      costo:     g => g.costo,
+      total_orig: g => g.costoOrig == null ? -1 : g.valorOrig,
+      total_soles: g => g.valor
     }
     if (!fZona && stOrden.col && stOrden.col !== 'zona') {
       const getCol = extractoresZona[stOrden.col]
@@ -260,6 +267,8 @@ export async function renderStockZonas() {
             <th data-col-tabla="stock-zonas" data-col="tc" class="th-ordenable" style="text-align:right;${colStyle('stock-zonas','tc') ? ' display:none;' : ''}" onclick="window.ordenarResumenStock('tc')" title="Tipo de cambio de la factura original. Sombreado = promedio ponderado de varios ingresos">T.C.${_flechaOrden('zona', 'tc')}</th>
             <th data-col-tabla="stock-zonas" data-col="costo_orig" class="th-ordenable" style="text-align:right;${colStyle('stock-zonas','costo_orig') ? ' display:none;' : ''}" onclick="window.ordenarResumenStock('costo_orig')" title="Costo unitario en la moneda de la factura original">Costo Orig.${_flechaOrden('zona', 'costo_orig')}</th>
             <th data-col-tabla="stock-zonas" data-col="costo" class="th-ordenable" style="text-align:right;${colStyle('stock-zonas','costo') ? ' display:none;' : ''}" onclick="window.ordenarResumenStock('costo')" title="Costo unitario en soles. Sombreado = promedio ponderado de varios ingresos con distinto costo">Costo S/.${_flechaOrden('zona', 'costo')}</th>
+            <th data-col-tabla="stock-zonas" data-col="total_orig" class="th-ordenable" style="text-align:right;${colStyle('stock-zonas','total_orig') ? ' display:none;' : ''}" onclick="window.ordenarResumenStock('total_orig')" title="Cantidad × costo unitario original, en la moneda de la factura">Costo Total Orig.${_flechaOrden('zona', 'total_orig')}</th>
+            <th data-col-tabla="stock-zonas" data-col="total_soles" class="th-ordenable" style="text-align:right;${colStyle('stock-zonas','total_soles') ? ' display:none;' : ''}" onclick="window.ordenarResumenStock('total_soles')" title="Cantidad × costo unitario en soles (T.C. de la factura de compra)">Costo Total S/.${_flechaOrden('zona', 'total_soles')}</th>
             <th data-col-tabla="stock-zonas" data-col="acciones"${colStyle('stock-zonas','acciones')}>Acciones</th>
           </tr>
         </thead>
@@ -276,7 +285,7 @@ export async function renderStockZonas() {
       // Fila separadora por zona, solo cuando se ven todas juntas (sin
       // filtro) — puramente visual, no cambia los datos.
       if (!fZona && etiquetaZona !== zonaAnterior) {
-        html += `<tr><td colspan="15" style="background:var(--bg-secondary); font-weight:bold; padding:6px 10px;">${etiquetaZona}</td></tr>`
+        html += `<tr><td colspan="17" style="background:var(--bg-secondary); font-weight:bold; padding:6px 10px;">${etiquetaZona}</td></tr>`
         zonaAnterior = etiquetaZona
       }
 
@@ -294,8 +303,10 @@ export async function renderStockZonas() {
           <td data-col-tabla="stock-zonas" data-col="peso_unidad" data-valor="${g.unidades > 0 ? g.cantidad / g.unidades : ''}" style="text-align:right;${colStyle('stock-zonas','peso_unidad') ? ' display:none;' : ''}" title="Cantidad ÷ Unidades de esta fila (suma de todas las facturas agrupadas)">${g.unidades > 0 ? (g.cantidad / g.unidades).toLocaleString('en-US', { maximumFractionDigits: 4 }) : '-'}</td>
           <td data-col-tabla="stock-zonas" data-col="moneda" class="${g.monedas.size > 1 ? 'costo-promedio' : ''}"${colStyle('stock-zonas','moneda')} title="${g.monedas.size > 1 ? 'Ingresos en distintas monedas: ' + [...g.monedas].join(' · ') : 'Moneda de la factura original'}">${g.moneda}</td>
           <td data-col-tabla="stock-zonas" data-col="tc" data-valor="${g.tc}" class="${g.tcPromedio ? 'costo-promedio' : ''}" style="text-align:right;${colStyle('stock-zonas','tc') ? ' display:none;' : ''}" title="${g.tcPromedio ? `Promedio ponderado de ${g.tcs.size} T.C.: ` + [...g.tcs].map(t => parseFloat(t).toFixed(3)).join(' · ') : 'T.C. de la factura original'}">${g.tc.toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 4 })}</td>
-          <td data-col-tabla="stock-zonas" data-col="costo_orig" data-valor="${g.costoOrig == null ? '' : g.costoOrig}" class="${g.costoOrigPromedio ? 'costo-promedio' : ''}" style="text-align:right;${colStyle('stock-zonas','costo_orig') ? ' display:none;' : ''}" title="${g.costoOrig == null ? 'Monedas distintas: ver Costo S/.' : g.costoOrigPromedio ? `Promedio ponderado de ${g.costosOrig.size} ingresos: ` + [...g.costosOrig].map(c => parseFloat(c).toFixed(2)).join(' · ') : 'Costo único de la factura original'}">${g.costoOrig == null ? '—' : ({ USD: '$ ', EUR: '€ ' }[g.moneda] || 'S/. ') + g.costoOrig.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
-          <td data-col-tabla="stock-zonas" data-col="costo" data-valor="${g.costo}" class="${g.esPromedio ? 'costo-promedio' : ''}" style="text-align:right;${colStyle('stock-zonas','costo') ? ' display:none;' : ''}" title="${g.esPromedio ? `Promedio ponderado de ${g.costos.size} ingresos: ` + [...g.costos].map(c => 'S/. ' + parseFloat(c).toFixed(2)).join(' · ') : 'Costo único del lote'}">S/. ${g.costo.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+          <td data-col-tabla="stock-zonas" data-col="costo_orig" data-valor="${g.costoOrig == null ? '' : g.costoOrig}" class="${g.costoOrigPromedio ? 'costo-promedio' : ''}" style="text-align:right;${colStyle('stock-zonas','costo_orig') ? ' display:none;' : ''}" title="${g.costoOrig == null ? 'Monedas distintas: ver Costo S/.' : g.costoOrigPromedio ? `Promedio ponderado de ${g.costosOrig.size} ingresos: ` + [...g.costosOrig].map(c => parseFloat(c).toFixed(2)).join(' · ') : 'Costo único de la factura original'}">${g.costoOrig == null ? '—' : ({ USD: '$ ', EUR: '€ ' }[g.moneda] || 'S/. ') + g.costoOrig.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 6 })}</td>
+          <td data-col-tabla="stock-zonas" data-col="costo" data-valor="${g.costo}" class="${g.esPromedio ? 'costo-promedio' : ''}" style="text-align:right;${colStyle('stock-zonas','costo') ? ' display:none;' : ''}" title="${g.esPromedio ? `Promedio ponderado de ${g.costos.size} ingresos: ` + [...g.costos].map(c => 'S/. ' + parseFloat(c).toFixed(2)).join(' · ') : 'Costo único del lote'}">S/. ${g.costo.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 6 })}</td>
+          <td data-col-tabla="stock-zonas" data-col="total_orig" data-valor="${g.costoOrig == null ? '' : g.valorOrig}" style="text-align:right;${colStyle('stock-zonas','total_orig') ? ' display:none;' : ''}" title="${g.costoOrig == null ? 'Monedas distintas: ver Costo Total S/.' : 'Cantidad × costo original'}">${g.costoOrig == null ? '—' : ({ USD: '$ ', EUR: '€ ' }[g.moneda] || 'S/. ') + g.valorOrig.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td data-col-tabla="stock-zonas" data-col="total_soles" data-valor="${g.valor}" style="text-align:right; font-weight:600;${colStyle('stock-zonas','total_soles') ? ' display:none;' : ''}" title="Cantidad × costo S/.">S/. ${g.valor.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td data-col-tabla="stock-zonas" data-col="acciones"${colStyle('stock-zonas','acciones')}>${esFam ? '<span style="color:var(--text-secondary); font-size:0.8rem;" title="Desactiva Agrupar por familia para trasladar lote por lote">—</span>' : `<button class="btn btn-small btn-secondary" onclick="window.abrirModalTrasladoDesdeResumenZona(${g.itemId}, ${g.ubicacion_id})">Trasladar</button>`}</td>
         </tr>
       `
@@ -371,7 +382,9 @@ window.exportarStockZonasExcel = async function () {
     peso_unidad: '#,##0.0000',
     tc:          '0.000',
     costo_orig:  '#,##0.0000',
-    costo:       '"S/." #,##0.0000'
+    costo:       '"S/." #,##0.0000',
+    total_orig:  '#,##0.00',
+    total_soles: '"S/." #,##0.00'
   }
   const filasArray = filasAExportar.map(tr =>
     ths.map(th => {
@@ -457,7 +470,7 @@ window.exportarStockZonasPDF = async function () {
     const fechaHoy = new Date().toISOString().slice(0, 10)
     // Cada celda en UNA sola línea: la letra se ajusta sola para que entre
     // en la hoja (pdfTablaUnaLinea, helpers.js — 2026-10-06).
-    const NUM = new Set(['cantidad', 'unidades', 'peso_unidad', 'tc', 'costo_orig', 'costo'])
+    const NUM = new Set(['cantidad', 'unidades', 'peso_unidad', 'tc', 'costo_orig', 'costo', 'total_orig', 'total_soles'])
     const derecha = new Set(ths.map((th, i) => NUM.has(th.dataset.col) ? i : -1).filter(i => i >= 0))
     pdfTablaUnaLinea({
       jsPDF, titulo: 'Resumen de Stock — Por Ubicación', subtitulo: `Generado: ${_fechaDDMMAAAA(fechaHoy)}`,

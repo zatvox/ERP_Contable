@@ -419,7 +419,7 @@ window.procesarImportacionGuias = async function () {
 
         for (const l of g.lineas) {
           const costoOriginal = costoNetoLineaCompra(l.detalleCompra)   // sin IGV (2026-10-09)
-          const costoPen = parseFloat((costoOriginal * tcCompra).toFixed(4))
+          const costoPen = parseFloat((costoOriginal * tcCompra).toFixed(6))
           const pesoPorUnidad = l.unidades > 0 ? parseFloat((l.cantidad / l.unidades).toFixed(4)) : null
 
           // Se relee el lote por si otra línea de este mismo archivo ya lo creó.
@@ -436,7 +436,7 @@ window.procesarImportacionGuias = async function () {
             const unidadesResultantes = parseFloat((unidPrevias + (l.unidades || 0)).toFixed(4))
             const costoPrevio = parseFloat(fresco?.costo_unitario) || 0
             costoFinal = cantidadResultante > 0
-              ? parseFloat((((cantPrevia * costoPrevio) + (l.cantidad * costoPen)) / cantidadResultante).toFixed(4))
+              ? parseFloat((((cantPrevia * costoPrevio) + (l.cantidad * costoPen)) / cantidadResultante).toFixed(6))
               : costoPen
 
             await updateLote(lote.id, {

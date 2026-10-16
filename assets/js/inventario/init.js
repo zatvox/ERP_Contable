@@ -64,6 +64,8 @@ registrarColumnas('stock-zonas', [
   { key: 'tc',        label: 'T.C.' },
   { key: 'costo_orig', label: 'Costo Orig.' },
   { key: 'costo',     label: 'Costo S/.' },
+  { key: 'total_orig', label: 'Costo Total Orig.' },
+  { key: 'total_soles', label: 'Costo Total S/.' },
   { key: 'acciones',  label: 'Acciones' }
 ])
 

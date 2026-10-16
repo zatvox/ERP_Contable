@@ -450,7 +450,7 @@ window.cargarKardex = async function() {
       // Un lote borrado (guía eliminada) deja el movimiento huérfano: se
       // muestra el id para poder rastrearlo en vez de un guión mudo.
       if (!l) return `<span style="color:var(--color-warning);" title="El lote ya no existe">#${loteId}</span>`
-      return `<span title="Lote ${l.numero_lote} · costo unit. ${(parseFloat(l.costo_unitario) || 0).toFixed(4)}">${_escInv(l.numero_lote || ('#' + loteId))}</span>`
+      return `<span title="Lote ${l.numero_lote} · costo unit. ${(parseFloat(l.costo_unitario) || 0).toFixed(6)}">${_escInv(l.numero_lote || ('#' + loteId))}</span>`
     }
 
     // Contacto (cliente si el movimiento viene de una venta, proveedor si
@@ -499,7 +499,7 @@ window.cargarKardex = async function() {
         </div>
         <div class="card" style="padding:12px; text-align:center;">
           <div style="font-size:0.8rem; color:var(--text-secondary);">Costo Promedio</div>
-          <div style="font-size:1.4rem; font-weight:bold; color:var(--color-info);">S/ ${costoPromedio.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</div>
+          <div style="font-size:1.4rem; font-weight:bold; color:var(--color-info);">S/ ${costoPromedio.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 6 })}</div>
         </div>
         <div class="card" style="padding:12px; text-align:center;">
           <div style="font-size:0.8rem; color:var(--text-secondary);">Valor Total</div>
@@ -592,7 +592,7 @@ window.cargarKardex = async function() {
           <td data-col="salida" style="text-align:right; color:var(--color-danger);${cols.salida ? '' : ' display:none;'}">${salida > 0 ? salida.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}</td>
           <td data-col="unidentrada" style="text-align:right; color:var(--color-success);${cols.unidentrada ? '' : ' display:none;'}">${unidEntrada > 0 ? unidEntrada.toLocaleString('en-US', { maximumFractionDigits: 2 }) : ''}</td>
           <td data-col="unidsalida" style="text-align:right; color:var(--color-danger);${cols.unidsalida ? '' : ' display:none;'}">${unidSalida > 0 ? unidSalida.toLocaleString('en-US', { maximumFractionDigits: 2 }) : ''}</td>
-          <td data-col="costounit" style="text-align:right;${cols.costounit ? '' : ' display:none;'}">${costoUnit.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+          <td data-col="costounit" style="text-align:right;${cols.costounit ? '' : ' display:none;'}">${costoUnit.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 6 })}</td>
           <td data-col="costototal" style="text-align:right;${cols.costototal ? '' : ' display:none;'}">${costoTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td data-col="saldocant" style="text-align:right; font-weight:bold;${cols.saldocant ? '' : ' display:none;'}">${saldoCant.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td data-col="saldovalor" style="text-align:right; font-weight:bold;${cols.saldovalor ? '' : ' display:none;'}">${saldoValor.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>

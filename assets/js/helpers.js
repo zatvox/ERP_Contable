@@ -85,7 +85,7 @@ export function formatCurrency(value, currency = 'PEN') {
  *  (mínimo 2 para que 5.5 se vea 5.50). Totales siguen con formatNumber (2). */
 export function formatPrecio(value) {
   const num = parseFloat(value)
-  return (isNaN(num) ? 0 : num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
+  return (isNaN(num) ? 0 : num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })
 }
 window.formatPrecio = formatPrecio
 

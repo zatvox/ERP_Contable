@@ -62,7 +62,7 @@ window.abrirModalAjusteKardex = async function () {
       sel.onchange = () => {
         const costo = sel.selectedOptions[0]?.getAttribute('data-costo')
         const inp = document.getElementById('ajusteKardexCosto')
-        if (inp && costo) inp.value = parseFloat(costo).toFixed(4)
+        if (inp && costo) inp.value = parseFloat(costo).toFixed(6)
         window._sugerirUnidadesAjusteKardex()
       }
     }

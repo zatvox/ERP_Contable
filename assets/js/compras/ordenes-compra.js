@@ -119,7 +119,7 @@ window.verOC = async function (id) {
         const item = await getItemById(d.item_id)
         const nombreProducto = item ? (item.nombre || item.name) : `#${d.item_id}`
         return `producto: ${nombreProducto}
-          ${(parseFloat(d.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} kg x ${(parseFloat(d.precio_unitario) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${oc.currency} = ${(parseFloat(d.total) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${oc.currency}`
+          ${(parseFloat(d.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} kg x ${(parseFloat(d.precio_unitario) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })} ${oc.currency} = ${(parseFloat(d.total) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${oc.currency}`
       })
       const detallesArray = await Promise.all(detallesPromises)
       detallesText = detallesArray.join('\n')
@@ -242,7 +242,7 @@ window.confirmarOC = async function (id) {
         <td>${marMap[item?.marca_id] || '-'}</td>
         <td style="text-align:right;">${(parseFloat(d.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
         <td>${d.unidad_medida || 'KG'}</td>
-        <td style="text-align:right;">${(parseFloat(d.precio_unitario) || 0).toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+        <td style="text-align:right;">${(parseFloat(d.precio_unitario) || 0).toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 6 })}</td>
         <td style="text-align:right;"><strong>${tot.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></td>
         <td><input type="text" id="cc-lote-${idx}" placeholder="Ej: L-${oc.numero || oc.id}-${idx+1}" style="min-width:130px;" required></td>
         <td><select id="cc-partida-${idx}" style="min-width:120px;">${partidaOptions}</select></td>
@@ -414,7 +414,7 @@ window.ejecutarConfirmarCompra = async function () {
       tipo_compra:            'mercaderia',
       descripcion,
       cantidad:               cantidadTotal,
-      precio_unitario:        parseFloat((subtotalC / cantidadTotal).toFixed(4)) || 0,
+      precio_unitario:        parseFloat((subtotalC / cantidadTotal).toFixed(6)) || 0,
       base_imponible_gravada: subtotalC,
       igv_gravado:            igvC,
       subtotal:               subtotalC,
@@ -457,7 +457,7 @@ window.ejecutarConfirmarCompra = async function () {
       // costo_unitario SIEMPRE va en soles (costo_unit_original x tipo_cambio);
       // si la compra fue en USD, precio_unitario venía en USD y aquí se convierte.
       const costoOriginal = parseFloat(d.precio_unitario) || 0
-      const costoPen = parseFloat((costoOriginal * tipoCambio).toFixed(4))
+      const costoPen = parseFloat((costoOriginal * tipoCambio).toFixed(6))
       await addLote({
         item_id:         d.item_id || null,
         proveedor_id:    oc.contact_id,
@@ -684,7 +684,7 @@ function _renderTablaDetalleOC() {
           <td>${d.nombre || `Item #${d.item_id}`}</td>
           <td>${formatQty(d.cantidad)}</td>
           <td>${d.unidad_medida}</td>
-          <td style="text-align:right;">${(parseFloat(d.precio_unitario) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+          <td style="text-align:right;">${(parseFloat(d.precio_unitario) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td>
           <td style="text-align:right;">${formatNumber(d.subtotal)}</td>
           <td style="text-align:right;">${formatNumber(d.igv_monto)}</td>
           <td style="text-align:right; font-weight:bold;">${formatNumber(d.total)}</td>
