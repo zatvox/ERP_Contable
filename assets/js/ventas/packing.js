@@ -1,5 +1,5 @@
 import { fechaDMY } from '../helpers.js'
-import { declararEmpresaModal } from '../empresa.js'
+import { declararEmpresaModal, empresaById } from '../empresa.js'
 import { exigirEmpresaDeTrabajo } from '../empresa.js'
 // ============================================================================
 // ventas/packing.js — TAB "Packing (PK)": cotización / orden de venta (2026-09-30)
@@ -32,6 +32,32 @@ const EMPRESA = {
   email: 'gerencia@jhiroperu.com', telefono: '979050317', web: 'https://jhiroperu.com',
   logo: 'assets/img/logo-jhiro.png',          // logotipo completo (PDF)
   isotipo: 'assets/img/isotipo-jhiro.png'     // solo el símbolo (usos futuros)
+}
+
+/** Datos del EMISOR para el PDF según la empresa del PK (multiempresa):
+ *  antes todo PK salía con los datos de JHIRO, incluso los de BENJI. */
+async function _emisorPK(pk) {
+  // empresa_config completa (el contexto multiempresa solo trae id/ruc/color/logo)
+  let ec = empresaById(pk?.empresa_id) || null
+  if (pk?.empresa_id) {
+    try { const { data } = await supabase.from('empresa_config').select('*').eq('id', pk.empresa_id).single(); if (data) ec = { ...ec, ...data } } catch { /* usa el contexto */ }
+  }
+  const esJhiro = !ec || String(ec.ruc) === EMPRESA.ruc
+  const color = /^#[0-9a-f]{6}$/i.test(ec?.color || '') ? ec.color : '#2f6db5'
+  return esJhiro
+    ? { ...EMPRESA, logo: ec?.logo_url || EMPRESA.logo, color, corto: ec?.nombre_comercial || 'JHIRO' }
+    : { nombre: ec.razon_social, ruc: ec.ruc, direccion: ec.direccion || '', email: ec.email || '', telefono: ec.telefono || '', web: ec.web || '',
+        logo: ec.logo_url || null, color, corto: ec.nombre_comercial || ec.codigo || '' }
+}
+/** Texto legible sobre un fondo: oscuro si el color es claro (luminancia WCAG). */
+function _textoSobre(hex) {
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(c => c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) > 0.45 ? '#111827' : '#ffffff'
+}
+/** Mezcla el color con blanco (p: 0..1 del color) → tonos suaves para filas/etiquetas. */
+function _tinte(hex, p) {
+  const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)).map(v => Math.round(v * p + 255 * (1 - p)))
+  return '#' + c.map(v => v.toString(16).padStart(2, '0')).join('')
 }
 
 const _esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
@@ -508,6 +534,7 @@ function _asegurarModal() {
           <input type="text" id="pkNotaLinea" placeholder="Ej: 18 BOLSAS (24.50 KG X BOLSA)">
         </div>
       </div>
+      <div id="pkAvisoStock" role="status" style="display:none; margin-top:10px; padding:8px 12px; border-radius:var(--radius-md); background:rgba(245,158,11,.12); border:1px solid rgba(245,158,11,.35); color:var(--color-warning); font-size:0.82rem; line-height:1.35;"></div>
       <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; margin-top:10px;">
         <div style="flex:0.9 1 120px;">
           <label style="font-size:0.8rem;">Cantidad total *</label>
@@ -620,8 +647,12 @@ function _poblarSelects() {
 function _poblarItemsConStockPK(itemActual = null) {
   const el = document.getElementById('pkItem')
   if (!el) return
-  const ops = (S._items || []).map(i => ({ i, kg: _stockTotalPorItem(i.id)?.totalKg || 0 }))
-    .filter(o => o.kg > 0 || o.i.id === itemActual)
+  // 2026-10-19: se listan TODOS los productos (se puede cotizar sin stock);
+  // primero los que tienen stock y luego los "sin stock". El aviso amarillo
+  // aparece en el sub-modal al elegir uno sin stock suficiente.
+  const ops = (S._items || []).filter(i => i.activo !== false || i.id === itemActual)
+    .map(i => ({ i, kg: _stockTotalPorItem(i.id)?.totalKg || 0 }))
+    .sort((a, b) => (b.kg > 0) - (a.kg > 0) || String(a.i.sku || '').localeCompare(String(b.i.sku || '')))
   el.innerHTML = '<option value="">-- Selecciona producto --</option>' + ops.map(({ i, kg }) =>
     `<option value="${i.id}">${i.sku ? '[' + _esc(i.sku) + '] ' : ''}${_esc(i.nombre)} — ${kg > 0 ? formatNumber(kg) + ' ' + _esc(i.unidad_medida || 'kg') : 'sin stock'}</option>`).join('')
 }
@@ -659,6 +690,27 @@ window._pkOnItem = function () {
   const it = (S._items || []).find(i => i.id === parseInt(document.getElementById('pkItem').value))
   if (it) document.getElementById('pkUdm').value = it.unidad_medida || 'KG'
   window._pkSugerirUnidades()
+  _pkAvisoStock()
+}
+
+/** Aviso amarillo (no bloquea): producto sin stock o cantidad mayor al disponible. */
+function _pkAvisoStock() {
+  const box = document.getElementById('pkAvisoStock')
+  if (!box) return
+  const itemId = parseInt(document.getElementById('pkItem')?.value || 0)
+  if (!itemId) { box.style.display = 'none'; return }
+  const it = (S._items || []).find(i => i.id === itemId)
+  const um = _esc(it?.unidad_medida || 'kg')
+  const disp = _stockTotalPorItem(itemId)?.totalKg || 0
+  const cant = parseFloat(document.getElementById('pkCant')?.value) || 0
+  // Lo ya pedido de este producto en OTRAS líneas del mismo PK
+  const otras = (_pkLineas || []).filter((l, i) => i !== _pkLineaEditIdx && l.item_id === itemId).reduce((t, l) => t + (+l.cantidad || 0), 0)
+  const libre = disp - otras
+  let msg = ''
+  if (disp <= 0) msg = `⚠️ <strong>Sin stock</strong> de este producto. Puedes cotizarlo igual; al facturar/despachar necesitarás stock (compra o traslado).`
+  else if (cant > 0 && cant > libre + 0.0005) msg = `⚠️ Pides <strong>${formatNumber(cant)} ${um}</strong> y hay <strong>${formatNumber(Math.max(0, libre))} ${um}</strong> disponibles${otras ? ` (descontando ${formatNumber(otras)} ${um} de otras líneas de este PK)` : ''}. Faltarían ${formatNumber(cant - Math.max(0, libre))} ${um}.`
+  box.innerHTML = msg
+  box.style.display = msg ? '' : 'none'
 }
 
 // Unidades sugeridas: cantidad ÷ peso por unidad del lote más reciente del
@@ -681,6 +733,7 @@ function _calcLinea(cant, precio, igvTipo) {
 }
 
 window._pkPreviewLinea = function () {
+  _pkAvisoStock()
   const cant = parseFloat(document.getElementById('pkCant').value) || 0
   const precio = parseFloat(document.getElementById('pkPrecio').value) || 0
   const c = cant > 0 ? _calcLinea(cant, precio, document.getElementById('pkIGV').value) : { subtotal: 0, igv_monto: 0, total_linea: 0 }
@@ -1425,42 +1478,112 @@ export function numeroALetras(monto, moneda = 'PEN') {
   return `${partes.join(' ') || 'CERO'} ${mon} Y ${cent ? _menorMil(cent) : 'CERO'} CENTAVOS`
 }
 
+/** Convierte el HTML del documento en un PDF A4 y lo DESCARGA (sin abrir
+ *  ventana ni diálogo de impresión). html2canvas + jsPDF, mismas librerías
+ *  que el estado de cuenta. Si el contenido pasa de una hoja, se corta en
+ *  varias páginas y la firma "by: ZatVox" se repite en cada una. */
+async function _descargarPDFDesdeHTML(html, nombreArchivo) {
+  const ifr = document.createElement('iframe')
+  ifr.style.cssText = 'position:fixed; left:-10000px; top:0; width:794px; height:1123px; border:0; visibility:hidden;'
+  document.body.appendChild(ifr)
+  try {
+    const doc = ifr.contentDocument
+    doc.open(); doc.write(html); doc.close()
+    doc.body.style.margin = '0'; doc.body.style.padding = '38px 40px'; doc.body.style.background = '#fff'
+    // Esperar fuentes e imágenes (logo)
+    await new Promise(r => setTimeout(r, 120))
+    await Promise.all([...doc.images].map(img => img.complete ? null : new Promise(r => { img.onload = img.onerror = r })))
+    const [{ jsPDF }, h2c] = await Promise.all([
+      import('https://cdn.jsdelivr.net/npm/jspdf@2.5.2/+esm'),
+      import('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/+esm')
+    ])
+    const html2canvas = h2c.default || h2c
+    const zv = doc.querySelector('.zv'); if (zv) zv.style.position = 'absolute'   // en canvas va en la 1ra hoja; luego se repite con jsPDF
+    // html2canvas no soporta texto con degradado (background-clip:text): color sólido de la misma paleta
+    doc.querySelectorAll('.zv-txt b').forEach(b => { b.style.background = 'none'; b.style.color = '#4f46e5' })
+    // Alto REAL del contenido (no el del iframe): evita una 2da hoja en blanco
+    const alto = Math.ceil(Math.max(...[...doc.body.children].map(el => el.getBoundingClientRect().bottom + (doc.defaultView.scrollY || 0)))) + 38
+    const canvas = await html2canvas(doc.body, { scale: 2, backgroundColor: '#ffffff', useCORS: true, windowWidth: 794, height: alto, windowHeight: alto })
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+    const W = 210, H = 297
+    const pxPorMm = canvas.width / W
+    const altoPagPx = Math.floor(H * pxPorMm)
+    let y = 0, pag = 0
+    while (canvas.height - y > 24) {   // ignora restos de pocos px (redondeo)
+      const alto = Math.min(altoPagPx, canvas.height - y)
+      const trozo = document.createElement('canvas')
+      trozo.width = canvas.width; trozo.height = alto
+      trozo.getContext('2d').drawImage(canvas, 0, y, canvas.width, alto, 0, 0, canvas.width, alto)
+      if (pag > 0) pdf.addPage()
+      pdf.addImage(trozo.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, W, alto / pxPorMm)
+      if (pag > 0) {   // firma del autor en hojas siguientes
+        pdf.setFont('helvetica', 'italic').setFontSize(7).setTextColor(130, 130, 150)
+        pdf.text('by: ZatVox', W / 2, 6, { align: 'center' })
+      }
+      y += alto; pag++
+    }
+    pdf.save(nombreArchivo)
+    showToast('PDF descargado ✅', 'success')
+  } finally { ifr.remove() }
+}
+
 window.imprimirPacking = async function (id) {
   try {
     const pk = _pkLista.find(p => p.id === id)
     if (!pk) return
-    const w = window.open('', '_blank')   // se abre ANTES de los await: si no, el navegador lo bloquea
-    if (!w) { showToast('El navegador bloqueó la ventana del PDF: permite ventanas emergentes', 'warning'); return }
+    showToast(`Generando PDF de ${pk.numero}…`, 'info', 2500)
     const [lineas, cliente] = await Promise.all([_getDetalle(pk.id), getContactById(pk.contact_id)])
     if (!_pkTerminos.length) _pkTerminos = (await getTerminosPago()) || []
     const termino = _pkTerminos.find(t => t.id === pk.termino_pago_id)?.nombre || '—'
     const sim = pk.moneda === 'USD' ? '$' : 'S/'
     const f = n => `${sim} ${formatNumber(n)}`
     const base = new URL('.', location.href).href
+    const E = await _emisorPK(pk)
+    const C = E.color, CT = _textoSobre(C), C10 = _tinte(C, 0.10), C25 = _tinte(C, 0.25)
+    const CTXT = CT === '#ffffff' ? C : '#111827'   // color de marca usable como TEXTO sobre blanco
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>${_esc(pk.numero)}</title><base href="${base}">
 <style>
   @page { size: A4; margin: 14mm; }
   body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color:#111; }
-  .top { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+  .top { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-top:24px; }
   .logo { width:210px; font-size:28px; font-weight:bold; letter-spacing:2px; }
   .emp { flex:1; font-size:10px; line-height:1.45; }
-  .doc { border:1px solid #333; border-radius:10px; padding:10px 18px; text-align:center; min-width:210px; font-size:12px; }
+  * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .doc { border:1.5px solid ${C}; border-radius:10px; padding:10px 18px; text-align:center; min-width:210px; font-size:12px; }
   .doc b { display:block; font-size:13px; }
-  .box { border:1px solid #333; border-radius:10px; padding:8px 12px; margin-top:16px; display:grid; grid-template-columns:90px 1fr 110px 1fr; gap:4px 8px; font-size:10px; }
+  .box { border:1px solid ${C25}; background:${C10}; border-radius:10px; padding:8px 12px; margin-top:16px; display:grid; grid-template-columns:90px 1fr 110px 1fr; gap:4px 8px; font-size:10px; }
   .box .k { font-weight:bold; }
   table.l { width:100%; border-collapse:collapse; margin-top:16px; }
-  table.l th { background:#2f6db5; color:#fff; padding:6px; font-size:11px; border:1px solid #2f6db5; }
+  table.l th { background:${C}; color:${CT}; padding:6px; font-size:11px; border:1px solid ${C}; }
   table.l td { border:1px solid #bbb; padding:5px 6px; }
+  /* Columnas numéricas al ancho de su contenido; la descripción usa el resto y
+     baja de línea si es larga (nunca se corta el nombre del producto). */
+  table.l { table-layout:auto; }
+  table.l th.n, table.l td.n { width:1%; white-space:nowrap; }
+  table.l td.desc { word-break:break-word; }
   .r { text-align:right; } .c { text-align:center; } .nota td { font-style:italic; }
   .tot { width:48%; margin-left:auto; border-collapse:collapse; margin-top:10px; }
-  .tot td { border:1px solid #bbb; padding:6px 8px; } .tot td:first-child { color:#2f6db5; font-weight:bold; }
-  .tot tr.t td { background:#2f6db5; color:#fff; font-weight:bold; }
+  .tot td { border:1px solid #bbb; padding:6px 8px; } .tot td:first-child { color:${CTXT}; font-weight:bold; }
+  .tot tr.t td { background:${C}; color:${CT}; font-weight:bold; }
+  .logo-txt { display:inline-flex; align-items:center; justify-content:center; min-width:120px; height:64px; padding:0 16px; border-radius:14px; background:${C}; color:${CT}; font-size:26px; font-weight:800; letter-spacing:3px; }
+  /* Marca de agua del autor — fija arriba en cada hoja impresa */
+  .zv { position:fixed; top:0; left:0; right:0; display:flex; justify-content:center; pointer-events:none; z-index:0; }
+  .zv-in { display:inline-flex; align-items:center; gap:7px; padding:3px 12px 3px 4px; border-radius:999px;
+           background:linear-gradient(90deg, rgba(17,24,39,.045), rgba(17,24,39,.02)); border:1px solid rgba(17,24,39,.08); opacity:.7; }
+  .zv-mono { width:16px; height:16px; border-radius:5px; display:inline-flex; align-items:center; justify-content:center;
+             background:linear-gradient(135deg,#6366f1 0%,#06b6d4 100%); color:#fff; font:800 8px/1 Arial, sans-serif; letter-spacing:-.3px; }
+  .zv-txt { font:italic 400 9px/1 Georgia, 'Times New Roman', serif; color:#6b7280; letter-spacing:.4px; }
+  .zv-txt b { font:800 9.5px/1 Arial, Helvetica, sans-serif; font-style:normal; letter-spacing:1.6px;
+              background:linear-gradient(90deg,#4f46e5,#0891b2); -webkit-background-clip:text; background-clip:text; color:transparent; }
   .letras { font-weight:bold; margin-top:14px; }
 </style></head><body>
+  <div class="zv"><span class="zv-in"><span class="zv-mono">ZV</span><span class="zv-txt">by: <b>ZatVox</b></span></span></div>
   <div class="top">
-    <div class="logo"><img src="${EMPRESA.logo}" alt="JHIRO" style="width:200px; max-height:70px; object-fit:contain;" onerror="this.replaceWith(document.createTextNode('JHIRO'))"></div>
-    <div class="emp"><b>${EMPRESA.nombre}</b><br>${EMPRESA.direccion}<br><b>Email:</b> ${EMPRESA.email}<br><b>Teléfono:</b> ${EMPRESA.telefono}<br><b>Sitio web:</b> ${EMPRESA.web}</div>
-    <div class="doc"><b>Orden de Venta</b>RUC ${EMPRESA.ruc}<br><span style="font-size:14px;">${_esc(pk.numero)}</span></div>
+    <div class="logo">${E.logo
+      ? `<img src="${_esc(E.logo)}" alt="${_esc(E.corto)}" style="width:200px; max-height:70px; object-fit:contain;" onerror="this.outerHTML='<span class=&quot;logo-txt&quot;>${_esc(E.corto)}</span>'">`
+      : `<span class="logo-txt">${_esc(E.corto || E.nombre)}</span>`}</div>
+    <div class="emp"><b>${_esc(E.nombre)}</b>${E.direccion ? '<br>' + _esc(E.direccion) : ''}${E.email ? `<br><b>Email:</b> ${_esc(E.email)}` : ''}${E.telefono ? `<br><b>Teléfono:</b> ${_esc(E.telefono)}` : ''}${E.web ? `<br><b>Sitio web:</b> ${_esc(E.web)}` : ''}</div>
+    <div class="doc"><b style="color:${CTXT};">Orden de Venta</b>RUC ${_esc(E.ruc)}<br><span style="font-size:14px;">${_esc(pk.numero)}</span></div>
   </div>
   <div class="box">
     <span class="k">CLIENTE</span><span>${_esc(cliente?.nombre || '')}<br>RUC : ${_esc(cliente?.nro_documento || '')}</span>
@@ -1472,19 +1595,22 @@ window.imprimirPacking = async function (id) {
     <span class="k">F. VALIDEZ</span><span>${_esc(fechaDMY(pk.fecha_validez, ''))}</span>
     <span class="k">MONEDA</span><span>${pk.moneda === 'USD' ? 'DÓLARES' : 'SOLES'}</span>
   </div>
-  <table class="l"><thead><tr><th>Descripción</th><th>Cantidad</th><th>UdM</th><th>Precio unitario</th><th>Total</th></tr></thead><tbody>
-    ${lineas.map(l => `<tr><td>${_esc(l.descripcion)}</td><td class="c">${formatNumber(l.cantidad)}</td><td class="c">${_esc((l.unidad_medida || '').toLowerCase())}</td>
-      <td class="c">${sim} ${(+l.precio_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td><td class="r">${f(l.subtotal)}</td></tr>
-      ${l.nota ? `<tr class="nota"><td colspan="5">${_esc(l.nota)}</td></tr>` : ''}`).join('')}
-    ${pk.observaciones ? `<tr class="nota"><td colspan="5">${_esc(pk.observaciones).replace(/\n/g, '<br>')}</td></tr>` : ''}
+  <table class="l"><thead><tr><th>Descripción</th><th class="n">N° Unid.</th><th class="n">Peso unit.</th><th class="n">Cantidad</th><th class="n">UdM</th><th class="n">Precio unitario</th><th class="n">Total</th></tr></thead><tbody>
+    ${lineas.map(l => { const un = +l.cantidad_unidades || 0; const pu = un > 0 ? (+l.cantidad || 0) / un : 0
+      return `<tr><td class="desc">${_esc(l.descripcion)}</td>
+      <td class="c n">${un ? formatNumber(un, 0) : '—'}</td>
+      <td class="c n">${pu ? pu.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) + ' ' + _esc((l.unidad_medida || '').toLowerCase()) : '—'}</td>
+      <td class="c n">${formatNumber(l.cantidad)}</td><td class="c n">${_esc((l.unidad_medida || '').toLowerCase())}</td>
+      <td class="c n">${sim} ${(+l.precio_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td><td class="r n">${f(l.subtotal)}</td></tr>
+      ${l.nota ? `<tr class="nota"><td colspan="7">${_esc(l.nota)}</td></tr>` : ''}` }).join('')}
+    ${pk.observaciones ? `<tr class="nota"><td colspan="7">${_esc(pk.observaciones).replace(/\n/g, '<br>')}</td></tr>` : ''}
   </tbody></table>
   <div class="letras">SON: ${numeroALetras(pk.total, pk.moneda)}</div>
   <table class="tot"><tr><td>OP. GRAVADA</td><td class="r">${f(pk.subtotal)}</td></tr>
     <tr><td>IGV 18%</td><td class="r">${f(pk.igv)}</td></tr><tr class="t"><td>TOTAL</td><td class="r">${f(pk.total)}</td></tr></table>
   <p style="margin-top:18px;">Términos de pago: ${_esc(termino)}</p>
-  <script>window.onload = () => setTimeout(() => window.print(), 300)<\/script>
 </body></html>`
-    w.document.open(); w.document.write(html); w.document.close()
+    await _descargarPDFDesdeHTML(html, `${pk.numero}_${String(cliente?.nombre || '').replace(/[^\w]+/g, '_').slice(0, 40)}.pdf`)
     if (pk.estado === 'borrador') {
       await update('packing', pk.id, { estado: 'enviado', updated_at: new Date().toISOString() })
       await renderPacking(true)
