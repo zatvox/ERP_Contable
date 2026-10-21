@@ -11,6 +11,8 @@ import { getContacts, deleteContact, updateContact, tiposDeContacto, ultimoError
 import { showToast } from '../helpers.js'
 import { registrarColumnas, colMenuHtml, colStyle, colsVisibles } from '../col-menu.js'
 import { menuAccionesFila } from '../main.js'
+import { supabase } from '../supabase-client.js'
+import { estaAnulado } from '../anulacion.js'
 import { abrirModalContacto, ROLES_CONTACTO, linkWhatsApp, esLinkMaps, telefonoDe } from './contacto-modal.js'
 
 const POR_PAGINA = 50
@@ -32,6 +34,7 @@ const COLS = [
   { key: 'maps',      label: 'Ubicación (Maps)' },
   { key: 'retencion', label: 'Retención IGV', oculta: true },
   { key: 'sunat',     label: 'Estado SUNAT', oculta: true },
+  { key: 'nventas',   label: 'N° ventas' },
   { key: 'estado',    label: 'Estado' },
   { key: 'acciones',  label: 'Acciones' }
 ]
@@ -51,6 +54,7 @@ function _valor(c, key) {
     case 'retencion': return c.sujeto_retencion ? 0 : 1
     case 'sunat':     return c.estado || ''
     case 'estado':    return c.activo === false ? 1 : 0
+    case 'nventas':   return c._nventas || 0
     default: return ''
   }
 }
@@ -70,6 +74,7 @@ function _texto(c, key) {
     case 'retencion': return c.sujeto_retencion ? 'Sí' : 'No'
     case 'sunat':     return [c.estado, c.condicion].filter(Boolean).join(' / ')
     case 'estado':    return c.activo === false ? 'Inactivo' : 'Activo'
+    case 'nventas':   return c._nventas || 0
     default: return ''
   }
 }
@@ -98,6 +103,7 @@ function _celda(c, key) {
     case 'retencion': return c.sujeto_retencion ? '<span class="badge badge-warning">Sí</span>' : GUION
     case 'sunat':     return c.estado ? `<span class="badge badge-${c.estado === 'ACTIVO' && (c.condicion || 'HABIDO') === 'HABIDO' ? 'success' : 'danger'}">${_esc(c.estado)}${c.condicion ? ' · ' + _esc(c.condicion) : ''}</span>` : GUION
     case 'estado':    return `<span class="badge badge-${c.activo === false ? 'danger' : 'success'}">${c.activo === false ? 'Inactivo' : 'Activo'}</span>`
+    case 'nventas':   return c._nventas ? `<span style="font-variant-numeric:tabular-nums; font-weight:600;" title="Facturas/boletas/NV vigentes (sin anuladas ni notas de crédito/débito)">${c._nventas}</span>` : GUION
     default: return ''
   }
 }
@@ -181,7 +187,23 @@ function _filtrados(id) {
 
 export async function refrescarTablaContactos(id, recargar = false) {
   const st = _inst[id]; if (!st) return
-  if (recargar || !st.lista) st.lista = (await getContacts().catch(() => [])) || []
+  if (recargar || !st.lista) {
+    st.lista = (await getContacts().catch(() => [])) || []
+    // N° de ventas vigentes por contacto (sin anuladas ni NC/ND), todas las empresas visibles
+    try {
+      const cuenta = new Map()
+      for (let desde = 0; ; desde += 1000) {
+        const { data, error } = await supabase.from('ventas').select('contact_id, tipo_comprobante, estado, comprobante_anulado, estado_comprobante').range(desde, desde + 999)
+        if (error) throw error
+        for (const v of (data || [])) {
+          if (!v.contact_id || ['07', '08'].includes(String(v.tipo_comprobante)) || estaAnulado(v)) continue
+          cuenta.set(v.contact_id, (cuenta.get(v.contact_id) || 0) + 1)
+        }
+        if ((data || []).length < 1000) break
+      }
+      st.lista.forEach(c => { c._nventas = cuenta.get(c.id) || 0 })
+    } catch (e) { console.warn('N° ventas por contacto:', e.message) }
+  }
   const cuerpo = document.getElementById(`${id}-cuerpo`)
   if (!cuerpo) return
   const tabla = st.opts.tabla

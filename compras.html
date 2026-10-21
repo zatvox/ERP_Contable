@@ -13,18 +13,16 @@
     <aside class="sidebar">
       <div class="sidebar-logo">JHIRO</div>
       <ul class="sidebar-menu">
-        <li><a href="dashboard.html" data-page="dashboard">📊 Dashboard</a></li>
-        <li><a href="inventario.html" data-page="inventario">📦 Inventario</a></li>
-        <li><a href="compras.html" class="active" data-page="compras">🛒 Compras</a></li>
-        <li><a href="ventas.html" data-page="ventas">📈 Ventas</a></li>
-        <li><a href="cobranzas.html" data-page="cobranzas">💰 Cuentas x Cobrar/Pagar</a></li>
-        <li><a href="bancos.html" data-page="bancos">🏦 Bancos</a></li>
-        <li><a href="contabilidad.html" data-page="contabilidad">📑 Contabilidad</a></li>
-        <li data-solo-admin><a href="usuarios.html" data-page="usuarios">👤 Usuarios</a></li>
-        <li><a href="perfil.html" data-page="perfil">⚙️ Configuración</a></li>
-        <!-- En standby hasta la v3: módulo de importaciones.
-        <li><a href="costeo-importaciones.html" data-page="costeo">🚢 Costeo Importaciones</a></li>
-        -->
+        <li><a href="dashboard.html" data-page="dashboard">&#128202; Dashboard</a></li>
+        <li><a href="inventario.html" data-page="inventario">&#128230; Inventario</a></li>
+        <li><a href="compras.html" class="active" data-page="compras">&#128722; Compras</a></li>
+        <li><a href="ventas.html" data-page="ventas">&#128200; Ventas</a></li>
+        <li><a href="cobranzas.html" data-page="cobranzas">&#128176; Cuentas x Cobrar/Pagar</a></li>
+        <li><a href="bancos.html" data-page="bancos">&#127974; Bancos</a></li>
+        <li><a href="contabilidad.html" data-page="contabilidad">&#128209; Contabilidad</a></li>
+        <li><a href="costeo-importaciones.html" data-page="costeo">&#128674; Carpeta de Importaciones</a></li>
+        <li data-solo-admin><a href="usuarios.html" data-page="usuarios">&#128100; Usuarios</a></li>
+        <li><a href="perfil.html" data-page="perfil">&#9881;&#65039; Configuración</a></li>
       </ul>
       <div class="sidebar-user">
         <strong id="userDisplay">Admin</strong>
@@ -44,9 +42,7 @@
         <nav class="module-nav" id="comprasTabs">
           <button type="button" class="tab-btn active" data-tab="compras">Compras</button>
           <button type="button" class="tab-btn" data-tab="guias">Guía de Remisión</button>
-          <!-- Órdenes de Compra en standby: quitar este comentario para reactivar el tab.
           <button type="button" class="tab-btn" data-tab="ordenes">Órdenes de Compra</button>
-          -->
           <button type="button" class="tab-btn" data-tab="proveedores">Proveedores</button>
           <button type="button" class="tab-btn" data-tab="reportes">📊 Reportes</button>
           <button type="button" class="tab-btn module-nav-config" data-tab="configuracion">⚙️ Configuración</button>
@@ -210,12 +206,111 @@
               <input type="date" id="ocFecha" required>
             </div>
           </div>
-          <div class="form-group">
-            <label>Tipo de Pago</label>
-            <select id="ocTipoPago">
-              <option value="credito" selected>Crédito</option>
-              <option value="contado">Contado</option>
-            </select>
+          <div class="grid grid-2">
+            <div class="form-group">
+              <label>Tipo de Pago</label>
+              <select id="ocTipoPago">
+                <option value="credito" selected>Crédito</option>
+                <option value="contado">Contado</option>
+              </select>
+            </div>
+            <div class="form-group" style="align-self:end;">
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="checkbox" id="ocEsImportacion" style="width:auto; margin:0;"
+                       onchange="window.ocToggleImportacion()">
+                <strong>Es importación (Proforma Invoice)</strong>
+              </label>
+              <small style="color:var(--text-secondary);">Activa los datos del embarque y permite abrir la carpeta de importación.</small>
+            </div>
+          </div>
+        </div>
+
+        <!-- SECCIÓN: PROFORMA INVOICE (solo importación) -->
+        <div id="ocSeccionImportacion" style="display:none; padding:20px; border-bottom:1px solid var(--border-color);">
+          <strong style="display:block; margin-bottom:4px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Datos de la Proforma Invoice</strong>
+          <small style="display:block; margin-bottom:12px; color:var(--text-secondary); line-height:1.4;">
+            El incoterm decide si el flete y el seguro son costo aparte o ya vienen dentro del precio.
+          </small>
+
+          <div class="grid grid-3">
+            <div class="form-group">
+              <label>N° de proforma del proveedor *</label>
+              <input type="text" id="ocNumeroProforma" placeholder="Ej: NY 2491">
+              <small style="color:var(--text-secondary);">El que pone el proveedor, no el N° propio de la OC.</small>
+            </div>
+            <div class="form-group">
+              <label>Incoterm *</label>
+              <select id="ocIncoterm" onchange="window.ocOnIncoterm()">
+                <optgroup label="El precio YA incluye flete">
+                  <option value="CIF">CIF — costo, seguro y flete</option>
+                  <option value="CFR">CFR — costo y flete</option>
+                  <option value="CIP">CIP</option>
+                  <option value="CPT">CPT</option>
+                  <option value="DAP">DAP</option>
+                  <option value="DDP">DDP</option>
+                </optgroup>
+                <optgroup label="Flete y seguro van aparte">
+                  <option value="FOB">FOB — libre a bordo</option>
+                  <option value="FCA">FCA</option>
+                  <option value="FAS">FAS</option>
+                  <option value="EXW">EXW — en fábrica</option>
+                </optgroup>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Marca</label>
+              <input type="text" id="ocMarca" placeholder="Ej: HENGYI">
+            </div>
+          </div>
+
+          <div class="grid grid-3">
+            <div class="form-group">
+              <label>Puerto de embarque</label>
+              <input type="text" id="ocPuertoEmbarque" placeholder="Ej: ANY PORT OF CHINA">
+            </div>
+            <div class="form-group">
+              <label>Puerto de destino</label>
+              <input type="text" id="ocPuertoDestino" placeholder="Ej: CALLAO, PERU" value="CALLAO, PERU">
+            </div>
+            <div class="form-group">
+              <label>País de origen</label>
+              <input type="text" id="ocPaisOrigen" placeholder="Ej: CHINA">
+            </div>
+          </div>
+
+          <div class="grid grid-2" id="ocGrupoFleteSeguro">
+            <div class="form-group">
+              <label>Flete estimado</label>
+              <input type="number" id="ocFleteEstimado" step="0.01" placeholder="0.00">
+              <small id="ocFleteAviso" style="color:var(--text-secondary);"></small>
+            </div>
+            <div class="form-group">
+              <label>Seguro estimado</label>
+              <input type="number" id="ocSeguroEstimado" step="0.01" placeholder="0.00">
+            </div>
+          </div>
+
+          <strong style="display:block; margin:14px 0 8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Condiciones y plazos</strong>
+          <div class="grid grid-4">
+            <div class="form-group">
+              <label>Anticipo (%)</label>
+              <input type="number" id="ocAnticipoPct" step="1" min="0" max="100" value="20"
+                     oninput="window.ocCalcularAnticipo()">
+              <small id="ocAnticipoMonto" style="color:var(--color-info); font-weight:600;"></small>
+            </div>
+            <div class="form-group">
+              <label>Tolerancia cantidad (%)</label>
+              <input type="number" id="ocToleranciaPct" step="1" min="0" max="50" value="10">
+              <small style="color:var(--text-secondary);">±% que admite el embarque.</small>
+            </div>
+            <div class="form-group">
+              <label>Validez del anticipo (días)</label>
+              <input type="number" id="ocDiasValidezAnticipo" step="1" min="0" placeholder="Ej: 2">
+            </div>
+            <div class="form-group">
+              <label>Embarque (días desde anticipo)</label>
+              <input type="number" id="ocDiasEmbarque" step="1" min="0" placeholder="Ej: 20">
+            </div>
           </div>
         </div>
 
@@ -278,7 +373,7 @@
             <select id="newDetalleOCIGV" onchange="calcularDetalleOC()">
               <option value="18" selected>18%</option>
               <option value="10">10%</option>
-              <option value="0">Importacion</option>
+              <option value="0">0% — No gravada (factura del exterior)</option>
             </select>
           </div>
         </div>
@@ -303,6 +398,26 @@
           <div class="form-group">
             <label>Descuento %</label>
             <input type="number" id="newDetalleOCDescuento" placeholder="0" step="0.01" min="0" max="100" value="0" onchange="calcularDetalleOC()">
+          </div>
+        </div>
+
+        <!-- Solo importación: el prorrateo del flete necesita el peso -->
+        <div class="grid grid-4" id="ocDetalleGrupoImportacion" style="display:none;">
+          <div class="form-group">
+            <label>Peso neto (KG)</label>
+            <input type="number" id="newDetalleOCPesoNeto" step="0.01" placeholder="0.00">
+          </div>
+          <div class="form-group">
+            <label>Peso bruto (KG)</label>
+            <input type="number" id="newDetalleOCPesoBruto" step="0.01" placeholder="0.00">
+          </div>
+          <div class="form-group">
+            <label>Bultos</label>
+            <input type="number" id="newDetalleOCBultos" step="1" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label>Partida arancelaria</label>
+            <input type="text" id="newDetalleOCPartida" placeholder="Ej: 5402.33.00">
           </div>
         </div>
 
@@ -650,7 +765,7 @@
               <option value="18" selected>18%</option>
               <option value="18-inc" title="El Precio Unitario ya incluye el IGV: se extrae en vez de sumarse encima.">18% (incluido)</option>
               <option value="10">10%</option>
-              <option value="0">Importacion</option>
+              <option value="0">0% — No gravada (factura del exterior)</option>
             </select>
           </div>
         </div>

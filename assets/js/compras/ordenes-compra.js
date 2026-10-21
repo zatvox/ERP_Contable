@@ -1,3 +1,4 @@
+import { ultimoErrorInsert } from '../supabase-client.js'
 import { fechaDMY } from '../helpers.js'
 // ============================================================================
 // compras/ordenes-compra.js — parte de compras.js (reorganizado 2026-09-25, sin cambios de lógica)
@@ -492,6 +493,90 @@ window.ejecutarConfirmarCompra = async function () {
   }
 }
 
+
+// ════════════════════════════════════════════════════════════════════════════
+// OC DE IMPORTACIÓN (Proforma Invoice)
+// ════════════════════════════════════════════════════════════════════════════
+// El INCOTERM manda: con CIF/CFR/DAP el precio del proveedor ya incluye el
+// flete (y el seguro), así que cargarlos otra vez en el costeo los cuenta dos
+// veces. Con FOB/FCA/EXW sí son costo aparte. El modal lo impone solo.
+const INCOTERMS_CON_FLETE_INCLUIDO = ['CIF', 'CFR', 'CIP', 'CPT', 'DAP', 'DDP']
+
+export const incotermIncluyeFlete = i => INCOTERMS_CON_FLETE_INCLUIDO.includes(String(i || '').toUpperCase())
+
+/** Campos que solo existen después de correr el SQL 93. */
+const CAMPOS_OC_SQL93 = ['puerto_destino', 'tolerancia_porcentaje', 'dias_validez_anticipo', 'dias_embarque', 'marca']
+
+window.ocToggleImportacion = function () {
+  const esImp = !!document.getElementById('ocEsImportacion')?.checked
+  const sec = document.getElementById('ocSeccionImportacion')
+  if (sec) sec.style.display = esImp ? '' : 'none'
+
+  // La factura del exterior no lleva IGV peruano: el IGV de la importación
+  // se paga con la DAM, no en la factura del proveedor.
+  const igv = document.getElementById('newDetalleOCIGV')
+  if (igv && esImp) igv.value = '0'
+
+  const grupoDet = document.getElementById('ocDetalleGrupoImportacion')
+  if (grupoDet) grupoDet.style.display = esImp ? 'grid' : 'none'
+
+  if (esImp) window.ocOnIncoterm()
+}
+
+window.ocOnIncoterm = function () {
+  const inc = document.getElementById('ocIncoterm')?.value || 'CIF'
+  const incluido = incotermIncluyeFlete(inc)
+  const flete = document.getElementById('ocFleteEstimado')
+  const seguro = document.getElementById('ocSeguroEstimado')
+  const aviso = document.getElementById('ocFleteAviso')
+
+  for (const el of [flete, seguro]) {
+    if (!el) continue
+    el.disabled = incluido
+    if (incluido) el.value = ''
+    el.style.opacity = incluido ? '0.5' : ''
+  }
+  if (aviso) {
+    aviso.textContent = incluido
+      ? `${inc}: el precio del proveedor YA incluye flete y seguro — no se cargan aparte en el costeo.`
+      : `${inc}: el flete y el seguro son costo aparte y se registran en el ledger de la carpeta.`
+    aviso.style.color = incluido ? 'var(--color-warning)' : 'var(--text-secondary)'
+  }
+  window.ocCalcularAnticipo()
+}
+
+window.ocCalcularAnticipo = function () {
+  const pct = parseFloat(document.getElementById('ocAnticipoPct')?.value || 0)
+  const total = (detallesOCEnCreacion || []).reduce((t, d) => t + (parseFloat(d.total) || 0), 0)
+  const el = document.getElementById('ocAnticipoMonto')
+  if (!el) return
+  const moneda = document.getElementById('ocMoneda')?.value || 'USD'
+  el.textContent = total && pct ? `Anticipo: ${moneda} ${formatNumber(total * pct / 100, 2)}` : ''
+}
+
+/** Lee los campos de importación del modal. */
+function _datosImportacionOC() {
+  const v = id => { const e = document.getElementById(id); return e && e.value ? String(e.value).trim() : '' }
+  const n = id => { const x = parseFloat(v(id)); return Number.isFinite(x) ? x : null }
+  if (!document.getElementById('ocEsImportacion')?.checked) return { es_importacion: false }
+  return {
+    es_importacion: true,
+    numero_proforma_proveedor: v('ocNumeroProforma') || null,
+    incoterm: v('ocIncoterm') || null,
+    puerto_embarque: v('ocPuertoEmbarque') || null,
+    pais_origen: v('ocPaisOrigen') || null,
+    flete_estimado: n('ocFleteEstimado') || 0,
+    seguro_estimado: n('ocSeguroEstimado') || 0,
+    anticipo_porcentaje: n('ocAnticipoPct'),
+    // --- SQL 93 ---
+    puerto_destino: v('ocPuertoDestino') || null,
+    tolerancia_porcentaje: n('ocToleranciaPct'),
+    dias_validez_anticipo: n('ocDiasValidezAnticipo'),
+    dias_embarque: n('ocDiasEmbarque'),
+    marca: v('ocMarca') || null
+  }
+}
+
 window.guardarOC = async function () {
   try {
     const user = await getCurrentUser()
@@ -513,6 +598,22 @@ window.guardarOC = async function () {
     if (!detallesOCEnCreacion || detallesOCEnCreacion.length === 0) {
       showToast('Agrega al menos un producto', 'warning')
       return
+    }
+
+    const imp = _datosImportacionOC()
+    if (imp.es_importacion) {
+      if (!imp.numero_proforma_proveedor) {
+        showToast('Falta el N° de proforma del proveedor (ej. NY 2491)', 'warning'); return
+      }
+      if (!imp.incoterm) { showToast('Elige el incoterm de la proforma', 'warning'); return }
+      // Con el precio ya "puesto en destino" no puede haber flete aparte.
+      if (incotermIncluyeFlete(imp.incoterm) && (imp.flete_estimado || imp.seguro_estimado)) {
+        showToast(`Con ${imp.incoterm} el precio ya incluye flete y seguro: no se cargan aparte`, 'warning'); return
+      }
+      const sinPeso = detallesOCEnCreacion.filter(d => !(parseFloat(d.peso_neto) > 0))
+      if (sinPeso.length) {
+        if (!confirm(`${sinPeso.length} linea(s) sin peso neto.\n\nSin peso, el flete y los gastos fisicos no se pueden prorratear por kilo.\n\n¿Guardar igual?`)) return
+      }
     }
 
     // Calcular totales
@@ -539,12 +640,27 @@ window.guardarOC = async function () {
       cantidad_total: detallesOCEnCreacion.reduce((sum, d) => sum + d.cantidad, 0),
       total_subtotal: totalSubtotal,
       total_igv: totalIGV,
-      total_OC: totalMonto
+      total_OC: totalMonto,
+      ...imp
     }
 
-    const ocGuardada = await addOrderCompra(ocPrincipal)
+    let ocGuardada = await addOrderCompra(ocPrincipal)
+
+    // Los campos del SQL 93 pueden no existir todavia: si la BD los rechaza,
+    // se reintenta sin ellos y se avisa, en vez de perder la OC entera.
     if (!ocGuardada || !ocGuardada.id) {
-      showToast('Error al crear la orden de compra', 'danger')
+      const msg = ultimoErrorInsert()?.mensaje || ''
+      if (/column|columna/i.test(msg) && CAMPOS_OC_SQL93.some(c => msg.includes(c))) {
+        const reducido = { ...ocPrincipal }
+        for (const c of CAMPOS_OC_SQL93) delete reducido[c]
+        ocGuardada = await addOrderCompra(reducido)
+        if (ocGuardada?.id) {
+          showToast('OC creada, pero faltan campos del SQL 93 (puerto destino, tolerancia, plazos). Corre assets/sql/93 y vuelve a editarla.', 'warning')
+        }
+      }
+    }
+    if (!ocGuardada || !ocGuardada.id) {
+      showToast('Error al crear la orden de compra: ' + (ultimoErrorInsert()?.mensaje || 'revisa la consola'), 'danger')
       return
     }
 
@@ -556,6 +672,10 @@ window.guardarOC = async function () {
         cantidad: detalle.cantidad,
         precio_unitario: detalle.precio_unitario,
         unidad_medida: detalle.unidad_medida,
+        peso_neto: detalle.peso_neto ?? null,
+        peso_bruto: detalle.peso_bruto ?? null,
+        bultos: detalle.bultos ?? null,
+        partida_arancelaria: detalle.partida_arancelaria ?? null,
         igv_porcentaje: detalle.igv_porcentaje,
         subtotal: detalle.subtotal,
         igv_monto: detalle.igv_monto,
@@ -603,9 +723,20 @@ window.abrirModalDetalleDesdeCrearOC = async function () {
     
     // Limpiar formulario
     document.getElementById('formNewDetalleOC').reset()
-    document.getElementById('newDetalleOCIGV').value = '18'
     document.getElementById('newDetalleOCDescuento').value = '0'
-    
+
+    // Importación: sin IGV peruano (se paga con la DAM) y con peso visible,
+    // que es la base del prorrateo del flete y de los gastos físicos.
+    const esImp = !!document.getElementById('ocEsImportacion')?.checked
+    document.getElementById('newDetalleOCIGV').value = esImp ? '0' : '18'
+    const grupoImp = document.getElementById('ocDetalleGrupoImportacion')
+    if (grupoImp) grupoImp.style.display = esImp ? 'grid' : 'none'
+    if (esImp) {
+      // El peso neto suele ser la misma cantidad cuando se compra por kilo
+      const unidad = document.getElementById('newDetalleOCUnidad')
+      if (unidad && !unidad.value) unidad.value = 'KG'
+    }
+
     // Actualizar campos calculados
     calcularDetalleOC()
     
@@ -729,11 +860,19 @@ window.crearDetalleOC = function () {
     const igvMonto = (subtotal * igvPct) / 100
     const total = subtotal + igvMonto
 
+    const numOrNull = id => { const x = parseFloat(document.getElementById(id)?.value); return Number.isFinite(x) ? x : null }
+
     detallesOCEnCreacion.push({
       item_id:         itemId,
       nombre:          sel?.selectedOptions[0]?.text || '',
       cantidad,
       unidad_medida:   unidad,
+      // Importación: el peso es la base del prorrateo del flete y de los
+      // gastos fisicos (estiba, almacen, transporte local).
+      peso_neto:           numOrNull('newDetalleOCPesoNeto'),
+      peso_bruto:          numOrNull('newDetalleOCPesoBruto'),
+      bultos:              numOrNull('newDetalleOCBultos'),
+      partida_arancelaria: document.getElementById('newDetalleOCPartida')?.value?.trim() || null,
       precio_unitario: precio,
       igv_porcentaje:  igvPct,
       subtotal:        parseFloat(subtotal.toFixed(2)),
@@ -742,6 +881,7 @@ window.crearDetalleOC = function () {
     })
 
     _renderTablaDetalleOC()
+    window.ocCalcularAnticipo()
     window.cerrarModalDetalleOC()
     showToast('Producto agregado a la orden', 'success')
   } catch (error) {

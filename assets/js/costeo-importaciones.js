@@ -1,3 +1,6 @@
+import { ultimoErrorInsert, query } from './supabase-client.js'
+import { llenarSelectorLote, leerSelectorLote, validarLoteCI, esAviso } from './shared/lote-selector.js'
+import { renderResumenFinal } from './importaciones/resumen-analisis.js'
 import { renderCostosLedger } from './importaciones/costos-ledger.js'
 import { fechaDMY } from './helpers.js'
 // ============================================================================
@@ -98,6 +101,51 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 })
 
+
+// ─── DETALLE DE LA CI: payload limpio + selector de lote ─────────────────────
+// `detalle_comercial_invoice` solo acepta sus columnas reales. Antes se enviaba
+// `producto` (que NO es columna) y el insert fallaba en silencio: la linea
+// desaparecia y el costeo quedaba sin productos.
+const COLS_DETALLE_CI = ['comercial_invoice_id', 'lote', 'lote_id', 'product_id',
+  'partida_arancelaria', 'cantidad_neto', 'cantidad_gross', 'cantidad_unid',
+  'costo_unitario', 'costo_total', 'inventariable', 'cantidad_recibida', 'margen_objetivo']
+
+function _payloadDetalleCI(d) {
+  const out = {}
+  for (const k of COLS_DETALLE_CI) if (d[k] !== undefined) out[k] = d[k]
+  return out
+}
+
+
+/** Nombre del producto de una linea de CI con la convencion "(SKU) Nombre". */
+function _nombreProductoCI(detalle, itemsMap) {
+  const it = itemsMap ? itemsMap[detalle.product_id] : null
+  if (!it) return detalle.producto_nombre || (detalle.product_id ? `Articulo #${detalle.product_id}` : '-')
+  return it.sku ? `(${it.sku}) ${it.nombre}` : it.nombre
+}
+
+/** Mapa id -> item, para resolver nombres sin N+1 consultas. */
+async function _mapaItems() {
+  const items = await getItems()
+  const m = {}
+  for (const i of items || []) m[i.id] = i
+  return m
+}
+
+/** Recarga los lotes disponibles cuando cambia el producto de la linea. */
+window.onCambiarProductoDetalleCI = async function (modo) {
+  const pre = modo === 'edit' ? 'editDetalle' : 'newDetalle'
+  const itemId = document.getElementById(pre + 'Producto')?.value || null
+  const compraId = window.costeoActual?.compra_id || null
+  const r = await llenarSelectorLote(pre + 'Lote', { itemId, compraId })
+  const aviso = document.getElementById(pre + 'LoteAviso')
+  if (aviso) {
+    aviso.textContent = !itemId ? 'Elige primero el producto.'
+      : r.lotes.length ? `${r.lotes.length} lote(s) de este producto${r.deCompra ? ` · ${r.deCompra} de esta compra` : ''}.`
+      : 'Este producto no tiene lotes registrados: dejalo sin asignar y vinculalo cuando ingrese la mercaderia.'
+  }
+}
+
 window.validarCalculoFOB = function() {
   try {
     const costo_seguro = parseFloat(document.getElementById('newCostoSeguro')?.value || 0)
@@ -157,7 +205,7 @@ function initTabsCosteo() {
       if (tab === 'guia-remision') await renderGuiaRemision()
       if (tab === 'costos') await renderCostosLedger()
       if (tab === 'pagos') await renderPagos()
-      if (tab === 'resumen' && typeof renderResumenFinal === 'function') await renderResumenFinal()
+      if (tab === 'resumen') await renderResumenFinal()
     })
   })
 }
@@ -285,14 +333,31 @@ function initCalculosAutomaticos() {
 
 async function cargarImportacionesList() {
   try {
-    const costeos = await getComercialInvoices()
+    // El selector lista CARPETAS, no Commercial Invoices: una carpeta existe
+    // desde la etapa 1 (OC/Proforma) y el CI recien aparece en la etapa 2.
+    // Listando CIs, una carpeta recien abierta era imposible de seleccionar.
+    const carpetas = (await query('carpetas_importacion', {})) || []
     const selector = document.getElementById('costeoSelector')
     if (!selector) return
- 
-    selector.innerHTML = '<option value="">-- Selecciona una importación --</option>'
-    costeos.forEach(costeo => {
-      selector.innerHTML += `<option value="${costeo.id}">${costeo.invoice_number}</option>`
-    })
+
+    const contactos = await getContacts()
+    const mapProv = {}
+    for (const c of contactos || []) mapProv[c.id] = c.nombre || ''
+
+    carpetas.sort((a, b) => String(b.numero_carpeta || '').localeCompare(String(a.numero_carpeta || ''), 'es', { numeric: true }))
+
+    selector.innerHTML = '<option value="">-- Selecciona una carpeta --</option>' +
+      carpetas.map(c => {
+        const partes = [c.numero_carpeta]
+        if (mapProv[c.proveedor_id]) partes.push(mapProv[c.proveedor_id])
+        if (c.numero_dam) partes.push('DAM ' + c.numero_dam)
+        if (c.estado && c.estado !== 'abierta') partes.push(c.estado.toUpperCase())
+        return `<option value="${c.id}">${partes.join(' · ')}</option>`
+      }).join('')
+
+    if (!carpetas.length) {
+      selector.innerHTML += '<option value="" disabled>(todavia no hay carpetas de importacion)</option>'
+    }
     
     // Cargar ordenes de compra en el selector de nueva importación
     const ordenCompras = await getOrderCompras()
@@ -334,24 +399,46 @@ window.cargarImportacionesEnSelect = async function(selectId) {
   }
 }
 
+// Expuesta para que el modal de nueva carpeta pueda refrescar el selector.
+window.cargarImportacionesList = cargarImportacionesList
+
 window.cargarImportacion = async function () {
   try {
     const selector = document.getElementById('costeoSelector')
     if (!selector) return
  
-    const importacionId = selector.value
-    if (!importacionId) {
-      showToast('Selecciona una importación', 'warning')
+    const carpetaId = parseInt(selector.value)
+    if (!carpetaId) {
+      showToast('Selecciona una carpeta', 'warning')
       return
     }
- 
-    const costeos = await getComercialInvoices()
-    window.costeoActual = costeos.find(imp => imp.id === parseInt(importacionId))
- 
-    if (!window.costeoActual) {
-      showToast('Importación no encontrada', 'danger')
+
+    const carpeta = ((await query('carpetas_importacion', { id: carpetaId })) || [])[0]
+    if (!carpeta) {
+      showToast('Carpeta no encontrada', 'danger')
       return
     }
+    window.carpetaActual = carpeta
+
+    // El Commercial Invoice de la carpeta (puede no existir todavia: etapa 1)
+    let ci = null
+    if (carpeta.comercial_invoice_id) {
+      ci = ((await query('comercial_invoices', { id: carpeta.comercial_invoice_id })) || [])[0]
+    }
+    if (!ci) {
+      ci = ((await query('comercial_invoices', { carpeta_importacion_id: carpetaId })) || [])[0]
+    }
+
+    if (!ci) {
+      // Carpeta sin CI: los tabs que dependen de el se auto-silencian, pero el
+      // ledger y el resumen SI funcionan porque cuelgan de la carpeta.
+      window.costeoActual = { id: null, carpeta_importacion_id: carpetaId }
+      showToast(`Carpeta ${carpeta.numero_carpeta}: todavia sin Commercial Invoice`, 'info')
+      await renderCostosLedger()
+      mostrarOcultarBotonesEdicion()
+      return
+    }
+    window.costeoActual = ci
  
     // NUEVO: Cargar detalles y recalcular totales
     const detalles = await getDetalleCIByComercialInvoiceId(window.costeoActual.id)
@@ -371,7 +458,7 @@ window.cargarImportacion = async function () {
     //await actualizarCabecera()
     await renderDAM()
     await renderGuiaRemision()
-    await renderGastosLocales()
+    await renderCostosLedger()
     await renderPagos()
  
     mostrarOcultarBotonesEdicion()
@@ -526,11 +613,11 @@ window.crearImportacion = async function () {
  
     if (detallesCIEnCreacion && detallesCIEnCreacion.length > 0) {
       for (const detalle of detallesCIEnCreacion) {
-        const detalleConCI = {
-          ...detalle,
-          comercial_invoice_id: resultado.id
+        const detalleConCI = _payloadDetalleCI({ ...detalle, comercial_invoice_id: resultado.id })
+        const filaDet = await addDetalleCI(detalleConCI)
+        if (!filaDet) {
+          showToast(`No se pudo guardar la linea "${detalle.producto_nombre || detalle.lote || ''}": ${ultimoErrorInsert()?.mensaje || 'revisa la consola'}`, 'danger')
         }
-        await addDetalleCI(detalleConCI)
       }
     }
  
@@ -808,7 +895,9 @@ window.cargarOCDesdeNewImportacion = async function () {
       const costoTotal    = parseFloat(d.subtotal || (cantidadNeto * costoUnitario) || 0)
       return {
         lote:            '',
-        producto:        nombre,
+        lote_id:         null,
+        product_id:      d.item_id || null,
+        producto_nombre: nombre,
         cantidad_neto:   cantidadNeto,
         cantidad_gross:  cantidadNeto,   // igual al neto por defecto; el usuario puede editar el CI después
         cantidad_unid:   0,
@@ -881,6 +970,7 @@ async function renderDetalleCI() {
     if (!tabla) return
  
     const detalles = await getDetalleCIByComercialInvoiceId(window.costeoActual.id)
+    const itemsMapCI = await _mapaItems()
  
     if (!detalles || detalles.length === 0) {
       tabla.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 20px;">Sin detalles</p>'
@@ -907,8 +997,8 @@ async function renderDetalleCI() {
     detalles.forEach(detalle => {
       html += `
         <tr>
-          <td>${detalle.lote || '-'}</td>
-          <td><strong>${detalle.producto || '-'}</strong></td>
+          <td>${detalle.lote || '-'}${detalle.lote && !detalle.lote_id ? ' <span class="badge badge-warning" title="El lote es texto suelto: no esta vinculado a un lote real del almacen">sin vincular</span>' : ''}</td>
+          <td><strong>${_nombreProductoCI(detalle, itemsMapCI)}</strong></td>
           <td>${(detalle.cantidad_neto || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td>${(detalle.cantidad_gross || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td>${formatQty(detalle.cantidad_unid || 0)}</td>
@@ -940,14 +1030,11 @@ async function renderDetallesCabecera() {
     if (!tabla) return
  
     const detalles = await getDetalleCIByComercialInvoiceId(window.costeoActual.id)
-    const productos = await getItems()
-    const detallesConProductos = detalles.map(detalle => {
-      const producto = productos.find(p => p.id === detalle.producto)
-      return {
-        ...detalle,
-        producto: producto ? producto.nombre : 'Producto no encontrado'
-      }
-    })
+    const itemsMapCab = await _mapaItems()
+    const detallesConProductos = detalles.map(detalle => ({
+      ...detalle,
+      producto_nombre: _nombreProductoCI(detalle, itemsMapCab)
+    }))
     if (!detalles || detalles.length === 0) {
       tabla.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 20px;">Sin detalles agregados</p>'
       return
@@ -974,7 +1061,7 @@ async function renderDetallesCabecera() {
       html += `
         <tr>
           <td>${detalle.lote || '-'}</td>
-          <td><strong>${detalle.producto || '-'}</strong></td>
+          <td><strong>${detalle.producto_nombre || '-'}</strong></td>
           <td>${(detalle.cantidad_neto || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td>${(detalle.cantidad_gross || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td>${formatQty(detalle.cantidad_unid || 0)}</td>
@@ -1027,7 +1114,7 @@ async function renderDetallesCIEnCreacion(readOnly = false) {
     detallesCIEnCreacion.forEach((detalle, index) => {
       html += `
         <tr style="border-bottom: 1px solid var(--border-color);">
-          <td style="padding: 10px;"><strong>${detalle.producto || '-'}</strong></td>
+          <td style="padding: 10px;"><strong>${detalle.producto_nombre || detalle.producto || '-'}</strong></td>
           <td style="padding: 10px; text-align: right;">${(detalle.cantidad_neto || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td style="padding: 10px; text-align: right;">${(detalle.cantidad_gross || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td style="padding: 10px; text-align: right;">${formatQty(detalle.cantidad_unid || 0)}</td>
@@ -1104,8 +1191,10 @@ window.crearDetalleCI = async function () {
       return
     }
  
-    const lote = document.getElementById('newDetalleLote')?.value || ''
-    const producto = document.getElementById('newDetalleProducto')?.value || ''
+    const selProd = document.getElementById('newDetalleProducto')
+    const producto = selProd?.value || ''
+    const productoNombre = selProd?.options?.[selProd.selectedIndex]?.text || ''
+    const { lote_id: loteId, lote } = leerSelectorLote('newDetalleLote')
     const cantidadNeto = parseFloat(document.getElementById('newDetalleCantidadNeto')?.value || 0)
     const cantidadGross = parseFloat(document.getElementById('newDetalleCantidadGross')?.value || 0)
     const cantidadUnid = parseInt(document.getElementById('newDetalleCantidadUnid')?.value || 0)
@@ -1116,12 +1205,21 @@ window.crearDetalleCI = async function () {
       return
     }
  
+    // VALIDACIONES DEL LOTE (mismo producto, no usado por otra linea, peso)
+    const errLote = await validarLoteCI(loteId, { itemId: producto, pesoLinea: cantidadNeto })
+    if (errLote) {
+      if (!esAviso(errLote)) { showToast(errLote, 'danger'); return }
+      if (!confirm(errLote + '\n\n¿Agregar la linea de todas formas?')) return
+    }
+
     const costoTotal = calcularCostoDetalleCI(cantidadNeto, costoUnitario)
  
     // CREAR OBJETO TEMPORAL (sin ID, se generará al guardar en BD)
     const newDetalle = {
       lote: lote,
-      producto: producto,
+      lote_id: loteId,
+      product_id: producto ? parseInt(producto) : null,
+      producto_nombre: productoNombre,
       cantidad_neto: cantidadNeto,
       cantidad_gross: cantidadGross,
       cantidad_unid: cantidadUnid,
@@ -1159,10 +1257,15 @@ window.editarDetalleCI = async function (detalleId) {
     window.detalleActual = detalle
     
     // Cargar productos en el select
-    await cargarProductosEnSelectEditDetalle(detalle.producto)
-    
-    document.getElementById('editDetalleLote').value = detalle.lote || ''
-    document.getElementById('editDetalleProducto').value = detalle.producto || ''
+    await cargarProductosEnSelectEditDetalle(detalle.product_id)
+
+    document.getElementById('editDetalleProducto').value = detalle.product_id || ''
+    await llenarSelectorLote('editDetalleLote', {
+      itemId: detalle.product_id,
+      compraId: window.costeoActual?.compra_id || null,
+      loteId: detalle.lote_id || null,
+      loteTexto: detalle.lote || ''
+    })
     document.getElementById('editDetalleCantidadNeto').value = detalle.cantidad_neto || 0
     document.getElementById('editDetalleCantidadGross').value = detalle.cantidad_gross || 0
     document.getElementById('editDetalleCantidadUnid').value = detalle.cantidad_unid || 0
@@ -1179,13 +1282,24 @@ window.actualizarDetalleCI = async function () {
   try {
     if (!window.detalleActual) return
  
-    const cantidadNeto = parseInt(document.getElementById('editDetalleCantidadNeto')?.value || 0)
+    const cantidadNeto = parseFloat(document.getElementById('editDetalleCantidadNeto')?.value || 0)
     const costoUnitario = parseFloat(document.getElementById('editDetalleCostoUnit')?.value || 0)
     const costoTotal = calcularCostoDetalleCI(cantidadNeto, costoUnitario)
  
+    const prodEdit = document.getElementById('editDetalleProducto')?.value || ''
+    const { lote_id: loteIdEdit, lote: loteEdit } = leerSelectorLote('editDetalleLote')
+    const errLoteEdit = await validarLoteCI(loteIdEdit, {
+      itemId: prodEdit, excluirDetalleId: window.detalleActual.id, pesoLinea: cantidadNeto
+    })
+    if (errLoteEdit) {
+      if (!esAviso(errLoteEdit)) { showToast(errLoteEdit, 'danger'); return }
+      if (!confirm(errLoteEdit + '\n\n¿Guardar de todas formas?')) return
+    }
+
     const datosActualizados = {
-      lote: document.getElementById('editDetalleLote')?.value || '',
-      producto: document.getElementById('editDetalleProducto')?.value || '',
+      lote: loteEdit,
+      lote_id: loteIdEdit,
+      product_id: prodEdit ? parseInt(prodEdit) : null,
       cantidad_neto: parseFloat(document.getElementById('editDetalleCantidadNeto')?.value || 0),
       cantidad_gross: parseFloat(document.getElementById('editDetalleCantidadGross')?.value || 0),
       cantidad_unid: parseInt(document.getElementById('editDetalleCantidadUnid')?.value || 0),

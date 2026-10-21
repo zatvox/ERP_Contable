@@ -14,12 +14,16 @@
     <aside class="sidebar">
       <div class="sidebar-logo">JHIRO</div>
       <ul class="sidebar-menu">
-        <li><a href="dashboard.html" data-page="dashboard">📊 Dashboard</a></li>
-        <li><a href="inventario.html" data-page="inventario">📦 Inventario</a></li>
-        <li><a href="compras.html" data-page="compras">🛒 Compras</a></li>
-        <li><a href="ventas.html" data-page="ventas">📈 Ventas</a></li>
-        <li><a href="contabilidad.html" data-page="contabilidad">📑 Contabilidad</a></li>
-        <li><a href="costeo-importaciones.html" class="active" data-page="costeo">📈 Carpeta de Importaciones</a></li>
+        <li><a href="dashboard.html" data-page="dashboard">&#128202; Dashboard</a></li>
+        <li><a href="inventario.html" data-page="inventario">&#128230; Inventario</a></li>
+        <li><a href="compras.html" data-page="compras">&#128722; Compras</a></li>
+        <li><a href="ventas.html" data-page="ventas">&#128200; Ventas</a></li>
+        <li><a href="cobranzas.html" data-page="cobranzas">&#128176; Cuentas x Cobrar/Pagar</a></li>
+        <li><a href="bancos.html" data-page="bancos">&#127974; Bancos</a></li>
+        <li><a href="contabilidad.html" data-page="contabilidad">&#128209; Contabilidad</a></li>
+        <li><a href="costeo-importaciones.html" class="active" data-page="costeo">&#128674; Carpeta de Importaciones</a></li>
+        <li data-solo-admin><a href="usuarios.html" data-page="usuarios">&#128100; Usuarios</a></li>
+        <li><a href="perfil.html" data-page="perfil">&#9881;&#65039; Configuración</a></li>
       </ul>
       <div class="sidebar-user">
         <strong id="userDisplay">Admin</strong>
@@ -33,8 +37,19 @@
       <header class="header">
         <div class="header-left">
           <button class="menu-toggle" id="menuToggle">☰</button>
-          <h2 class="header-title">Carpeta de Importaciones</h2>
+          <h2 class="header-title">Importaciones</h2>
         </div>
+
+        <nav class="module-nav" id="costeoTabs">
+          <button type="button" class="tab-btn active" data-tab="cabecera">1. Comercial Invoice</button>
+          <button type="button" class="tab-btn" data-tab="billoflading">2. Bill of Lading</button>
+          <button type="button" class="tab-btn" data-tab="dam">3. DAM</button>
+          <button type="button" class="tab-btn" data-tab="guia-remision">4. Guia de Remision</button>
+          <button type="button" class="tab-btn" data-tab="costos">5. Costos y Gastos</button>
+          <button type="button" class="tab-btn" data-tab="pagos">6. Pagos y CxP</button>
+          <button type="button" class="tab-btn" data-tab="resumen">7. Resumen Final</button>
+        </nav>
+
         <div class="header-controls">
           <button class="theme-toggle" id="themeToggle">🌙 Oscuro</button>
         </div>
@@ -42,29 +57,18 @@
 
       <!-- CONTENT -->
       <main class="content">
-        <h1 class="page-title">Carpeta de Importaciones</h1>
 
         <!-- SELECTOR Y BOTONES -->
         <div class="costeo-header-controls">
           <div class="costeo-selector">
-            <label>Importación:</label>
+            <label>Carpeta:</label>
             <select id="costeoSelector" onchange="cargarImportacion()">
               <option value="">-- Selecciona una Importación --</option>
             </select>
           </div>
-          <button class="btn btn-primary btn-small" onclick="openModal('modal-nueva-importacion')">+ Nueva</button>
+          <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevaCarpeta()">+ Nueva carpeta</button>
+          <button class="btn btn-secondary btn-small" onclick="window.abrirAdjuntosCarpeta()" title="Proforma, constancias, BL, DAM, liquidacion...">&#128206; Documentos</button>
           <button class="btn btn-secondary btn-small" onclick="exportarPDF()" id="btnExportar" style="display:none;">📥 PDF</button>
-        </div>
-
-        <!-- TABS HORIZONTALES -->
-        <div class="tab-buttons" id="costeoTabs">
-          <button class="tab-btn active" data-tab="cabecera">1. Comercial Invoice</button>
-          <button class="tab-btn" data-tab="billoflading">2. Bill of Lading</button>
-          <button class="tab-btn" data-tab="dam">3. DAM</button>
-          <button class="tab-btn" data-tab="guia-remision">4. Guia de Remision</button>
-          <button class="tab-btn" data-tab="costos">5. Costos y Gastos</button>
-          <button class="tab-btn" data-tab="pagos">6. Pagos y CxP</button>
-          <button class="tab-btn" data-tab="resumen">7. Resumen Final</button>
         </div>
 
         <!-- TAB 1: CI y PO -->
@@ -269,18 +273,30 @@
           </div>
         </div>
 
-        <!-- TAB 9: RESUMEN FINAL -->
+        <!-- TAB 7: RESUMEN FINAL — formato del Excel "Jhiro & Benji / Analisis general" -->
         <div id="tab-resumen" class="tab-content">
           <div class="card">
-            <div class="card-header">
-              <h3 class="card-title">Resumen Final y Margen de Ganancia</h3>
+            <div class="card-header" style="flex-direction:column; align-items:stretch; gap:10px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding-right:34px;">
+                <h3 class="card-titulo-tab">Analisis general &mdash; estado de contenedores</h3>
+                <div class="card-acciones" style="display:flex; gap:8px;">
+                  <button class="btn btn-secondary btn-small" onclick="window.exportarAnalisisXLSX()">&#11015; Excel</button>
+                  <button class="btn btn-secondary btn-small" onclick="window.exportarAnalisisPDF()">&#11015; PDF</button>
+                  <button class="btn btn-primary btn-small" onclick="window.renderResumenFinal()">&#8635; Recalcular</button>
+                </div>
+              </div>
+              <div id="alcance-resumen" style="display:flex; flex-wrap:wrap; gap:6px;">
+                <button type="button" class="reporte-chip on" data-alcance="consolidado"
+                        onclick="window.cambiarAlcanceResumen('consolidado')">Consolidado (todas las carpetas)</button>
+                <button type="button" class="reporte-chip" data-alcance="carpeta"
+                        onclick="window.cambiarAlcanceResumen('carpeta')">Solo esta importacion</button>
+              </div>
             </div>
-            <div id="contenido-resumen" style="padding: 20px;">
-              <p style="text-align: center; color: var(--text-secondary);">Completa todos los tabs para ver el resumen</p>
+            <div id="contenido-resumen">
+              <p style="text-align:center; color:var(--text-secondary); padding:20px;">Abriendo el analisis&hellip;</p>
             </div>
           </div>
         </div>
-
       </main>
     </div>
   </div>
@@ -1127,13 +1143,16 @@
       <form id="formNewDetalle" style="padding: 20px;">
         <div class="grid grid-2">
           <div class="form-group">
-            <label>Lote Referencial</label>
-            <input type="text" id="newDetalleLote" placeholder="Ej: LOTE-001">
+            <label>Lote</label>
+            <select id="newDetalleLote" disabled>
+              <option value="">— Elige primero el producto —</option>
+            </select>
+            <small id="newDetalleLoteAviso" style="color:var(--text-secondary);">Se elige de los lotes del producto; si el lote aún no existe, déjalo sin asignar.</small>
           </div>
           <div class="form-group">
             <label>Producto *</label>
             <div style="display: flex; gap: 10px; align-items: flex-end;">
-              <select id="newDetalleProducto" style="flex: 1;" required>
+              <select id="newDetalleProducto" style="flex: 1;" required onchange="window.onCambiarProductoDetalleCI('new')">
                 <option value="">-- Selecciona un producto --</option>
               </select>
               <!-- <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioProductoCosteo()" style="margin-bottom: 0;">+ Nuevo</button> -->
@@ -1184,12 +1203,15 @@
       <form id="formEditDetalle">
         <div class="grid grid-2">
           <div class="form-group">
-            <label>Lote Referencial</label>
-            <input type="text" id="editDetalleLote" placeholder="Ej: LOTE-001">
+            <label>Lote</label>
+            <select id="editDetalleLote" disabled>
+              <option value="">— Elige primero el producto —</option>
+            </select>
+            <small id="editDetalleLoteAviso" style="color:var(--text-secondary);">Vincula la línea con el lote real del almacén.</small>
           </div>
           <div class="form-group">
             <label>Producto *</label>
-            <select id="editDetalleProducto" required>
+            <select id="editDetalleProducto" required onchange="window.onCambiarProductoDetalleCI('edit')">
               <option value="">-- Selecciona un producto --</option>
             </select>
           </div>
@@ -1252,11 +1274,12 @@
             </select>
           </div>
           <div class="form-group">
-            <label>Precinto</label>
-            <input type="text" id="newContenedorPrecinto" placeholder="Opcional">
+            <label>Etiqueta corta (CONT.)</label>
+            <input type="text" id="newContenedorEtiqueta" placeholder="1.1" maxlength="12">
+            <small style="color:var(--text-secondary);">Tu contador interno; es la columna CONT. del analisis general.</small>
           </div>
         </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:10px;">
           <div class="form-group">
             <label>Peso bruto (KG)</label>
             <input type="number" id="newContenedorPesoBruto" step="0.01" placeholder="0.00">
@@ -1264,6 +1287,10 @@
           <div class="form-group">
             <label>Bultos</label>
             <input type="number" id="newContenedorBultos" step="1" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label>Precinto</label>
+            <input type="text" id="newContenedorPrecinto" placeholder="Opcional">
           </div>
           <div class="form-group">
             <label>Canal de control</label>
@@ -1305,5 +1332,8 @@
   <script type="module" src="assets/js/main.js"></script>
   <script type="module" src="assets/js/costeo-importaciones.js"></script>
   <script type="module" src="assets/js/importaciones/costos-ledger.js"></script>
+  <script type="module" src="assets/js/importaciones/resumen-analisis.js"></script>
+  <script type="module" src="assets/js/importaciones/carpeta-nueva.js"></script>
+  <script type="module" src="assets/js/importaciones/adjuntos-carpeta.js"></script>
 </body>
 </html>

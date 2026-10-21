@@ -17,7 +17,7 @@
 //          documentos_importacion.compra_id → compras (Registro de Compras)
 // ============================================================================
 
-import { supabase, insert, update, deleteRecord, query, ultimoErrorInsert } from '../supabase-client.js'
+import { supabase, insert, update, deleteRecord, query, ultimoErrorInsert, esperarContextoEmpresa } from '../supabase-client.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { showToast, formatNumber, fechaDMY } from '../helpers.js'
 import { getSuppliers, addCuentaPagar, subirAdjuntos, getAdjuntos, getUrlAdjunto,
@@ -184,10 +184,14 @@ export async function crearLineaCosto(doc, linea, userId) {
 
   if (!documentoId) {
     // ¿Ya existe este comprobante? (caso "una factura, 2 DAMs")
+    // El indice unico del SQL 87 es por (empresa, proveedor, serie, numero):
+    // la misma factura del mismo agente puede existir en Jhiro y en Benji y
+    // son dos documentos distintos. Por eso la busqueda se acota a la empresa
+    // de la carpeta, no a las empresas activas del chip.
     if (doc.proveedor_id && doc.serie && doc.numero) {
-      const previos = await query('documentos_importacion', {
-        proveedor_id: doc.proveedor_id, serie: doc.serie, numero: doc.numero
-      })
+      const filtro = { proveedor_id: doc.proveedor_id, serie: doc.serie, numero: doc.numero }
+      if (doc.empresa_id) filtro.empresa_id = doc.empresa_id
+      const previos = await query('documentos_importacion', filtro)
       if (previos && previos.length) documentoId = previos[0].id
     }
     if (!documentoId) {
@@ -239,6 +243,10 @@ export async function vincularCxPDocumento(documentoId, userId) {
 export async function renderCostosLedger() {
   const cont = document.getElementById('tabla-costos-importacion')
   if (!cont) return
+
+  // Multiempresa: las vistas v_importacion_* se filtran por empresa_id y el
+  // filtro falla CERRADO si el contexto no esta listo (SQL 87 + supabase-client).
+  await esperarContextoEmpresa()
 
   if (!window.costeoActual || !window.costeoActual.id) {
     cont.innerHTML = _aviso('Selecciona una importación arriba para ver sus costos.')
@@ -953,7 +961,10 @@ window.guardarLineaCosto = async function () {
       neto_pagado: tipoDoc === 'rh' ? (monto + igv - retencion) : null,
       estado_pago: v('lcEstadoPago'),
       es_provisional: chk('lcProvisional'),
-      sustentado: chk('lcSustentado')
+      sustentado: chk('lcSustentado'),
+      // La empresa la manda la CARPETA (v_importacion_resumen.empresa_id),
+      // no el chip de trabajo: evita documentos mestizos entre empresas.
+      empresa_id: _resumen?.empresa_id ?? undefined
     }
 
     const cat = conceptoPorCodigo(concepto)
@@ -1099,6 +1110,7 @@ window.crearContenedor = async function () {
     const fila = await insert('contenedores', {
       carpeta_importacion_id: carpeta,
       numero: v('newContenedorNumero').toUpperCase(),
+      etiqueta: v('newContenedorEtiqueta') || null,
       tipo: v('newContenedorTipo') || '40HC',
       numero_precinto: v('newContenedorPrecinto') || null,
       peso_bruto: num(v('newContenedorPesoBruto')),

@@ -583,7 +583,10 @@ window.guardarCompraMercaderia = async function () {
         cantidad:        d.cantidad,
         precio_unitario: d.precio_unitario,
         subtotal:        d.subtotal,
-        tipo_base:       d.igv_porcentaje > 0 ? 'gravada' : 'exonerada',
+        // 0% de IGV = operacion NO GRAVADA (factura del exterior / inafecta).
+        // Antes caia en 'exonerada', que va a otra casilla del PDT 621:
+        // exonerada = Apendice I de la Ley del IGV; no gravada = fuera del ambito.
+        tipo_base:       d.igv_porcentaje > 0 ? 'gravada' : 'no_gravada',
         igv_porcentaje:  d.igv_porcentaje,
         igv_monto:       d.igv_monto,
         total_linea:     d.total,

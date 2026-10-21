@@ -72,7 +72,11 @@ export const TABLAS_EMPRESA = new Set([
   // Vistas que ya exponen empresa_id (SQL 87, parte 8)
   'stock_ubicaciones', 'v_stock_bultos_zona', 'v_registro_ventas', 'v_registro_compras',
   'v_cxc_pendientes', 'v_cxp_pendientes', 'v_antiguedad_cxc_cliente',
-  'v_libro_mayor', 'v_balance_comprobacion'
+  'v_libro_mayor', 'v_balance_comprobacion',
+  // Vistas de importaciones con empresa_id (SQL 89)
+  'v_importacion_costos', 'v_importacion_doc_cuadre', 'v_importacion_resumen',
+  'v_importacion_costo_detalle', 'v_importacion_prorrateo_cuadre',
+  'v_importacion_analisis_general', 'v_compras_importacion'
 ])
 
 /** Aplica el filtro de empresas activas a una consulta, si corresponde. */

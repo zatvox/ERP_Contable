@@ -97,7 +97,7 @@ export function _pintarLineasEdicionCompra() {
           <option value="18"${(d.igv_porcentaje == 18) ? ' selected' : ''}>18%</option>
           <option value="18-inc" title="El Precio Unitario ya incluye el IGV: se extrae en vez de sumarse encima.">18% (incluido)</option>
           <option value="10"${(d.igv_porcentaje == 10) ? ' selected' : ''}>10%</option>
-          <option value="0"${(!d.igv_porcentaje || d.igv_porcentaje == 0) ? ' selected' : ''}>Exonerada / Importación</option>
+          <option value="0"${(!d.igv_porcentaje || d.igv_porcentaje == 0) ? ' selected' : ''}>0% — No gravada (factura del exterior)</option>
         </select>
       </td>
       <td style="text-align:right;" id="ecLineaSubtotal-${idx}">${parseFloat(d.subtotal || 0).toFixed(2)}</td>

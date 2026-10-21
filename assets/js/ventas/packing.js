@@ -208,8 +208,8 @@ export async function renderPacking(forzar = true) {
       <div class="table-container"><table>
         <thead><tr>
           ${_th('sel', '<input type="checkbox" id="selTodosPK" style="width:auto; margin:0;" onchange="window.toggleSelTodosPK(this.checked)" title="Seleccionar todos los eliminables">', 'width:32px;')}
-          ${_th('numero', 'N° PK')}${_th('emision', 'Emisión')}${_th('validez', 'Validez')}${_th('cliente', 'Cliente')}${_th('vendedor', 'Vendedor')}${_th('oc', 'O/C')}
-          ${_th('moneda', 'Moneda')}${_th('total', 'Total', 'text-align:right;')}${_th('estado', 'Estado')}${_th('factura', 'Factura')}${_th('acciones', 'Acciones')}</tr></thead>
+          ${_thS('numero', 'N° PK')}${_thS('emision', 'Emisión')}${_thS('validez', 'Validez')}${_thS('cliente', 'Cliente')}${_thS('vendedor', 'Vendedor')}${_thS('oc', 'O/C')}
+          ${_thS('moneda', 'Moneda')}${_thS('total', 'Total', 'text-align:right;')}${_thS('estado', 'Estado')}${_thS('factura', 'Factura')}${_th('acciones', 'Acciones')}</tr></thead>
         <tbody id="tabla-packing-body"><tr><td colspan="12" style="text-align:center;">Cargando...</td></tr></tbody>
       </table></div>`
   }
@@ -265,6 +265,29 @@ const _cs = k => colStyle('packing', k)
 const _csR = (k, extra = '') => { const oc = colStyle('packing', k) !== ''; return ` style="${extra}${oc ? ' display:none;' : ''}"` }
 const _td = (k, html, extra = '') => `<td data-col-tabla="packing" data-col="${k}"${extra ? _csR(k, extra) : _cs(k)}>${html}</td>`
 const _th = (k, lbl, extra = '') => `<th data-col-tabla="packing" data-col="${k}"${extra ? _csR(k, extra) : _cs(k)}>${lbl}</th>`
+// Encabezado ordenable: clic = asc → desc (2026-10-20)
+const _thS = (k, lbl, extra = '') => `<th data-col-tabla="packing" data-col="${k}"${_csR(k, 'cursor:pointer; user-select:none; white-space:nowrap;' + extra)} onclick="window.ordenarPacking('${k}')" title="Ordenar por ${lbl}">${lbl}<span class="pk-flecha" data-k="${k}" style="margin-left:4px; opacity:.85;"></span></th>`
+let _pkSort = { col: null, dir: 'asc' }
+const _ORDEN_EST_PK = { borrador: 0, enviado: 1, parcial: 2, facturado: 3, anulado: 4 }
+function _valorOrdenPK(p, col) {
+  switch (col) {
+    case 'numero':   return (parseInt(p.correlativo) || 0) || String(p.numero || '')
+    case 'emision':  return p.fecha_emision || ''
+    case 'validez':  return p.fecha_validez || ''
+    case 'cliente':  return String(p._cliente || '').toLowerCase()
+    case 'vendedor': return String(_nombreVendedor(p.vendedor_id) || '').toLowerCase()
+    case 'oc':       return String(p.orden_compra_cliente || '').toLowerCase()
+    case 'moneda':   return p.moneda || ''
+    case 'total':    return +p.total || 0
+    case 'estado':   return _ORDEN_EST_PK[p.estado] ?? 9
+    case 'factura':  return (p._facturas?.map(f => f.numero).join(' ') || (p.venta_id ? _pkVentasMap.get(p.venta_id) || '' : '')).toLowerCase()
+    default: return ''
+  }
+}
+window.ordenarPacking = function (col) {
+  _pkSort = _pkSort.col === col ? { col, dir: _pkSort.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' }
+  window.filtrarPacking()
+}
 
 /** Se puede eliminar: sin factura vigente y en borrador / enviado / anulado.
  *  (El PK no mueve stock, CxC ni asientos: borrarlo no deja nada colgado.) */
@@ -323,6 +346,18 @@ window.filtrarPacking = function () {
   const hoy = _hoy()
   const lista = _pkLista.filter(p => (!fe || p.estado === fe) &&
     (!q || `${p.numero} ${p._cliente || ''} ${p.orden_compra_cliente || ''}`.toLowerCase().includes(q)))
+  if (_pkSort.col) {
+    const k = _pkSort.dir === 'asc' ? 1 : -1
+    lista.sort((a, b) => {
+      const va = _valorOrdenPK(a, _pkSort.col), vb = _valorOrdenPK(b, _pkSort.col)
+      const vacioA = va === '' || va == null, vacioB = vb === '' || vb == null
+      if (vacioA !== vacioB) return vacioA ? 1 : -1          // vacíos siempre al final
+      return (typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb), 'es', { numeric: true })) * k
+    })
+  }
+  document.querySelectorAll('#tabla-packing-body')[0]?.closest('table')?.querySelectorAll('.pk-flecha').forEach(sp => {
+    sp.textContent = sp.dataset.k === _pkSort.col ? (_pkSort.dir === 'asc' ? '▲' : '▼') : ''
+  })
   const selTodos = document.getElementById('selTodosPK'); if (selTodos) selTodos.checked = false
   window.actualizarBotonEliminarPK?.()
   if (!lista.length) { tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;">Sin PK registrados</td></tr>'; window.actualizarBotonEliminarPK(); return }
