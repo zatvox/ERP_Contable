@@ -7,8 +7,9 @@
   <title>JHIRO ERP - Costeo de Importaciones</title>
   <link rel="stylesheet" href="assets/css/styles.css">
   <link rel="stylesheet" href="assets/css/costeo-styles.css">
+  <link rel="stylesheet" href="assets/css/modal-moderno.css">
 </head>
-<body>
+<body class="ui-moderna">
   <div class="app-container">
     <!-- SIDEBAR -->
     <aside class="sidebar">
@@ -41,13 +42,36 @@
         </div>
 
         <nav class="module-nav" id="costeoTabs">
-          <button type="button" class="tab-btn active" data-tab="cabecera">1. Comercial Invoice</button>
-          <button type="button" class="tab-btn" data-tab="billoflading">2. Bill of Lading</button>
-          <button type="button" class="tab-btn" data-tab="dam">3. DAM</button>
-          <button type="button" class="tab-btn" data-tab="guia-remision">4. Guia de Remision</button>
-          <button type="button" class="tab-btn" data-tab="costos">5. Costos y Gastos</button>
-          <button type="button" class="tab-btn" data-tab="pagos">6. Pagos y CxP</button>
-          <button type="button" class="tab-btn" data-tab="resumen">7. Resumen Final</button>
+          <!-- Etapas reales del ciclo (ver areas/importaciones-ciclo): cada etapa abre sus pestañas internas -->
+          <div class="module-nav-group">
+            <button type="button" class="module-nav-group-toggle">1. Compra y anticipo</button>
+            <div class="module-nav-dropdown">
+              <button type="button" class="tab-btn active" data-tab="cabecera">Hoja de costeo (PI y CI)</button>
+              <button type="button" class="tab-btn" data-tab="pagos">Pagos y CxP</button>
+            </div>
+          </div>
+          <div class="module-nav-group">
+            <button type="button" class="module-nav-group-toggle">2. Embarque y saldo</button>
+            <div class="module-nav-dropdown">
+              <button type="button" class="tab-btn" data-tab="billoflading">Bill of Lading</button>
+              <button type="button" class="tab-btn" data-tab="pagos">Pagos y CxP</button>
+            </div>
+          </div>
+          <div class="module-nav-group">
+            <button type="button" class="module-nav-group-toggle">3. Nacionalización</button>
+            <div class="module-nav-dropdown">
+              <button type="button" class="tab-btn" data-tab="dam">DAM</button>
+              <button type="button" class="tab-btn" data-tab="costos">Costos y gastos</button>
+              <button type="button" class="tab-btn" data-tab="guia-remision">Guía de remisión</button>
+            </div>
+          </div>
+          <div class="module-nav-group">
+            <button type="button" class="module-nav-group-toggle">4. Liquidación y cierre</button>
+            <div class="module-nav-dropdown">
+              <button type="button" class="tab-btn" data-tab="resumen">Resumen final</button>
+              <button type="button" class="tab-btn" data-tab="pagos">Pagos y CxP</button>
+            </div>
+          </div>
         </nav>
 
         <div class="header-controls">
@@ -68,20 +92,16 @@
           </div>
           <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevaCarpeta()">+ Nueva carpeta</button>
           <button class="btn btn-secondary btn-small" onclick="window.abrirAdjuntosCarpeta()" title="Proforma, constancias, BL, DAM, liquidacion...">&#128206; Documentos</button>
+          <button class="btn btn-secondary btn-small" onclick="window.abrirPagosProveedor()" title="Anticipo, saldo, agente: constancia, SWIFT y comisiones">&#128181; Pagos</button>
           <button class="btn btn-secondary btn-small" onclick="exportarPDF()" id="btnExportar" style="display:none;">📥 PDF</button>
         </div>
 
         <!-- TAB 1: CI y PO -->
         <div id="tab-cabecera" class="tab-content active">
-          <div class="card">
-            <div class="card-header">
-              <h3 class="card-title">Datos de la Importación</h3>
-              <div class="card-header-actions">
-                <button class="btn btn-primary btn-small" onclick="openModal('modal-nueva-importacion')">+ Nueva</button>
-                <button class="btn btn-secondary btn-small" id="btnEditarImportacion" onclick="editarImportacion()" style="display: none;">✏️ Editar</button>
-                <button class="btn btn-danger btn-small" id="btnEliminarImportacion" onclick="eliminarImportacion()" style="display: none;">🗑️ Eliminar</button>
-              </div>
-            </div>
+          <div id="hoja-costeo"></div>
+          <!-- Card antiguo "Datos de la Importación": se reemplazó por la Hoja de costeo (👁 PI / 👁 CI).
+               Se conserva OCULTO porque cargarCabecera() aún rellena estos campos. -->
+          <div class="card" style="display:none;" aria-hidden="true">
             <form id="formCabecera" class="costeo-form">
               <div class="form-group">
                 <div style="display: flex; gap: 10px; align-items: flex-end;">
@@ -198,7 +218,7 @@
           <div class="card">
             <div class="card-header">
               <h3 class="card-title">Datos del Bill of Lading</h3>
-              <button class="btn btn-primary btn-small" onclick="openModal('modal-nuevo-BL'); cargarImportacionesEnSelect('newBLImportacionSelector')">+ Agregar BL</button>
+              <button class="btn btn-primary btn-small" onclick="window.abrirBL()">+ Agregar BL</button>
             </div>
             <div id="tabla-billoflading" class="table-container">
               <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Sin documentos</p>
@@ -524,13 +544,14 @@
   <div id="modal-editar-importacion" class="modal">
     <div class="modal-content" style="max-width: 800px;">
       <div class="modal-header">
-        <h3 class="modal-title">Editar Importación</h3>
+        <h3 class="modal-title" id="editCITitulo">Editar Commercial Invoice</h3>
         <button class="modal-close" onclick="closeModal('modal-editar-importacion')">✕</button>
       </div>
   
       <form id="formEditImportacion">
         <div style="padding: 20px; border-bottom: 1px solid var(--border-color);">
-          <h4 style="margin-bottom: 15px; color: var(--text-primary);">Información Básica</h4>
+          <h4 style="margin-bottom: 4px; color: var(--text-primary);">Información Básica</h4>
+          <small id="editCINota" style="display:block; margin-bottom:12px; color:var(--text-secondary);"></small>
           
           <div class="form-group">
             <div style="display: flex; gap: 10px; align-items: flex-end;">
@@ -570,6 +591,7 @@
             <label>Estado</label>
             <select id="editEstado">
               <option value="borrador">Borrador</option>
+              <option value="confirmado">Confirmado</option>
               <option value="en_proceso">En Proceso</option>
               <option value="completado">Completado</option>
               <option value="cancelado">Cancelado</option>
@@ -584,18 +606,23 @@
               <label>Términos Delivery (FOB, CIF)</label>
               <select id="editTerminosDelivery">
                 <option value="EXW">EXW</option>
+                <option value="FCA">FCA</option>
+                <option value="FAS">FAS</option>
                 <option value="FOB" selected>FOB</option>
-                <option value="CIF">CIF</option>
                 <option value="CFR">CFR</option>
+                <option value="CIF">CIF</option>
+                <option value="CIP">CIP</option>
+                <option value="CPT">CPT</option>
+                <option value="DAP">DAP</option>
                 <option value="DDP">DDP</option>
               </select>
             </div>
             <div class="form-group">
-              <label>Costo Flete Maritimo</label>
+              <label>Flete incluido en el precio (CIF/CFR…)</label>
               <input type="text" id="editCostoFlete">
             </div>
             <div class="form-group">
-              <label>Costo seguro maritimo</label>
+              <label>Seguro incluido en el precio</label>
               <input type="text" id="editCostoSeguro">
             </div>
           </div>
@@ -617,8 +644,10 @@
       </form>
   
       <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeModal('modal-editar-importacion')">Cancelar</button>
-        <button class="btn btn-primary" onclick="guardarCambiosImportacion()">Guardar Cambios</button>
+        <button class="btn btn-secondary" data-solo-lectura onclick="closeModal('modal-editar-importacion')">Cerrar</button>
+        <button class="btn btn-primary" data-solo-lectura onclick="activarEdicionCI()">✏️ Editar</button>
+        <button class="btn btn-secondary" data-solo-edicion style="display:none;" onclick="editarImportacion()">Cancelar</button>
+        <button class="btn btn-primary" data-solo-edicion style="display:none;" onclick="guardarCambiosImportacion()">💾 Guardar Cambios</button>
       </div>
     </div>
   </div>
@@ -798,7 +827,7 @@
           </select>
         </div>
 
-        <div class="grid grid-2">
+        <div class="grid grid-3">
           <div class="form-group">
             <label>Número DAM *</label>
             <input type="text" id="newDAMNumero" placeholder="Ej: 0001-000100" required>
@@ -806,6 +835,10 @@
           <div class="form-group">
             <label>Fecha DAM *</label>
             <input type="date" id="newDAMFecha" required>
+          </div>
+          <div class="form-group">
+            <label>Fecha de pago de tributos</label>
+            <input type="date" id="newDAMFechaPago" onchange="window.autoFetchTCDAM('new', false)">
           </div>
         </div>
         
@@ -853,8 +886,8 @@
           </div>
           <div class="form-group">
             <label>
-              T.C. <span style="font-size:0.78rem; font-weight:600; color:var(--color-warning);">COMPRA SBS</span>
-              <button type="button" onclick="window.autoFetchTCCompraDAM()" title="Obtener TC COMPRA del día (SBS)" style="margin-left:6px; background:none; border:1px solid var(--border-color); border-radius:4px; padding:1px 6px; font-size:0.75rem; cursor:pointer; color:var(--color-info);">↻ Auto</button>
+              T.C. <span style="font-size:0.78rem; font-weight:600; color:var(--color-warning);">VENTA SUNAT · fecha de pago</span>
+              <button type="button" onclick="window.autoFetchTCDAM('new', true)" title="Traer el T.C. venta SUNAT de la fecha de pago" style="margin-left:6px; background:none; border:1px solid var(--border-color); border-radius:4px; cursor:pointer; padding:0 6px;">⟳</button>
             </label>
             <input type="text" id="newDAMTipoCambio" onchange="calculoAutomaticoImpuestosNewDAM()" placeholder="3.451">
             <small id="newDAMTCAviso" style="color:var(--color-muted); font-size:0.75rem;"></small>
@@ -883,7 +916,7 @@
         <button class="modal-close" onclick="cancelarEditarDAM()">✕</button>
       </div>
       <form id="formEditDAM">
-        <div class="grid grid-2">
+        <div class="grid grid-3">
           <div class="form-group">
             <label>Número DAM *</label>
             <input type="text" id="editDAMNumero" placeholder="Ej: 0001-000100" required>
@@ -891,6 +924,10 @@
           <div class="form-group">
             <label>Fecha DAM *</label>
             <input type="date" id="editDAMFecha" required>
+          </div>
+          <div class="form-group">
+            <label>Fecha de pago de tributos</label>
+            <input type="date" id="editDAMFechaPago" onchange="window.autoFetchTCDAM('edit', false)">
           </div>
         </div>
         
@@ -937,9 +974,10 @@
             <input type="number" id="editDAMPercepcion">
           </div>
           <div class="form-group">
-            <label>T.C. <span style="font-size:0.78rem; font-weight:600; color:var(--color-warning);">COMPRA SBS</span></label>
+            <label>T.C. <span style="font-size:0.78rem; font-weight:600; color:var(--color-warning);">VENTA SUNAT · fecha de pago</span>
+              <button type="button" onclick="window.autoFetchTCDAM('edit', true)" title="Traer el T.C. venta SUNAT de la fecha de pago" style="margin-left:6px; background:none; border:1px solid var(--border-color); border-radius:4px; cursor:pointer; padding:0 6px;">⟳</button></label>
             <input type="text" id="editDAMTipoCambio" onchange="calculoAutomaticoImpuestosEditDAM()" placeholder="3.451">
-            <small style="color:var(--color-muted); font-size:0.75rem;">TC Compra SBS del día de la DUA — Art. 61° LIR</small>
+            <small id="editDAMTCAviso" style="color:var(--color-muted); font-size:0.75rem;">T.C. venta SUNAT de la fecha de pago de tributos</small>
           </div>
           <div class="form-group">
             <label>Estado</label>
@@ -1335,5 +1373,11 @@
   <script type="module" src="assets/js/importaciones/resumen-analisis.js"></script>
   <script type="module" src="assets/js/importaciones/carpeta-nueva.js"></script>
   <script type="module" src="assets/js/importaciones/adjuntos-carpeta.js"></script>
+  <script type="module" src="assets/js/importaciones/pagos-proveedor.js"></script>
+  <script type="module" src="assets/js/importaciones/bl-modal.js"></script>
+  <script type="module" src="assets/js/importaciones/dam-modal.js"></script>
+  <script type="module" src="assets/js/importaciones/dam-declaracion.js"></script>
+  <script type="module" src="assets/js/importaciones/hoja-costeo.js"></script>
+  <script type="module" src="assets/js/importaciones/pi-modal.js"></script>
 </body>
 </html>

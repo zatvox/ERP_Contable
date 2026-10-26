@@ -861,13 +861,28 @@ export async function eliminarAdjuntoCompra(compraId) {
 // (1 fila por archivo, con entidad + entidad_id + concepto). Se abren con URL
 // firmada temporal: el bucket es privado.
 const ADJ_BUCKET = 'tesoreria-adjuntos'
-export const ADJ_CONCEPTOS = { voucher: 'Voucher', recibo: 'Recibo', dietario: 'Dietario del banco', otro: 'Otro' }
-const _ADJ_MIME = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+// Los conceptos del expediente de importación (invoice, bl, packing…) también deben estar aquí:
+// subirAdjuntos() reemplaza por 'otro' cualquier concepto que no figure en esta lista.
+export const ADJ_CONCEPTOS = {
+  voucher: 'Voucher', recibo: 'Recibo', dietario: 'Dietario del banco', otro: 'Otro', swift: 'SWIFT', correo: 'Correo de confirmación', certificado_origen: 'Certificado de origen', ficha_tecnica: 'Ficha técnica', contrato: 'Contrato',
+  proforma: 'Proforma Invoice (PI)', invoice: 'Commercial Invoice (CI)', bl: 'Bill of Lading (BL)', packing: 'Packing list',
+  poliza: 'Póliza de seguro', dam: 'DAM / DUA', autoliquidacion: 'Autoliquidación (duda razonable)', boletin: 'Boletín químico', notificacion_aduana: 'Notificación de Aduanas (duda razonable)', garantia: 'Orden de depósito de garantía', dam_completa: 'DAM completa (hojas A, B y DAV)',
+  liquidacion: 'Liquidación del agente', factura_gasto: 'Factura de gasto', rh: 'Recibo por honorarios', guia: 'Guía de remisión'
+}
+// Se acepta CUALQUIER tipo de archivo (PDF, fotos, Excel, correos .eml/.msg, zip...). Solo los PDF e
+// imágenes tienen previsualización; el resto se descarga. Se bloquean los ejecutables por seguridad.
+const _ADJ_BLOQUEADOS = ['exe', 'bat', 'cmd', 'com', 'msi', 'scr', 'js', 'vbs', 'ps1', 'jar', 'sh', 'dll']
 
 export function validarArchivoAdjunto(file) {
-  if (!_ADJ_MIME.includes(file.type)) return `${file.name}: solo PDF, JPG, PNG o WEBP`
+  const ext = (file.name.split('.').pop() || '').toLowerCase()
+  if (_ADJ_BLOQUEADOS.includes(ext)) return `${file.name}: este tipo de archivo (.${ext}) no se permite`
   if (file.size > 10 * 1024 * 1024) return `${file.name}: supera 10 MB`
   return null
+}
+
+/** true si el navegador puede previsualizarlo (PDF o imagen). */
+export function esPrevisualizable(mime, nombre = '') {
+  return /^(image\/|application\/pdf)/.test(mime || '') || /\.(pdf|png|jpe?g|webp|gif)$/i.test(nombre)
 }
 
 /**
@@ -882,7 +897,7 @@ export async function subirAdjuntos(entidad, entidadId, items, userDbId = null) 
     if (err) { errores.push(err); continue }
     const ext = (file.name.split('.').pop() || 'pdf').toLowerCase()
     const path = `${entidad}-${entidadId}/${Date.now()}-${i}.${ext}`
-    const { error } = await supabase.storage.from(ADJ_BUCKET).upload(path, file, { upsert: false })
+    const { error } = await supabase.storage.from(ADJ_BUCKET).upload(path, file, { upsert: false, contentType: file.type || 'application/octet-stream' })
     if (error) {
       errores.push(/bucket not found/i.test(error.message) ? 'Falta correr assets/sql/60_adjuntos_cobros_pagos.sql' : `${file.name}: ${error.message}`)
       continue

@@ -215,7 +215,9 @@ export async function renderCompras(forzar = false) {
       const comprobante = c.serie ? `${c.serie}-${c.numero}` : (c.numero || '-')
       const periodo = `${c.periodo_ano}-${String(c.periodo_mes).padStart(2, '0')}`
       const badgePago = c.estado_pago === 'pagado' ? 'success' : (c.estado_pago === 'parcial' ? 'warning' : 'pending')
-      const tieneGuia = c.tipo_compra !== 'mercaderia' || comprasConGuia.has(c.id)
+      // 'importacion' (compra del exterior, tipo 91) también mueve stock, igual que 'mercaderia'.
+      const afectaStock = c.tipo_compra === 'mercaderia' || c.tipo_compra === 'importacion'
+      const tieneGuia = !afectaStock || comprasConGuia.has(c.id)
       const badgeStock = c.tipo_compra === 'anticipo'
         ? (() => {
             const aplicado = aplicadoPorAnticipoCompra.get(c.id) || 0
@@ -225,7 +227,7 @@ export async function renderCompras(forzar = false) {
               ? '<span class="badge badge-success">💰 Aplicado íntegramente</span>'
               : `<span class="badge badge-warning" title="Aplicado ${aplicado.toFixed(2)} de ${total.toFixed(2)}">💰 Anticipo — saldo ${saldo.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>`
           })()
-        : c.tipo_compra !== 'mercaderia'
+        : !afectaStock
         ? '<span class="badge badge-secondary">N/A (servicio)</span>'
         : (tieneGuia
             ? '<span class="badge badge-success">✓ Con Guía</span>'
@@ -259,6 +261,8 @@ export async function renderCompras(forzar = false) {
                     ? { label: 'Ver detalle', icono: '📋', onclick: `window.verDetalleNotaCompra(${c.id})` }
                     : { label: 'Ver detalle', icono: '📋', onclick: `window.editarCompra(${c.id})` },
                   { label: c.adjunto_url ? 'Ver/Reemplazar documento' : 'Adjuntar documento', icono: '📎', onclick: `window.abrirModalAdjuntoCompra(${c.id})` },
+                  ...(!esNota(c.tipo_comprobante) && !c.orden_compra_id && (c.tipo_comprobante === '91' || c.tipo_compra === 'importacion')
+                    ? [{ label: 'Generar Proforma (PI)', icono: '📄', onclick: `window.irAGenerarProforma(${c.id})` }] : []),
                   { separador: true },
                   { label: 'Nota de Crédito', icono: '↩️', onclick: `window.abrirModalNotaCreditoCompra(${c.id})` },
                   { label: 'Nota de Débito', icono: '↪️', onclick: `window.abrirModalNotaDebitoCompra(${c.id})` },
@@ -581,4 +585,11 @@ window.eliminarComprasSeleccionadas = async function () {
   }
 
   if (btn) btn.disabled = false
+}
+
+/** Compra del exterior sin PI → abre Órdenes de Compra con la Proforma prellenada (no guarda nada). */
+window.irAGenerarProforma = async function (compraId) {
+  if (typeof window.cambiarTab === 'function') window.cambiarTab('ordenes')
+  else document.querySelector('[data-tab="ordenes"]')?.click()
+  await window.ocDesdeCompra(compraId)
 }

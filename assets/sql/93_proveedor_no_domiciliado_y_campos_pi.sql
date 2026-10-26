@@ -60,6 +60,10 @@ COMMENT ON VIEW public.v_proveedores_exterior IS
 -- ============================================================
 -- 2. LA VISTA DE COMPRAS, AHORA POR PROVEEDOR
 -- ============================================================
+-- La vista del 92 tiene otras columnas en otro orden: CREATE OR REPLACE no
+-- puede insertar columnas en medio (error 42P16), así que se recrea. Nadie
+-- más depende de ella (solo el JS), por eso no lleva CASCADE.
+DROP VIEW IF EXISTS public.v_compras_importacion;
 CREATE VIEW public.v_compras_importacion AS
 SELECT
   c.id,

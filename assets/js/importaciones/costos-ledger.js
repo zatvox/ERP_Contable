@@ -49,6 +49,7 @@ export const CONCEPTOS_COSTO = [
   { codigo: 'visto_bueno',       label: 'Visto bueno',                            grupo: 'despacho',        clasificacion: 'inventario',       base: 'peso_bruto' },
   { codigo: 'gate_in',           label: 'Gate in / devolución de contenedor',     grupo: 'despacho',        clasificacion: 'inventario',       base: 'peso_bruto' },
   { codigo: 'boletin_quimico',   label: 'Boletín químico SUNAT',                  grupo: 'despacho',        clasificacion: 'inventario',       base: 'peso_bruto' },
+  { codigo: 'sobreestadia',      label: 'Sobreestadía / demora de contenedor',    grupo: 'despacho',        clasificacion: 'inventario',       base: 'peso_bruto' },
   // ── Nacionalización física ────────────────────────────────────────────────
   { codigo: 'gastos_destino',    label: 'Gastos en destino',                      grupo: 'nacionalizacion', clasificacion: 'inventario',       base: 'peso_bruto' },
   { codigo: 'almacen',           label: 'Almacenaje',                             grupo: 'nacionalizacion', clasificacion: 'inventario',       base: 'peso_bruto' },
@@ -694,7 +695,7 @@ function _asegurarModalLinea() {
         <small style="display:block; margin-bottom:8px; color:var(--text-secondary); line-height:1.4;">
           PDF o foto, max. 10 MB por archivo. Se guardan en el bucket privado y se abren con enlace firmado.
         </small>
-        <input type="file" id="lcArchivos" multiple accept="application/pdf,image/jpeg,image/png,image/webp" onchange="window.lcArchivosElegidos(this)">
+        <input type="file" id="lcArchivos" multiple onchange="window.lcArchivosElegidos(this)">
         <div id="lcListaArchivos" style="margin-top:6px; font-size:0.85rem; color:var(--text-secondary);"></div>
 
         <div class="form-group" style="margin-top:12px;">
@@ -998,12 +999,12 @@ window.guardarLineaCosto = async function () {
       const okLinea = await update('importacion_costos', _editandoId, linea)
       if (!okLinea) throw new Error('No se pudo actualizar la linea de costo (revisa si la carpeta esta cerrada)')
     } else {
-      const r = await crearLineaCosto(doc, linea, user && user.id)
+      const r = await crearLineaCosto(doc, linea, user && user.db_id)
       documentoId = r.documentoId
     }
 
     if (_archivosPendientes.length && documentoId) {
-      const res = await subirAdjuntos('documento_importacion', documentoId, _archivosPendientes, user && user.id)
+      const res = await subirAdjuntos('documento_importacion', documentoId, _archivosPendientes, user && user.db_id)
       if (res && res.errores && res.errores.length) {
         showToast(`Costo guardado, ${res.ok} adjunto(s) subidos. ${res.errores[0]}`, 'warning')
       }
@@ -1075,7 +1076,7 @@ window.verLineaCosto = function (id) {
 window.enviarCostoACxP = async function (documentoId) {
   try {
     const user = await getCurrentUser()
-    const cxp = await vincularCxPDocumento(documentoId, user && user.id)
+    const cxp = await vincularCxPDocumento(documentoId, user && user.db_id)
     showToast(`Cuenta por Pagar #${cxp.id} creada — ya se puede pagar desde Cobranzas`, 'success')
     await renderCostosLedger()
   } catch (e) {
@@ -1118,7 +1119,7 @@ window.crearContenedor = async function () {
       canal: v('newContenedorCanal') || null,
       fecha_eta: v('newContenedorETA') || null,
       fecha_llegada: v('newContenedorLlegada') || null,
-      created_by: user && user.id
+      created_by: user && user.db_id
     })
     if (!fila || !fila.id) throw new Error(ultimoErrorInsert()?.message || 'No se pudo crear el contenedor (¿numero repetido?)')
 

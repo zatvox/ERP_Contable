@@ -98,7 +98,7 @@ function _inyectarModal() {
         <div class="form-group" style="margin:0;"><label>Observaciones</label><input type="text" id="cmObs" placeholder="Opcional"></div>
         <div>
           ${sec('Archivos adjuntos')}
-          <input type="file" id="cmasArchivo" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp" onchange="window._adjSeleccionar('cmas')">
+          <input type="file" data-preview-lista id="cmasArchivo" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp" onchange="window._adjSeleccionar('cmas')">
           <small style="color:var(--text-secondary); font-size:0.72rem;">Voucher del depósito / recibo (se guardan en el primer cobro del lote).</small>
           <div id="cmas-adj-lista" style="display:flex; flex-direction:column; gap:6px; margin-top:6px;"></div>
         </div>

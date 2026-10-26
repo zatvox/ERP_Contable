@@ -379,7 +379,8 @@ const RE_MODAL_SIN_CINTILLO = /linea|adjunt|buscador|ayuda|columnas|detalle-nota
 // Decirles "se guardará en BENJI" sería mentira: ese producto lo van a ver
 // las tres. Llevan un cintillo propio que lo afirma — es exactamente la duda
 // que surge al ver la tabla de Productos vacía en una empresa sin lotes.
-const RE_MODAL_COMPARTIDO = /producto|categoria|marca|partida|cliente|proveedor|contacto|termino-pago/i
+// 'pagos-proveedor' es un registro OPERATIVO de la carpeta (tiene empresa), no el catálogo de proveedores.
+const RE_MODAL_COMPARTIDO = /^(?!modal-pagos-proveedor$).*(producto|categoria|marca|partida|cliente|proveedor|contacto|termino-pago)/i
 
 function _inicial(e) {
   const t = (e?.codigo || e?.nombre_comercial || e?.razon_social || '?').trim()

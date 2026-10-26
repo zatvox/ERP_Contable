@@ -27,6 +27,7 @@ const DEFAULTS = {
     formatoFecha:      'dd/mm/aaaa',
     decimales:         2,
     monedaDefault:     'PEN',
+    comprobanteCeros:  false,       // N° de comprobante con 8 dígitos (00000448)
     filasPorPagina:    50,
     animaciones:       true,
     mostrarKpis:       true
@@ -220,6 +221,7 @@ const CAMPOS_APARIENCIA = [
   { key: 'formatoFecha', label: 'Formato de fecha', tipo: 'select', opciones: ['dd/mm/aaaa', 'aaaa-mm-dd', 'dd-mmm-aaaa'] },
   { key: 'decimales',    label: 'Decimales en montos', tipo: 'select', opciones: [0, 2, 3, 4] },
   { key: 'monedaDefault', label: 'Moneda por defecto', tipo: 'select', opciones: ['PEN', 'USD'] },
+  { key: 'comprobanteCeros', label: 'N° de comprobante con 8 dígitos (FFFI-00000448)', tipo: 'checkbox', hint: 'Apagado: FFFI-448. Solo cambia cómo se ve; en la base se guarda sin ceros. Recarga la página para aplicarlo.' },
   SEP('Comportamiento'),
   { key: 'animaciones',  label: 'Animaciones y transiciones', tipo: 'checkbox' },
   { key: 'mostrarKpis',  label: 'Mostrar tarjetas KPI en los módulos', tipo: 'checkbox' }

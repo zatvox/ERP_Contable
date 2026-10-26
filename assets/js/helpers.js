@@ -344,6 +344,30 @@ window.conCarga = conCarga
 
 
 // ============================================================================
+// N° DE COMPROBANTE (estándar 2026-10-22)
+// ============================================================================
+// En BD el correlativo numérico se guarda SIN ceros a la izquierda ('448')
+// — SQL 89 + trigger trg_norm_correlativo. La vista lo muestra según
+// ⚙️ Configuración → Apariencia → "N° de comprobante con 8 dígitos".
+// Textos no numéricos (facturas del exterior, letras 'LT.187-01') o números
+// de más de 8 dígitos se muestran tal cual.
+export function comprobanteConCeros() {
+  try { return !!JSON.parse(localStorage.getItem('jhiro_config_apariencia') || '{}').comprobanteCeros } catch { return false }
+}
+export function numComp(v) {
+  if (v === null || v === undefined || v === '') return ''
+  const s = String(v).trim()
+  if (!/^\d{1,8}$/.test(s)) return s
+  const n = s.replace(/^0+(?=\d)/, '')
+  return comprobanteConCeros() ? n.padStart(8, '0') : n
+}
+/** 'FFFI' + '448' → 'FFFI-448' (o 'FFFI-00000448' según configuración). */
+export function docComp(serie, numero) {
+  const n = numComp(numero)
+  return serie ? `${serie}-${n}` : n
+}
+
+// ============================================================================
 // FECHA DD/MM/AAAA (estándar de visualización 2026-10-03)
 // ============================================================================
 /** 'YYYY-MM-DD' (o ISO con hora) → 'DD/MM/AAAA'. Vacío → '—'. */

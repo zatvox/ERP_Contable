@@ -9,6 +9,7 @@
 
 import { getCurrentUser } from './auth-supabase.js'
 import { supabase } from './supabase-client.js'
+import { miniaturaArchivoHTML, pintarMiniaturaArchivo } from './shared/adj-preview.js'
 import { getTipoCambioDia } from './sunat-api.js'
 import {
   getCuentasCobrar, updateCuentaCobrar,
@@ -29,7 +30,7 @@ import {
   generarAsientoCobroCliente, generarAsientoPagoProveedor, crearAsientoCancelacionME, crearAsientoMultiME, ctaCob,
   subirAdjuntos, getAdjuntos, getConteoAdjuntos, getUrlAdjunto, eliminarAdjunto, eliminarAdjuntosDe, ADJ_CONCEPTOS
 } from './supabase-data.js'
-import { showToast, formatNumber, fechaDMY, hacerTablaOrdenable } from './helpers.js'
+import { showToast, formatNumber, fechaDMY, hacerTablaOrdenable, numComp } from './helpers.js'
 import { initModuleNavDropdowns, initSubtabs, menuAccionesFila } from './main.js'
 import { getModuloConfig, renderConfiguracionTab, aplicarPreferenciasVista } from './config-modulo.js'
 import { cacheado, invalidarVarios } from './data-cache.js'
@@ -225,6 +226,17 @@ function _set(id, texto) { const el = document.getElementById(id); if (el) el.te
 // Las notas ajustan el importe del comprobante sin que haya movido dinero,
 // así que tienen que entrar aquí o el saldo mostraría una deuda que ya no
 // existe (NC) o se quedaría corta (ND).
+// ── Moneda junto al importe (estándar 2026-10-22) ────────────────────────────
+// Criterio: tabla con varias monedas → columna "Moneda" (+ totales por moneda);
+// tabla de UN documento → la moneda va en el encabezado "Monto (USD)";
+// fichas / filas sueltas → la moneda pegada al importe con _fm().
+const _monCod = m => (m || 'PEN').toUpperCase() === 'USD' ? 'USD' : 'PEN'
+const _mon = m => `<span class="mon mon-${_monCod(m).toLowerCase()}">${_monCod(m)}</span>`
+const _fm = (v, m) => `${_mon(m)}${formatNumber(v)}`
+/** Totales por moneda: { PEN: n, USD: n } → "PEN 1.00<br>USD 2.00" (solo las que tengan movimiento). */
+const _fmTotales = t => ['PEN', 'USD'].filter(k => Math.abs(t[k] || 0) > 0.004).map(k => _fm(t[k], k)).join('<br>') || _fm(0, 'PEN')
+const _sumaMon = (t, m, v) => { const k = _monCod(m); t[k] = (t[k] || 0) + (parseFloat(v) || 0) }
+
 function _saldoCxC(c) {
   return parseFloat(c.monto_total || 0)
        + parseFloat(c.monto_notas_debito || 0)
@@ -253,6 +265,58 @@ async function _posibleDuplicadoCP(esCobro, docId, fecha, monto) {
       .eq(esCobro ? 'cxc_id' : 'cxp_id', docId).eq('fecha', fecha)
     return (data || []).find(x => Math.abs(parseFloat(x.monto) - monto) < 0.01) || null
   } catch { return null }
+}
+
+/**
+ * Validación de duplicados por N° de OPERACIÓN (2026-10-23). Devuelve true si
+ * se puede grabar. Reglas:
+ *  1. Mismo N° de operación + mismo banco en ESTE documento → BLOQUEA: es el
+ *     mismo depósito registrado dos veces.
+ *  2. Mismo N° de operación + mismo banco en OTRO documento → confirma: un
+ *     depósito puede pagar varias facturas (mejor usar Cobro masivo).
+ *  3. Mismo documento + fecha + importe con OTRO N° de operación → confirma
+ *     mostrando los N° de operación; si confirmas se graba como operación aparte.
+ *  4. Mismo documento + fecha + importe SIN N° de operación → confirma y
+ *     recomienda escribirlo.
+ */
+async function _validarDuplicadoOperacion(esCobro, { docId, fecha, monto, bancoId, numOp }) {
+  const tabla = esCobro ? 'cobros' : 'pagos_proveedores'
+  const campoDoc = esCobro ? 'cxc_id' : 'cxp_id'
+  const que = esCobro ? 'cobro' : 'pago'
+  const op = (numOp || '').trim()
+  const norm = v => String(v || '').trim().replace(/^0+(?=\d)/, '').toLowerCase()
+  const opDe = x => x.numero_operacion || x.referencia || ''
+  try {
+    if (op) {
+      let q = supabase.from(tabla).select(`id, ${campoDoc}, fecha, monto, banco_id, referencia, numero_operacion`)
+        .or(`numero_operacion.ilike."*${norm(op).replace(/["*,()]/g, '')}",referencia.ilike."*${norm(op).replace(/["*,()]/g, '')}"`)
+      const { data } = await q
+      const mismos = (data || []).filter(x => norm(opDe(x)) === norm(op) && (!bancoId || !x.banco_id || Number(x.banco_id) === Number(bancoId)))
+      const enEste = mismos.find(x => Number(x[campoDoc]) === Number(docId))
+      if (enEste) {
+        showToast(`⛔ La operación N° ${op} ya está registrada en este documento (${que} del ${fechaDMY(enEste.fecha)} por ${formatNumber(enEste.monto)}). No se graba dos veces el mismo depósito.`, 'danger', 10000)
+        return false
+      }
+      if (mismos.length) {
+        const otros = mismos.map(x => {
+          const d = (esCobro ? _cxcList : _cxpList).find(c => c.id === x[campoDoc])
+          return `• ${d ? _descDocCP(d) : 'doc #' + x[campoDoc]} — ${fechaDMY(x.fecha)} — ${formatNumber(x.monto)}`
+        }).join('\n')
+        if (!confirm(`⚠️ La operación N° ${op} (misma cuenta) ya se usó en otro(s) documento(s):\n${otros}\n\nSi es UN depósito que paga varias facturas está bien (mejor usa Cobro masivo).\n¿Registrar igual?`)) return false
+      }
+    }
+    const { data: mismoDia } = await supabase.from(tabla).select('id, fecha, monto, referencia, numero_operacion')
+      .eq(campoDoc, docId).eq('fecha', fecha)
+    const iguales = (mismoDia || []).filter(x => Math.abs(parseFloat(x.monto) - monto) < 0.01)
+    if (iguales.length) {
+      const lista = iguales.map(x => `• ${fechaDMY(x.fecha)} — ${formatNumber(x.monto)} — Op. ${opDe(x) || 'sin N°'}`).join('\n')
+      const msg = op
+        ? `⚠️ Este documento ya tiene ${iguales.length} ${que}(s) por el mismo importe y fecha:\n${lista}\n\nEl nuevo tiene la operación N° ${op} (distinta).\n¿Es otro depósito? Se grabará como una operación aparte.`
+        : `⚠️ Este documento ya tiene ${iguales.length} ${que}(s) por el mismo importe y fecha:\n${lista}\n\nEl nuevo NO tiene N° de operación: escríbelo para distinguirlo.\n¿Registrar igual?`
+      if (!confirm(msg)) return false
+    }
+  } catch (e) { console.warn('_validarDuplicadoOperacion:', e.message) }
+  return true
 }
 /** Suma de lo cobrado/pagado por los OTROS registros del documento (para revertir sin descuadrar). */
 async function _sumaOtrosCP(esCobro, docId, excluirId) {
@@ -301,7 +365,7 @@ function _filtrarCxC() {
       if (venc === 'alcorriente'&& (fv && fv < hoy && c.estado !== 'cobrado')) return false
     }
     if (buscar) {
-      const txt = `${_nombreContacto(c.contact_id)} ${c.tipo_comprobante || ''} ${c.serie || ''} ${c.numero_comprobante || ''}`.toLowerCase()
+      const txt = `${_nombreContacto(c.contact_id)} ${c.tipo_comprobante || ''} ${c.serie || ''} ${numComp(c.numero_comprobante)}`.toLowerCase()
       if (!txt.includes(buscar)) return false
     }
     return true
@@ -347,6 +411,7 @@ window.cargarCxC = async function() {
     }
 
     let tTotal = 0, tCobrado = 0, tPend = 0
+    const mT = {}, mC = {}, mP = {}
     tbody.innerHTML = lista.map(cxc => {
       const total     = parseFloat(cxc.monto_total || 0)
       const cobrado   = parseFloat(cxc.monto_cobrado || 0)
@@ -360,7 +425,7 @@ window.cargarCxC = async function() {
       const vencida   = !anulado && cxc.estado !== 'cobrado' && pendiente > 0.01 && cxc.fecha_vencimiento && cxc.fecha_vencimiento < hoy
       const dias      = anulado || cxc.estado === 'cobrado' ? null : (cxc.fecha_vencimiento ? diasVencidos(cxc.fecha_vencimiento) : null)
       const retPendienteSustentar = retencionPendientePorCxc[cxc.id] || 0
-      if (!anulado) { tTotal += total; tCobrado += cobrado + retenido; tPend += pendiente }
+      if (!anulado) { tTotal += total; tCobrado += cobrado + retenido; tPend += pendiente; _sumaMon(mT, cxc.moneda, total); _sumaMon(mC, cxc.moneda, cobrado + retenido); _sumaMon(mP, cxc.moneda, pendiente) }
 
       const badge = anulado ? 'badge-danger'
                   : cxc.estado === 'cobrado' ? 'badge-success'
@@ -369,7 +434,7 @@ window.cargarCxC = async function() {
 
       return `<tr ${anulado ? 'style="opacity:.55; text-decoration:line-through;" title="Comprobante anulado: no genera deuda"' : (vencida ? 'style="background:rgba(239,68,68,.06);"' : '')}>
         <td>${_esc(_nombreContacto(cxc.contact_id))}</td>
-        <td>${_esc(`${cxc.tipo_comprobante || ''} ${cxc.serie || ''}-${cxc.numero_comprobante || ''}`)}${_htmlCuotas(cxc.id)}</td>
+        <td>${_esc(`${cxc.tipo_comprobante || ''} ${cxc.serie || ''}-${numComp(cxc.numero_comprobante)}`)}${_htmlCuotas(cxc.id)}</td>
         <td style="white-space:nowrap;">${_esc(_pkDeCxc(cxc) || '—')}</td>
         <td>${fechaDMY(cxc.fecha_emision, '-')}</td>
         <td>${fechaDMY(cxc.fecha_vencimiento, '—')}</td>
@@ -385,9 +450,9 @@ window.cargarCxC = async function() {
 
     if (tfoot) tfoot.innerHTML = `
       <td colspan="7"><strong>TOTAL (${lista.filter(c => c.estado !== 'anulado').length} documentos${lista.some(c => c.estado === 'anulado') ? ` · ${lista.filter(c => c.estado === 'anulado').length} anulado(s) sin sumar` : ''})</strong></td>
-      <td style="text-align:right;"><strong>${formatNumber(tTotal)}</strong></td>
-      <td style="text-align:right;"><strong>${formatNumber(tCobrado)}</strong></td>
-      <td style="text-align:right;"><strong>${formatNumber(tPend)}</strong></td>
+      <td style="text-align:right; white-space:nowrap;"><strong>${_fmTotales(mT)}</strong></td>
+      <td style="text-align:right; white-space:nowrap;"><strong>${_fmTotales(mC)}</strong></td>
+      <td style="text-align:right; white-space:nowrap;"><strong>${_fmTotales(mP)}</strong></td>
       <td colspan="2"></td>`
 
     _poblarSelectCxC(_cxcList.filter(c => c.estado !== 'cobrado' && c.estado !== 'anulado'))
@@ -404,7 +469,7 @@ window.exportarCxC = function() {
     ['Cliente', 'Comprobante', 'F. Emisión', 'F. Vencimiento', 'Días', 'Moneda', 'Total', 'Cobrado', 'Retenido', 'Pendiente', 'Estado'],
     ...lista.map(c => [
       _nombreContacto(c.contact_id),
-      `${c.tipo_comprobante || ''} ${c.serie || ''}-${c.numero_comprobante || ''}`,
+      `${c.tipo_comprobante || ''} ${c.serie || ''}-${numComp(c.numero_comprobante)}`,
       c.fecha_emision || '', c.fecha_vencimiento || '',
       c.fecha_vencimiento ? diasVencidos(c.fecha_vencimiento) : '',
       c.moneda || 'PEN',
@@ -421,7 +486,7 @@ function _poblarSelectCxC(lista) {
   if (!sel) return
   sel.innerHTML = '<option value="">-- Seleccione CxC --</option>' + lista.map(cxc => {
     const pend = _saldoCxC(cxc).toFixed(2)
-    return `<option value="${cxc.id}">${_esc(_nombreContacto(cxc.contact_id))} — ${_esc(`${cxc.tipo_comprobante || ''} ${cxc.serie || ''}-${cxc.numero_comprobante || ''}`)} (Pend: ${formatNumber(pend)} ${cxc.moneda || 'PEN'})</option>`
+    return `<option value="${cxc.id}">${_esc(_nombreContacto(cxc.contact_id))} — ${_esc(`${cxc.tipo_comprobante || ''} ${cxc.serie || ''}-${numComp(cxc.numero_comprobante)}`)} (Pend: ${formatNumber(pend)} ${cxc.moneda || 'PEN'})</option>`
   }).join('')
   refrescarBuscador(sel)
 }
@@ -601,8 +666,7 @@ window.registrarCobro = async function() {
     }
 
     if (!_reciboValidoParaCliente(numeroRecibo, cxc.contact_id, null)) return
-    const dupC = await _posibleDuplicadoCP(true, cxcId, fecha, monto)
-    if (dupC && !confirm(`⚠️ Ya existe un cobro de ${formatNumber(dupC.monto)} para esta factura con fecha ${fechaDMY(dupC.fecha)}.\n\n¿Es un cobro DIFERENTE y quieres registrarlo igual?`)) return
+    if (!(await _validarDuplicadoOperacion(true, { docId: cxcId, fecha, monto, bancoId, numOp: referencia }))) return
 
     const cobro = await addCobro({
       numero_recibo: numeroRecibo,
@@ -668,6 +732,7 @@ const _pkDeCxc = cxc => (cxc?.venta_id && _pkPorVenta[cxc.venta_id]) || ''
 
 async function cargarCobrosRecientes() {
   try {
+    invalidarVarios(['cobros'])   // siempre fresco: otro usuario/pestaña pudo registrar (2026-10-23)
     _cobrosList = await cacheado('cobros', getCobros)
     _adjConteo.cobro = await getConteoAdjuntos('cobro')
     if (!_cxcList.length) _cxcList = await cacheado('cuentas_cobrar', getCuentasCobrar)
@@ -737,6 +802,7 @@ async function _cobrosDelRecibo(reg) {
 function _htmlSeccionRecibo(reg, lista) {
   if (!reg?.numero_recibo || !lista?.length) return ''
   const total = lista.reduce((s, x) => s + (parseFloat(x.monto) || 0), 0)
+  const mTot = {}; lista.forEach(x => _sumaMon(mTot, x.moneda, x.monto))
   const otroCli = lista.some(x => x.contact_id !== reg.contact_id)
   return `<h4 style="margin:16px 0 6px;">🧾 Recibo N° ${_esc(reg.numero_recibo)} — ${lista.length} voucher(s)</h4>
     ${otroCli ? '<div style="padding:6px 10px; border-left:3px solid var(--color-danger); background:var(--bg-secondary); font-size:0.82rem; margin-bottom:6px;">⚠ Este N° de recibo también está en cobros de otro cliente: revisa si es un error de tipeo.</div>' : ''}
@@ -745,15 +811,15 @@ function _htmlSeccionRecibo(reg, lista) {
         <thead><tr style="background:var(--bg-secondary);"><th>Fecha</th><th>Cliente</th><th>Documento</th><th>Banco</th><th>Referencia</th><th style="text-align:right;">Monto</th><th></th></tr></thead>
         <tbody>${lista.map(x => {
           const cxc = _cxcList.find(d => d.id === x.cxc_id)
-          const docTxt = cxc ? `${cxc.serie ? cxc.serie + '-' : ''}${cxc.numero_comprobante || ''}` : '—'
+          const docTxt = cxc ? `${cxc.serie ? cxc.serie + '-' : ''}${numComp(cxc.numero_comprobante)}` : '—'
           const actual = x.id === reg.id
           return `<tr style="border-top:1px solid var(--border-color);${actual ? ' background:rgba(59,130,246,0.08); font-weight:600;' : ''}${x.contact_id !== reg.contact_id ? ' color:var(--color-danger);' : ''}">
             <td>${fechaDMY(x.fecha)}</td><td>${_esc(_nombreContacto(x.contact_id))}</td><td>${_esc(docTxt)}</td>
             <td>${_esc(_bancosMap[x.banco_id]?.nombre || '—')}</td><td>${_esc(x.referencia || '—')}${_clipAdjunto('cobro', x.id)}</td>
-            <td style="text-align:right;">${formatNumber(x.monto)}</td>
+            <td style="text-align:right; white-space:nowrap;">${_fm(x.monto, x.moneda)}</td>
             <td style="white-space:nowrap;">${actual ? '<small style="color:var(--text-secondary);">este</small>' : _botonesCP('cobro', x.id)}</td></tr>`
         }).join('')}</tbody>
-        <tfoot><tr style="border-top:2px solid var(--border-color); font-weight:bold;"><td colspan="5">Total del recibo</td><td style="text-align:right;">${formatNumber(total)}</td><td></td></tr></tfoot>
+        <tfoot><tr style="border-top:2px solid var(--border-color); font-weight:bold;"><td colspan="5">Total del recibo</td><td style="text-align:right; white-space:nowrap;">${_fmTotales(mTot)}</td><td></td></tr></tfoot>
       </table>
     </div>`
 }
@@ -818,7 +884,7 @@ function _filtrarCxP() {
     if (desde && (c.fecha_emision || '') < desde) return false
     if (hasta && (c.fecha_emision || '') > hasta) return false
     if (buscar) {
-      const txt = `${_nombreContacto(c.contact_id)} ${c.tipo_comprobante || ''} ${c.serie || ''} ${c.numero_comprobante || ''}`.toLowerCase()
+      const txt = `${_nombreContacto(c.contact_id)} ${c.tipo_comprobante || ''} ${c.serie || ''} ${numComp(c.numero_comprobante)}`.toLowerCase()
       if (!txt.includes(buscar)) return false
     }
     return true
@@ -845,6 +911,7 @@ window.cargarCxP = async function() {
     }
 
     let tTotal = 0, tPagado = 0, tPend = 0
+    const mT = {}, mPg = {}, mP = {}
     tbody.innerHTML = lista.map(cxp => {
       const total  = parseFloat(cxp.monto_total || 0)
       const pagado = parseFloat(cxp.monto_pagado || 0)
@@ -854,7 +921,7 @@ window.cargarCxP = async function() {
       const anulado = cxp.estado === 'anulado'
       const pend   = anulado ? 0 : _saldoCxP(cxp)
       const dias   = anulado || cxp.estado === 'pagado' ? null : (cxp.fecha_vencimiento ? diasVencidos(cxp.fecha_vencimiento) : null)
-      if (!anulado) { tTotal += total; tPagado += pagado; tPend += pend }
+      if (!anulado) { tTotal += total; tPagado += pagado; tPend += pend; _sumaMon(mT, cxp.moneda, total); _sumaMon(mPg, cxp.moneda, pagado); _sumaMon(mP, cxp.moneda, pend) }
 
       const badge = anulado ? 'badge-danger'
                   : cxp.estado === 'pagado' ? 'badge-success'
@@ -862,7 +929,7 @@ window.cargarCxP = async function() {
 
       return `<tr ${anulado ? 'style="opacity:.55; text-decoration:line-through;" title="Comprobante anulado: no genera deuda"' : ''}>
         <td>${_esc(_nombreContacto(cxp.contact_id))}</td>
-        <td>${_esc(`${cxp.tipo_comprobante || ''} ${cxp.serie || ''}-${cxp.numero_comprobante || ''}`)}</td>
+        <td>${_esc(`${cxp.tipo_comprobante || ''} ${cxp.serie || ''}-${numComp(cxp.numero_comprobante)}`)}</td>
         <td>${fechaDMY(cxp.fecha_emision, '-')}</td>
         <td>${fechaDMY(cxp.fecha_vencimiento, '—')}</td>
         <td>${dias === null ? '—' : (dias > 0 ? `<span class="badge badge-vencido">+${dias}</span>` : `<span class="badge badge-alcorriente">${dias}</span>`)}</td>
@@ -877,9 +944,9 @@ window.cargarCxP = async function() {
 
     if (tfoot) tfoot.innerHTML = `
       <td colspan="6"><strong>TOTAL (${lista.length} documentos)</strong></td>
-      <td style="text-align:right;"><strong>${formatNumber(tTotal)}</strong></td>
-      <td style="text-align:right;"><strong>${formatNumber(tPagado)}</strong></td>
-      <td style="text-align:right;"><strong>${formatNumber(tPend)}</strong></td>
+      <td style="text-align:right; white-space:nowrap;"><strong>${_fmTotales(mT)}</strong></td>
+      <td style="text-align:right; white-space:nowrap;"><strong>${_fmTotales(mPg)}</strong></td>
+      <td style="text-align:right; white-space:nowrap;"><strong>${_fmTotales(mP)}</strong></td>
       <td colspan="2"></td>`
 
     _poblarSelectCxP(_cxpList.filter(c => c.estado !== 'pagado' && c.estado !== 'anulado'))
@@ -896,7 +963,7 @@ window.exportarCxP = function() {
     ['Proveedor', 'Comprobante', 'F. Emisión', 'F. Vencimiento', 'Moneda', 'Total', 'Pagado', 'Pendiente', 'Estado'],
     ...lista.map(c => [
       _nombreContacto(c.contact_id),
-      `${c.tipo_comprobante || ''} ${c.serie || ''}-${c.numero_comprobante || ''}`,
+      `${c.tipo_comprobante || ''} ${c.serie || ''}-${numComp(c.numero_comprobante)}`,
       c.fecha_emision || '', c.fecha_vencimiento || '', c.moneda || 'PEN',
       parseFloat(c.monto_total || 0).toFixed(2),
       parseFloat(c.monto_pagado || 0).toFixed(2),
@@ -910,7 +977,7 @@ function _poblarSelectCxP(lista) {
   if (!sel) return
   sel.innerHTML = '<option value="">-- Seleccione Compra --</option>' + lista.map(cxp => {
     const pend = _saldoCxP(cxp).toFixed(2)
-    return `<option value="${cxp.id}" data-pendiente="${pend}" data-moneda="${cxp.moneda || 'PEN'}">${_esc(_nombreContacto(cxp.contact_id))} — ${_esc(`${cxp.tipo_comprobante || ''} ${cxp.serie || ''}-${cxp.numero_comprobante || ''}`)} (Pend: ${formatNumber(pend)} ${cxp.moneda || 'PEN'})</option>`
+    return `<option value="${cxp.id}" data-pendiente="${pend}" data-moneda="${cxp.moneda || 'PEN'}">${_esc(_nombreContacto(cxp.contact_id))} — ${_esc(`${cxp.tipo_comprobante || ''} ${cxp.serie || ''}-${numComp(cxp.numero_comprobante)}`)} (Pend: ${formatNumber(pend)} ${cxp.moneda || 'PEN'})</option>`
   }).join('')
   refrescarBuscador(sel)
 }
@@ -973,8 +1040,7 @@ window.registrarPagoProveedor = async function() {
       showToast(`El pago (${formatNumber(monto)}) supera el saldo pendiente (${formatNumber(saldo)})`, 'warning')
       return
     }
-    const dupP = await _posibleDuplicadoCP(false, cxpId, fecha, monto)
-    if (dupP && !confirm(`⚠️ Ya existe un pago de ${formatNumber(dupP.monto)} para esta compra con fecha ${fechaDMY(dupP.fecha)}.\n\n¿Es un pago DIFERENTE y quieres registrarlo igual?`)) return
+    if (!(await _validarDuplicadoOperacion(false, { docId: cxpId, fecha, monto, bancoId, numOp: referencia }))) return
 
     const pago = await addPagoProveedor({
       cxp_id: cxpId, compra_id: cxp.compra_id, contact_id: cxp.contact_id,
@@ -1071,22 +1137,24 @@ window.cargarRetenciones = async function() {
     }
 
     let total = 0
+    const mRet = {}
     tbody.innerHTML = retenciones.map(c => {
       const cxc = cxcMap[c.cxc_id]
-      const comprobante = cxc ? `${cxc.tipo_comprobante || ''} ${cxc.serie || ''}-${cxc.numero_comprobante || ''}` : '-'
+      const comprobante = cxc ? `${cxc.tipo_comprobante || ''} ${cxc.serie || ''}-${numComp(cxc.numero_comprobante)}` : '-'
       const monto = parseFloat(c.monto_retencion) || 0
       total += monto
+      _sumaMon(mRet, c.moneda, monto)
       return `<tr>
         <td>${fechaDMY(c.fecha, '-')}</td>
         <td>${_esc(_nombreContacto(c.contact_id))}</td>
         <td>${_esc(comprobante)}</td>
-        <td style="text-align:right; font-weight:bold;">${formatNumber(monto)}</td>
+        <td style="text-align:right; font-weight:bold; white-space:nowrap;">${_fm(monto, c.moneda)}</td>
         <td>${c.numero_comprobante_retencion ? _esc(c.numero_comprobante_retencion) : '<span class="badge badge-warning" title="Edita el cobro (✏️) para registrar el N° del comprobante de retención">⚠ pendiente</span>'}</td>
         <td style="white-space:nowrap;">${_botonesCP('cobro', c.id)}</td>
       </tr>`
     }).join('')
 
-    if (totalEl) totalEl.textContent = `S/ ${formatNumber(total)}`
+    if (totalEl) totalEl.innerHTML = _fmTotales(mRet).replace('<br>', ' · ')
   } catch (e) {
     console.error('cargarRetenciones:', e)
     showToast('Error al cargar retenciones: ' + e.message, 'danger')
@@ -1115,7 +1183,7 @@ window.exportarRetenciones = async function() {
     ...rows.map(c => {
       const cxc = cxcMap[c.cxc_id]
       return [c.fecha || '', _nombreContacto(c.contact_id),
-        cxc ? `${cxc.tipo_comprobante || ''} ${cxc.serie || ''}-${cxc.numero_comprobante || ''}` : '',
+        cxc ? `${cxc.tipo_comprobante || ''} ${cxc.serie || ''}-${numComp(cxc.numero_comprobante)}` : '',
         parseFloat(c.monto_retencion || 0).toFixed(2), c.numero_comprobante_retencion || '']
     })
   ])
@@ -1195,7 +1263,7 @@ function construirReporte(panelId) {
           tramo: c.estado === 'cobrado' ? '5 · Cobrado' : tramoAntiguedad(dias),
           estado: c.estado, moneda: c.moneda || 'PEN',
           mes: nombreMes((c.fecha_emision || '').slice(0, 7)),
-          comprobante: `${c.tipo_comprobante || ''} ${c.serie || ''}-${c.numero_comprobante || ''}`,
+          comprobante: `${c.tipo_comprobante || ''} ${c.serie || ''}-${numComp(c.numero_comprobante)}`,
           fecha_emision: c.fecha_emision || '', fecha_vencimiento: c.fecha_vencimiento || '',
           total: parseFloat(c.monto_total || 0),
           cobrado: parseFloat(c.monto_cobrado || 0),
@@ -1257,7 +1325,7 @@ function construirReporte(panelId) {
           tramo: c.estado === 'pagado' ? '5 · Pagado' : tramoAntiguedad(dias),
           estado: c.estado, moneda: c.moneda || 'PEN',
           mes: nombreMes((c.fecha_emision || '').slice(0, 7)),
-          comprobante: `${c.tipo_comprobante || ''} ${c.serie || ''}-${c.numero_comprobante || ''}`,
+          comprobante: `${c.tipo_comprobante || ''} ${c.serie || ''}-${numComp(c.numero_comprobante)}`,
           fecha_emision: c.fecha_emision || '',
           total: parseFloat(c.monto_total || 0),
           pagado: parseFloat(c.monto_pagado || 0),
@@ -1661,7 +1729,7 @@ async function construirAntiguedadCxC() {
     const datos = filas.map(f => ({
       cliente: f.cliente || `ID ${f.contact_id}`,
       tramo: f.tramo,
-      comprobante: `${f.tipo_comprobante || ''} ${f.serie || ''}-${f.numero_comprobante || ''}`.trim(),
+      comprobante: `${f.tipo_comprobante || ''} ${f.serie || ''}-${numComp(f.numero_comprobante)}`.trim(),
       cuota: f.numero_cuota,
       // Etiqueta legible del hito: "2/2 · Llegada del contenedor"
       cuota_etiqueta: f.hito ? `Cuota ${f.numero_cuota} · ${f.hito}` : `Cuota ${f.numero_cuota}`,
@@ -1973,6 +2041,7 @@ window.cargarLetras = async function () {
     for (const id of [..._letSel]) { const x = _letrasCache.find(z => z.id === id); if (!x || !_letraAbierta(x)) _letSel.delete(id) }
 
     tbody.innerHTML = lista.map(l => {
+      const _fila = (() => {
       const cuota = l.tipo === 'emitida'
         ? _cuotasCache.find(q => q.id === l.cuota_cobrar_id)
         : _cuotasPagarCache.find(q => q.id === l.cuota_pagar_id)
@@ -1980,7 +2049,7 @@ window.cargarLetras = async function () {
         ? _cxcList.find(c => c.id === l.cxc_id)
         : _cxpList.find(c => c.id === l.cxp_id)
       const comprobante = cabecera
-        ? `${cabecera.tipo_comprobante || ''} ${cabecera.serie || ''}-${cabecera.numero_comprobante || ''}`
+        ? `${cabecera.tipo_comprobante || ''} ${cabecera.serie || ''}-${numComp(cabecera.numero_comprobante)}`
         : '—'
       const banco = l.banco_id ? (_bancosMap[l.banco_id]?.nombre || `Banco #${l.banco_id}`) : '—'
 
@@ -2002,12 +2071,37 @@ window.cargarLetras = async function () {
         <td><span class="badge ${badgeEstado[l.estado] || 'badge-secondary'}">${l.estado}</span></td>
         <td style="white-space:nowrap;">${_accionesLetra(l)}</td>
       </tr>`
+      })()
+      // Texto buscable: todas las columnas visibles (sin HTML) + montos sin separador de miles
+      const txt = (_fila.replace(/<[^>]+>/g, ' ') + ' ' + [l.monto, l.monto_pagado, _saldoLetra(l)].join(' ')).toLowerCase().replace(/\s+/g, ' ')
+      return _fila.replace('<tr>', `<tr data-bsq="${_esc(txt)}">`)
     }).join('')
+    window.filtrarLetras()
     _letPintarBotonUnificar()
   } catch (e) {
     console.error('cargarLetras:', e)
     showToast('Error al cargar letras: ' + e.message, 'danger')
   }
+}
+
+/** Buscador general de la tabla de letras (AND de palabras, todas las columnas). */
+window.filtrarLetras = function () {
+  const q = (document.getElementById('let-buscar')?.value || '').toLowerCase().trim()
+  const palabras = q.split(/\s+/).filter(Boolean)
+  const tb = document.getElementById('tbody-letras')
+  if (!tb) return
+  let vis = 0, total = 0
+  tb.querySelectorAll('tr[data-bsq]').forEach(tr => {
+    total++
+    const ok = palabras.every(p => tr.dataset.bsq.includes(p))
+    tr.style.display = ok ? '' : 'none'
+    if (ok) vis++
+  })
+  let aviso = tb.querySelector('tr.let-sin-res')
+  if (palabras.length && !vis && total) {
+    if (!aviso) { aviso = document.createElement('tr'); aviso.className = 'let-sin-res'; tb.appendChild(aviso) }
+    aviso.innerHTML = `<td colspan="14" style="text-align:center; color:var(--text-secondary);">Ninguna letra coincide con "${_esc(q)}"</td>`
+  } else aviso?.remove()
 }
 
 function _accionesLetra(l) {
@@ -2060,14 +2154,43 @@ window.onCambiarTipoLetra = function () {
   if (!sel) return
 
   const fuente = tipo === 'emitida' ? _cuotasCache : _cuotasPagarCache
+  const totalDoc = !!document.getElementById('letTotalDoc')?.checked
+  const lbl = document.getElementById('letCuotaLbl')
+  if (lbl) lbl.textContent = totalDoc ? 'Documento a canjear (saldo total) *' : 'Cuota pendiente a canjear *'
+  if (totalDoc) {
+    // Un documento por opción: saldo = suma de sus cuotas con saldo (value "doc:<id>")
+    const porDoc = new Map()
+    for (const q of fuente) {
+      if (q.estado === 'anulado' || saldoCuota(q) <= 0.01) continue
+      const docId = tipo === 'emitida' ? q.cxc_id : q.cxp_id
+      const e = porDoc.get(docId) || { saldo: 0, n: 0 }
+      e.saldo = _r2(e.saldo + saldoCuota(q)); e.n++
+      e.tope = _saldoDocDeCuota(tipo, q)
+      porDoc.set(docId, e)
+    }
+    for (const e of porDoc.values()) e.saldo = Math.min(e.saldo, e.tope)
+    const docs = [...porDoc.entries()].map(([docId, e]) => {
+      const cab = tipo === 'emitida' ? _cxcList.find(c => c.id === docId) : _cxpList.find(c => c.id === docId)
+      if (!cab || cab.estado === 'anulado') return null
+      const label = `${_nombreContacto(cab.contact_id)} — ${_descDocCP(cab)} — ${e.n} cuota(s) — Saldo ${formatNumber(e.saldo)} ${cab.moneda || 'PEN'}`
+      return { id: `doc:${docId}`, label, saldo: e.saldo, n: e.n, contactId: cab.contact_id || '', moneda: cab.moneda || 'PEN', tipoCambio: cab.tipo_cambio || 1 }
+    }).filter(Boolean).sort((a, b) => a.label.localeCompare(b.label))
+    sel.innerHTML = '<option value="">-- Selecciona --</option>' + docs.map(o =>
+      `<option value="${o.id}" data-saldo="${o.saldo}" data-ncuotas="${o.n}" data-contact="${o.contactId}" data-moneda="${o.moneda}" data-tc="${o.tipoCambio}">${_esc(o.label)}</option>`
+    ).join('')
+    _letFilas = []; _letPintar()
+    const info0 = document.getElementById('letCuotaInfo'); if (info0) info0.style.display = 'none'
+    document.getElementById('letCuotaAviso').textContent = docs.length ? '' : 'No hay documentos con saldo pendiente para este tipo.'
+    return
+  }
   const opciones = fuente
-    .filter(q => saldoCuota(q) > 0.01 && q.estado !== 'anulado')
+    .filter(q => saldoCuota(q) > 0.01 && q.estado !== 'anulado' && _saldoDocDeCuota(tipo, q) > 0.01)
     .map(q => {
       const cabecera = tipo === 'emitida'
         ? _cxcList.find(c => c.id === q.cxc_id)
         : _cxpList.find(c => c.id === q.cxp_id)
-      const saldo = saldoCuota(q)
-      const label = `${_nombreContacto(cabecera?.contact_id)} — ${cabecera?.tipo_comprobante || ''} ${cabecera?.serie || ''}-${cabecera?.numero_comprobante || ''} — Cuota ${q.numero_cuota} — Saldo ${formatNumber(saldo)} ${cabecera?.moneda || 'PEN'}`
+      const saldo = Math.min(saldoCuota(q), _saldoDocDeCuota(tipo, q))
+      const label = `${_nombreContacto(cabecera?.contact_id)} — ${cabecera?.tipo_comprobante || ''} ${cabecera?.serie || ''}-${numComp(cabecera?.numero_comprobante)} — Cuota ${q.numero_cuota} — Saldo ${formatNumber(saldo)} ${cabecera?.moneda || 'PEN'}`
       return { id: q.id, label, saldo, contactId: cabecera?.contact_id || '', moneda: cabecera?.moneda || 'PEN', tipoCambio: cabecera?.tipo_cambio || 1 }
     })
     .sort((a, b) => a.label.localeCompare(b.label))
@@ -2083,13 +2206,23 @@ window.onCambiarTipoLetra = function () {
     : ''
 }
 
+// Tope del saldo de cuota(s) por el saldo del DOCUMENTO (2026-10-22): una NC
+// baja el documento; si las cuotas aún no reflejan la NC (SQL 97), nunca se
+// canjea más de lo que el documento realmente debe.
+const _saldoDocDeCuota = (tipo, q) => {
+  const doc = tipo === 'emitida' ? _cxcList.find(c => c.id === q.cxc_id) : _cxpList.find(c => c.id === q.cxp_id)
+  return doc ? Math.max(0, _r2(tipo === 'emitida' ? _saldoCxC(doc) : _saldoCxP(doc))) : Infinity
+}
+
 // ── Canje en VARIAS letras (2026-10-07) ─────────────────────────────────────
 // _letFilas = [{ numero, monto, venc }] — una fila por letra a crear.
 let _letFilas = []
 const _letCuotaSel = () => {
   const opt = document.getElementById('letCuota')?.selectedOptions[0]
   if (!opt || !opt.value) return null
-  return { id: parseInt(opt.value), saldo: parseFloat(opt.getAttribute('data-saldo') || 0), moneda: opt.getAttribute('data-moneda') || 'PEN', opt }
+  const esDoc = opt.value.startsWith('doc:')
+  return { id: esDoc ? null : parseInt(opt.value), esDoc, docId: esDoc ? parseInt(opt.value.slice(4)) : null,
+    saldo: parseFloat(opt.getAttribute('data-saldo') || 0), moneda: opt.getAttribute('data-moneda') || 'PEN', opt }
 }
 const _sumarDias = (f, d) => { if (!f) return ''; const x = new Date(f + 'T00:00:00'); x.setDate(x.getDate() + d); return x.toISOString().slice(0, 10) }
 const _diasEntre = (a, b) => (a && b) ? Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000) : null
@@ -2099,6 +2232,28 @@ window.onCambiarCuotaLetra = function () {
   const info = document.getElementById('letCuotaInfo')
   if (!c) { if (info) info.style.display = 'none'; _letFilas = []; _letPintar(); return }
   const tipo = document.getElementById('letTipo')?.value || 'emitida'
+  if (c.esDoc) {
+    const cab = tipo === 'emitida' ? _cxcList.find(d => d.id === c.docId) : _cxpList.find(d => d.id === c.docId)
+    const pend = (tipo === 'emitida' ? _cuotasCache : _cuotasPagarCache)
+      .filter(q => Number(tipo === 'emitida' ? q.cxc_id : q.cxp_id) === c.docId && q.estado !== 'anulado' && saldoCuota(q) > 0.01)
+      .sort((a, b) => a.numero_cuota - b.numero_cuota)
+    if (info) {
+      info.style.display = ''
+      info.innerHTML = `<div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">${tipo === 'emitida' ? 'Cliente' : 'Proveedor'} · canje del saldo total</div>
+        <div style="font-weight:600; font-size:1.05rem; margin-top:2px;">${_esc(_nombreContacto(cab?.contact_id))}</div>
+        <div style="font-size:0.85rem; color:var(--text-secondary); margin-top:2px;">${_esc(_descDocCP(cab))} · Total ${_fm(cab?.monto_total || 0, c.moneda)} · <b style="color:var(--text-primary);">Saldo a canjear ${_fm(c.saldo, c.moneda)}</b></div>
+        <div style="font-size:0.82rem; margin-top:6px;">${pend.length > 1
+          ? `⚠ Se unirán <b>${pend.length} cuotas</b> (${pend.map(q => `${q.numero_cuota}: ${formatNumber(saldoCuota(q))} vence ${fechaDMY(q.fecha_vencimiento)}`).join(' · ')}) en <b>una sola</b> con vencimiento ${fechaDMY(pend[0]?.fecha_vencimiento)}. El cronograma original se reemplaza por las letras.`
+          : 'Tiene una sola cuota con saldo: se canjea tal cual.'}</div>`
+    }
+    document.getElementById('letCuotaAviso').textContent = ''
+    const pref0 = document.getElementById('letPrefijo')
+    if (pref0 && !pref0.value) pref0.value = `LT.${String(cab?.numero_comprobante || '').replace(/^0+/, '')}-`
+    const pv0 = document.getElementById('letPrimerVenc')
+    if (pv0 && !pv0.value) pv0.value = _sumarDias(document.getElementById('letFechaEmision')?.value, parseInt(document.getElementById('letIntervalo')?.value || 30) || 30)
+    window._letGenerar()
+    return
+  }
   const q = (tipo === 'emitida' ? _cuotasCache : _cuotasPagarCache).find(x => x.id === c.id)
   const cab = q ? (tipo === 'emitida' ? _cxcList.find(d => d.id === q.cxc_id) : _cxpList.find(d => d.id === q.cxp_id)) : null
   if (info) {
@@ -2186,11 +2341,59 @@ function _letResumen() {
   const queda = _r2(saldo - total)
   const color = queda < -0.009 ? 'var(--color-danger)' : (Math.abs(queda) < 0.01 ? 'var(--color-success)' : 'var(--color-warning)')
   const card = (lbl, val, st = '') => `<div><div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">${lbl}</div><div style="font-weight:700; font-size:1.1rem;${st}">${val}</div></div>`
-  box.innerHTML = card('Saldo de la cuota', `${mon} ${formatNumber(saldo)}`) +
+  box.innerHTML = card(c?.esDoc ? 'Saldo del documento' : 'Saldo de la cuota', `${mon} ${formatNumber(saldo)}`) +
     card(`Total en ${_letFilas.length} letra(s)`, `${mon} ${formatNumber(total)}`) +
     card(queda < -0.009 ? 'Excede el saldo' : 'Queda sin canjear', `${mon} ${formatNumber(queda)}`, ` color:${color};`)
   const btn = document.getElementById('letBtnGuardar')
   if (btn && !btn.classList.contains('btn-cargando')) btn.textContent = `💾 Guardar ${_letFilas.length || ''} letra${_letFilas.length === 1 ? '' : 's'}`
+}
+
+/**
+ * Canje del saldo total (2026-10-22): une las cuotas con saldo del documento en
+ * la PRIMERA (suma monto, cobrado/pagado, retenido y canjeado), re-apunta sus
+ * letras y cobros/pagos a esa cuota, borra las demás y renumera. Devuelve la
+ * cuota unida (fresca) o null si algo falló (avisa).
+ */
+async function _unificarCuotasPendientes(tipoDoc, docId, pendientes, cuotasDoc) {
+  const esC = _esCxcDoc(tipoDoc)
+  if (!pendientes.length) return null
+  const destino = pendientes[0]
+  if (pendientes.length === 1) return destino
+  try {
+    const campoAp = esC ? 'monto_cobrado' : 'monto_pagado'
+    const suma = k => _r2(pendientes.reduce((t, q) => t + (parseFloat(q[k]) || 0), 0))
+    const nueva = { ...destino, monto: suma('monto'), [campoAp]: suma(campoAp), monto_canjeado: suma('monto_canjeado') }
+    if (esC) nueva.monto_retenido = suma('monto_retenido')
+    const datos = { monto: nueva.monto, [campoAp]: nueva[campoAp], monto_canjeado: nueva.monto_canjeado, estado: estadoCuota(nueva, esC) }
+    if (esC) datos.monto_retenido = nueva.monto_retenido
+    const ok1 = await _updCuota(tipoDoc, destino.id, datos)
+    if (!ok1) throw new Error('no se pudo actualizar la cuota ' + destino.numero_cuota)
+    const otras = pendientes.slice(1).map(q => q.id)
+    // Letras y cobros/pagos que apuntaban a las cuotas que se van → a la unida
+    const campoLetra = esC ? 'cuota_cobrar_id' : 'cuota_pagar_id'
+    const r1 = await supabase.from('letras_cambio').update({ [campoLetra]: destino.id }).in(campoLetra, otras)
+    if (r1.error) throw new Error('letras: ' + r1.error.message)
+    const r2 = await supabase.from(esC ? 'cobros' : 'pagos_proveedores').update({ cuota_id: destino.id }).in('cuota_id', otras)
+    if (r2.error) throw new Error((esC ? 'cobros' : 'pagos') + ': ' + r2.error.message)
+    for (const id of otras) {
+      const ok = esC ? await deleteCuotaCobrar(id) : await deleteCuotaPagar(id)
+      if (ok === false) throw new Error('no se pudo borrar la cuota #' + id)
+    }
+    // Renumerar (ascendente: los números solo bajan → no chocan con el UNIQUE)
+    const quedan = cuotasDoc.filter(q => !otras.includes(q.id)).sort((a, b) => a.numero_cuota - b.numero_cuota)
+    let n = 1
+    for (const x of quedan) { if (x.numero_cuota !== n) await _updCuota(tipoDoc, x.id, { numero_cuota: n }); n++ }
+    await _refrescarCuotasDoc(esC, docId)
+    await _sincronizarVencimientoDoc(tipoDoc, docId)
+    invalidarVarios(['letras_cambio', 'cobros', 'pagos_proveedores'])
+    try { _letrasCache = await getLetrasCambio() } catch (_) {}
+    return (esC ? _cuotasCache : _cuotasPagarCache).find(q => q.id === destino.id) || null
+  } catch (e) {
+    console.error('_unificarCuotasPendientes:', e)
+    showToast('No se pudieron unir las cuotas: ' + e.message + '. No se creó ninguna letra; revisa las cuotas del documento.', 'danger', 10000)
+    await _refrescarCuotasDoc(esC, docId)
+    return null
+  }
 }
 
 window.guardarLetra = async function () {
@@ -2201,8 +2404,9 @@ window.guardarLetra = async function () {
     const tipo = document.getElementById('letTipo')?.value || 'emitida'
     const sel = document.getElementById('letCuota')
     const opt = sel?.selectedOptions[0]
-    const cuotaId = parseInt(sel?.value || 0)
-    if (!cuotaId) { showToast('Selecciona la cuota a canjear', 'warning'); return }
+    const selC = _letCuotaSel()
+    let cuotaId = selC?.esDoc ? null : parseInt(sel?.value || 0)
+    if (!selC || (!selC.esDoc && !cuotaId)) { showToast(`Selecciona ${document.getElementById('letTotalDoc')?.checked ? 'el documento' : 'la cuota'} a canjear`, 'warning'); return }
     if (!_letFilas.length) { showToast('Agrega al menos una letra (⚡ Generar o + Agregar letra)', 'warning'); return }
 
     const fechaEmision = document.getElementById('letFechaEmision')?.value
@@ -2220,12 +2424,39 @@ window.guardarLetra = async function () {
       if (!f.venc) { showToast(`Letra ${n}: falta el vencimiento`, 'warning'); return }
       if (f.venc < fechaEmision) { showToast(`Letra ${n}: vence antes de la fecha de emisión`, 'warning'); return }
     }
-    const saldo = parseFloat(opt.getAttribute('data-saldo') || 0)
+    // Saldo REAL desde la BD (otro usuario pudo cobrar/canjear mientras tanto)
+    const esC = tipo === 'emitida'
+    const monSel = opt.getAttribute('data-moneda') || 'PEN'
+    let docIdSel = selC.esDoc ? selC.docId : null
+    if (!docIdSel) { const qc = (esC ? _cuotasCache : _cuotasPagarCache).find(q => q.id === cuotaId); docIdSel = qc ? (esC ? qc.cxc_id : qc.cxp_id) : null }
+    if (docIdSel) await _refrescarCuotasDoc(esC, docIdSel)
+    const cuotasDoc = (esC ? _cuotasCache : _cuotasPagarCache).filter(q => Number(esC ? q.cxc_id : q.cxp_id) === Number(docIdSel) && q.estado !== 'anulado')
+    const pendientes = cuotasDoc.filter(q => saldoCuota(q) > 0.01).sort((a, b) => a.numero_cuota - b.numero_cuota)
+    let saldo = selC.esDoc
+      ? _r2(pendientes.reduce((t, q) => t + saldoCuota(q), 0))
+      : _r2(saldoCuota(cuotasDoc.find(q => q.id === cuotaId) || {}))
+    const docFresco = docIdSel ? await _docFrescoCP(esC, docIdSel) : null
+    const topeDoc = docFresco ? Math.max(0, _r2(esC ? _saldoCxC(docFresco) : _saldoCxP(docFresco))) : Infinity
+    if (saldo > topeDoc + 0.01) { saldo = topeDoc; showToast(`ℹ️ El documento tiene nota(s) de crédito: se canjea su saldo real ${monSel} ${formatNumber(topeDoc)}`, 'info', 7000) }
+    const queQue = selC.esDoc ? 'el saldo del documento' : 'el saldo de la cuota'
+    if (saldo <= 0.01) { showToast(`Ya no hay saldo por canjear (alguien más lo cobró o canjeó). Recarga la pantalla.`, 'warning', 8000); return }
+    if (Math.abs(saldo - parseFloat(opt.getAttribute('data-saldo') || 0)) > 0.01) showToast(`⚠️ El saldo cambió desde que abriste la pantalla: ahora es ${monSel} ${formatNumber(saldo)}`, 'warning', 8000)
     const totalLetras = _r2(_letFilas.reduce((s, f) => s + (parseFloat(f.monto) || 0), 0))
     if (totalLetras > saldo + 0.01) {
-      showToast(`El total de las letras (${formatNumber(totalLetras)}) supera el saldo de la cuota (${formatNumber(saldo)})`, 'warning'); return
+      showToast(`El total de las letras (${monSel} ${formatNumber(totalLetras)}) supera ${queQue} (${monSel} ${formatNumber(saldo)})`, 'warning'); return
     }
-    if (saldo - totalLetras > 0.01 && !confirm(`Las letras suman ${formatNumber(totalLetras)} y la cuota tiene ${formatNumber(saldo)}.\n\nQuedarán ${formatNumber(saldo - totalLetras)} sin canjear (canje parcial). ¿Continuar?`)) return
+    const resumenUnion = selC.esDoc && pendientes.length > 1
+      ? `Se unirán ${pendientes.length} cuotas (${pendientes.map(q => formatNumber(saldoCuota(q))).join(' + ')}) en UNA cuota de ${monSel} ${formatNumber(saldo)} con vencimiento ${fechaDMY(pendientes[0].fecha_vencimiento)}.\nEl cronograma original se reemplaza.\n\n`
+      : ''
+    const parcial = saldo - totalLetras > 0.01 ? `\n⚠ Quedarán ${monSel} ${formatNumber(saldo - totalLetras)} sin canjear (canje parcial).` : ''
+    if ((resumenUnion || parcial) && !confirm(`${resumenUnion}Canje en ${_letFilas.length} letra(s) por ${monSel} ${formatNumber(totalLetras)}.${parcial}\n\n¿Continuar?`)) return
+
+    // Canje del saldo total: une las cuotas pendientes en la primera
+    if (selC.esDoc) {
+      const unida = await _unificarCuotasPendientes(esC ? 'cxc' : 'cxp', docIdSel, pendientes, cuotasDoc)
+      if (!unida) return
+      cuotaId = unida.id
+    }
 
     const contactId = parseInt(opt.getAttribute('data-contact') || 0) || null
     const moneda = opt.getAttribute('data-moneda') || 'PEN'
@@ -2236,6 +2467,7 @@ window.guardarLetra = async function () {
       ? _cuotasCache.find(q => q.id === cuotaId)
       : _cuotasPagarCache.find(q => q.id === cuotaId)
     if (!cuota) { showToast('No se encontró la cuota seleccionada', 'danger'); return }
+    if (document.getElementById('letTotalDoc')) document.getElementById('letTotalDoc').checked = false
     const cabecera = tipo === 'emitida'
       ? _cxcList.find(c => c.id === cuota.cxc_id)
       : _cxpList.find(c => c.id === cuota.cxp_id)
@@ -2562,7 +2794,7 @@ function _estadoCxPCalc(cxp, pagado) {
   return aplicado >= total - 0.01 ? 'pagado' : (aplicado > 0.01 ? 'parcial' : 'pendiente')
 }
 
-const _descDocCP = d => `${d?.tipo_comprobante || ''} ${d?.serie || ''}-${d?.numero_comprobante || ''}`.trim()
+const _descDocCP = d => `${d?.tipo_comprobante || ''} ${d?.serie || ''}-${numComp(d?.numero_comprobante)}`.trim()
 
 // ── Aplicar efectos ─────────────────────────────────────────────────────────
 
@@ -2880,8 +3112,8 @@ window.verDetalleCP = async function(tipo, id) {
         ${esCobro ? fila('N° Recibo', _esc(reg.numero_recibo || '—')) : ''}
         ${fila('Fecha', fechaDMY(reg.fecha))}
         ${fila(esCobro ? 'Cliente' : 'Proveedor', _esc(_nombreContacto(reg.contact_id)))}
-        ${fila('Monto', `<b>${reg.moneda || 'PEN'} ${formatNumber(reg.monto)}</b>`)}
-        ${esCobro ? fila('Retención IGV', parseFloat(reg.monto_retencion || 0) > 0 ? formatNumber(reg.monto_retencion) : '—') : ''}
+        ${fila('Monto', `<b>${_fm(reg.monto, reg.moneda)}</b>${mov && _monCod(_bancosMap[mov.banco_id]?.moneda) !== _monCod(reg.moneda) ? `<span class="mon-sub">Entró a la cuenta: ${_fm(mov.monto, _bancosMap[mov.banco_id]?.moneda)} (T.C. ${reg.tipo_cambio ?? '—'})</span>` : ''}`)}
+        ${esCobro ? fila('Retención IGV', parseFloat(reg.monto_retencion || 0) > 0 ? _fm(reg.monto_retencion, reg.moneda) : '—') : ''}
         ${esCobro && reg.numero_comprobante_retencion ? fila('Comprobante retención', _esc(reg.numero_comprobante_retencion)) : ''}
         ${fila('Tipo de cambio', reg.tipo_cambio ?? '—')}
         ${fila('Medio de pago', reg.medio_pago || '—')}
@@ -2898,16 +3130,16 @@ window.verDetalleCP = async function(tipo, id) {
       <h4 style="margin:16px 0 6px;">Documento ${esCobro ? 'CxC' : 'CxP'}</h4>
       ${doc ? `<table class="table-compact" style="width:100%;">
         ${fila('Comprobante', _esc(_descDocCP(doc)))}
-        ${fila('Total', `${doc.moneda || 'PEN'} ${formatNumber(doc.monto_total)}`)}
-        ${fila(esCobro ? 'Cobrado' : 'Pagado', formatNumber(esCobro ? doc.monto_cobrado : doc.monto_pagado))}
-        ${esCobro ? fila('Retenido', formatNumber(doc.monto_retenido || 0)) : ''}
-        ${fila('Saldo', `<b>${formatNumber(saldoDoc)}</b>`)}
+        ${fila('Total', _fm(doc.monto_total, doc.moneda))}
+        ${fila(esCobro ? 'Cobrado' : 'Pagado', _fm(esCobro ? doc.monto_cobrado : doc.monto_pagado, doc.moneda))}
+        ${esCobro ? fila('Retenido', _fm(doc.monto_retenido || 0, doc.moneda)) : ''}
+        ${fila('Saldo', `<b>${_fm(saldoDoc, doc.moneda)}</b>`)}
         ${fila('Estado', doc.estado || '—')}
       </table>` : '<p style="color:var(--text-secondary);">Sin documento vinculado.</p>'}
 
       ${cuotas.length ? `<h4 style="margin:16px 0 6px;">Cuotas del documento</h4>
       <table class="table-compact" style="width:100%;">
-        <thead><tr><th>N°</th><th>Vence</th><th style="text-align:right;">Monto</th><th style="text-align:right;">${esCobro ? 'Cobrado' : 'Pagado'}</th>${esCobro ? '<th style="text-align:right;">Retenido</th>' : ''}<th style="text-align:right;">Saldo</th><th>Estado</th></tr></thead>
+        <thead><tr><th>N°</th><th>Vence</th><th style="text-align:right;">Monto (${_monCod(doc?.moneda)})</th><th style="text-align:right;">${esCobro ? 'Cobrado' : 'Pagado'} (${_monCod(doc?.moneda)})</th>${esCobro ? `<th style="text-align:right;">Retenido (${_monCod(doc?.moneda)})</th>` : ''}<th style="text-align:right;">Saldo (${_monCod(doc?.moneda)})</th><th>Estado</th></tr></thead>
         <tbody>${cuotas.map(q => `<tr><td>${q.numero_cuota}</td><td>${fechaDMY(q.fecha_vencimiento)}</td>
           <td style="text-align:right;">${formatNumber(q.monto)}</td>
           <td style="text-align:right;">${formatNumber(esCobro ? q.monto_cobrado : q.monto_pagado)}</td>
@@ -2918,7 +3150,7 @@ window.verDetalleCP = async function(tipo, id) {
       <h4 style="margin:16px 0 6px;">Asiento contable</h4>
       ${asiento?.id ? `<p style="margin:0 0 6px;"><b>${_esc(asiento.numero_asiento || '')}</b> — ${_esc(asiento.descripcion || '')}</p>
       <table class="table-compact" style="width:100%;">
-        <thead><tr><th>Cuenta</th><th style="text-align:right;">Debe</th><th style="text-align:right;">Haber</th></tr></thead>
+        <thead><tr><th>Cuenta</th><th style="text-align:right;">Debe (PEN)</th><th style="text-align:right;">Haber (PEN)</th></tr></thead>
         <tbody>${lineas.map(l => { const a = _planCuentasMap?.[l.account_id]; return `<tr>
           <td>${_esc(a ? `${a.codigo} ${a.nombre}` : (l.descripcion || l.account_id))}</td>
           <td style="text-align:right;">${parseFloat(l.debe || 0) ? formatNumber(l.debe) : ''}</td>
@@ -2930,8 +3162,8 @@ window.verDetalleCP = async function(tipo, id) {
         ${fila('N° Registro', `<b>${_numMB(mov.id)}</b>`)}
         ${fila('Cuenta', _esc(_bancosMap[mov.banco_id]?.nombre || mov.banco_id))}
         ${fila('Concepto', _esc(mov.concepto))}
-        ${fila('Monto', `${mov.tipo} ${formatNumber(mov.monto)}`)}
-        ${fila('Saldo posterior', mov.saldo_posterior != null ? formatNumber(mov.saldo_posterior) : '—')}
+        ${fila('Monto', `${mov.tipo} ${_fm(mov.monto, _bancosMap[mov.banco_id]?.moneda)}`)}
+        ${fila('Saldo posterior', mov.saldo_posterior != null ? _fm(mov.saldo_posterior, _bancosMap[mov.banco_id]?.moneda) : '—')}
         ${fila('Conciliado', mov.reconciliado ? 'Sí' : 'No')}
         ${fila('Vínculo', movRes.modo === 'vinculado' ? 'Directo' : 'Por coincidencia (registro antiguo)')}
       </table>` : `<p style="color:var(--text-secondary);">${movRes.modo === 'ambiguo' ? 'Varios movimientos coinciden: revisa Bancos.' : 'Sin movimiento bancario.'}</p>`}`
@@ -3238,18 +3470,18 @@ async function _verDetalleDocCP(tipoDoc, docId) {
         <div style="font-size:0.85rem; color:var(--text-secondary); margin-top:2px;">${_esc(_nombreContacto(doc.contact_id))} · Emisión ${fechaDMY(doc.fecha_emision, '—')} · Vence ${fechaDMY(doc.fecha_vencimiento, '—')}</div>
       </div>
       <table class="table-compact" style="width:100%; margin-top:10px;">
-        ${fila('Total', `${doc.moneda || 'PEN'} ${formatNumber(doc.monto_total)}`)}
-        ${fila(esCxC ? 'Cobrado' : 'Pagado', formatNumber(esCxC ? doc.monto_cobrado : doc.monto_pagado))}
-        ${esCxC ? fila('Retenido', formatNumber(doc.monto_retenido || 0)) : ''}
-        ${aplicadoSinMov > 0 ? fila('Anticipo / canje aplicado', formatNumber(aplicadoSinMov)) : ''}
-        ${fila('Pendiente', `<b>${formatNumber(pendiente)}</b>`)}
+        ${fila('Total', _fm(doc.monto_total, doc.moneda))}
+        ${fila(esCxC ? 'Cobrado' : 'Pagado', _fm(esCxC ? doc.monto_cobrado : doc.monto_pagado, doc.moneda))}
+        ${esCxC ? fila('Retenido', _fm(doc.monto_retenido || 0, doc.moneda)) : ''}
+        ${aplicadoSinMov > 0 ? fila('Anticipo / canje aplicado', _fm(aplicadoSinMov, doc.moneda)) : ''}
+        ${fila('Pendiente', `<b>${_fm(pendiente, doc.moneda)}</b>`)}
         ${fila('Estado', doc.estado || '—')}
       </table>
 
       <h4 style="margin:16px 0 6px;">${esCxC ? 'Cobros' : 'Pagos'} registrados (${movs.length})</h4>
       ${movs.length ? `<div style="border:1px solid var(--border-color); border-radius:var(--radius-md); overflow:hidden; overflow-x:auto;">
         <table style="width:100%; border-collapse:collapse; margin:0;">
-          <thead><tr style="background:var(--bg-secondary);">${esCxC ? '<th>N° Recibo</th>' : ''}<th>Fecha</th><th style="text-align:right;">Monto</th>${esCxC ? '<th style="text-align:right;">Retención</th>' : ''}<th>Medio</th><th>Banco</th><th>Referencia</th><th></th></tr></thead>
+          <thead><tr style="background:var(--bg-secondary);">${esCxC ? '<th>N° Recibo</th>' : ''}<th>Fecha</th><th style="text-align:right;">Monto (${_monCod(doc.moneda)})</th>${esCxC ? `<th style="text-align:right;">Retención (${_monCod(doc.moneda)})</th>` : ''}<th>Medio</th><th>Banco</th><th>Referencia</th><th></th></tr></thead>
           <tbody>${movs.map(m => `<tr style="border-top:1px solid var(--border-color);">
             ${esCxC ? `<td>${_esc(m.numero_recibo || '—')}</td>` : ''}<td>${fechaDMY(m.fecha)}</td><td style="text-align:right;">${formatNumber(m.monto)}</td>
             ${esCxC ? `<td style="text-align:right;">${parseFloat(m.monto_retencion || 0) > 0 ? formatNumber(m.monto_retencion) : '—'}</td>` : ''}
@@ -3261,7 +3493,7 @@ async function _verDetalleDocCP(tipoDoc, docId) {
       ${letrasDoc.length ? `<h4 style="margin:16px 0 6px;">Letras (canje) (${letrasDoc.length})</h4>
       <div style="border:1px solid var(--border-color); border-radius:var(--radius-md); overflow:hidden; overflow-x:auto;">
         <table style="width:100%; border-collapse:collapse; margin:0;">
-          <thead><tr style="background:var(--bg-secondary);"><th>N° Letra</th><th>Vence</th><th style="text-align:right;">Monto</th><th>Estado</th><th></th></tr></thead>
+          <thead><tr style="background:var(--bg-secondary);"><th>N° Letra</th><th>Vence</th><th style="text-align:right;">Monto (${_monCod(doc.moneda)})</th><th>Estado</th><th></th></tr></thead>
           <tbody>${letrasDoc.map(l => `<tr style="border-top:1px solid var(--border-color);">
             <td>${_esc(l.numero_letra)}</td><td>${fechaDMY(l.fecha_vencimiento)}</td><td style="text-align:right;">${formatNumber(l.monto)}</td><td>${l.estado}</td>
             <td style="white-space:nowrap;">${_botonesLetra(l.id)}</td></tr>`).join('')}</tbody>
@@ -3269,7 +3501,7 @@ async function _verDetalleDocCP(tipoDoc, docId) {
 
       ${cuotas.length ? `<h4 style="margin:16px 0 6px;">Cuotas</h4>
       <table class="table-compact" style="width:100%;">
-        <thead><tr><th>N°</th><th>Vence</th><th style="text-align:right;">Monto</th><th style="text-align:right;">Saldo</th><th>Estado</th><th></th></tr></thead>
+        <thead><tr><th>N°</th><th>Vence</th><th style="text-align:right;">Monto (${_monCod(doc.moneda)})</th><th style="text-align:right;">Saldo (${_monCod(doc.moneda)})</th><th>Estado</th><th></th></tr></thead>
         <tbody>${cuotas.map(q => `<tr><td>${q.numero_cuota}</td><td>${fechaDMY(q.fecha_vencimiento)}</td><td style="text-align:right;">${formatNumber(q.monto)}</td><td style="text-align:right;">${formatNumber(saldoCuota(q))}</td><td>${q.estado}</td>
           <td style="white-space:nowrap;">${_botonesCuota(tipoDoc, q.id)}</td></tr>`).join('')}</tbody>
       </table>` : ''}`
@@ -3969,15 +4201,15 @@ function _rfinPintarOrigenes() {
       <td style="padding:6px 10px; font-weight:600;">${_esc(x.numero_letra)}</td>
       <td style="padding:6px 10px;">${fechaDMY(x.fecha_vencimiento)}${atraso ? ` <small style="color:var(--color-danger);">(${atraso} d)</small>` : ''}</td>
       <td style="padding:6px 10px;"><span class="badge ${x.estado === 'parcial' ? 'badge-warning' : (x.estado === 'banco' ? 'badge-info' : 'badge-secondary')}">${x.estado}</span></td>
-      <td style="padding:6px 10px; text-align:right;">${formatNumber(x.monto)}</td>
-      <td style="padding:6px 10px; text-align:right;">${formatNumber(x.monto_pagado || 0)}</td>
-      <td style="padding:6px 10px; text-align:right; font-weight:600;">${formatNumber(_saldoLetra(x))}</td>
+      <td style="padding:6px 10px; text-align:right; white-space:nowrap;">${_fm(x.monto, mon)}</td>
+      <td style="padding:6px 10px; text-align:right; white-space:nowrap;">${_fm(x.monto_pagado || 0, mon)}</td>
+      <td style="padding:6px 10px; text-align:right; font-weight:600; white-space:nowrap;">${_fm(_saldoLetra(x), mon)}</td>
       <td style="padding:6px 10px; text-align:right; color:var(--text-secondary);">${mon === 'USD' ? (parseFloat(x.tipo_cambio) || 1).toFixed(3) : '—'}</td>
     </tr>`
   }).join('')
   const n = _rfin.sel.size
   document.getElementById('rfinOrigenesFoot').innerHTML = `<td></td><td colspan="5" style="padding:8px 10px;">${n} letra(s) seleccionada(s)</td>
-    <td style="padding:8px 10px; text-align:right; font-weight:700;">${mon} ${formatNumber(_rfinTotalSaldos())}</td><td></td>`
+    <td style="padding:8px 10px; text-align:right; font-weight:700; white-space:nowrap;">${_fm(_rfinTotalSaldos(), mon)}</td><td></td>`
 }
 
 window._rfinToggleOrigen = function (id, on) {
@@ -4519,7 +4751,7 @@ window.verDetalleLetra = async function (id) {
     try { adjLetra = await getAdjuntos('letra', id) } catch (_) {}
     const tabla = (cab, filas, pie = '') => `<div style="border:1px solid var(--border-color); border-radius:var(--radius-md); overflow:hidden; overflow-x:auto;">
       <table style="width:100%; border-collapse:collapse; margin:0; font-size:0.85rem;"><thead><tr style="background:var(--bg-secondary);">${cab}</tr></thead><tbody>${filas}</tbody>${pie}</table></div>`
-    const listaLetras = arr => arr.map(x => `<a href="#" onclick="window.verDetalleLetra(${x.id}); return false;">${_esc(x.numero_letra)}</a> <small style="color:var(--text-secondary);">${formatNumber(x.monto)} · ${x.estado}</small>`).join(' · ')
+    const listaLetras = arr => arr.map(x => `<a href="#" onclick="window.verDetalleLetra(${x.id}); return false;">${_esc(x.numero_letra)}</a> <small style="color:var(--text-secondary);">${_fm(x.monto, mon)} · ${x.estado}</small>`).join(' · ')
 
     body.innerHTML = `
       <div style="padding:12px 14px; background:var(--bg-secondary); border-radius:var(--radius-md); border-left:3px solid var(--color-info); font-size:0.88rem; line-height:1.6; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;">
@@ -4530,7 +4762,7 @@ window.verDetalleLetra = async function (id) {
         </div>
         <div style="display:grid; grid-template-columns:repeat(3, auto); gap:2px 18px; text-align:right;">
           <span style="color:var(--text-secondary); font-size:0.75rem;">MONTO</span><span style="color:var(--text-secondary); font-size:0.75rem;">PAGADO</span><span style="color:var(--text-secondary); font-size:0.75rem;">SALDO</span>
-          <b>${mon} ${formatNumber(l.monto)}</b><b>${mon} ${formatNumber(l.monto_pagado || 0)}</b><b style="color:${saldo > 0 ? 'var(--color-warning)' : 'var(--color-success)'};">${mon} ${formatNumber(saldo)}</b>
+          <b>${_fm(l.monto, mon)}</b><b>${_fm(l.monto_pagado || 0, mon)}</b><b style="color:${saldo > 0 ? 'var(--color-warning)' : 'var(--color-success)'};">${_fm(saldo, mon)}</b>
         </div>
       </div>
       <table class="table-compact" style="width:100%; margin-top:10px;">
@@ -4546,14 +4778,14 @@ window.verDetalleLetra = async function (id) {
         <div style="font-size:0.85rem; line-height:1.8;">
           <div><span style="color:var(--text-secondary);">Letras de origen:</span> ${listaLetras(refinOrigen.ori.map(o => ({ id: o.letra_id, numero_letra: _letrasCache.find(x => x.id === o.letra_id)?.numero_letra || '#' + o.letra_id, monto: o.saldo, estado: 'saldo' })))}</div>
           <div><span style="color:var(--text-secondary);">Letras nuevas:</span> ${listaLetras(refinOrigen.hermanas)}</div>
-          <div><span style="color:var(--text-secondary);">Saldos ${formatNumber(refinOrigen.ref.total_saldos)} − abono ${formatNumber(refinOrigen.ref.monto_abono)} + interés ${formatNumber(refinOrigen.ref.interes_refin)} = </span><b>${mon} ${formatNumber(refinOrigen.ref.total_nuevas)}</b>${mon === 'USD' ? ` · T.C. ${parseFloat(refinOrigen.ref.tipo_cambio || 1).toFixed(4)}` : ''}</div>
+          <div><span style="color:var(--text-secondary);">Saldos ${_fm(refinOrigen.ref.total_saldos, mon)} − abono ${_fm(refinOrigen.ref.monto_abono, mon)} + interés ${_fm(refinOrigen.ref.interes_refin, mon)} = </span><b>${_fm(refinOrigen.ref.total_nuevas, mon)}</b>${mon === 'USD' ? ` · T.C. ${parseFloat(refinOrigen.ref.tipo_cambio || 1).toFixed(4)}` : ''}</div>
         </div>` : ''}
       ${refinCierre ? `<h4 style="margin:16px 0 6px;">🔗 ${refinCierre.ref.modalidad === 'renovacion' ? 'Renovada' : 'Unificada'} en #${refinCierre.ref.id} (${fechaDMY(refinCierre.ref.fecha)})</h4>
         <div style="font-size:0.85rem;">Letras nuevas: ${listaLetras(refinCierre.nuevas)}</div>` : ''}
 
       <h4 style="margin:16px 0 6px;">💵 Abonos ${emitida ? '/ cobros' : '/ pagos'} (${abonos.length})</h4>
       ${abonos.length ? tabla(
-        `<th>Fecha</th><th>Tipo</th><th>Medio / cuenta</th><th>Recibo</th><th>N° Op.</th><th style="text-align:right;">Amortiza (${mon})</th><th style="text-align:right;">Interés</th><th style="text-align:right;">Gastos</th><th style="text-align:right;">Neto (${mon})</th><th>Mov. / Asiento</th><th></th>`,
+        `<th>Fecha</th><th>Tipo</th><th>Medio / cuenta</th><th>Recibo</th><th>N° Op.</th><th style="text-align:right;">Amortiza (${mon})</th><th style="text-align:right;">Interés (${mon})</th><th style="text-align:right;">Gastos (${mon})</th><th style="text-align:right;">Neto (${mon})</th><th>Mov. / Asiento</th><th></th>`,
         abonos.map((a, i) => `<tr style="border-top:1px solid var(--border-color);">
           <td>${fechaDMY(a.fecha)}</td>
           <td><span class="badge ${a.tipo_abono === 'total' ? 'badge-success' : (a.tipo_abono === 'parcial' ? 'badge-warning' : 'badge-info')}">${_TIPOS_ABONO[a.tipo_abono] || a.tipo_abono}</span><br><small style="color:var(--text-secondary);">${a.ubicacion === 'banco' ? '🏦 banco' : '📁 cartera'}</small></td>
@@ -4741,20 +4973,20 @@ window.verDetalleCuota = async function (tipoDoc, id) {
     body.innerHTML = `
       <div style="padding:12px 14px; background:var(--bg-secondary); border-radius:var(--radius-md); border-left:3px solid var(--color-info); font-size:0.88rem; line-height:1.6;">
         <div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">Cuota del cronograma · ${q.estado}</div>
-        <div style="font-weight:600; font-size:1.05rem; margin-top:2px;">Cuota ${q.numero_cuota} — ${doc?.moneda || 'PEN'} ${formatNumber(q.monto)}</div>
+        <div style="font-weight:600; font-size:1.05rem; margin-top:2px;">Cuota ${q.numero_cuota} — ${_fm(q.monto, doc?.moneda)}</div>
         <div style="font-size:0.85rem; color:var(--text-secondary); margin-top:2px;">${_esc(_descDocCP(doc))} · ${_esc(_nombreContacto(doc?.contact_id))}</div>
       </div>
       <table class="table-compact" style="width:100%; margin-top:10px;">
         ${fila('Vencimiento', fechaDMY(q.fecha_vencimiento))}
-        ${fila(_esCxcDoc(tipoDoc) ? 'Cobrado' : 'Pagado', formatNumber(_esCxcDoc(tipoDoc) ? q.monto_cobrado : q.monto_pagado))}
-        ${_esCxcDoc(tipoDoc) ? fila('Retenido', formatNumber(q.monto_retenido || 0)) : ''}
-        ${fila('Canjeado en letras', formatNumber(q.monto_canjeado || 0))}
-        ${fila('Saldo', `<b>${formatNumber(saldoCuota(q))}</b>`)}
+        ${fila(_esCxcDoc(tipoDoc) ? 'Cobrado' : 'Pagado', _fm(_esCxcDoc(tipoDoc) ? q.monto_cobrado : q.monto_pagado, doc?.moneda))}
+        ${_esCxcDoc(tipoDoc) ? fila('Retenido', _fm(q.monto_retenido || 0, doc?.moneda)) : ''}
+        ${fila('Canjeado en letras', _fm(q.monto_canjeado || 0, doc?.moneda))}
+        ${fila('Saldo', `<b>${_fm(saldoCuota(q), doc?.moneda)}</b>`)}
         ${q.hito ? fila('Hito', _esc(q.hito)) : ''}
         ${fila('Observaciones', _esc(q.observaciones || '—'))}
       </table>
       ${letras.length ? `<h4 style="margin:16px 0 6px;">Letras que canjean esta cuota</h4>
-      <table class="table-compact" style="width:100%;"><tbody>${letras.map(l => `<tr><td>${_esc(l.numero_letra)}</td><td>${fechaDMY(l.fecha_vencimiento)}</td><td style="text-align:right;">${formatNumber(l.monto)}</td><td>${l.estado}</td><td style="white-space:nowrap;">${_botonesLetra(l.id)}</td></tr>`).join('')}</tbody></table>` : ''}`
+      <table class="table-compact" style="width:100%;"><tbody>${letras.map(l => `<tr><td>${_esc(l.numero_letra)}</td><td>${fechaDMY(l.fecha_vencimiento)}</td><td style="text-align:right; white-space:nowrap;">${_fm(l.monto, doc?.moneda)}</td><td>${l.estado}</td><td style="white-space:nowrap;">${_botonesLetra(l.id)}</td></tr>`).join('')}</tbody></table>` : ''}`
   } catch (e) {
     console.error('verDetalleCuota:', e)
     body.innerHTML = `<p style="color:var(--color-danger);">Error: ${_esc(e.message)}</p>`
@@ -5172,11 +5404,13 @@ function _pintarAdjPendientes(pref) {
   if (!cont) return
   const opts = v => Object.entries(ADJ_CONCEPTOS).map(([k, t]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${t}</option>`).join('')
   cont.innerHTML = _adjPendientes[pref].map((a, i) => `
-    <div style="display:grid; grid-template-columns:130px 1fr auto; gap:8px; align-items:center; padding:6px 8px; background:var(--bg-secondary); border-radius:var(--radius-sm);">
+    <div style="display:grid; grid-template-columns:56px 130px 1fr auto; gap:8px; align-items:center; padding:6px 8px; background:var(--bg-secondary); border-radius:var(--radius-sm);">
+      ${miniaturaArchivoHTML(`adjth-${pref}-${i}`)}
       <select onchange="window._adjConcepto('${pref}', ${i}, this.value)" style="padding:4px 6px;">${opts(a.concepto)}</select>
       <span style="font-size:0.82rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${_esc(a.file.name)}">📄 ${_esc(a.file.name)} <small style="color:var(--text-secondary);">(${(a.file.size / 1024).toFixed(0)} KB)</small></span>
       <button type="button" class="btn btn-small btn-danger" onclick="window._adjQuitarPendiente('${pref}', ${i})" title="Quitar">✕</button>
     </div>`).join('')
+  _adjPendientes[pref].forEach((a, i) => pintarMiniaturaArchivo(document.getElementById(`adjth-${pref}-${i}`), a.file))
   const input = document.getElementById(`${pref}Archivo`)
   if (input) input.disabled = _adjPendientes[pref].length >= _ADJ_MAX_VEZ
 }
@@ -5198,7 +5432,8 @@ async function _subirAdjuntosPendientes(pref, entidad, id) {
 
 function _htmlAdjuntos(entidad, id, adjuntos, conQuitar) {
   if (!adjuntos?.length) return '<span style="color:var(--text-secondary);">Sin archivos adjuntos.</span>'
-  return adjuntos.map(a => `<div>
+  return adjuntos.map(a => `<div style="display:flex; align-items:center; gap:8px; margin:4px 0;">
+      <span class="adj-thumb" data-adj-path="${_esc(a.path)}" data-adj-nombre="${_esc(a.nombre)}">…</span>
       <span class="badge badge-info" style="font-size:0.7rem;">${ADJ_CONCEPTOS[a.concepto] || a.concepto}</span>
       <a href="#" onclick="window.verAdjunto(${a.id}, '${a.path}'); return false;">${_esc(a.nombre)}</a>
       ${conQuitar ? `· <a href="#" style="color:var(--color-danger);" onclick="window.quitarAdjunto('${entidad}', ${id}, ${a.id}); return false;">Quitar</a>` : ''}
@@ -5369,7 +5604,7 @@ window.cargarRecibos = async function () {
     const desc = r => {
       if (r.origen === 'cobro') {
         const cxc = _cxcList.find(d => d.id === r.cxc_id)
-        return { txt: `Cobro ${cxc ? `${cxc.serie ? cxc.serie + '-' : ''}${cxc.numero_comprobante || ''}` : 'factura'}`, ver: `window.verDetalleCP('cobro', ${r.id})` }
+        return { txt: `Cobro ${cxc ? `${cxc.serie ? cxc.serie + '-' : ''}${numComp(cxc.numero_comprobante)}` : 'factura'}`, ver: `window.verDetalleCP('cobro', ${r.id})` }
       }
       const l = _letrasCache.find(x => x.id === r.letra_id)
       return { txt: `${_TIPOS_ABONO[r.tipo_abono] || 'Abono'} letra ${l?.numero_letra || (r.refinanciacion_id ? `(refinanc. #${r.refinanciacion_id})` : '')}`, ver: r.letra_id ? `window.verDetalleLetra(${r.letra_id})` : '' }

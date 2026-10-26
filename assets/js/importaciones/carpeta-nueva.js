@@ -27,10 +27,12 @@ const n2 = v => formatNumber(parseFloat(v) || 0, 2)
 const n6 = v => formatNumber(parseFloat(v) || 0, 6)
 const num = v => parseFloat(v) || 0
 
+const INCOTERMS = ['FOB', 'CFR', 'CIF', 'CIP', 'CPT', 'FCA', 'FAS', 'EXW', 'DAP', 'DDP']
 const INCOTERMS_CON_FLETE = ['CIF', 'CFR', 'CIP', 'CPT', 'DAP', 'DDP']
 export const incluyeFlete = i => INCOTERMS_CON_FLETE.includes(String(i || '').toUpperCase())
 
-let _origen = 'compra'
+let _origen = 'oc'
+let _compraPI = null      // compra ya registrada que respalda la PI elegida (caso carpetas históricas)
 let _compras = []
 let _ocs = []
 let _contactos = []
@@ -84,11 +86,11 @@ function _asegurarModal() {
       <div style="padding:16px 20px 0;">
         <strong style="display:block; margin-bottom:4px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">¿De dónde nace la carpeta?</strong>
         <small style="display:block; margin-bottom:10px; color:var(--text-secondary); line-height:1.4;">
-          La carpeta es el expediente del contenedor. Puede nacer de una compra que ya registraste, de una OC-Proforma, o vacía.
+          La carpeta es el expediente de la importación. Lo normal es que nazca de una <strong>Proforma (PI)</strong> confirmada; si la PI ya tiene su compra registrada, el Commercial Invoice se arma con esa compra.
         </small>
         <div id="cnOrigenChips" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px;">
-          <button type="button" class="reporte-chip on" data-origen="compra" onclick="window.cnOrigen('compra')">Desde una compra registrada</button>
-          <button type="button" class="reporte-chip" data-origen="oc" onclick="window.cnOrigen('oc')">Desde una OC-Proforma</button>
+          <button type="button" class="reporte-chip on" data-origen="oc" onclick="window.cnOrigen('oc')">Desde una Proforma (PI)</button>
+          <button type="button" class="reporte-chip" data-origen="compra" onclick="window.cnOrigen('compra')">Desde una compra (sin PI)</button>
           <button type="button" class="reporte-chip" data-origen="cero" onclick="window.cnOrigen('cero')">Desde cero</button>
         </div>
 
@@ -107,7 +109,7 @@ function _asegurarModal() {
         <div style="display:grid; grid-template-columns:1fr 1.6fr 1fr 0.8fr; gap:10px;">
           <div class="form-group">
             <label>N° de carpeta *</label>
-            <input type="text" id="cnNumero" placeholder="14">
+            <input type="text" id="cnNumero" placeholder="15">
             <small id="cnNumeroAviso" style="color:var(--text-secondary);"></small>
           </div>
           <div class="form-group">
@@ -125,6 +127,27 @@ function _asegurarModal() {
               <option value="PEN">PEN</option>
             </select>
           </div>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 3fr; gap:10px;">
+          <div class="form-group">
+            <label>Incoterm</label>
+            <select id="cnIncoterm" onchange="window.cnIncotermCambio()">
+              <option value="">— Elegir —</option>
+              ${INCOTERMS.map(i => `<option value="${i}">${i}</option>`).join('')}
+            </select>
+          </div>
+          <div id="cnIncotermAviso" style="align-self:center;"></div>
+        </div>
+        <div id="cnDesglose" style="display:none; margin-bottom:10px;">
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
+            <div class="form-group"><label>Flete incluido en el precio <span style="font-weight:400; color:var(--text-secondary);">(opcional)</span></label>
+              <input type="number" step="0.01" min="0" id="cnFleteIncl" oninput="window.cnDesgloseCalc()"></div>
+            <div class="form-group"><label>Seguro incluido <span style="font-weight:400; color:var(--text-secondary);">(opcional)</span></label>
+              <input type="number" step="0.01" min="0" id="cnSeguroIncl" oninput="window.cnDesgloseCalc()"></div>
+            <div class="form-group"><label>Valor FOB resultante</label>
+              <input type="text" id="cnFobCalc" readonly style="background:var(--bg-secondary,#f3f4f6);"></div>
+          </div>
+          <small style="color:var(--text-secondary);">Es solo el desglose del precio CIF (FOB = total − flete − seguro). No es costo adicional. Si el CI aún no lo detalla, déjalo en blanco y complétalo en la pestaña 1 · Commercial Invoice.</small>
         </div>
         <div class="form-group">
           <label>Descripción</label>
@@ -154,6 +177,7 @@ window.cnOrigen = async function (origen) {
   _origen = origen
   _seleccion = null
   _lineas = []
+  _compraPI = null
   document.querySelectorAll('#cnOrigenChips .reporte-chip').forEach(b =>
     b.classList.toggle('on', b.dataset.origen === origen))
   document.getElementById('cnPreview').innerHTML = ''
@@ -185,13 +209,13 @@ async function _llenarSelector() {
       ? `${_compras.length} compra(s) de proveedor del exterior sin carpeta. Las DUAs no aparecen: no abren carpeta.`
       : 'No hay compras de importación sin carpeta.'
   } else {
-    if (lbl) lbl.textContent = 'OC marcada como importación (Proforma Invoice)'
+    if (lbl) lbl.textContent = 'Proforma Invoice (PI) sin carpeta'
     _ocs = await getOCsImportacion()
     sel.innerHTML = '<option value="">-- Selecciona --</option>' + _ocs.map(o =>
-      `<option value="${o.id}">${o.numero}${o.numero_proforma_proveedor ? ' · PI ' + o.numero_proforma_proveedor : ''} · ${o.currency} ${n2(o.total_OC)} · ${fechaDMY(o.fecha)}</option>`).join('')
+      `<option value="${o.id}">${o.numero_proforma_proveedor ? 'PI ' + o.numero_proforma_proveedor : o.numero} · ${o.currency} ${n2(o.total_oc)} · ${fechaDMY(o.fecha)}${o.status === 'confirmado' ? '' : ' · ⚠ ' + (o.status || 'borrador')}</option>`).join('')
     if (aviso) aviso.textContent = _ocs.length
-      ? `${_ocs.length} OC-Proforma sin carpeta.`
-      : 'No hay OCs marcadas como importación. Créala en Compras → Órdenes de Compra con "Es importación".'
+      ? `${_ocs.length} Proforma(s) sin carpeta. Las marcadas ⚠ aún no están confirmadas.`
+      : 'No hay Proformas pendientes. Créala en Compras → Órdenes de Compra marcando "Es importación", o genérala desde una compra ya registrada (Compras → ⋮ → Generar Proforma).'
   }
 }
 
@@ -211,19 +235,9 @@ window.cnSeleccionar = async function () {
     set('cnFecha', c.fecha_emision)
     set('cnMoneda', c.currency || 'USD')
     set('cnDescripcion', `Importación ${c.documento || c.referencia} — ${c.proveedor_nombre}`)
+    set('cnIncoterm', '')
 
-    const detalles = (await getCompraDetalles(id)) || []
-    const items = await getItems()
-    const mapa = {}; for (const i of items || []) mapa[i.id] = i
-    _lineas = detalles.map(d => ({
-      product_id: d.item_id,
-      nombre: mapa[d.item_id] ? (mapa[d.item_id].sku ? `(${mapa[d.item_id].sku}) ${mapa[d.item_id].nombre}` : mapa[d.item_id].nombre) : (d.descripcion || `Item #${d.item_id}`),
-      cantidad_neto: num(d.cantidad),
-      cantidad_gross: num(d.cantidad),
-      cantidad_unid: 0,
-      costo_unitario: num(d.precio_unitario),
-      costo_total: num(d.subtotal) || num(d.cantidad) * num(d.precio_unitario)
-    }))
+    _lineas = await _lineasDeCompra(id)
 
     const totalLineas = _lineas.reduce((t, l) => t + l.costo_total, 0)
     const dif = Math.abs(totalLineas - num(c.subtotal))
@@ -242,18 +256,69 @@ window.cnSeleccionar = async function () {
     set('cnFecha', o.fecha)
     set('cnMoneda', o.currency || 'USD')
     set('cnDescripcion', `Importación PI ${o.numero_proforma_proveedor || o.numero}`)
+    set('cnIncoterm', o.incoterm || '')
 
-    const anticipo = num(o.total_OC) * num(o.anticipo_porcentaje) / 100
-    if (prev) prev.innerHTML = _aviso(
+    // ¿La PI ya tiene su compra registrada? (carpetas históricas: la compra ES el CI)
+    _compraPI = null
+    const { data: compraPI } = await supabase.from('v_compras_importacion')
+      .select('*').eq('orden_compra_id', id).is('carpeta_importacion_id', null).limit(1)
+    if (compraPI && compraPI.length) {
+      _compraPI = compraPI[0]
+      _lineas = await _lineasDeCompra(_compraPI.id)
+    }
+
+    const anticipo = num(o.total_oc) * num(o.anticipo_porcentaje) / 100
+    if (prev) prev.innerHTML = (o.status === 'confirmado' ? '' : _aviso(`Esta Proforma está en estado "${o.status || 'borrador'}"`,
+        'Lo normal es confirmarla antes de abrir la carpeta (Compras → Órdenes de Compra → Confirmar Proforma). Si sigues, se te pedirá confirmación.')) +
+      (_compraPI
+        ? _aviso(`Esta PI ya tiene su compra registrada (${_compraPI.documento || _compraPI.referencia})`,
+            `Se creará la carpeta + el Commercial Invoice con ${_lineas.length} línea(s) de esa compra, y la compra queda enlazada a la carpeta.`, 'info') + _tablaLineas()
+        : '') +
+      (_compraPI ? '' : _aviso(
       `Se creará la carpeta en etapa 1, sin Commercial Invoice`,
-      `${o.incoterm || '—'}${o.puerto_embarque ? ' · ' + o.puerto_embarque : ''}${o.puerto_destino ? ' → ' + o.puerto_destino : ''} · total ${o.currency} ${n2(o.total_OC)}` +
+      `${o.incoterm || '—'}${o.puerto_embarque ? ' · ' + o.puerto_embarque : ''}${o.puerto_destino ? ' → ' + o.puerto_destino : ''} · total ${o.currency} ${n2(o.total_oc)}` +
       (anticipo ? ` · anticipo ${n2(o.anticipo_porcentaje)}% = ${o.currency} ${n2(anticipo)}` : '') +
-      `. El CI llega en la etapa 2, cuando embarque.`, 'info') +
-      (incluyeFlete(o.incoterm)
-        ? _aviso(`${o.incoterm}: el precio ya incluye flete y seguro`,
-            'El costeo de esta carpeta NO debe llevar líneas de flete ni seguro internacional: se contarían dos veces.')
-        : '')
+      `. El CI llega en la etapa 2, cuando embarque.`, 'info'))
   }
+  window.cnIncotermCambio()
+}
+
+/** Total de las líneas de la compra que alimenta el CI (0 si no hay compra). */
+const _totalCI = () => _lineas.reduce((t, l) => t + l.costo_total, 0)
+
+window.cnDesgloseCalc = function () {
+  const f = num(document.getElementById('cnFleteIncl')?.value)
+  const sg = num(document.getElementById('cnSeguroIncl')?.value)
+  const out = document.getElementById('cnFobCalc'); if (!out) return
+  out.value = _totalCI() > 0 ? n2(_totalCI() - f - sg) : ''
+  out.style.color = (f + sg) >= _totalCI() && (f + sg) > 0 ? 'var(--color-danger)' : ''
+}
+
+window.cnIncotermCambio = function () {
+  const i = document.getElementById('cnIncoterm')?.value || ''
+  const des = document.getElementById('cnDesglose')
+  if (des) { des.style.display = (i && incluyeFlete(i) && _lineas.length) ? '' : 'none'; window.cnDesgloseCalc() }
+  const box = document.getElementById('cnIncotermAviso'); if (!box) return
+  box.innerHTML = !i ? '<small style="color:var(--text-secondary);">Sin incoterm no se puede validar si el flete ya viene en el precio.</small>'
+    : incluyeFlete(i)
+      ? `<small style="color:var(--color-warning,#b45309);">${i}: el precio YA incluye flete y seguro — el costeo no debe cargarlos aparte (se contarían dos veces).</small>`
+      : `<small style="color:var(--text-secondary);">${i}: el flete y el seguro internacional van como líneas del ledger.</small>`
+}
+
+/** Líneas de una compra, en el formato del Commercial Invoice. */
+async function _lineasDeCompra(compraId) {
+  const detalles = (await getCompraDetalles(compraId)) || []
+  const items = await getItems()
+  const mapa = {}; for (const i of items || []) mapa[i.id] = i
+  return detalles.map(d => ({
+    product_id: d.item_id,
+    nombre: mapa[d.item_id] ? (mapa[d.item_id].sku ? `(${mapa[d.item_id].sku}) ${mapa[d.item_id].nombre}` : mapa[d.item_id].nombre) : (d.descripcion || `Item #${d.item_id}`),
+    cantidad_neto: num(d.cantidad),
+    cantidad_gross: num(d.cantidad),
+    cantidad_unid: 0,
+    costo_unitario: num(d.precio_unitario),
+    costo_total: num(d.subtotal) || num(d.cantidad) * num(d.precio_unitario)
+  }))
 }
 
 function _avisoIncotermCompra(c) {
@@ -289,7 +354,7 @@ function _tablaLineas() {
 window.abrirModalNuevaCarpeta = async function () {
   await esperarContextoEmpresa()
   _asegurarModal()
-  _seleccion = null; _lineas = []
+  _seleccion = null; _lineas = []; _compraPI = null
 
   if (!_contactos.length) _contactos = (await getContacts()) || []
   const prov = document.getElementById('cnProveedor')
@@ -332,13 +397,26 @@ window.crearCarpetaImportacion = async function () {
     if (!numero) throw new Error('Falta el número de carpeta')
     if (!proveedorId) throw new Error('Elige el proveedor')
     if (!fecha) throw new Error('Falta la fecha de apertura')
-    if (_origen !== 'cero' && !_seleccion) throw new Error('Elige la compra o la OC de origen')
+    if (_origen !== 'cero' && !_seleccion) throw new Error('Elige la Proforma o la compra de origen')
+    if (_origen === 'oc' && _seleccion.status !== 'confirmado' &&
+        !confirm(`La Proforma está en estado "${_seleccion.status || 'borrador'}".\n\n¿Abrir la carpeta igual?`)) return
 
     const repetidas = (await query('carpetas_importacion', { numero_carpeta: numero })) || []
     if (repetidas.length) throw new Error(`Ya existe una carpeta con el número "${numero}"`)
 
     btn.disabled = true; btn.textContent = 'Creando…'
     const user = await getCurrentUser()
+
+    // Compra que alimenta el Commercial Invoice: la elegida, o la que ya respalda la PI.
+    const compraBase = _origen === 'compra' ? _seleccion : (_origen === 'oc' ? _compraPI : null)
+    const incoterm = v('cnIncoterm') || null
+    // Desglose del precio CIF (solo si hay CI y el incoterm ya incluye flete)
+    const conDesglose = !!(compraBase && incoterm && incluyeFlete(incoterm))
+    const fleteIncl = conDesglose ? num(v('cnFleteIncl')) : 0
+    const seguroIncl = conDesglose ? num(v('cnSeguroIncl')) : 0
+    if (fleteIncl < 0 || seguroIncl < 0) throw new Error('Flete y seguro no pueden ser negativos')
+    if (conDesglose && (fleteIncl + seguroIncl) >= _totalCI() && (fleteIncl + seguroIncl) > 0)
+      throw new Error('Flete + seguro no pueden igualar o superar el total del CI: el FOB saldría en cero o negativo')
 
     const carpeta = {
       numero_carpeta: numero,
@@ -348,9 +426,10 @@ window.crearCarpetaImportacion = async function () {
       moneda_costeo: v('cnMoneda') || 'USD',
       estado: 'abierta',
       origen: _origen === 'cero' ? 'manual' : (_origen === 'oc' ? 'orden_compra' : 'compra'),
-      compra_origen_id: _origen === 'compra' ? _seleccion.id : null,
+      compra_origen_id: compraBase ? compraBase.id : null,
+      incoterm,
       orden_compra_id: _origen === 'oc' ? _seleccion.id : null,
-      created_by: user?.id
+      created_by: user?.db_id
     }
 
     if (_origen === 'compra') {
@@ -358,32 +437,51 @@ window.crearCarpetaImportacion = async function () {
       carpeta.cif_total_usd = num(_seleccion.subtotal)
       carpeta.tipo_cambio = num(_seleccion.tipo_cambio) || 3.75
     } else if (_origen === 'oc') {
-      carpeta.fob_total_usd = num(_seleccion.total_OC)
+      if (compraBase) carpeta.tipo_cambio = num(compraBase.tipo_cambio) || undefined
+      carpeta.fob_total_usd = num(_seleccion.total_oc)
       carpeta.flete_usd = num(_seleccion.flete_estimado)
       carpeta.seguro_usd = num(_seleccion.seguro_estimado)
-      carpeta.cif_total_usd = num(_seleccion.total_OC) + num(_seleccion.flete_estimado) + num(_seleccion.seguro_estimado)
+      carpeta.cif_total_usd = num(_seleccion.total_oc) + num(_seleccion.flete_estimado) + num(_seleccion.seguro_estimado)
     }
 
-    const filaCarpeta = await insert('carpetas_importacion', carpeta)
-    if (!filaCarpeta?.id) throw new Error(ultimoErrorInsert()?.mensaje || 'No se pudo crear la carpeta')
+    let filaCarpeta = await insert('carpetas_importacion', carpeta)
+    // Sin el SQL 94 la columna incoterm no existe: se reintenta sin ella.
+    if (!filaCarpeta?.id && /incoterm/i.test(ultimoErrorInsert()?.mensaje || ultimoErrorInsert()?.message || '')) {
+      const { incoterm: _omit, ...sinIncoterm } = carpeta
+      filaCarpeta = await insert('carpetas_importacion', sinIncoterm)
+      if (filaCarpeta?.id) showToast('Carpeta creada sin incoterm: corre assets/sql/94 y edítalo.', 'warning')
+    }
+    if (!filaCarpeta?.id) throw new Error(ultimoErrorInsert()?.mensaje || ultimoErrorInsert()?.message || 'No se pudo crear la carpeta')
     const carpetaId = filaCarpeta.id
 
-    // ── Origen COMPRA: crear el Commercial Invoice con sus líneas ──────────
-    if (_origen === 'compra') {
+    // ── Con compra (directa o respaldando la PI): crear el Commercial Invoice ──
+    if (compraBase) {
       const ci = await insert('comercial_invoices', {
         contact_id: proveedorId,
-        invoice_number: _seleccion.documento || _seleccion.referencia,
-        fecha,
+        invoice_number: compraBase.documento || compraBase.referencia,
+        fecha: compraBase.fecha_emision || fecha,   // la fecha del CI es la de la compra, no la de apertura
         product: v('cnDescripcion') || null,
-        terminos_delivery: 'FOB',
+        terminos_delivery: incoterm || 'FOB',
+        // Con origen PI, el CI hereda lo que ya dice la Proforma
+        ...(_origen === 'oc' ? {
+          proforma_number: _seleccion.numero_proforma_proveedor || null,
+          puerto_embarque: _seleccion.puerto_embarque || null,
+          pais_origen: _seleccion.pais_origen || null,
+          terminos_payment: _seleccion.anticipo_porcentaje != null
+            ? `${num(_seleccion.anticipo_porcentaje)}% advance - ${parseFloat((100 - num(_seleccion.anticipo_porcentaje)).toFixed(2))}% ${_seleccion.dias_saldo_desde_bl != null ? 'within ' + _seleccion.dias_saldo_desde_bl + ' days from B/L date' : 'balance'}`
+            : null
+        } : {}),
         total_unidades: _lineas.reduce((t, l) => t + (l.cantidad_unid || 0), 0),
         cantidad_total_neto: _lineas.reduce((t, l) => t + l.cantidad_neto, 0),
         cantidad_total_gross: _lineas.reduce((t, l) => t + l.cantidad_gross, 0),
         valor_total_final_ci: _lineas.reduce((t, l) => t + l.costo_total, 0),
-        valor_total_final_fob: _lineas.reduce((t, l) => t + l.costo_total, 0),
+        // FOB = total − flete − seguro (con CIF/CFR/...); en FOB/EXW coincide con el total
+        costo_flete: fleteIncl,
+        costo_seguro: seguroIncl,
+        valor_total_final_fob: parseFloat((_lineas.reduce((t, l) => t + l.costo_total, 0) - fleteIncl - seguroIncl).toFixed(2)),
         carpeta_importacion_id: carpetaId,
         status: 'confirmado',
-        created_by: user?.id
+        created_by: user?.db_id
       })
       if (ci?.id) {
         await update('carpetas_importacion', carpetaId, { comercial_invoice_id: ci.id })
@@ -406,7 +504,7 @@ window.crearCarpetaImportacion = async function () {
         showToast('Carpeta creada, pero el Commercial Invoice falló: ' + (ultimoErrorInsert()?.mensaje || ''), 'warning')
       }
       // Enlazar la compra con su carpeta
-      await update('compras', _seleccion.id, { carpeta_importacion_id: carpetaId })
+      await update('compras', compraBase.id, { carpeta_importacion_id: carpetaId })
     }
 
     // ── Origen OC: enlazar la OC ──────────────────────────────────────────

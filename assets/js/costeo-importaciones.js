@@ -1,8 +1,10 @@
-import { ultimoErrorInsert, query } from './supabase-client.js'
+import { ultimoErrorInsert, query, update } from './supabase-client.js'
 import { llenarSelectorLote, leerSelectorLote, validarLoteCI, esAviso } from './shared/lote-selector.js'
 import { renderResumenFinal } from './importaciones/resumen-analisis.js'
 import { renderCostosLedger } from './importaciones/costos-ledger.js'
 import { fechaDMY } from './helpers.js'
+import { initModuleNavDropdowns } from './main.js'
+import { incluyeFlete } from './importaciones/carpeta-nueva.js'
 // ============================================================================
 // COSTEO-IMPORTACIONES.JS - Módulo Costeo de Importaciones (Async/Await)
 // ============================================================================
@@ -21,34 +23,38 @@ import { getLotes, getItems,
   generarAsientoGuiaRemision, getJournalEntryByReferencia, eliminarAsientoContable,
   /*Ordenes de Compra y detalles*/getOrderCompras, getOrderCompraById, getOrderCompraDetalles, getOrderCompraDetalleById
 } from './supabase-data.js'
-import { getTCCompra } from './sunat-api.js'
+import { getTCCompra, getTCVenta, textoAvisoTC } from './sunat-api.js'
 import { showToast, formatNumber, formatQty } from './helpers.js'
 
 // ─── TC COMPRA automático para DAM ───────────────────────────────────────────
 
 /**
- * Consulta TC COMPRA SBS para la fecha del formulario DAM y llena el campo.
- * Importaciones en USD → Art. 61° LIR → TC COMPRA.
+ * T.C. VENTA SUNAT de la FECHA DE PAGO de los tributos (si no hay, la de la DAM, provisional).
+ * Norma: los tributos de importación se cancelan en soles al T.C. venta vigente a la fecha de pago.
+ * @param {'new'|'edit'} pref  modal que se llena
+ * @param {boolean} forzar     true = puede consultar a Decolecta (1 crédito); false = solo lo ya guardado
  */
-window.autoFetchTCCompraDAM = async function () {
-  const campo = document.getElementById('newDAMTipoCambio')
-  const aviso = document.getElementById('newDAMTCAviso')
+window.autoFetchTCDAM = async function (pref = 'new', forzar = true) {
+  const campo = document.getElementById(`${pref}DAMTipoCambio`)
+  const aviso = document.getElementById(`${pref}DAMTCAviso`)
   if (!campo) return
+  const fechaPago = document.getElementById(`${pref}DAMFechaPago`)?.value || null
+  const fecha = fechaPago || document.getElementById(`${pref}DAMFecha`)?.value || null
+  if (!fecha) { if (aviso) aviso.textContent = 'Indica la fecha de pago de tributos para traer el T.C.'; return }
+  if (aviso) aviso.textContent = 'Consultando T.C. venta SUNAT…'
 
-  const fecha = document.getElementById('newDAMFecha')?.value || null
-  if (aviso) aviso.textContent = 'Consultando SBS...'
-
-  const result = await getTCCompra(fecha)
+  const result = await getTCVenta(fecha, { permitirApi: !!forzar })
   if (result.error) {
-    if (aviso) aviso.textContent = `⚠️ ${result.error} — ingresa TC manualmente`
-    showToast('No se pudo obtener el TC de SUNAT. Ingresa el tipo de cambio manualmente.', 'warning')
+    if (aviso) aviso.textContent = `⚠️ ${result.error}`
+    if (forzar) showToast('No se pudo obtener el T.C. de SUNAT. Ingrésalo manualmente.', 'warning')
     return
   }
-
   campo.value = result.tc.toFixed(3)
-  if (typeof calculoAutomaticoImpuestosNewDAM === 'function') calculoAutomaticoImpuestosNewDAM()
-  if (aviso) aviso.textContent = `TC Compra SBS ${result.fecha}: S/. ${result.tc.toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} — Art. 61° LIR`
+  const calc = pref === 'edit' ? window.calculoAutomaticoImpuestosEditDAM : window.calculoAutomaticoImpuestosNewDAM
+  if (typeof calc === 'function') calc()
+  if (aviso) aviso.textContent = textoAvisoTC(result, 'venta') + (fechaPago ? '' : ' · provisional: usa la fecha de la DAM, falta la fecha de pago')
 }
+window.autoFetchTCCompraDAM = () => window.autoFetchTCDAM('new', true)   // compatibilidad con llamadas antiguas
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -69,9 +75,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     initTabsCosteo()
-    await cargarProveedoresSelect()
-    await cargarProductosSelectCosteo()
+    initModuleNavDropdowns('#costeoTabs')   // etapas con pestañas internas (estándar del ERP)
+    // Una sola carga: carpetas + CI + PI + DAM en paralelo. Los selectores de los
+    // modales (proveedores, OC, guías) se llenan al abrirlos, no al entrar.
     await cargarImportacionesList()
+    if (document.getElementById('costeoSelector')?.value) await window.cargarImportacion()   // carpeta abierta mas alta
+    else window.renderHojaCosteo?.()   // hoja vacía con "+ Nueva" hasta elegir carpeta
     
     // Inicializar cálculos automáticos en vivo
     initCalculosAutomaticos()
@@ -86,15 +95,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (costoFleteInput) costoFleteInput.addEventListener('change', triggerValidationFOB)
     if (prodFOBInput) prodFOBInput.addEventListener('change', triggerValidationFOB)
       
-    // Cargar primera importación si existe
-    const costeos = await getComercialInvoices()
-    if (costeos && costeos.length > 0) {
-      const selector = document.getElementById('costeoSelector')
-      if (selector) {
-        selector.value = costeos[0].id
-        await window.cargarImportacionesEnSelect('costeoSelector')
-      }
-    }
   } catch (error) {
     console.error('Error en DOMContentLoaded:', error)
     showToast('Error al cargar el módulo de costeo', 'danger')
@@ -331,60 +331,78 @@ function initCalculosAutomaticos() {
   if (prodQuantityInput) prodQuantityInput.addEventListener('input', calculateProdFOB)
 }
 
+/**
+ * Texto del selector de carpetas según la etapa en que va:
+ *   Carpeta 8 - PI P260710HY5012                        (etapa 1: solo PI)
+ *   Carpeta 8 - PI P260710HY5012 / CI INVOICE-HY5012261 (etapa 2: llegó el CI)
+ *   Carpeta 8 - PI … / CI … / DAM 436155                (etapa 3: nacionalizada)
+ * Sin PI (carpeta histórica o "desde cero") simplemente omite esa parte.
+ */
+export function etiquetaCarpeta(c, pi, ci) {
+  const partes = []
+  const nPI = pi?.numero_proforma_proveedor || ci?.proforma_number
+  if (nPI) partes.push(`PI ${nPI}`)
+  if (ci?.invoice_number) partes.push(`CI ${ci.invoice_number}`)
+  if (c.numero_dam) partes.push(`DAM ${c.numero_dam}`)
+  let txt = `Carpeta ${c.numero_carpeta}`
+  txt += partes.length ? ' - ' + partes.join(' / ') : (c.descripcion ? ' - ' + c.descripcion : '')
+  if (c.estado && c.estado !== 'abierta') txt += ` · ${c.estado.toUpperCase()}`
+  return txt
+}
+
 async function cargarImportacionesList() {
   try {
     // El selector lista CARPETAS, no Commercial Invoices: una carpeta existe
     // desde la etapa 1 (OC/Proforma) y el CI recien aparece en la etapa 2.
-    // Listando CIs, una carpeta recien abierta era imposible de seleccionar.
-    const carpetas = (await query('carpetas_importacion', {})) || []
     const selector = document.getElementById('costeoSelector')
     if (!selector) return
+    const previo = selector.value
 
-    const contactos = await getContacts()
-    const mapProv = {}
-    for (const c of contactos || []) mapProv[c.id] = c.nombre || ''
+    const [carpetas, cis, ocs] = await Promise.all([
+      query('carpetas_importacion', {}),
+      query('comercial_invoices', {}),
+      query('orden_compra', { es_importacion: true })
+    ])
+    const ciPorId = {}, ciPorCarpeta = {}, ocPorId = {}
+    for (const x of cis || []) { ciPorId[x.id] = x; if (x.carpeta_importacion_id) ciPorCarpeta[x.carpeta_importacion_id] = x }
+    for (const o of ocs || []) ocPorId[o.id] = o
 
-    carpetas.sort((a, b) => String(b.numero_carpeta || '').localeCompare(String(a.numero_carpeta || ''), 'es', { numeric: true }))
+    const lista = [...(carpetas || [])]
+    lista.sort((a, b) => String(b.numero_carpeta || '').localeCompare(String(a.numero_carpeta || ''), 'es', { numeric: true }))
 
     selector.innerHTML = '<option value="">-- Selecciona una carpeta --</option>' +
-      carpetas.map(c => {
-        const partes = [c.numero_carpeta]
-        if (mapProv[c.proveedor_id]) partes.push(mapProv[c.proveedor_id])
-        if (c.numero_dam) partes.push('DAM ' + c.numero_dam)
-        if (c.estado && c.estado !== 'abierta') partes.push(c.estado.toUpperCase())
-        return `<option value="${c.id}">${partes.join(' · ')}</option>`
+      lista.map(c => {
+        const ci = ciPorId[c.comercial_invoice_id] || ciPorCarpeta[c.id] || null
+        const pi = ocPorId[c.orden_compra_id] || null
+        return `<option value="${c.id}">${etiquetaCarpeta(c, pi, ci)}</option>`
       }).join('')
-
-    if (!carpetas.length) {
-      selector.innerHTML += '<option value="" disabled>(todavia no hay carpetas de importacion)</option>'
-    }
-    
-    // Cargar ordenes de compra en el selector de nueva importación
-    const ordenCompras = await getOrderCompras()
-    const OCselector = document.getElementById('selectorNewImportacionOC')
-    if (OCselector) {
-      OCselector.innerHTML = '<option value="">-- Selecciona --</option>'
-      ordenCompras.forEach(oc => {
-        OCselector.innerHTML += `<option value="${oc.id}">${oc.numero}</option>`
-      })
-    }
-
-    // Cargar proveedores en el selector de nueva importación
-    const suppliers = await getSuppliers()
-    const provSelector = document.getElementById('newProvId')
-    if (provSelector) {
-      provSelector.innerHTML = '<option value="">-- Selecciona --</option>'
-      suppliers.forEach(supplier => {
-        provSelector.innerHTML += `<option value="${supplier.id}">${supplier.nombre || supplier.razon_social}</option>`
-      })
+    if (!lista.length) selector.innerHTML += '<option value="" disabled>(todavia no hay carpetas de importacion)</option>'
+    if (previo && lista.some(c => String(c.id) === previo)) selector.value = previo
+    else {
+      // Por defecto: la carpeta ABIERTA de numero mas alto (la lista ya viene ordenada desc)
+      const abierta = lista.find(c => !c.estado || c.estado === 'abierta')
+      if (abierta) selector.value = String(abierta.id)
     }
   } catch (error) {
     console.error('Error en cargarImportacionesList:', error)
   }
 }
 
+/** Modal legacy "Nueva importación": sus selectores se llenan recién al abrirlo. */
+window.prepararModalNuevaImportacion = async function () {
+  try {
+    const [ordenes, proveedores] = await Promise.all([getOrderCompras(), getSuppliers()])
+    const ocSel = document.getElementById('selectorNewImportacionOC')
+    if (ocSel) ocSel.innerHTML = '<option value="">-- Selecciona --</option>' + (ordenes || []).map(o => `<option value="${o.id}">${o.numero}</option>`).join('')
+    const pSel = document.getElementById('newProvId')
+    if (pSel) pSel.innerHTML = '<option value="">-- Selecciona --</option>' + (proveedores || []).map(p => `<option value="${p.id}">${p.nombre || p.razon_social}</option>`).join('')
+  } catch (e) { console.error('prepararModalNuevaImportacion:', e) }
+  window.openModal('modal-nueva-importacion')
+}
+
 window.cargarImportacionesEnSelect = async function(selectId) {
   try {
+    if (selectId === 'newGuiaImportacionSelector') cargarProveedoresSelect()
     const costeos = await getComercialInvoices()
     const select = document.getElementById(selectId)
 
@@ -435,6 +453,7 @@ window.cargarImportacion = async function () {
       window.costeoActual = { id: null, carpeta_importacion_id: carpetaId }
       showToast(`Carpeta ${carpeta.numero_carpeta}: todavia sin Commercial Invoice`, 'info')
       await renderCostosLedger()
+      window.renderHojaCosteo?.()
       mostrarOcultarBotonesEdicion()
       return
     }
@@ -460,6 +479,7 @@ window.cargarImportacion = async function () {
     await renderGuiaRemision()
     await renderCostosLedger()
     await renderPagos()
+    window.renderHojaCosteo?.()
  
     mostrarOcultarBotonesEdicion()
   } catch (error) {
@@ -686,6 +706,21 @@ function mostrarOcultarBotonesEdicion() {
   }
 }
 
+/** FOB del CI = total de la factura − flete − seguro (en FOB/EXW coincide con el total). */
+function _conFOB(totales) {
+  const ci = window.costeoActual || {}
+  const fob = (totales.valor_total_final_ci || 0) - (parseFloat(ci.costo_flete) || 0) - (parseFloat(ci.costo_seguro) || 0)
+  return { ...totales, valor_total_final_fob: parseFloat(fob.toFixed(2)) }
+}
+
+/** Botón ✏️ Editar del modal CI: habilita los campos. */
+window.activarEdicionCI = function () {
+  window.aplicarModoVerEditar('modal-editar-importacion', false)
+  const tit = document.getElementById('editCITitulo')
+  if (tit) tit.textContent = `Editar Commercial Invoice — Carpeta ${window.carpetaActual?.numero_carpeta || ''}`
+}
+window.verCI = () => window.editarImportacion()
+
 window.editarImportacion = async function () {
   try {
     if (!window.costeoActual || !window.costeoActual.id) {
@@ -704,21 +739,34 @@ window.editarImportacion = async function () {
       provSelector.value = window.costeoActual.contact_id || ''
     }
  
-    // Llenar formulario con datos actuales
-    document.getElementById('editInvoice').value = window.costeoActual.invoice_number || ''
-    document.getElementById('editProforma').value = window.costeoActual.proforma_number || ''
-    document.getElementById('editProducto').value = window.costeoActual.product || ''
-    document.getElementById('editFecha').value = window.costeoActual.fecha || ''
-    document.getElementById('editEstado').value = window.costeoActual.status || 'borrador'
-    document.getElementById('editTerminosDelivery').value = window.costeoActual.terminos_delivery || 'FOB'
-    document.getElementById('editTerminosPayment').value = window.costeoActual.terminos_payment || ''
-    document.getElementById('editCostoSeguro').value = window.costeoActual.costo_seguro || 0
-    document.getElementById('editCostoFlete').value = window.costeoActual.costo_flete || 0
-    document.getElementById('editPuertoEmbarque').value = window.costeoActual.puerto_embarque || ''
-    document.getElementById('editPaisOrigen').value = window.costeoActual.pais_origen || ''
+    // Llenar formulario con datos actuales (lo vacío se completa con lo que dice la PI)
+    const pi = await _piDeCarpeta()
+    const v = _valoresCIconPI(window.costeoActual, pi)
+    const ci = window.costeoActual
+    const est = document.getElementById('editEstado')
+    if (est && ci.status && ![...est.options].some(o => o.value === ci.status)) est.add(new Option(ci.status, ci.status))
+    document.getElementById('editInvoice').value = ci.invoice_number || ''
+    document.getElementById('editProforma').value = v.proforma
+    document.getElementById('editProducto').value = ci.product || ''
+    document.getElementById('editFecha').value = ci.fecha || ''
+    document.getElementById('editEstado').value = ci.status || 'borrador'
+    document.getElementById('editTerminosDelivery').value = v.delivery
+    document.getElementById('editTerminosPayment').value = v.pago
+    document.getElementById('editCostoSeguro').value = ci.costo_seguro || 0
+    document.getElementById('editCostoFlete').value = ci.costo_flete || 0
+    document.getElementById('editPuertoEmbarque').value = v.puerto
+    document.getElementById('editPaisOrigen').value = v.pais
+    const tit = document.getElementById('editCITitulo')
+    if (tit) tit.textContent = `Commercial Invoice — Carpeta ${window.carpetaActual?.numero_carpeta || ''}`
+    const nota = document.getElementById('editCINota')
+    if (nota) nota.textContent = pi
+      ? `Proforma ${pi.numero_proforma_proveedor || pi.numero} del ${fechaDMY(pi.fecha)}. Los campos vacíos del CI se completan con lo que dice la PI.`
+      : 'Esta carpeta no tiene Proforma enlazada.'
+    window.costeoPI = pi
 
-    // Abrir modal
+    // Abrir modal SIEMPRE en modo lectura (estándar Ver → Editar)
     window.openModal('modal-editar-importacion')
+    window.aplicarModoVerEditar('modal-editar-importacion', true)
   } catch (error) {
     console.error('Error en editarImportacion:', error)
     showToast('Error al abrir formulario de edición', 'danger')
@@ -749,7 +797,22 @@ window.guardarCambiosImportacion = async function () {
       showToast('Completa todos los campos requeridos', 'warning')
       return
     }
+    const pi = window.costeoPI || null
+    if (pi?.fecha && fecha < pi.fecha) {
+      showToast(`La fecha del CI (${fechaDMY(fecha)}) no puede ser anterior a la de la Proforma (${fechaDMY(pi.fecha)})`, 'warning'); return
+    }
+    if (!(costo_flete >= 0) || !(costo_seguro >= 0)) { showToast('Flete y seguro deben ser números mayores o iguales a 0', 'warning'); return }
+    if (!incluyeFlete(terminosDelivery) && (costo_flete > 0 || costo_seguro > 0)) {
+      showToast(`Con ${terminosDelivery} el flete y el seguro NO vienen en el precio: se registran como costos en el tab 5, no aquí`, 'warning'); return
+    }
+    const totalCI = parseFloat(window.costeoActual.valor_total_final_ci) || 0
+    if (costo_flete + costo_seguro >= totalCI && (costo_flete + costo_seguro) > 0) {
+      showToast('Flete + seguro no pueden igualar o superar el total del CI (el FOB saldría en cero o negativo)', 'warning'); return
+    }
  
+    if (incluyeFlete(terminosDelivery) && costo_flete === 0 && costo_seguro === 0 &&
+        !confirm(`Con ${terminosDelivery} el precio incluye flete y seguro, pero no los registraste.\n\nEl FOB quedará igual al total (USD ${totalCI.toFixed(2)}) y el costeo saldrá inflado.\n\n¿Guardar así de todas formas?`)) return
+
     // Datos actualizados
     const datosActualizados = {
       invoice_number: invoice,
@@ -763,7 +826,9 @@ window.guardarCambiosImportacion = async function () {
       costo_seguro: costo_seguro,
       costo_flete: costo_flete,
       puerto_embarque: puerto_embarque,
-      pais_origen: pais_origen
+      pais_origen: pais_origen,
+      // FOB = total del CI − flete − seguro (con CIF/CFR…); en FOB/EXW coincide con el total
+      valor_total_final_fob: parseFloat((totalCI - costo_flete - costo_seguro).toFixed(2))
     }
  
     // Actualizar en BD
@@ -773,6 +838,14 @@ window.guardarCambiosImportacion = async function () {
       return
     }
  
+    // Mantener el incoterm de la carpeta alineado con el del CI
+    try {
+      if (window.carpetaActual && window.carpetaActual.incoterm !== terminosDelivery) {
+        await update('carpetas_importacion', window.carpetaActual.id, { incoterm: terminosDelivery })
+        window.carpetaActual.incoterm = terminosDelivery
+      }
+    } catch (e) { console.warn('incoterm de la carpeta no actualizado:', e) }
+
     // Actualizar variable local
     window.costeoActual = resultado
  
@@ -780,7 +853,9 @@ window.guardarCambiosImportacion = async function () {
     await cargarCabecera()
     await cargarImportacionesList()
  
-    showToast('Importación actualizada', 'success')
+    showToast(costo_flete || costo_seguro
+      ? `CI actualizado. FOB recalculado: USD ${datosActualizados.valor_total_final_fob.toFixed(2)} (total ${totalCI.toFixed(2)} − flete ${costo_flete.toFixed(2)} − seguro ${costo_seguro.toFixed(2)})`
+      : 'Importación actualizada', 'success')
     window.closeModal('modal-editar-importacion')
   } catch (error) {
     console.error('Error en guardarCambiosImportacion:', error)
@@ -1318,7 +1393,7 @@ window.actualizarDetalleCI = async function () {
     
     // Recalcular totales y actualizar
     const totales = await calcularTotalesCI(window.costeoActual.id)
-    await updateComercialInvoice(window.costeoActual.id, totales)
+    await updateComercialInvoice(window.costeoActual.id, _conFOB(totales))
     
     await renderDetalleCI()
     await cargarCabecera()
@@ -1343,7 +1418,7 @@ window.eliminarDetalleCI = async function (detalleId) {
     
     // Recalcular totales y actualizar
     const totales = await calcularTotalesCI(window.costeoActual.id)
-    await updateComercialInvoice(window.costeoActual.id, totales)
+    await updateComercialInvoice(window.costeoActual.id, _conFOB(totales))
     
     await renderDetalleCI()
     await cargarCabecera()
@@ -1357,6 +1432,36 @@ window.eliminarDetalleCI = async function (detalleId) {
 // FUNCIÓN: cargarCabecera (ACTUALIZADA)
 // ============================================================================
  
+
+// ─── Herencia PI → CI ───────────────────────────────────────────────────────
+/** Proforma (OC de importación) de la carpeta abierta, o null. */
+async function _piDeCarpeta() {
+  const id = window.carpetaActual?.orden_compra_id
+  if (!id) return null
+  return ((await query('orden_compra', { id })) || [])[0] || null
+}
+
+/** "30% advance - 70% within 30 days from B/L date", armado con lo que dice la PI. */
+function _terminosPagoDesdePI(oc) {
+  if (!oc || oc.anticipo_porcentaje == null) return ''
+  const a = parseFloat(oc.anticipo_porcentaje) || 0
+  const resto = parseFloat((100 - a).toFixed(2))
+  const saldo = oc.dias_saldo_desde_bl != null ? `within ${oc.dias_saldo_desde_bl} days from B/L date` : 'balance'
+  return `${a}% advance - ${resto}% ${saldo}`
+}
+
+/** Valores de la CI; si un campo está vacío, se completa con lo que dice la PI. */
+function _valoresCIconPI(ci, pi) {
+  return {
+    proforma: ci.proforma_number || pi?.numero_proforma_proveedor || '',
+    pago: ci.terminos_payment || _terminosPagoDesdePI(pi),
+    puerto: ci.puerto_embarque || pi?.puerto_embarque || '',
+    pais: ci.pais_origen || pi?.pais_origen || '',
+    delivery: ci.terminos_delivery || pi?.incoterm || 'FOB',
+    heredaProforma: !ci.proforma_number && !!pi?.numero_proforma_proveedor
+  }
+}
+
 async function cargarCabecera() {
   try {
     if (!window.costeoActual) return
@@ -1366,19 +1471,21 @@ async function cargarCabecera() {
 
     document.getElementById('cabProveedor').value = nombreProveedor
     document.getElementById('cabInvoice').value = window.costeoActual.invoice_number || ''
-    document.getElementById('cabProforma').value = window.costeoActual.proforma_number || ''
+    const pi = await _piDeCarpeta()
+    const v = _valoresCIconPI(window.costeoActual, pi)
+    document.getElementById('cabProforma').value = v.proforma
     document.getElementById('cabProducto').value = window.costeoActual.product || ''
     document.getElementById('cabFecha').value = window.costeoActual.fecha || ''
     document.getElementById('cabEstado').value = window.costeoActual.status || 'borrador'
     document.getElementById('cabCostoSeguro').value = window.costeoActual.costo_seguro || 0
     document.getElementById('cabCostoFlete').value = window.costeoActual.costo_flete || 0
-    document.getElementById('cabPuertoEmbarque').value = window.costeoActual.puerto_embarque || ''
-    document.getElementById('cabPaisOrigen').value = window.costeoActual.pais_origen || ''
+    document.getElementById('cabPuertoEmbarque').value = v.puerto
+    document.getElementById('cabPaisOrigen').value = v.pais
     document.getElementById('cabPagado').value = window.costeoActual.pagado || 'Pendiente'
     
     // NUEVO: Campos adicionales
-    document.getElementById('cabTerminosDelivery').value = window.costeoActual.terminos_delivery || 'FOB'
-    document.getElementById('cabTerminosPayment').value = window.costeoActual.terminos_payment || ''
+    document.getElementById('cabTerminosDelivery').value = v.delivery
+    document.getElementById('cabTerminosPayment').value = v.pago
     document.getElementById('cabTotalUnidades').value = window.costeoActual.total_unidades || 0
     document.getElementById('cabCantidadTotalNeto').value = window.costeoActual.cantidad_total_neto || 0
     document.getElementById('cabCantidadTotalGross').value = window.costeoActual.cantidad_total_gross || 0
@@ -1633,7 +1740,7 @@ async function cargarContenedoresEnSelect(selectId) {
   }
 }
 
-window.editarBL = async function (blId) {
+window.editarBLLegacy = async function (blId) {
   const el = document.getElementById('id-' + blId);
   console.log('Elemento encontrado:', el)
   try {
@@ -1773,6 +1880,14 @@ async function renderDAM() {
   }
 }
  
+/** Validaciones de la DAM: T.C. obligatorio si hay tributos; pagado exige fecha de pago; el pago no es anterior a la numeración. */
+function _validarDAM({ fechaDam, fechaPago, tipoCambio, estado, tributos }) {
+  if (fechaPago && fechaDam && fechaPago < fechaDam) return 'La fecha de pago de tributos no puede ser anterior a la fecha de la DAM'
+  if (estado === 'pagado' && !fechaPago) return 'Una DAM pagada necesita la fecha de pago de tributos (de ahí sale el T.C.)'
+  if ((tributos > 0 || estado === 'pagado') && !(tipoCambio >= 1 && tipoCambio <= 10)) return 'Ingresa el T.C. venta SUNAT de la fecha de pago (usa ⟳)'
+  return null
+}
+
 window.crearDAM = async function () {
   try {
     const importacionId = document.getElementById('newDAMImportacionSelector')?.value || null
@@ -1799,8 +1914,11 @@ window.crearDAM = async function () {
     const igvUSD = parseFloat(document.getElementById('newDAMIGVUSD')?.value || 0)
     const totalLiquidacion = parseFloat(document.getElementById('newDAMTotalLiquidacion')?.value || 0)
     const percepcion = parseFloat(document.getElementById('newDAMPercepcion')?.value || 0)
-    const tipoCambio = parseFloat(document.getElementById('newDAMTipoCambio')?.value || 3.45)
+    const tipoCambio = parseFloat(document.getElementById('newDAMTipoCambio')?.value || 0)
     const estado = document.getElementById('newDAMEstado')?.value || 'pendiente'
+    const fechaPago = document.getElementById('newDAMFechaPago')?.value || null
+    const errDam = _validarDAM({ fechaDam, fechaPago, tipoCambio, estado, tributos: adValoremUSD + impUSD + igvUSD + percepcion })
+    if (errDam) { showToast(errDam, 'warning'); return }
  
     const newDAM = {
       importacion_id: parseInt(importacionId),
@@ -1816,10 +1934,16 @@ window.crearDAM = async function () {
       total_liquidacion: totalLiquidacion,
       percepcion: percepcion,
       tipo_cambio: tipoCambio,
+      fecha_pago: fechaPago,
       estado: estado
     }
  
-    const resultado = await addDAM(newDAM)
+    let resultado = await addDAM(newDAM)
+    if (!resultado) {   // sin el SQL 101 no existe fecha_pago: guardar sin ella
+      const { fecha_pago: _fp, ...sinFechaPago } = newDAM
+      resultado = await addDAM(sinFechaPago)
+      if (resultado) showToast('DAM guardada sin fecha de pago: corre assets/sql/101 y edítala.', 'warning')
+    }
     if (!resultado) {
       showToast('Error al guardar DAM', 'danger')
       return
@@ -1867,7 +1991,8 @@ window.editarDAM = async function (damId) {
     document.getElementById('editDAMIGVUSD').value = (dam.igv_usd || 0).toFixed(2)
     document.getElementById('editDAMTotalLiquidacion').value = (dam.total_liquidacion || 0).toFixed(2)
     document.getElementById('editDAMPercepcion').value = (dam.percepcion || 0).toFixed(2)
-    document.getElementById('editDAMTipoCambio').value = (dam.tipo_cambio || 3.45).toFixed(3)
+    document.getElementById('editDAMTipoCambio').value = dam.tipo_cambio ? Number(dam.tipo_cambio).toFixed(3) : ''
+    document.getElementById('editDAMFechaPago').value = dam.fecha_pago || ''
     document.getElementById('editDAMEstado').value = dam.estado || 'pendiente'
  
     // Abrir modal
@@ -1923,11 +2048,20 @@ window.guardarCambiosDAM = async function () {
       igv_usd: parseFloat(document.getElementById('editDAMIGVUSD')?.value || 0),
       total_liquidacion: parseFloat(document.getElementById('editDAMTotalLiquidacion')?.value || 0),
       percepcion: parseFloat(document.getElementById('editDAMPercepcion')?.value || 0),
-      tipo_cambio: parseFloat(document.getElementById('editDAMTipoCambio')?.value || 3.45),
+      tipo_cambio: parseFloat(document.getElementById('editDAMTipoCambio')?.value || 0),
+      fecha_pago: document.getElementById('editDAMFechaPago')?.value || null,
       estado: document.getElementById('editDAMEstado')?.value || 'pendiente'
     }
+    const errDam = _validarDAM({ fechaDam, fechaPago: datosActualizados.fecha_pago, tipoCambio: datosActualizados.tipo_cambio, estado: datosActualizados.estado,
+      tributos: datosActualizados.ad_valorem_usd + datosActualizados.imp_usd + datosActualizados.igv_usd + datosActualizados.percepcion })
+    if (errDam) { showToast(errDam, 'warning'); return }
  
-    const resultado = await updateDAM(window.damActual.id, datosActualizados)
+    let resultado = await updateDAM(window.damActual.id, datosActualizados)
+    if (!resultado) {   // sin el SQL 101 no existe fecha_pago
+      const { fecha_pago: _fp, ...sinFechaPago } = datosActualizados
+      resultado = await updateDAM(window.damActual.id, sinFechaPago)
+      if (resultado) showToast('Guardado sin fecha de pago: corre assets/sql/101.', 'warning')
+    }
     if (!resultado) {
       showToast('Error al guardar cambios en la base de datos', 'danger')
       return
@@ -2916,3 +3050,6 @@ window.exportarPDF = function () {
     showToast('Error al exportar PDF', 'danger')
   }
 }
+
+// El BL ahora se ve/edita con el modal nuevo (importaciones/bl-modal.js); el viejo queda como respaldo.
+window.editarBL = (id) => window.abrirBL ? window.abrirBL(id) : window.editarBLLegacy(id)

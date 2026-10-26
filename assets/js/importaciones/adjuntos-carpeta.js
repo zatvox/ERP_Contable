@@ -13,7 +13,7 @@
 // el bucket se llena en meses. Los PDF se suben tal cual.
 // ============================================================================
 
-import { query, esperarContextoEmpresa } from '../supabase-client.js'
+import { query, update, esperarContextoEmpresa } from '../supabase-client.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { showToast, formatNumber, fechaDMY } from '../helpers.js'
 import { subirAdjuntos, getAdjuntos, getUrlAdjunto, eliminarAdjunto, validarArchivoAdjunto } from '../supabase-data.js'
@@ -28,7 +28,12 @@ export const CONCEPTOS_CARPETA = {
   bl:              'Bill of Lading (BL)',
   packing:         'Packing list',
   poliza:          'Póliza de seguro',
+  certificado_origen: 'Certificado de origen',
+  ficha_tecnica:   'Ficha técnica',
   dam:             'DAM / DUA',
+  dam_completa:    'DAM completa (hojas A, B y DAV)',
+  notificacion_aduana: 'Notificación de Aduanas (duda razonable)',
+  garantia:        'Orden de depósito de garantía',
   autoliquidacion: 'Autoliquidación (duda razonable)',
   boletin:         'Boletín químico',
   liquidacion:     'Liquidación del agente',
@@ -71,7 +76,7 @@ function _asegurarModal() {
   const opts = Object.entries(CONCEPTOS_CARPETA)
     .map(([k, v]) => `<option value="${k}">${v}</option>`).join('')
   document.body.insertAdjacentHTML('beforeend', `
-  <div id="modal-adjuntos-carpeta" class="modal">
+  <div id="modal-adjuntos-carpeta" class="modal" data-sin-guardia>
     <div class="modal-content" style="width:min(94vw, 860px); max-width:min(94vw, 860px); max-height:calc(100vh - 48px); overflow-y:auto;">
       <div class="modal-header">
         <h3 class="modal-title" id="acTitulo">Documentos de la carpeta</h3>
@@ -85,9 +90,8 @@ function _asegurarModal() {
             <select id="acConcepto">${opts}</select>
           </div>
           <div class="form-group">
-            <label>Archivo (PDF o imagen, máx. 10 MB)</label>
+            <label>Archivo (cualquier tipo, máx. 10 MB)</label>
             <input type="file" id="acArchivos" multiple
-                   accept="application/pdf,image/jpeg,image/png,image/webp"
                    onchange="window.acArchivosElegidos(this)">
           </div>
         </div>
@@ -142,7 +146,7 @@ window.subirAdjuntosCarpeta = async function () {
     btn.disabled = true; btn.textContent = 'Subiendo…'
 
     const user = await getCurrentUser()
-    const res = await subirAdjuntos('carpeta_importacion', _carpetaId, _pendientes, user?.id)
+    const res = await subirAdjuntos('carpeta_importacion', _carpetaId, _pendientes, user?.db_id)
     if (res?.errores?.length) showToast(`${res.ok} subido(s). ${res.errores[0]}`, 'warning')
     else showToast(`${res.ok} documento(s) agregados al expediente`, 'success')
 
@@ -173,7 +177,9 @@ async function _pintarLista() {
       <tbody>
         ${adjs.map(a => `
           <tr>
-            <td>${CONCEPTOS_CARPETA[a.concepto] || a.concepto}</td>
+            <td><select class="form-control" style="min-width:190px; padding:4px 6px;" title="Cambiar el tipo de documento" onchange="window.acCambiarConcepto(${a.id}, this.value)">
+              ${Object.entries(CONCEPTOS_CARPETA).map(([k, l]) => `<option value="${k}" ${k === a.concepto ? 'selected' : ''}>${l}</option>`).join('')}
+            </select></td>
             <td>${a.nombre}</td>
             <td style="text-align:right">${kb(a.tamano)}</td>
             <td>${fechaDMY(String(a.created_at || '').slice(0, 10))}</td>
@@ -184,6 +190,13 @@ async function _pintarLista() {
           </tr>`).join('')}
       </tbody>
     </table>`
+}
+
+/** Corrige el tipo de un documento ya subido. */
+window.acCambiarConcepto = async function (id, concepto) {
+  const ok = await update('adjuntos', id, { concepto })
+  if (!ok) { showToast('No se pudo cambiar el tipo de documento', 'danger'); await _pintarLista(); return }
+  showToast('Tipo de documento actualizado', 'success')
 }
 
 window.verAdjuntoCarpeta = async function (id) {
@@ -207,6 +220,13 @@ window.borrarAdjuntoCarpeta = async function (id, nombre) {
   } catch (e) {
     showToast(e.message || 'No se pudo eliminar', 'danger')
   }
+}
+
+// Los archivos se suben al instante, así que no hay nada que "descartar": cierra directo
+// y refresca la hoja para que la lista de documentos marque lo recién adjuntado.
+window.cerrarAdjuntosCarpeta = function () {
+  window.closeModal('modal-adjuntos-carpeta')
+  window.renderHojaCosteo?.()
 }
 
 window.abrirAdjuntosCarpeta = async function () {

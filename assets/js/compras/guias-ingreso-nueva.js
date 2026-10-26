@@ -94,7 +94,7 @@ async function _cargarComprasSelectGuia() {
     })
   }
 
-  S._guiaComprasCache = (compras || []).filter(c => c.tipo_compra === 'mercaderia' && tienePendiente(c.id))
+  S._guiaComprasCache = (compras || []).filter(c => (c.tipo_compra === 'mercaderia' || c.tipo_compra === 'importacion') && tienePendiente(c.id))
 
   select.innerHTML = '<option value="">-- Selecciona una compra registrada --</option>' +
     S._guiaComprasCache.map(c =>

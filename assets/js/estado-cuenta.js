@@ -14,7 +14,7 @@
 // ============================================================================
 
 import { supabase } from './supabase-client.js'
-import { formatNumber, fechaDMY, showToast } from './helpers.js'
+import { formatNumber, fechaDMY, showToast, docComp } from './helpers.js'
 import { getModuloConfig } from './config-modulo.js'
 
 const _esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
@@ -118,7 +118,7 @@ async function _cargarDatos() {
   try { terminos = await _q('terminos_pago', 'id, nombre') } catch (_) {}
   const terminoMap = new Map(terminos.map(t => [t.id, t.nombre]))
 
-  const docTxt = c => `${c.serie ? c.serie + '-' : ''}${String(c.numero_comprobante || '').replace(/^0+/, '')}`
+  const docTxt = c => docComp(c.serie, c.numero_comprobante)
   const filasF = facturas.map(c => {
     const v = ventaMap.get(c.venta_id)
     const lineas = dets.filter(d => d.venta_id === c.venta_id).map(d => ({

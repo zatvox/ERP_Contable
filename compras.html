@@ -6,8 +6,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>JHIRO ERP - Compras</title>
   <link rel="stylesheet" href="assets/css/styles.css">
+  <link rel="stylesheet" href="assets/css/modal-moderno.css">
 </head>
-<body>
+<body class="ui-moderna">
   <div class="app-container">
     <!-- SIDEBAR -->
     <aside class="sidebar">
@@ -40,9 +41,9 @@
         </div>
 
         <nav class="module-nav" id="comprasTabs">
+          <button type="button" class="tab-btn" data-tab="ordenes">OC</button>
           <button type="button" class="tab-btn active" data-tab="compras">Compras</button>
           <button type="button" class="tab-btn" data-tab="guias">Guía de Remisión</button>
-          <button type="button" class="tab-btn" data-tab="ordenes">Órdenes de Compra</button>
           <button type="button" class="tab-btn" data-tab="proveedores">Proveedores</button>
           <button type="button" class="tab-btn" data-tab="reportes">📊 Reportes</button>
           <button type="button" class="tab-btn module-nav-config" data-tab="configuracion">⚙️ Configuración</button>
@@ -56,19 +57,22 @@
       <!-- CONTENT -->
       <main class="content">
 
-        <!-- Órdenes de Compra en standby: quitar este comentario para reactivar.
+        <!-- Órdenes de Compra: reactivado 2026-10-23 para las Proformas (PI) de importación. -->
         <div id="tab-ordenes" class="tab-content">
           <div class="card">
-            <div class="card-header">
+            <div class="col-menu card-corner-menu" id="ordenesColMenu">
+              <button type="button" class="card-menu-btn" onclick="window._colMenuToggle('ordenes-compra', 'ordenesColMenu', 'ordenesColMenuDropdown')" title="Elegir qué columnas mostrar">⋮</button>
+              <div class="col-menu-dropdown" id="ordenesColMenuDropdown"></div>
+            </div>
+            <div class="card-header" style="padding-right:34px;">
               <h3 class="card-title">Órdenes de Compra</h3>
-              <button class="btn btn-primary btn-small" onclick="openModal('modal-nueva-oc')">+ Nueva Orden de Compra</button>
+              <button class="btn btn-primary btn-small" onclick="window.ocNueva()">+ Nueva Orden de Compra</button>
             </div>
             <div id="tabla-oc" class="table-container">
               <p style="text-align: center; color: var(--text-secondary);">Cargando...</p>
             </div>
           </div>
         </div>
-        -->
 
         <!-- TAB COMPRAS -->
         <div id="tab-compras" class="tab-content active">
@@ -229,7 +233,7 @@
         <div id="ocSeccionImportacion" style="display:none; padding:20px; border-bottom:1px solid var(--border-color);">
           <strong style="display:block; margin-bottom:4px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Datos de la Proforma Invoice</strong>
           <small style="display:block; margin-bottom:12px; color:var(--text-secondary); line-height:1.4;">
-            El incoterm decide si el flete y el seguro son costo aparte o ya vienen dentro del precio.
+            Solo el <strong>N° de proforma</strong> y el <strong>incoterm</strong> son obligatorios. Lo que tu proveedor no indique en la PI déjalo en blanco: se completa después (botón «Completar PI» en la lista, o en el Commercial Invoice). El incoterm decide si el flete y el seguro son costo aparte o ya vienen dentro del precio.
           </small>
 
           <div class="grid grid-3">
@@ -265,27 +269,28 @@
 
           <div class="grid grid-3">
             <div class="form-group">
-              <label>Puerto de embarque</label>
+              <label>Puerto de embarque <span style="font-weight:400; color:var(--text-secondary);">(opcional)</span></label>
               <input type="text" id="ocPuertoEmbarque" placeholder="Ej: ANY PORT OF CHINA">
+              <small style="color:var(--text-secondary);">Muchas PI no lo traen; el BL lo confirma.</small>
             </div>
             <div class="form-group">
-              <label>Puerto de destino</label>
+              <label>Puerto de destino <span style="font-weight:400; color:var(--text-secondary);">(opcional)</span></label>
               <input type="text" id="ocPuertoDestino" placeholder="Ej: CALLAO, PERU" value="CALLAO, PERU">
             </div>
             <div class="form-group">
-              <label>País de origen</label>
+              <label>País de origen <span style="font-weight:400; color:var(--text-secondary);">(opcional)</span></label>
               <input type="text" id="ocPaisOrigen" placeholder="Ej: CHINA">
             </div>
           </div>
 
           <div class="grid grid-2" id="ocGrupoFleteSeguro">
             <div class="form-group">
-              <label>Flete estimado</label>
+              <label>Flete estimado <span style="font-weight:400; color:var(--text-secondary);">(solo FOB/EXW…)</span></label>
               <input type="number" id="ocFleteEstimado" step="0.01" placeholder="0.00">
               <small id="ocFleteAviso" style="color:var(--text-secondary);"></small>
             </div>
             <div class="form-group">
-              <label>Seguro estimado</label>
+              <label>Seguro estimado <span style="font-weight:400; color:var(--text-secondary);">(solo FOB/EXW…)</span></label>
               <input type="number" id="ocSeguroEstimado" step="0.01" placeholder="0.00">
             </div>
           </div>
@@ -294,7 +299,7 @@
           <div class="grid grid-4">
             <div class="form-group">
               <label>Anticipo (%)</label>
-              <input type="number" id="ocAnticipoPct" step="1" min="0" max="100" value="20"
+              <input type="number" id="ocAnticipoPct" step="1" min="0" max="100" placeholder="Ej: 30"
                      oninput="window.ocCalcularAnticipo()">
               <small id="ocAnticipoMonto" style="color:var(--color-info); font-weight:600;"></small>
             </div>
@@ -304,12 +309,28 @@
               <small style="color:var(--text-secondary);">±% que admite el embarque.</small>
             </div>
             <div class="form-group">
-              <label>Validez del anticipo (días)</label>
+              <label>Plazo para pagar el anticipo (días)</label>
               <input type="number" id="ocDiasValidezAnticipo" step="1" min="0" placeholder="Ej: 2">
             </div>
             <div class="form-group">
-              <label>Embarque (días desde anticipo)</label>
+              <label>Plazo de embarque (días desde el anticipo)</label>
               <input type="number" id="ocDiasEmbarque" step="1" min="0" placeholder="Ej: 20">
+              <small style="color:var(--text-secondary);">Solo si la PI lo dice en días. Si dice un mes, usa «Entrega pactada».</small>
+            </div>
+          </div>
+          <div class="grid grid-3">
+            <div class="form-group">
+              <label>Entrega pactada</label>
+              <input type="text" id="ocEntregaPactada" maxlength="60" placeholder="Ej: JULIO 2026">
+            </div>
+            <div class="form-group">
+              <label>Saldo: días desde la fecha del B/L</label>
+              <input type="number" id="ocDiasSaldoBL" step="1" min="0" placeholder="Ej: 30">
+              <small style="color:var(--text-secondary);">«Saldo dentro de 30 días desde el B/L».</small>
+            </div>
+            <div class="form-group">
+              <label>Validez de la oferta (hasta)</label>
+              <input type="date" id="ocValidezOferta">
             </div>
           </div>
         </div>

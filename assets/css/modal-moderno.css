@@ -1,0 +1,203 @@
+/* ============================================================================
+   modal-moderno.css  (2026-10-24)
+   Capa visual moderna para modales y hoja de Importaciones / PI-OC.
+   Solo cambia el aspecto (radios, sombras, foco, tipografia, animacion):
+   NO toca medidas del layout (padding/sticky) ni la logica.
+   Se activa con <body class="ui-moderna">. Para llevarlo a todo el ERP basta
+   poner esa clase en el <body> de las demas paginas.
+   ============================================================================ */
+body.ui-moderna {
+  --mm-radius: 18px;
+  --mm-ring: color-mix(in srgb, var(--color-info, #3b82f6) 35%, transparent);
+  --mm-soft: color-mix(in srgb, var(--text-secondary, #6b7280) 10%, transparent);
+}
+
+/* Fondo: desenfoque + degradado suave en vez de negro plano */
+body.ui-moderna .modal {
+  background: radial-gradient(1200px 600px at 50% -10%, rgba(59,130,246,.18), transparent 60%), rgba(8, 12, 24, .55);
+  -webkit-backdrop-filter: blur(6px) saturate(120%);
+  backdrop-filter: blur(6px) saturate(120%);
+}
+
+/* Tarjeta del modal */
+body.ui-moderna .modal-content {
+  border-radius: var(--mm-radius);
+  border: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  box-shadow: 0 30px 80px -20px rgba(2, 6, 23, .55), 0 8px 24px -8px rgba(2, 6, 23, .35);
+  animation: mmEntrada .28s cubic-bezier(.2, .8, .2, 1);
+  scrollbar-width: thin;
+}
+@keyframes mmEntrada { from { opacity: 0; transform: translateY(14px) scale(.985); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { body.ui-moderna .modal-content { animation: none; } }
+
+/* Encabezado: titulo con acento, sin raya gruesa */
+body.ui-moderna .modal-header { border-bottom: 1px solid var(--border-color); }
+body.ui-moderna .modal-title {
+  font-size: 1.15rem; font-weight: 700; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: 10px;
+}
+body.ui-moderna .modal-title::before {
+  content: ''; width: 4px; height: 1.15em; border-radius: 4px;
+  background: linear-gradient(180deg, var(--color-info, #3b82f6), #8b5cf6);
+}
+body.ui-moderna .modal-close {
+  width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 1.15rem; line-height: 1; transition: background .15s, color .15s, transform .15s;
+}
+body.ui-moderna .modal-close:hover { background: var(--mm-soft); transform: rotate(90deg); }
+
+/* Pie: acciones claras */
+body.ui-moderna .modal-footer { border-top: 1px solid var(--border-color); }
+body.ui-moderna .modal-footer .btn { border-radius: 10px; padding: 9px 18px; font-weight: 600; transition: transform .12s, box-shadow .15s, filter .15s; }
+body.ui-moderna .modal-footer .btn:hover { transform: translateY(-1px); }
+body.ui-moderna .modal-footer .btn-primary { box-shadow: 0 6px 16px -6px color-mix(in srgb, var(--color-info, #3b82f6) 70%, transparent); }
+
+/* Formularios */
+body.ui-moderna .modal label {
+  font-size: .74rem; font-weight: 600; letter-spacing: .03em; text-transform: uppercase;
+  color: var(--text-secondary); margin-bottom: 5px;
+}
+body.ui-moderna .modal input:not([type=checkbox]):not([type=radio]):not([type=file]),
+body.ui-moderna .modal select,
+body.ui-moderna .modal textarea {
+  border-radius: 10px; border: 1px solid var(--border-color); background: var(--bg-secondary);
+  padding: 9px 12px; transition: border-color .15s, box-shadow .15s, background .15s;
+}
+body.ui-moderna .modal input:hover:not(:disabled):not([readonly]),
+body.ui-moderna .modal select:hover:not(:disabled),
+body.ui-moderna .modal textarea:hover:not(:disabled) { border-color: color-mix(in srgb, var(--color-info, #3b82f6) 45%, var(--border-color)); }
+body.ui-moderna .modal input:focus,
+body.ui-moderna .modal select:focus,
+body.ui-moderna .modal textarea:focus {
+  outline: none; border-color: var(--color-info, #3b82f6); box-shadow: 0 0 0 4px var(--mm-ring); background: var(--bg-primary);
+}
+body.ui-moderna .modal input:disabled, body.ui-moderna .modal select:disabled, body.ui-moderna .modal textarea:disabled { opacity: .75; }
+body.ui-moderna .modal input[type=file] { border-radius: 10px; border: 1.5px dashed var(--border-color); padding: 12px; background: var(--bg-secondary); width: 100%; }
+
+/* Titulos de seccion dentro de modales */
+body.ui-moderna .mod-sec {
+  display: flex !important; align-items: center; gap: 8px; margin: 18px 0 10px !important;
+  font-size: .74rem !important; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-secondary) !important;
+}
+body.ui-moderna .mod-sec::after { content: ''; flex: 1; height: 1px; background: var(--border-color); }
+
+/* Tablas dentro de modales */
+body.ui-moderna .modal table { border-collapse: separate; border-spacing: 0; }
+body.ui-moderna .modal .table-container { border: 1px solid var(--border-color); border-radius: 12px; overflow: hidden; overflow-x: auto; }
+body.ui-moderna .modal thead th { background: var(--bg-secondary); font-size: .72rem; letter-spacing: .05em; text-transform: uppercase; color: var(--text-secondary); }
+
+/* Tarjetas informativas */
+body.ui-moderna .modal .info-card, body.ui-moderna .modal .alert { border-radius: 12px; }
+
+/* ── Modal de pagos ─────────────────────────────────────────────────────── */
+body.ui-moderna #modal-pagos-proveedor .pp-banco { border: 1px solid var(--border-color); border-radius: 12px; padding: 10px 14px; background: var(--bg-secondary); }
+body.ui-moderna #modal-pagos-proveedor .pp-banco summary { cursor: pointer; font-size: .82rem; font-weight: 600; color: var(--text-secondary); }
+#modal-pagos-proveedor[data-modo="rapido"] #ppLista,
+#modal-pagos-proveedor[data-modo="rapido"] #ppAdjuntosVista,
+#modal-pagos-proveedor[data-modo="rapido"] .mod-sec:first-of-type,
+#modal-pagos-proveedor[data-modo="rapido"] #ppBtnNuevo { display: none !important; }
+#modal-pagos-proveedor[data-modo="rapido"] .modal-content { width: min(96vw, 760px) !important; max-width: min(96vw, 760px) !important; }
+
+/* ── Cronograma de pagos en la hoja ────────────────────────────────────── */
+.cr-wrap { margin-top: 14px; border: 1px solid var(--border-color); border-radius: 14px; padding: 12px 14px 14px; background: linear-gradient(180deg, var(--bg-secondary), transparent); }
+.cr-head { display: flex; align-items: center; gap: 8px; font-weight: 700; margin-bottom: 10px; }
+.cr-head span { font-weight: 500; color: var(--text-secondary); font-size: .85rem; }
+.cr-grid { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 10px; align-items: stretch; }
+.cr-flecha { align-self: center; color: var(--text-secondary); font-size: 1.3rem; opacity: .6; }
+.cr-paso { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-primary); box-shadow: 0 1px 2px rgba(0,0,0,.04); transition: box-shadow .15s, transform .15s; }
+.cr-paso:hover { box-shadow: 0 10px 24px -12px rgba(2,6,23,.35); transform: translateY(-1px); }
+.cr-paso::before { content: ''; position: absolute; left: 0; top: 12px; bottom: 12px; width: 3px; border-radius: 3px; background: var(--border-color); }
+.cr-paso.pagado::before { background: #10b981; } .cr-paso.parcial::before { background: #f59e0b; }
+.cr-paso.vencido::before { background: #ef4444; } .cr-paso.estimado::before { background: #3b82f6; }
+.cr-top { display: flex; align-items: center; gap: 8px; }
+.cr-ico { font-size: 1.05rem; } .cr-tit { font-size: .76rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-secondary); flex: 1; }
+.cr-big { font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.cr-sub { font-size: .8rem; color: var(--text-secondary); line-height: 1.35; min-height: 2.1em; }
+.cr-btn { margin-top: 6px; align-self: flex-start; border-radius: 9px; }
+.cr-chip { font-size: .68rem; font-weight: 700; padding: 2px 9px; border-radius: 999px; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); border: 1px solid color-mix(in srgb, var(--c) 35%, transparent); }
+@media (max-width: 900px) { .cr-grid { grid-template-columns: 1fr; } .cr-flecha { transform: rotate(90deg); justify-self: center; } }
+
+/* Ajustes finos del modal de pagos */
+body.ui-moderna #modal-pagos-proveedor small { display: block; font-size: .74rem; line-height: 1.3; margin-top: 4px; }
+body.ui-moderna #modal-pagos-proveedor #ppResumen > div:last-of-type > div { min-width: 120px !important; }
+
+/* ── Documentos del pago: zona de arrastre + lista ─────────────────────── */
+.pp-docs-n { color: var(--color-info, #3b82f6); font-weight: 700; }
+.pp-drop { display: flex; align-items: center; gap: 14px; padding: 16px 18px; border: 1.5px dashed var(--border-color); border-radius: 14px; background: var(--bg-secondary); transition: border-color .15s, background .15s, transform .15s; outline: none; }
+.pp-drop:hover, .pp-drop:focus-visible, .pp-drop.sobre { border-color: var(--color-info, #3b82f6); background: color-mix(in srgb, var(--color-info, #3b82f6) 9%, var(--bg-secondary)); }
+.pp-drop.sobre { transform: scale(1.01); }
+.pp-drop-ico { font-size: 1.6rem; opacity: .85; }
+.pp-drop strong { font-size: .95rem; }
+.pp-drop-link { color: var(--color-info, #3b82f6); font-weight: 600; cursor: pointer; text-decoration: underline; text-transform: none; letter-spacing: 0; font-size: inherit; margin: 0; }
+.pp-drop-hint { display: block; margin-top: 4px; font-size: .76rem; color: var(--text-secondary); line-height: 1.35; }
+.pp-docs { display: grid; gap: 8px; margin-top: 10px; }
+.pp-doc { display: grid; grid-template-columns: 44px 1fr minmax(170px, 220px) 32px; align-items: center; gap: 12px; padding: 8px 10px; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-primary); animation: mmEntrada .2s ease-out; }
+.pp-doc-vista { width: 44px; height: 44px; border-radius: 8px; overflow: hidden; display: grid; place-items: center; background: var(--bg-secondary); }
+.pp-doc-vista img { width: 100%; height: 100%; object-fit: cover; }
+.pp-pdf { font-size: .68rem; font-weight: 800; color: #fff; background: #ef4444; padding: 3px 6px; border-radius: 5px; }
+.pp-doc-nombre { font-size: .88rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pp-doc-peso { font-size: .74rem; color: var(--text-secondary); }
+.pp-doc select { padding: 7px 10px !important; font-size: .85rem; text-transform: none; letter-spacing: 0; }
+.pp-doc-x { width: 30px; height: 30px; border-radius: 50%; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; transition: background .15s, color .15s; }
+.pp-doc-x:hover { background: color-mix(in srgb, var(--color-danger, #ef4444) 15%, transparent); color: var(--color-danger, #ef4444); }
+@media (max-width: 640px) { .pp-doc { grid-template-columns: 44px 1fr 32px; } .pp-doc select { grid-column: 1 / -1; } }
+body.ui-moderna .modal .pp-drop-link { display: inline !important; text-transform: none; letter-spacing: 0; font-size: inherit; font-weight: 600; margin: 0; }
+.pp-drop > div:last-child { flex: 1; min-width: 0; }
+.pp-pdf.otro { background: #6366f1; }
+.pp-doc-vista .adj-thumb { width: 44px; height: 44px; border-radius: 8px; cursor: zoom-in; }
+.pp-guardados { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+.pp-guardado { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 12px; max-width: 280px; }
+.pp-guardado .pp-doc-nombre { max-width: 180px; }
+
+/* ── Documentos de la carpeta (hoja) ──────────────────────────────────── */
+.dc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 10px; }
+.dc-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-primary); transition: box-shadow .15s, transform .15s; }
+.dc-item:hover { box-shadow: 0 10px 24px -14px rgba(2,6,23,.4); transform: translateY(-1px); }
+.dc-item.ok { border-color: color-mix(in srgb, #10b981 40%, var(--border-color)); }
+.dc-ico { font-size: 1.25rem; }
+.dc-txt { flex: 1; min-width: 0; }
+.dc-tit { font-size: .82rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.dc-estado { font-size: .66rem; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: color-mix(in srgb, var(--text-secondary) 14%, transparent); color: var(--text-secondary); }
+.dc-item.ok .dc-estado { background: color-mix(in srgb, #10b981 16%, transparent); color: #10b981; }
+.dc-sub { font-size: .78rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dc-acc { display: flex; gap: 6px; flex-shrink: 0; }
+.dc-btn { border-radius: 9px; text-decoration: none; white-space: nowrap; }
+
+/* Nombre en inglés del campo, tal como aparece en el documento (para buscarlo rápido) */
+#modal-bl-carpeta .bl-en { font-size: .66rem; font-weight: 500; text-transform: none; letter-spacing: 0; opacity: .75; }
+
+/* ── Etapa 3: DAM, ajustes de valor y declaración completa ──────────────── */
+.dm-explica { font-size: .84rem; padding: 10px 14px; border-radius: 12px; background: color-mix(in srgb, var(--primary-color, #6366f1) 10%, transparent); border: 1px solid color-mix(in srgb, var(--primary-color, #6366f1) 28%, var(--border-color)); margin: 4px 0 6px; }
+.dm-nota { font-size: .78rem; color: var(--text-secondary); padding: 4px 2px; }
+.dm-cruces { display: grid; gap: 6px; }
+.dm-cruce { display: flex; gap: 10px; align-items: flex-start; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--border-color); font-size: .84rem; }
+.dm-cruce-ico { font-weight: 800; }
+.dm-cruce.ok { border-color: color-mix(in srgb, #10b981 40%, var(--border-color)); } .dm-cruce.ok .dm-cruce-ico { color: #10b981; }
+.dm-cruce.warn { border-color: color-mix(in srgb, #f59e0b 55%, var(--border-color)); background: color-mix(in srgb, #f59e0b 8%, transparent); } .dm-cruce.warn .dm-cruce-ico { color: #f59e0b; }
+.dm-cruce.info .dm-cruce-ico { color: #3b82f6; }
+.dm-tabla { width: 100%; border-collapse: collapse; font-size: .84rem; }
+.dm-tabla th { text-align: left; padding: 8px 10px; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); border-bottom: 1px solid var(--border-color); }
+.dm-tabla td { padding: 8px 10px; border-bottom: 1px solid var(--border-color); vertical-align: middle; }
+#modal-dam-declaracion .dd-resumen { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.dd-chip, .cr-chip { display: inline-flex; align-items: center; gap: 4px; font-size: .72rem; font-weight: 700; padding: 2px 10px; border-radius: 999px; background: color-mix(in srgb, var(--c, #6b7280) 16%, transparent); color: var(--c, #6b7280); white-space: nowrap; }
+.dd-tasas { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; font-size: .82rem; padding: 8px 12px; border: 1px dashed var(--border-color); border-radius: 12px; margin-bottom: 8px; }
+.dd-tasas-t { font-weight: 700; }
+.dd-tasas label { display: flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: 0; font-weight: 500; margin: 0; }
+.dd-tasas input { width: 74px; padding: 5px 8px !important; }
+.dd-tabla td:nth-child(1) { width: 62px; color: var(--text-secondary); font-size: .76rem; }
+.dd-prop { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.dd-nd { color: var(--text-secondary); }
+.dd-tabla input { width: 100%; min-width: 150px; padding: 6px 10px !important; font-size: .84rem; }
+.dd-sec td { background: color-mix(in srgb, var(--primary-color, #6366f1) 12%, transparent); font-weight: 800; font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; padding: 8px 10px; }
+.dd-fila.dif td { background: color-mix(in srgb, #f59e0b 9%, transparent); }
+.dd-nota { font-size: .74rem; color: #b45309; margin-top: 3px; font-weight: 500; }
+.dd-conf { margin-right: auto; font-size: .8rem; color: var(--text-secondary); }
+/* Hoja: bloque Etapa 3 */
+.e3-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin-top: 8px; }
+.e3-paso { padding: 12px 14px; border: 1px solid var(--border-color); border-radius: 14px; background: var(--bg-primary); }
+.e3-top { display: flex; align-items: center; gap: 8px; font-size: .76rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); }
+.e3-vacio { padding: 14px; border: 1px dashed var(--border-color); border-radius: 12px; font-size: .88rem; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.e3-lista { display: grid; gap: 8px; margin-top: 10px; }
+.e3-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 12px; }
+.e3-monto { font-weight: 700; font-variant-numeric: tabular-nums; }
+.e3-nota { font-size: .8rem; color: var(--text-secondary); margin-top: 10px; padding: 8px 12px; border-left: 3px solid #3b82f6; background: color-mix(in srgb, #3b82f6 8%, transparent); border-radius: 0 8px 8px 0; }

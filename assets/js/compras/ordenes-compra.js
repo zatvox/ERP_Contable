@@ -1,11 +1,14 @@
-import { ultimoErrorInsert } from '../supabase-client.js'
+import { ultimoErrorInsert, query } from '../supabase-client.js'
+import { registrarColumnas, colStyle } from '../col-menu.js'
+import { menuAccionesFila } from '../main.js'
 import { fechaDMY } from '../helpers.js'
+import { validarCamposPI } from '../importaciones/pi-validaciones.js'
 // ============================================================================
 // compras/ordenes-compra.js — parte de compras.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
 import { getCurrentUser } from '../auth-supabase.js'
-import { getOrderCompras, getOrderComprasPage, getOrderCompraById, addOrderCompra, updateOrderCompra, addCompra, addCompraDetalle, getOrderCompraDetalles, addOrderCompraDetalle, addLote, getItems, getItemById, getSuppliers, getContactById, getCategorias, getMarcas, getPartidas, cargarSelectTipoDocumentos, addCuentaPagar, addCuotaPagar } from '../supabase-data.js'
+import { getOrderCompras, getOrderComprasPage, getOrderCompraById, addOrderCompra, updateOrderCompra, getCompraById, getCompraDetalles, updateCompra, addCompra, addCompraDetalle, getOrderCompraDetalles, addOrderCompraDetalle, addLote, getItems, getItemById, getSuppliers, getContactById, getCategorias, getMarcas, getPartidas, cargarSelectTipoDocumentos, addCuentaPagar, addCuotaPagar } from '../supabase-data.js'
 import { showToast, formatNumber, formatQty } from '../helpers.js'
 import { refrescarBuscador } from '../buscador-select.js'
 import { _escCompras } from './buscadores.js'
@@ -19,6 +22,12 @@ import { _autoFetchTCCompra } from './init.js'
 // Paginación server-side: solo se piden 50 órdenes por página a Supabase
 const OC_POR_PAGINA = 50
 let _ocPagina = 1
+
+registrarColumnas('ordenes-compra', [
+  { key: 'numero', label: 'Número' }, { key: 'pi', label: 'Proforma (PI)' }, { key: 'proveedor', label: 'Proveedor' },
+  { key: 'fecha', label: 'Fecha' }, { key: 'moneda', label: 'Moneda' }, { key: 'subtotal', label: 'Subtotal' },
+  { key: 'igv', label: 'IGV' }, { key: 'total', label: 'Total' }, { key: 'estado', label: 'Estado' }, { key: 'carpeta', label: 'Carpeta' }
+])
 
 export async function renderOrdenes() {
   try {
@@ -35,6 +44,8 @@ export async function renderOrdenes() {
       return
     }
 
+    const carpetaNum = {}
+    try { for (const c of (await query('carpetas_importacion', {})) || []) carpetaNum[c.id] = c.numero_carpeta } catch (_) {}
     const proveedoresMap = {}
     proveedores.forEach(p => { proveedoresMap[p.id] = p.nombre || 'Sin nombre' })
 
@@ -57,15 +68,17 @@ export async function renderOrdenes() {
       <table>
         <thead>
           <tr>
-            <th>Número</th>
-            <th>Proveedor</th>
-            <th>Fecha</th>
-            <th>Moneda</th>
-            <th>Subtotal</th>
-            <th>IGV</th>
-            <th>Total</th>
-            <th>Estado</th>
-            <th>Acciones</th>
+            <th data-col-tabla="ordenes-compra" data-col="numero"${colStyle('ordenes-compra','numero')}>Número</th>
+            <th data-col-tabla="ordenes-compra" data-col="pi"${colStyle('ordenes-compra','pi')}>Proforma (PI)</th>
+            <th data-col-tabla="ordenes-compra" data-col="proveedor"${colStyle('ordenes-compra','proveedor')}>Proveedor</th>
+            <th data-col-tabla="ordenes-compra" data-col="fecha"${colStyle('ordenes-compra','fecha')}>Fecha</th>
+            <th data-col-tabla="ordenes-compra" data-col="moneda"${colStyle('ordenes-compra','moneda')}>Moneda</th>
+            <th data-col-tabla="ordenes-compra" data-col="subtotal"${colStyle('ordenes-compra','subtotal')}>Subtotal</th>
+            <th data-col-tabla="ordenes-compra" data-col="igv"${colStyle('ordenes-compra','igv')}>IGV</th>
+            <th data-col-tabla="ordenes-compra" data-col="total"${colStyle('ordenes-compra','total')}>Total</th>
+            <th data-col-tabla="ordenes-compra" data-col="estado"${colStyle('ordenes-compra','estado')}>Estado</th>
+            <th data-col-tabla="ordenes-compra" data-col="carpeta"${colStyle('ordenes-compra','carpeta')}>Carpeta</th>
+            <th style="width:48px;"></th>
           </tr>
         </thead>
         <tbody>
@@ -73,18 +86,25 @@ export async function renderOrdenes() {
     ordenes.forEach(oc => {
       html += `
         <tr>
-          <td><strong>${oc.id}</strong></td>
-          <td>${proveedoresMap[oc.contact_id] || '-'}</td>
-          <td>${fechaDMY(oc.fecha, '-')}</td>
-          <td>${oc.currency || 'PEN'}</td>
-          <td>${(oc.total_subtotal || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td>${(oc.total_igv || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td><strong>${(oc.total_OC || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></td>
-          <td><span class="badge badge-${oc.status || 'pending'}">${oc.status || 'pending'}</span></td>
-          <td>
-            <button class="btn btn-small btn-secondary" onclick="window.verOC(${oc.id})">Ver</button>
-            ${oc.status === 'borrador' ? `<button class="btn btn-small btn-primary" onclick="window.confirmarOC(${oc.id})">Confirmar</button>` : ''}
-          </td>
+          <td data-col-tabla="ordenes-compra" data-col="numero"${colStyle('ordenes-compra','numero')}><strong>${oc.id}</strong></td>
+          <td data-col-tabla="ordenes-compra" data-col="pi"${colStyle('ordenes-compra','pi')}>${oc.es_importacion
+            ? `<strong>${_escCompras(oc.numero_proforma_proveedor || '—')}</strong><br><small style="color:var(--text-secondary);">${_escCompras(oc.incoterm || 'sin incoterm')}${oc.anticipo_porcentaje ? ' · anticipo ' + oc.anticipo_porcentaje + '%' : ''}</small>`
+            : '<span style="color:var(--text-secondary);">—</span>'}</td>
+          <td data-col-tabla="ordenes-compra" data-col="proveedor"${colStyle('ordenes-compra','proveedor')}>${proveedoresMap[oc.contact_id] || '-'}</td>
+          <td data-col-tabla="ordenes-compra" data-col="fecha"${colStyle('ordenes-compra','fecha')}>${fechaDMY(oc.fecha, '-')}</td>
+          <td data-col-tabla="ordenes-compra" data-col="moneda"${colStyle('ordenes-compra','moneda')}>${oc.currency || 'PEN'}</td>
+          <td data-col-tabla="ordenes-compra" data-col="subtotal"${colStyle('ordenes-compra','subtotal')}>${(oc.total_subtotal || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td data-col-tabla="ordenes-compra" data-col="igv"${colStyle('ordenes-compra','igv')}>${(oc.total_igv || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td data-col-tabla="ordenes-compra" data-col="total"${colStyle('ordenes-compra','total')}><strong>${(oc.total_oc || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></td>
+          <td data-col-tabla="ordenes-compra" data-col="estado"${colStyle('ordenes-compra','estado')}><span class="badge badge-${oc.status || 'pending'}">${oc.status || 'pending'}</span></td>
+          <td data-col-tabla="ordenes-compra" data-col="carpeta"${colStyle('ordenes-compra','carpeta')}>${oc.carpeta_importacion_id && carpetaNum[oc.carpeta_importacion_id] != null ? 'Carpeta ' + carpetaNum[oc.carpeta_importacion_id] : (oc.es_importacion ? '<span style="color:var(--text-secondary);">—</span>' : '')}</td>
+          <td>${menuAccionesFila([
+            { label: 'Ver', icono: '👁', onclick: `window.verOC(${oc.id})` },
+            oc.es_importacion && !oc.carpeta_importacion_id ? { label: 'Completar PI', icono: '📝', onclick: `window.completarProformaOC(${oc.id})` } : null,
+            oc.status === 'borrador' ? (oc.es_importacion
+              ? { label: 'Confirmar Proforma', icono: '✅', onclick: `window.confirmarProformaOC(${oc.id})` }
+              : { label: 'Confirmar', icono: '✅', onclick: `window.confirmarOC(${oc.id})` }) : null
+          ])}</td>
         </tr>
       `
     })
@@ -139,7 +159,7 @@ window.verOC = async function (id) {
           TOTALES:
           Subtotal: ${oc.currency || 'PEN'} ${(oc.total_subtotal || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           IGV: ${oc.currency || 'PEN'} ${(oc.total_igv || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          Total: ${oc.currency || 'PEN'} ${(oc.total_OC || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          Total: ${oc.currency || 'PEN'} ${(oc.total_oc || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               `
 
     alert(mensaje)
@@ -149,6 +169,153 @@ window.verOC = async function (id) {
   }
 }
 
+
+/**
+ * Confirmar una PROFORMA (OC de importación): solo cambia el estado. NO crea
+ * compra ni stock: la compra nace con el Commercial Invoice cuando embarcan.
+ * Con la PI confirmada ya se puede abrir la carpeta (Importaciones → Nueva carpeta).
+ */
+window.confirmarProformaOC = async function (id) {
+  try {
+    const oc = await getOrderCompraById(id)
+    if (!oc) { showToast('Proforma no encontrada', 'warning'); return }
+    if (oc.status === 'confirmado') { showToast('Esta Proforma ya está confirmada', 'warning'); return }
+    if (!confirm(`¿Confirmar la Proforma ${oc.numero_proforma_proveedor || oc.numero}?\n\nQueda aceptada con el proveedor. No crea compra ni mueve stock.`)) return
+    const ok = await updateOrderCompra(id, { status: 'confirmado' })
+    if (!ok) { showToast('No se pudo confirmar la Proforma', 'danger'); return }
+    showToast('Proforma confirmada. Ya puedes abrir su carpeta en Importaciones.', 'success')
+    await renderOrdenes()
+  } catch (e) {
+    console.error('confirmarProformaOC:', e)
+    showToast('Error al confirmar la Proforma', 'danger')
+  }
+}
+
+/**
+ * Generar la Proforma (PI) de una compra de importación ya registrada
+ * (caso histórico, ej. carpeta 8). Abre el formulario de OC con los datos y
+ * las líneas de la compra; al guardar, la compra queda enlazada a la PI
+ * (compras.orden_compra_id) y la PI aparece en "Nueva carpeta".
+ * No guarda nada hasta que el usuario pulse Guardar.
+ */
+let _ocCompraOrigenId = null
+
+// ─── Completar una Proforma ya guardada (datos que la PI no traía) ──────────
+const CAMPOS_COMPLETAR_PI = [
+  ['cpMarca', 'marca', 'Marca', 'text'], ['cpPuertoEmb', 'puerto_embarque', 'Puerto de embarque', 'text'],
+  ['cpPuertoDest', 'puerto_destino', 'Puerto de destino', 'text'], ['cpPais', 'pais_origen', 'País de origen', 'text'],
+  ['cpAnticipo', 'anticipo_porcentaje', 'Anticipo (%)', 'number'], ['cpTolerancia', 'tolerancia_porcentaje', 'Tolerancia cantidad (%)', 'number'],
+  ['cpDiasAnt', 'dias_validez_anticipo', 'Plazo para pagar el anticipo (días)', 'number'], ['cpDiasEmb', 'dias_embarque', 'Plazo de embarque (días desde el anticipo)', 'number'],
+  ['cpEntrega', 'entrega_pactada', 'Entrega pactada (ej. JULIO 2026)', 'text'], ['cpDiasSaldo', 'dias_saldo_desde_bl', 'Saldo: días desde el B/L', 'number'],
+  ['cpValidez', 'validez_oferta', 'Validez de la oferta (hasta)', 'date']
+]
+let _cpOcId = null
+
+window.completarProformaOC = async function (id) {
+  const oc = await getOrderCompraById(id)
+  if (!oc) { showToast('Proforma no encontrada', 'warning'); return }
+  _cpOcId = id
+  if (!document.getElementById('modal-completar-pi')) {
+    document.body.insertAdjacentHTML('beforeend', `
+    <div id="modal-completar-pi" class="modal">
+      <div class="modal-content" style="max-width:820px; max-height:90vh; overflow-y:auto;">
+        <div class="modal-header"><h3 class="modal-title" id="cpTitulo">Completar Proforma</h3>
+          <button class="modal-close" onclick="closeModal('modal-completar-pi')">✕</button></div>
+        <div style="padding:16px 20px;">
+          <small style="display:block; margin-bottom:12px; color:var(--text-secondary);">Todo es opcional: llena solo lo que ya sepas. El flete y el seguro de una PI CIF se registran en el Commercial Invoice.</small>
+          <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px;">
+            ${CAMPOS_COMPLETAR_PI.map(([i, , l, t]) => `<div class="form-group"><label>${l}</label><input type="${t}" id="${i}" ${t === 'number' ? 'step="1" min="0"' : ''}></div>`).join('')}
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal('modal-completar-pi')">Cancelar</button>
+          <button class="btn btn-primary" onclick="window.guardarCompletarPI()">💾 Guardar</button>
+        </div>
+      </div>
+    </div>`)
+  }
+  document.getElementById('cpTitulo').textContent = `Completar Proforma ${oc.numero_proforma_proveedor || oc.numero}`
+  for (const [i, c] of CAMPOS_COMPLETAR_PI) document.getElementById(i).value = oc[c] ?? ''
+  window.openModal('modal-completar-pi')
+}
+
+window.guardarCompletarPI = async function () {
+  try {
+    const oc = await getOrderCompraById(_cpOcId)
+    const datos = {}
+    for (const [i, c, , t] of CAMPOS_COMPLETAR_PI) {
+      const val = document.getElementById(i).value.trim()
+      datos[c] = val === '' ? null : (t === 'number' ? parseFloat(val) : val)
+    }
+    const err = _validarCamposPI({ ...datos, incoterm: oc.incoterm }, oc.fecha)
+    if (err) { showToast(err, 'warning'); return }
+    let ok = await updateOrderCompra(_cpOcId, datos)
+    if (!ok) {   // sin el SQL 99 las 3 columnas nuevas no existen: guardar el resto
+      const reducido = { ...datos }; for (const k of ['entrega_pactada', 'dias_saldo_desde_bl', 'validez_oferta']) delete reducido[k]
+      ok = await updateOrderCompra(_cpOcId, reducido)
+      if (ok) showToast('Guardado, pero faltan 3 campos del SQL 99 (entrega, saldo, validez). Córrelo y vuelve a completar.', 'warning')
+    }
+    if (!ok) { showToast('No se pudo guardar', 'danger'); return }
+    window.closeModal('modal-completar-pi')
+    showToast('Proforma actualizada', 'success')
+    await renderOrdenes()
+  } catch (e) { console.error(e); showToast('Error al guardar la Proforma', 'danger') }
+}
+
+/** Abrir el formulario de OC en blanco (descarta cualquier compra de origen pendiente). */
+window.ocNueva = function () {
+  _ocCompraOrigenId = null
+  detallesOCEnCreacion = []
+  _renderTablaDetalleOC()
+  window.openModal('modal-nueva-oc')
+}
+
+window.ocDesdeCompra = async function (compraId) {
+  try {
+    const compra = await getCompraById(compraId)
+    if (!compra) { showToast('Compra no encontrada', 'warning'); return }
+    if (compra.orden_compra_id) { showToast('Esta compra ya tiene su Proforma', 'warning'); return }
+    const detalles = (await getCompraDetalles(compraId)) || []
+    if (!detalles.length) { showToast('La compra no tiene detalle', 'warning'); return }
+
+    window.openModal('modal-nueva-oc')
+    const form = document.getElementById('formNewOC'); if (form) form.reset()
+
+    const sel = document.getElementById('ocProveedor')
+    if (sel) { sel.value = String(compra.contact_id || ''); refrescarBuscador(sel) }
+    if (typeof window._onCambiarProveedorOC === 'function') window._onCambiarProveedorOC()
+    const set = (id, val) => { const e = document.getElementById(id); if (e && val != null) e.value = val }
+    set('ocMoneda', compra.currency || 'USD')
+    set('ocFecha', compra.fecha_emision || compra.fecha)
+    set('ocTipoPago', compra.tipo_pago || 'credito')
+    const chk = document.getElementById('ocEsImportacion'); if (chk) chk.checked = true
+    window.ocToggleImportacion()
+
+    const items = await getItems()
+    const mapa = {}; for (const i of items || []) mapa[i.id] = i
+    detallesOCEnCreacion = detalles.map(d => {
+      const cant = parseFloat(d.cantidad) || 0
+      const precio = parseFloat(d.precio_unitario) || 0
+      const sub = parseFloat(d.subtotal) || cant * precio
+      const it = mapa[d.item_id]
+      return {
+        item_id: d.item_id,
+        nombre: it ? (it.sku ? `(${it.sku}) ${it.nombre}` : it.nombre) : `Item #${d.item_id}`,
+        cantidad: cant, unidad_medida: d.unidad_medida || 'KG',
+        peso_neto: cant, peso_bruto: null, bultos: null, partida_arancelaria: null,
+        precio_unitario: precio, igv_porcentaje: 0,
+        subtotal: parseFloat(sub.toFixed(2)), igv_monto: 0, total: parseFloat(sub.toFixed(2))
+      }
+    })
+    _renderTablaDetalleOC()
+    window.ocCalcularAnticipo()
+    _ocCompraOrigenId = compraId
+    showToast('Completa N° de PI, incoterm y anticipo de la Proforma y guarda. La compra quedará enlazada.', 'info')
+  } catch (e) {
+    console.error('ocDesdeCompra:', e)
+    showToast('No se pudo preparar la Proforma desde la compra', 'danger')
+  }
+}
 
 /**
  * Abre el modal "Confirmar Compra" pre-cargado con los datos de la OC.
@@ -392,7 +559,7 @@ window.ejecutarConfirmarCompra = async function () {
     const cantidadTotal = detalles.reduce((s, d) => s + (parseFloat(d.cantidad) || 0), 0) || 1
     const subtotalC = parseFloat(oc.total_subtotal || 0)
     const igvC      = parseFloat(oc.total_igv || 0)
-    const totalC    = parseFloat(oc.total_OC || 0)
+    const totalC    = parseFloat(oc.total_oc || 0)
     const referencia = nroComprobante || oc.numero || `OC-${oc.id}`
     const [serieC, numeroC] = (nroComprobante && nroComprobante.includes('-'))
       ? nroComprobante.split(/-(.+)/)
@@ -505,7 +672,9 @@ const INCOTERMS_CON_FLETE_INCLUIDO = ['CIF', 'CFR', 'CIP', 'CPT', 'DAP', 'DDP']
 export const incotermIncluyeFlete = i => INCOTERMS_CON_FLETE_INCLUIDO.includes(String(i || '').toUpperCase())
 
 /** Campos que solo existen después de correr el SQL 93. */
-const CAMPOS_OC_SQL93 = ['puerto_destino', 'tolerancia_porcentaje', 'dias_validez_anticipo', 'dias_embarque', 'marca']
+const CAMPOS_OC_SQL93 = ['puerto_destino', 'tolerancia_porcentaje', 'dias_validez_anticipo', 'dias_embarque', 'marca',
+  // SQL 99
+  'entrega_pactada', 'dias_saldo_desde_bl', 'validez_oferta']
 
 window.ocToggleImportacion = function () {
   const esImp = !!document.getElementById('ocEsImportacion')?.checked
@@ -538,7 +707,7 @@ window.ocOnIncoterm = function () {
   }
   if (aviso) {
     aviso.textContent = incluido
-      ? `${inc}: el precio del proveedor YA incluye flete y seguro — no se cargan aparte en el costeo.`
+      ? `${inc}: el precio YA incluye flete y seguro — no se cargan aparte. El desglose FOB / flete / seguro se registra después en el Commercial Invoice.`
       : `${inc}: el flete y el seguro son costo aparte y se registran en el ledger de la carpeta.`
     aviso.style.color = incluido ? 'var(--color-warning)' : 'var(--text-secondary)'
   }
@@ -573,8 +742,26 @@ function _datosImportacionOC() {
     tolerancia_porcentaje: n('ocToleranciaPct'),
     dias_validez_anticipo: n('ocDiasValidezAnticipo'),
     dias_embarque: n('ocDiasEmbarque'),
-    marca: v('ocMarca') || null
+    marca: v('ocMarca') || null,
+    // --- SQL 99 ---
+    entrega_pactada: v('ocEntregaPactada') || null,
+    dias_saldo_desde_bl: n('ocDiasSaldoBL'),
+    validez_oferta: v('ocValidezOferta') || null
   }
+}
+
+// Reglas de la PI: importaciones/pi-validaciones.js (compartidas con Ver/Editar PI)
+const _validarCamposPI = validarCamposPI
+
+/** Campos opcionales de la PI que quedaron vacíos (para avisar, no para bloquear). */
+function _camposPIFaltantes(imp) {
+  const f = []
+  if (!imp.puerto_embarque) f.push('puerto de embarque')
+  if (!imp.pais_origen) f.push('país de origen')
+  if (imp.anticipo_porcentaje == null) f.push('% de anticipo')
+  if (imp.dias_saldo_desde_bl == null) f.push('plazo del saldo')
+  if (imp.dias_embarque == null && !imp.entrega_pactada) f.push('fecha/plazo de embarque')
+  return f
 }
 
 window.guardarOC = async function () {
@@ -606,10 +793,12 @@ window.guardarOC = async function () {
         showToast('Falta el N° de proforma del proveedor (ej. NY 2491)', 'warning'); return
       }
       if (!imp.incoterm) { showToast('Elige el incoterm de la proforma', 'warning'); return }
-      // Con el precio ya "puesto en destino" no puede haber flete aparte.
-      if (incotermIncluyeFlete(imp.incoterm) && (imp.flete_estimado || imp.seguro_estimado)) {
-        showToast(`Con ${imp.incoterm} el precio ya incluye flete y seguro: no se cargan aparte`, 'warning'); return
-      }
+      const errPI = _validarCamposPI(imp, fecha)
+      if (errPI) { showToast(errPI, 'warning'); return }
+      // La misma PI del mismo proveedor no se registra dos veces.
+      const yaExiste = (await getOrderCompras() || []).find(o => o.es_importacion && o.contact_id === supplierId &&
+        String(o.numero_proforma_proveedor || '').trim().toUpperCase() === imp.numero_proforma_proveedor.toUpperCase())
+      if (yaExiste) { showToast(`Ya existe la proforma ${imp.numero_proforma_proveedor} de este proveedor (OC ${yaExiste.numero || yaExiste.id})`, 'warning'); return }
       const sinPeso = detallesOCEnCreacion.filter(d => !(parseFloat(d.peso_neto) > 0))
       if (sinPeso.length) {
         if (!confirm(`${sinPeso.length} linea(s) sin peso neto.\n\nSin peso, el flete y los gastos fisicos no se pueden prorratear por kilo.\n\n¿Guardar igual?`)) return
@@ -640,7 +829,7 @@ window.guardarOC = async function () {
       cantidad_total: detallesOCEnCreacion.reduce((sum, d) => sum + d.cantidad, 0),
       total_subtotal: totalSubtotal,
       total_igv: totalIGV,
-      total_OC: totalMonto,
+      total_oc: totalMonto,
       ...imp
     }
 
@@ -689,8 +878,21 @@ window.guardarOC = async function () {
       }
     }
 
-    showToast('Orden de Compra creada exitosamente', 'success')
-    //window.closeModal('modal-nueva-oc')
+    // Proforma generada desde una compra: enlazarlas (compras.orden_compra_id)
+    if (_ocCompraOrigenId) {
+      const enlazado = await updateCompra(_ocCompraOrigenId, { orden_compra_id: ocGuardada.id })
+      if (!enlazado) showToast('Proforma creada, pero no se pudo enlazar con la compra. Revisa el SQL 92.', 'warning')
+      _ocCompraOrigenId = null
+      if (typeof renderCompras === 'function') renderCompras()
+    }
+
+    if (imp.es_importacion) {
+      const falt = _camposPIFaltantes(imp)
+      showToast('Proforma creada. Confírmala para poder abrir su carpeta.' +
+        (falt.length ? ` Quedó en blanco: ${falt.join(', ')} (se completa con «Completar PI» o con el CI).` : ''), falt.length ? 'info' : 'success')
+    } else showToast('Orden de Compra creada exitosamente', 'success')
+    window.closeModal('modal-nueva-oc')
+    _ocCompraOrigenId = null
     detallesOCEnCreacion = []
     await renderOrdenes()
     const form = document.getElementById('formNewOC')
