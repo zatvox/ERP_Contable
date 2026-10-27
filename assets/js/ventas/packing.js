@@ -18,8 +18,9 @@ import { supabase, insert, update, deleteRecord , empresaTrabajoCtx } from '../s
 import { showToast, formatNumber, pintarDocumentoContacto } from '../helpers.js'
 import { convertirEnBuscador, refrescarBuscador } from '../buscador-select.js'
 import { serieDefault, siguienteCorrelativo, formatearNumero, registrarUsoSerie } from '../series.js'
-import { _nombreCliente, _nombreVendedor, _stockTotalPorItem, _refrescarStockLoteEnVivo } from './helpers.js'
+import { _nombreCliente, _nombreVendedor, _stockTotalPorItem, _refrescarStockLoteEnVivo, calcLineaIGV, tipoIGVUI, precioUI, NOMBRE_TIPO_IGV } from './helpers.js'
 import { menuAccionesFila } from '../main.js'
+import { registrarPesaje, cargarPesaje, sugerirPesoPlaceholder, pintarPanelStock } from './linea-pesaje.js'
 import { registrarColumnas, colStyle } from '../col-menu.js'
 import { getTCVenta, textoAvisoTC } from '../sunat-api.js'
 import { vincularTCEnVivo } from '../tc-en-vivo.js'
@@ -63,7 +64,7 @@ function _tinte(hex, p) {
 const _esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const _hoy = () => new Date().toISOString().split('T')[0]
 const _sumarDias = (f, d) => { const x = new Date(f + 'T12:00:00'); x.setDate(x.getDate() + (parseInt(d) || 0)); return x.toISOString().split('T')[0] }
-const ESTADOS = { borrador: ['Borrador', 'badge-secondary'], enviado: ['Enviado', 'badge-info'], parcial: ['Parcial', 'badge-warning'], facturado: ['Facturado', 'badge-success'], anulado: ['Anulado', 'badge-danger'] }
+const ESTADOS = { cotizacion: ['Cotización', 'badge-cotizacion'], borrador: ['Borrador', 'badge-secondary'], enviado: ['Enviado', 'badge-info'], parcial: ['Parcial', 'badge-warning'], facturado: ['Facturado', 'badge-success'], anulado: ['Anulado', 'badge-danger'] }
 
 let _pkLista = []
 let _pkLineas = []
@@ -142,7 +143,7 @@ async function _facturacionPK(packingId) {
 function _lineaConCantidad(l, cant) {
   const old = parseFloat(l.cantidad) || 0
   const unid = old > 0 && (+l.cantidad_unidades) ? Math.round((+l.cantidad_unidades) * cant / old) : (+l.cantidad_unidades || 0)
-  return { cantidad: +(+cant).toFixed(3), cantidad_unidades: unid, ..._calcLinea(+cant, +l.precio_unitario, l.tipo_base || 'gravada') }
+  return { cantidad: +(+cant).toFixed(3), cantidad_unidades: unid, ..._calcLinea(+cant, precioUI(l), tipoIGVUI(l)) }
 }
 
 async function _recalcularTotalesPK(packingId) {
@@ -174,11 +175,21 @@ window.recalcularEstadoPacking = recalcularEstadoPacking
 // EMPRESA DE TRABAJO, que es la que va a firmar el documento.
 async function _maxCorrelativoPK(serie) {
   const emp = empresaTrabajoCtx()
-  let q = supabase.from('packing').select('correlativo').eq('serie', serie)
+  let q = supabase.from('packing').select('correlativo').eq('serie', serie).not('correlativo', 'is', null)
   if (emp != null) q = q.eq('empresa_id', emp)
   const { data } = await q.order('correlativo', { ascending: false }).limit(1)
   return data?.[0]?.correlativo || 0
 }
+
+// Cotizaciones (sql/115): numeración interna COT-0001 por empresa, NO usa la serie PK.
+async function _maxCotPK() {
+  const emp = empresaTrabajoCtx()
+  let q = supabase.from('packing').select('cot_correlativo').not('cot_correlativo', 'is', null)
+  if (emp != null) q = q.eq('empresa_id', emp)
+  const { data } = await q.order('cot_correlativo', { ascending: false }).limit(1)
+  return data?.[0]?.cot_correlativo || 0
+}
+const _numeroCot = n => `COT-${String(n).padStart(4, '0')}`
 
 // ─── Lista ──────────────────────────────────────────────────────────────────
 export async function renderPacking(forzar = true) {
@@ -189,9 +200,17 @@ export async function renderPacking(forzar = true) {
       <div class="card-header">
         <h3 class="card-title">Packing (PK) — Cotizaciones / Órdenes de venta</h3>
         <div style="display:flex; gap:8px; align-items:center;">
-          <button class="btn btn-primary btn-small" onclick="window.abrirModalPacking()">+ Nuevo PK</button>
           <button id="btnEliminarPKSel" class="btn btn-danger btn-small" style="display:none;" onclick="window.eliminarPackingSeleccionados()">🗑 Eliminar seleccionados (0)</button>
-          <button class="btn btn-secondary btn-small" onclick="window.abrirModalImportarPacking()" title="Cargar PK masivamente desde Excel (carga retroactiva)">📥 Importar masivo</button>
+          <button class="btn btn-secondary btn-small" onclick="window.abrirModalPacking(null, { cotizacion: true })" title="Cotización sin N° de PK: el número se asigna recién al confirmar">📝 Cotización</button>
+          <button class="btn btn-primary btn-small" onclick="window.abrirModalPacking()">+ Nuevo PK</button>
+          <div class="col-menu menu-tuerca">
+            <button type="button" class="card-menu-btn" onclick="event.stopPropagation(); this.parentElement.classList.toggle('open')" title="Más acciones">⚙️</button>
+            <div class="col-menu-dropdown">
+              <label onclick="this.closest('.col-menu').classList.remove('open'); window.abrirModalImportarPacking()" title="Cargar PK masivamente desde Excel (carga retroactiva)">📥 Importar masivo</label>
+              <div class="col-menu-separador"></div>
+              <label class="peligro" onclick="this.closest('.col-menu').classList.remove('open'); window.abrirAnularCorrelativoPK()">🚫 Anular correlativo sin emitir</label>
+            </div>
+          </div>
           <div class="col-menu" id="pkColMenu">
             <button type="button" class="card-menu-btn" onclick="window._pkColMenu(event)" title="Columnas a mostrar / ocultar y más opciones">⋮</button>
             <div class="col-menu-dropdown" id="pkColMenuDD"></div>
@@ -268,7 +287,7 @@ const _th = (k, lbl, extra = '') => `<th data-col-tabla="packing" data-col="${k}
 // Encabezado ordenable: clic = asc → desc (2026-10-20)
 const _thS = (k, lbl, extra = '') => `<th data-col-tabla="packing" data-col="${k}"${_csR(k, 'cursor:pointer; user-select:none; white-space:nowrap;' + extra)} onclick="window.ordenarPacking('${k}')" title="Ordenar por ${lbl}">${lbl}<span class="pk-flecha" data-k="${k}" style="margin-left:4px; opacity:.85;"></span></th>`
 let _pkSort = { col: null, dir: 'asc' }
-const _ORDEN_EST_PK = { borrador: 0, enviado: 1, parcial: 2, facturado: 3, anulado: 4 }
+const _ORDEN_EST_PK = { cotizacion: -1, borrador: 0, enviado: 1, parcial: 2, facturado: 3, anulado: 4 }
 function _valorOrdenPK(p, col) {
   switch (col) {
     case 'numero':   return (parseInt(p.correlativo) || 0) || String(p.numero || '')
@@ -291,17 +310,12 @@ window.ordenarPacking = function (col) {
 
 /** Se puede eliminar: sin factura vigente y en borrador / enviado / anulado.
  *  (El PK no mueve stock, CxC ni asientos: borrarlo no deja nada colgado.) */
-const _pkEliminable = p => !p.venta_id && !(p._facturas?.length) && ['borrador', 'enviado', 'anulado'].includes(p.estado)
+const _pkEliminable = p => !p.venta_id && !(p._facturas?.length) && ['cotizacion', 'borrador', 'enviado', 'anulado'].includes(p.estado)
 
 /** ⋮ del header: columnas para mostrar/ocultar + acción de correlativo. */
 window._pkColMenu = function (ev) {
   ev?.stopPropagation()
   window._colMenuToggle('packing', 'pkColMenu', 'pkColMenuDD')
-  const dd = document.getElementById('pkColMenuDD')
-  if (dd && document.getElementById('pkColMenu')?.classList.contains('open') && !dd.querySelector('.pk-extra')) {
-    dd.insertAdjacentHTML('beforeend', `<div class="col-menu-separador pk-extra"></div>
-      <label class="pk-extra" style="color:var(--color-danger);" onclick="document.getElementById('pkColMenu').classList.remove('open'); window.abrirAnularCorrelativoPK()">🚫 Anular correlativo sin emitir</label>`)
-  }
 }
 
 window.toggleSelTodosPK = function (checked) {
@@ -363,7 +377,8 @@ window.filtrarPacking = function () {
   if (!lista.length) { tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;">Sin PK registrados</td></tr>'; window.actualizarBotonEliminarPK(); return }
   tbody.innerHTML = lista.map(p => {
     const [lbl, cls] = ESTADOS[p.estado] || [p.estado, 'badge-secondary']
-    const abierto = p.estado === 'borrador' || p.estado === 'enviado' || p.estado === 'parcial'
+    const esCot = p.estado === 'cotizacion'
+    const abierto = esCot || p.estado === 'borrador' || p.estado === 'enviado' || p.estado === 'parcial'
     const vencido = abierto && p.fecha_validez && p.fecha_validez < hoy
     const elim = _pkEliminable(p)
     return `<tr style="${p.estado === 'anulado' ? 'opacity:.55;' : ''}">
@@ -384,13 +399,14 @@ window.filtrarPacking = function () {
            ${p.estado === 'parcial' ? `<div title="Facturado sobre el subtotal del PK" style="margin-top:3px; height:5px; background:var(--bg-secondary); border-radius:3px; overflow:hidden;"><div style="height:100%; width:${p._avance.toFixed(0)}%; background:var(--color-warning);"></div></div><small style="color:var(--text-secondary);">${p._avance.toFixed(0)} % facturado</small>` : ''}`
         : (p.venta_id ? _esc(_pkVentasMap.get(p.venta_id) || '#' + p.venta_id) : '—')}</td>
       <td class="col-acciones" data-col-tabla="packing" data-col="acciones"${_cs('acciones')}>${menuAccionesFila([
-        abierto ? { icono: '🧾', label: 'Facturar', onclick: `window.facturarPacking(${p.id})` } : null,
+        esCot ? { icono: '✅', label: 'Confirmar → asignar N° PK', onclick: `window.confirmarCotizacionPK(${p.id})` } : null,
+        (abierto && !esCot) ? { icono: '🧾', label: 'Facturar', onclick: `window.facturarPacking(${p.id})` } : null,
         { icono: abierto ? '✏️' : '👁', label: abierto ? 'Editar' : 'Ver detalle', onclick: `window.abrirModalPacking(${p.id})` },
         { icono: '📑', label: 'Duplicar', onclick: `window.duplicarPacking(${p.id})` },   // cualquier estado, incluso anulado (2026-10-10)
         p._sinEmitir ? null : { icono: '📄', label: 'PDF', onclick: `window.imprimirPacking(${p.id})` },
         p._adjuntos ? { icono: '📎', label: `Ver adjunto${p._adjuntos > 1 ? 's (' + p._adjuntos + ')' : ''}`, onclick: `window.verAdjuntosPacking(${p.id})` } : null,
-        abierto ? { separador: true } : null,
-        (abierto && !p._facturas?.length) ? { icono: '🚫', label: 'Anular', onclick: `window.anularPacking(${p.id})`, peligro: true } : null,
+        (abierto && !esCot) ? { separador: true } : null,
+        (abierto && !esCot && !p._facturas?.length) ? { icono: '🚫', label: 'Anular', onclick: `window.anularPacking(${p.id})`, peligro: true } : null,
         elim ? { separador: true } : null,
         elim ? { icono: '✕', label: 'Eliminar', onclick: `window.eliminarPacking(${p.id})`, peligro: true } : null
       ])}</td></tr>`
@@ -571,17 +587,24 @@ function _asegurarModal() {
       </div>
       <div id="pkAvisoStock" role="status" style="display:none; margin-top:10px; padding:8px 12px; border-radius:var(--radius-md); background:rgba(245,158,11,.12); border:1px solid rgba(245,158,11,.35); color:var(--color-warning); font-size:0.82rem; line-height:1.35;"></div>
       <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; margin-top:10px;">
-        <div style="flex:0.9 1 120px;">
-          <label style="font-size:0.8rem;">Cantidad total *</label>
-          <input type="number" id="pkCant" min="0.001" step="0.001" oninput="window._pkSugerirUnidades(); window._pkPreviewLinea()">
+        <div style="flex:0.8 1 110px;">
+          <label style="font-size:0.8rem;" title="Bultos/conos/cajas/bolsas en total.">N° Unidades *</label>
+          <input type="number" id="pkUnid" min="0" step="1" placeholder="0" oninput="window._pesajeRecalc('pk')">
+        </div>
+        <div style="flex:0.8 1 120px;">
+          <label style="font-size:0.8rem;" title="Kg de cada caja/bolsa. Clic en un lote del panel de stock para usar su peso.">Peso por caja/bolsa *</label>
+          <input type="number" id="pkPeso" min="0" step="0.001" placeholder="kg por caja" oninput="window._pesajeRecalc('pk')">
         </div>
         <div style="flex:0 0 auto;">
           <label style="font-size:0.8rem;">Unidad</label>
           <input type="text" id="pkUdm" value="KG" size="4" style="width:auto; max-width:60px;">
         </div>
-        <div style="flex:0.9 1 130px;">
-          <label style="font-size:0.8rem;" title="Bultos/conos/cajas. Informativo.">N° Unidades</label>
-          <input type="number" id="pkUnid" min="0" step="1" placeholder="—">
+        <div style="flex:1 1 140px;">
+          <label style="font-size:0.8rem;" title="= N° unidades × peso por caja. 🔓 solo para peso variable.">Cantidad total (kg) *</label>
+          <div class="input-con-candado">
+            <input type="number" id="pkCant" min="0.001" step="0.001" readonly style="background:var(--bg-primary);" oninput="window._pesajeKgManual('pk')">
+            <button type="button" class="btn-candado" id="btnCandadoKgPK" title="Escribir kg a mano (peso variable)" onclick="window._pesajeCandado('pk')">🔒</button>
+          </div>
         </div>
         <div style="flex:0.9 1 120px;">
           <label style="font-size:0.8rem;">Precio Unit. *</label>
@@ -601,6 +624,10 @@ function _asegurarModal() {
         <div style="flex:0.9 1 120px;"><label style="font-size:0.8rem;">Subtotal</label><input type="text" id="pkPrevSub" readonly value="0.00" style="background:var(--bg-primary); color:var(--text-secondary);"></div>
         <div style="flex:0.9 1 120px;"><label style="font-size:0.8rem;">IGV</label><input type="text" id="pkPrevIGV" readonly value="0.00" style="background:var(--bg-primary); color:var(--text-secondary);"></div>
         <div style="flex:0.9 1 120px;"><label style="font-size:0.8rem;">Total</label><input type="text" id="pkPrevTot" readonly value="0.00" style="background:var(--bg-primary); color:var(--text-secondary); font-weight:bold;"></div>
+      </div>
+      <div id="pkDesglosePanel" style="margin-top:12px; padding:10px 12px; border:1px solid var(--border-color); border-radius:6px; background:var(--bg-secondary);">
+        <small id="pkStockAviso" style="display:block; color:var(--text-secondary); font-size:0.8rem;">Selecciona un producto para ver su stock disponible.</small>
+        <div id="pkDesgloseLotes" style="margin-top:6px; font-size:0.78rem; color:var(--text-secondary);"></div>
       </div>
     </div>
     <div class="modal-footer">
@@ -724,8 +751,8 @@ window._pkRecalcValidez = function () {
 window._pkOnItem = function () {
   const it = (S._items || []).find(i => i.id === parseInt(document.getElementById('pkItem').value))
   if (it) document.getElementById('pkUdm').value = it.unidad_medida || 'KG'
-  window._pkSugerirUnidades()
-  _pkAvisoStock()
+  sugerirPesoPlaceholder('pk', it?.id || 0)
+  window._pkPreviewLinea()
 }
 
 /** Aviso amarillo (no bloquea): producto sin stock o cantidad mayor al disponible. */
@@ -748,27 +775,19 @@ function _pkAvisoStock() {
   box.style.display = msg ? '' : 'none'
 }
 
-// Unidades sugeridas: cantidad ÷ peso por unidad del lote más reciente del
-// producto (mismo criterio que Nueva Venta). Editable.
-window._pkSugerirUnidades = function () {
-  const itemId = parseInt(document.getElementById('pkItem').value)
-  const cant = parseFloat(document.getElementById('pkCant').value) || 0
-  const lote = (S._lotes || []).filter(l => l.item_id === itemId && parseFloat(l.peso_por_unidad) > 0).sort((a, b) => b.id - a.id)[0]
-  if (lote && cant > 0) document.getElementById('pkUnid').value = Math.round(cant / parseFloat(lote.peso_por_unidad))
-}
+// Pesaje (2026-10-27): N° unidades × peso por caja = kg (🔒). Ver linea-pesaje.js.
+registrarPesaje('pk', { und: 'pkUnid', peso: 'pkPeso', kg: 'pkCant', btn: 'btnCandadoKgPK', despues: () => window._pkPreviewLinea() })
+window._pkSugerirUnidades = function () { window._pkPreviewLinea() }   // compat: ya no se sugieren unidades
 
 // Mismo cálculo que agregarLineaVenta (venta-nueva.js): precio guardado SIN IGV.
-function _calcLinea(cant, precio, igvTipo) {
-  const incl = igvTipo === 'gravada_incluido'
-  const pct = (igvTipo === 'gravada' || incl) ? 18 : 0
-  let subtotal, igvMonto, total, precioBase
-  if (incl) { total = +(cant * precio).toFixed(2); subtotal = +(total / 1.18).toFixed(2); igvMonto = +(total - subtotal).toFixed(2); precioBase = +(subtotal / cant).toFixed(6) }
-  else { subtotal = +(cant * precio).toFixed(2); igvMonto = +(subtotal * pct / 100).toFixed(2); total = +(subtotal + igvMonto).toFixed(2); precioBase = precio }
-  return { subtotal, igv_monto: igvMonto, total_linea: total, precio_unitario: precioBase, tipo_base: incl ? 'gravada' : igvTipo, igv_porcentaje: pct }
-}
+// Cálculo único (ventas/helpers.js · calcLineaIGV): conserva igv_incluido +
+// precio_con_igv para que la línea se vea tal como se registró (sql/114).
+function _calcLinea(cant, precio, igvTipo) { return calcLineaIGV(cant, precio, igvTipo) }
 
 window._pkPreviewLinea = function () {
   _pkAvisoStock()
+  pintarPanelStock({ pfx: 'pk', avisoId: 'pkStockAviso', panelId: 'pkDesgloseLotes',
+    itemId: parseInt(document.getElementById('pkItem')?.value || 0), cantidad: parseFloat(document.getElementById('pkCant')?.value) || 0 })
   const cant = parseFloat(document.getElementById('pkCant').value) || 0
   const precio = parseFloat(document.getElementById('pkPrecio').value) || 0
   const c = cant > 0 ? _calcLinea(cant, precio, document.getElementById('pkIGV').value) : { subtotal: 0, igv_monto: 0, total_linea: 0 }
@@ -792,13 +811,15 @@ window._pkAbrirLinea = function (idx = null) {
     _poblarItemsConStockPK(l?.item_id || null)
     if (sel) sel.value = actual
     refrescarBuscador('pkItem')
+    sugerirPesoPlaceholder('pk', parseInt(actual) || 0)
+    window._pkPreviewLinea()
   }).catch(e => console.warn('Stock en vivo PK:', e))
   val('pkNotaLinea', l?.nota || '')
-  val('pkCant', l?.cantidad || '')
   val('pkUdm', l?.unidad_medida || 'KG')
-  val('pkUnid', l?.cantidad_unidades || '')
-  val('pkPrecio', l?.precio_unitario || '')
-  val('pkIGV', l ? (l.tipo_base || 'gravada') : (_pkSerieActual?.tipo_igv_defecto || 'gravada'))
+  cargarPesaje('pk', { cantidad: l?.cantidad, unidades: l?.cantidad_unidades })
+  sugerirPesoPlaceholder('pk', l?.item_id || 0)
+  val('pkPrecio', l ? precioUI(l) : '')
+  val('pkIGV', l ? tipoIGVUI(l) : (_pkSerieActual?.tipo_igv_defecto || 'gravada'))
   document.getElementById('pkLineaTitulo').textContent = l ? `Editar línea ${idx + 1}` : 'Agregar Producto al PK'
   document.getElementById('pkBtnLineaOk').textContent = l ? '💾 Guardar línea' : '+ Agregar'
   window._pkPreviewLinea()
@@ -875,8 +896,8 @@ window._pkPintarLineas = function () {
     <td>${_esc(l.descripcion)}${l.nota ? `<br><small style="color:var(--text-secondary); font-style:italic;">${_esc(l.nota)}</small>` : ''}</td>
     <td style="text-align:right;">${formatNumber(l.cantidad)}${l.id && _pkFactPorLinea[l.id] ? `<br><small style="color:var(--color-success); white-space:nowrap;">fact. ${formatNumber(_pkFactPorLinea[l.id])}</small><br><small style="color:var(--color-warning); white-space:nowrap;">pend. ${formatNumber(Math.max(0, l.cantidad - _pkFactPorLinea[l.id]))}</small>` : ''}</td><td>${_esc(l.unidad_medida)}</td>
     <td style="text-align:right;">${l.cantidad_unidades || '—'}</td>
-    <td style="text-align:right;">${(+l.precio_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td>
-    <td>${l.tipo_base === 'gravada' ? 'Gravada' : _esc(l.tipo_base)}</td>
+    <td style="text-align:right;"${l.igv_incluido ? ` title="Valor sin IGV: ${(+l.precio_unitario).toFixed(6)}"` : ''}>${precioUI(l).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td>
+    <td>${_esc(NOMBRE_TIPO_IGV[tipoIGVUI(l)] || tipoIGVUI(l))}</td>
     <td style="text-align:right;">${formatNumber(l.subtotal)}</td>
     <td style="text-align:right;">${formatNumber(l.igv_monto)}</td>
     <td style="text-align:right; font-weight:600;">${formatNumber(l.total_linea)}</td>
@@ -914,7 +935,9 @@ window._pkGuardarYFacturar = async function (btn) {
 }
 let _pkCorrSugerido = null
 
-window.abrirModalPacking = async function (id = null) {
+let _pkModoCot = false   // true = cotización (sin N° de PK)
+
+window.abrirModalPacking = async function (id = null, opts = {}) {
   try {
     _asegurarModal()
     if (!_pkTerminos.length) _pkTerminos = (await getTerminosPago()) || []
@@ -923,14 +946,17 @@ window.abrirModalPacking = async function (id = null) {
     if (!serie) { showToast('Falta la serie PK: corre assets/sql/59_series_documentos_y_packing.sql', 'danger', 7000); return }
     const pk = id ? (_pkLista.find(p => p.id === id) || (await supabase.from('packing').select('*').eq('id', id).single()).data) : null
     _pkEditId = pk?.id || null
+    _pkModoCot = pk ? pk.estado === 'cotizacion' : !!opts.cotizacion
     _pkSerieActual = pk ? { ...serie, serie: pk.serie } : serie
     _pkLineas = pk ? (await _getDetalle(pk.id)).map(d => ({ ...d, cantidad: +d.cantidad, cantidad_unidades: +d.cantidad_unidades, precio_unitario: +d.precio_unitario, subtotal: +d.subtotal, igv_monto: +d.igv_monto, total_linea: +d.total_linea })) : []
     const val = (k, v) => { const el = document.getElementById(k); if (el) el.value = v ?? '' }
     const hoy = _hoy()
     const dig = parseInt(serie.digitos) || 6
-    _pkCorrSugerido = pk ? pk.correlativo : siguienteCorrelativo(serie, await _maxCorrelativoPK(serie.serie))
+    _pkCorrSugerido = _pkModoCot ? null : (pk ? pk.correlativo : siguienteCorrelativo(serie, await _maxCorrelativoPK(serie.serie)))
     val('pkSerie', _pkSerieActual.serie)
-    _resetCandado('pkCorrelativo', 'btnCandadoPkCorr', 'aviso-pk-corr', String(_pkCorrSugerido).padStart(dig, '0'))
+    _resetCandado('pkCorrelativo', 'btnCandadoPkCorr', 'aviso-pk-corr', _pkModoCot ? '' : String(_pkCorrSugerido).padStart(dig, '0'))
+    const _inpCorr = document.getElementById('pkCorrelativo')
+    if (_inpCorr) _inpCorr.placeholder = _pkModoCot ? 'Se asigna al confirmar' : '000001'
     val('pkCliente', pk?.contact_id || ''); refrescarBuscador('pkCliente'); _pintarDocClientePK()
     val('pkVendedor', pk?.vendedor_id || '')
     val('pkFecha', pk?.fecha_emision || hoy)
@@ -947,14 +973,16 @@ window.abrirModalPacking = async function (id = null) {
     _setOpcional('grupo-pk-oc', 'chkPkOC', 'pkOC', pk?.orden_compra_cliente)
     _setOpcional('grupo-pk-obs', 'chkPkObs', 'pkObs', pk?.observaciones)
 
-    const abierto = !pk || pk.estado === 'borrador' || pk.estado === 'enviado' || pk.estado === 'parcial'
+    const abierto = !pk || _pkModoCot || pk.estado === 'borrador' || pk.estado === 'enviado' || pk.estado === 'parcial'
     // Facturado/pendiente por línea (para mostrar y para no dejar bajar de lo ya facturado)
     _pkFactPorLinea = pk ? (await _facturacionPK(pk.id)).porLinea : {}
-    document.getElementById('pkBtnFacturar').style.display = (pk && abierto) ? '' : 'none'
-    document.getElementById('pkTitulo').textContent = pk ? `${abierto ? 'Editar' : 'Ver'} ${pk.numero}` : 'Nuevo PK — Packing'
+    // "Guardar y facturar" solo existe con N° de PK (no en cotizaciones)
+    document.getElementById('pkBtnFacturar').style.display = (pk && abierto && !_pkModoCot) ? '' : 'none'
+    document.getElementById('pkTitulo').textContent = pk ? `${abierto ? 'Editar' : 'Ver'} ${pk.numero}${_pkModoCot ? ' (cotización)' : ''}` : (_pkModoCot ? 'Nueva Cotización' : 'Nuevo PK — Packing')
+    document.getElementById('pkBtnGuardar').textContent = _pkModoCot ? '💾 Guardar cotización' : '💾 Guardar PK'
     document.getElementById('pkBtnGuardar').style.display = abierto ? '' : 'none'
     document.getElementById('pkBtnAgregarLinea').style.display = abierto ? '' : 'none'
-    document.getElementById('btnCandadoPkCorr').disabled = !abierto
+    document.getElementById('btnCandadoPkCorr').disabled = !abierto || _pkModoCot
     document.querySelectorAll('#modal-packing input, #modal-packing select').forEach(el => {
       if (el.id === 'pkTipoDoc' || el.id === 'pkSerie' || el.id === 'pkCorrelativo') return
       el.disabled = !abierto
@@ -987,7 +1015,7 @@ window.duplicarPacking = async function (id) {
       const { id: _i, packing_id: _p, created_at: _c, updated_at: _u, ...resto } = d
       return { ...resto, cantidad: +d.cantidad, cantidad_unidades: +d.cantidad_unidades, precio_unitario: +d.precio_unitario, subtotal: +d.subtotal, igv_monto: +d.igv_monto, total_linea: +d.total_linea }
     })
-    await window.abrirModalPacking(null)              // PK nuevo: N° sugerido, fecha hoy, T.C. en vivo
+    await window.abrirModalPacking(null, { cotizacion: origen.estado === 'cotizacion' })   // PK (o cotización) nuevo: N° sugerido, fecha hoy, T.C. en vivo
     const val = (k, v) => { const el = document.getElementById(k); if (el) el.value = v ?? '' }
     val('pkCliente', origen.contact_id || ''); refrescarBuscador('pkCliente'); _pintarDocClientePK()
     val('pkVendedor', origen.vendedor_id || '')
@@ -1001,7 +1029,7 @@ window.duplicarPacking = async function (id) {
     _pkFactPorLinea = {}
     window._pkOnMoneda?.()
     window._pkPintarLineas()
-    document.getElementById('pkTitulo').textContent = `Nuevo PK — copia de ${origen.numero}`
+    document.getElementById('pkTitulo').textContent = `${_pkModoCot ? 'Nueva Cotización' : 'Nuevo PK'} — copia de ${origen.numero}`
     showToast(`Copia de ${origen.numero} lista: revisa y presiona Guardar`, 'info')
   } catch (e) { showToast('Error al duplicar: ' + e.message, 'danger') }
 }
@@ -1069,7 +1097,7 @@ window.guardarPacking = async function () {
     if (!contactId) { showToast('Selecciona el cliente', 'warning'); return }
     if (!fecha) { showToast('Ingresa la fecha de emisión', 'warning'); return }
     if (!_pkLineas.length) { showToast('Agrega al menos un producto', 'warning'); return }
-    const corr = await _pkCorrelativoElegido()
+    const corr = _pkModoCot ? { manual: false } : await _pkCorrelativoElegido()
     if (!corr) return
     const t = _pkLineas.reduce((a, l) => ({ b: a.b + (+l.subtotal), i: a.i + (+l.igv_monto), t: a.t + (+l.total_linea) }), { b: 0, i: 0, t: 0 })
     const cab = {
@@ -1110,6 +1138,15 @@ window.guardarPacking = async function () {
         const { error } = await supabase.from('detalle_packing').delete().eq('id', pl.id)
         if (error) throw new Error('No se pudo retirar una línea: ' + error.message)
       }
+    } else if (_pkModoCot) {
+      // Cotización: sin correlativo PK; N° interno COT-xxxx (reintenta si otro usuario tomó el mismo)
+      const serie = await serieDefault('PK')
+      const base = (await _maxCotPK()) + 1
+      for (let intento = 0; intento < 5 && !pk; intento++) {
+        const n = base + intento
+        pk = await insert('packing', { ...cab, tipo: 'venta', serie: serie.serie, correlativo: null, cot_correlativo: n, numero: _numeroCot(n), estado: 'cotizacion', created_by: user?.db_id || null })
+      }
+      if (!pk) throw new Error('No se pudo crear la cotización (¿corriste assets/sql/115_packing_cotizaciones.sql?)')
     } else {
       // Correlativo: siguiente de la serie; si otro usuario tomó el mismo
       // número al mismo tiempo (UNIQUE), se reintenta con el siguiente.
@@ -1128,7 +1165,8 @@ window.guardarPacking = async function () {
         packing_id: pk.id, orden: i, item_id: l.item_id, descripcion: l.descripcion, nota: l.nota || null,
         cantidad: l.cantidad, unidad_medida: l.unidad_medida, cantidad_unidades: l.cantidad_unidades || 0,
         precio_unitario: l.precio_unitario, tipo_base: l.tipo_base, igv_porcentaje: l.igv_porcentaje,
-        subtotal: l.subtotal, igv_monto: l.igv_monto, total_linea: l.total_linea
+        subtotal: l.subtotal, igv_monto: l.igv_monto, total_linea: l.total_linea,
+        igv_incluido: !!l.igv_incluido, precio_con_igv: l.igv_incluido ? +l.precio_con_igv : null
       }
       const r = l.id && _pkEditId ? await update('detalle_packing', l.id, fila) : await insert('detalle_packing', fila)
       if (!r) throw new Error(`No se pudo guardar la línea ${i + 1} (${l.descripcion})`)
@@ -1152,6 +1190,35 @@ window.anularPacking = async function (id) {
   const r = await update('packing', id, { estado: 'anulado', updated_at: new Date().toISOString() })
   showToast(r ? `${pk.numero} anulado` : 'No se pudo anular', r ? 'success' : 'danger')
   await renderPacking(true)
+}
+
+// ─── Confirmar cotización → PK (sql/115) ────────────────────────────────────
+// Toma el SIGUIENTE correlativo PK libre en este momento (el primero que se
+// confirma recibe el primer número) y pasa a 'borrador'. No abre el modal.
+window.confirmarCotizacionPK = async function (id) {
+  if (!await exigirEmpresaDeTrabajo('packing', id, 'La cotización')) return
+  try {
+    const cot = (await supabase.from('packing').select('*').eq('id', id).single()).data
+    if (!cot || cot.estado !== 'cotizacion') { showToast('Ya no es una cotización (¿otro usuario la confirmó?)', 'warning'); await renderPacking(true); return }
+    const serie = await serieDefault('PK')
+    if (!serie) { showToast('Falta la serie PK', 'danger'); return }
+    const base = siguienteCorrelativo(serie, await _maxCorrelativoPK(serie.serie))
+    if (!confirm(`¿Confirmar ${cot.numero}?\n\nSe le asigna el N° ${formatearNumero(serie, base)} (el siguiente libre) y pasa a PK en borrador.`)) return
+    let ok = null, ultimoError = null
+    for (let intento = 0; intento < 5 && !ok; intento++) {
+      const n = base + intento
+      const { data, error } = await supabase.from('packing')
+        .update({ serie: serie.serie, correlativo: n, numero: formatearNumero(serie, n), estado: 'borrador', updated_at: new Date().toISOString() })
+        .eq('id', id).eq('estado', 'cotizacion').select().maybeSingle()
+      if (error) { ultimoError = error; if (error.code === '23505') continue; break }   // 23505 = N° tomado por otro usuario
+      ok = data
+      if (!data) { showToast('Otro usuario ya confirmó esta cotización', 'warning'); await renderPacking(true); return }
+    }
+    if (!ok) throw new Error(ultimoError?.message || 'No se pudo asignar el correlativo')
+    await registrarUsoSerie('PK', ok.serie, ok.correlativo)
+    showToast(`${cot.numero} confirmada → ${ok.numero} ✅`, 'success', 6000)
+    await renderPacking(true)
+  } catch (e) { showToast('Error al confirmar: ' + e.message, 'danger', 8000) }
 }
 
 // ─── Anular correlativo sin emitir (formato físico dañado) ───────────────────
@@ -1339,6 +1406,7 @@ window.facturarPacking = async function (id) {
     if (!pk) return
     if (pk.estado === 'facturado') { showToast('Este PK ya está facturado por completo', 'warning'); return }
     if (pk.estado === 'anulado') { showToast('PK anulado: no se puede facturar', 'warning'); return }
+    if (pk.estado === 'cotizacion') { showToast('Es una cotización: primero confírmala (✅ Confirmar → asignar N° PK)', 'warning', 6000); return }
     const { lineas, porLinea, sinSQL } = await _facturacionPK(pk.id)
     if (sinSQL) { showToast('Falta correr assets/sql/70_packing_facturacion_parcial.sql en Supabase', 'danger', 8000); return }
     if (!lineas.length) { showToast('El PK no tiene líneas', 'warning'); return }
@@ -1371,7 +1439,7 @@ function _pkFacPintar() {
   tb.innerHTML = _pkFac.filas.map((f, i) => {
     const l = f.l
     const completa = f.pend <= _TOL
-    const sub = f.sel && !f.retirar ? _calcLinea(f.aFact || 0, +l.precio_unitario, l.tipo_base || 'gravada').subtotal : 0
+    const sub = f.sel && !f.retirar ? _calcLinea(f.aFact || 0, precioUI(l), tipoIGVUI(l)).subtotal : 0
     const exceso = f.sel && !f.retirar && f.aFact > f.pend + _TOL
     const estilo = f.retirar ? 'opacity:.5; text-decoration:line-through;' : (completa ? 'opacity:.6;' : '')
     return `<tr style="border-top:1px solid var(--border-color); ${estilo}">
@@ -1390,7 +1458,7 @@ function _pkFacPintar() {
       <td style="padding:8px 10px;">
         <input type="number" step="1" min="0" value="${f.unid || 0}" ${!f.sel || f.retirar || completa ? 'disabled' : ''}
                oninput="window._pkFacUnid(${i}, this.value)" style="width:100%; text-align:right;"></td>
-      <td style="padding:8px 10px; text-align:right;">${(+l.precio_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td>
+      <td style="padding:8px 10px; text-align:right;">${precioUI(l).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}${l.igv_incluido ? '<br><small style="color:var(--text-secondary);">inc. IGV</small>' : ''}</td>
       <td style="padding:8px 10px; text-align:right; font-weight:600;">${sub ? formatNumber(sub) : '—'}</td>
       <td style="padding:8px 10px; text-align:center;">
         ${completa ? '' : `<button type="button" class="btn btn-small ${f.retirar ? 'btn-secondary' : 'btn-danger'}" onclick="window._pkFacRetirar(${i})"
@@ -1398,8 +1466,8 @@ function _pkFacPintar() {
       </td></tr>`
   }).join('')
   const selec = _pkFac.filas.filter(f => f.sel && !f.retirar && f.aFact > 0)
-  const base = selec.reduce((s, f) => s + _calcLinea(f.aFact, +f.l.precio_unitario, f.l.tipo_base || 'gravada').subtotal, 0)
-  const total = selec.reduce((s, f) => s + _calcLinea(f.aFact, +f.l.precio_unitario, f.l.tipo_base || 'gravada').total_linea, 0)
+  const base = selec.reduce((s, f) => s + _calcLinea(f.aFact, precioUI(f.l), tipoIGVUI(f.l)).subtotal, 0)
+  const total = selec.reduce((s, f) => s + _calcLinea(f.aFact, precioUI(f.l), tipoIGVUI(f.l)).total_linea, 0)
   const cambios = _pkFac.filas.filter(f => f.retirar || (f.sel && f.aFact > f.pend + _TOL)).length
   document.getElementById('pkFacResumen').innerHTML = `
     <span style="color:var(--text-secondary);">${selec.length} línea(s) a facturar${cambios ? ` · <strong style="color:var(--color-info);">${cambios} cambio(s) se guardarán en el PK</strong>` : ''}</span>
@@ -1459,7 +1527,7 @@ window._pkFacContinuar = async function () {
       precio_pk: +f.l.precio_unitario,
       cantidad: +f.aFact.toFixed(3),
       cantidad_unidades: f.unid || 0,
-      ..._calcLinea(f.aFact, +f.l.precio_unitario, f.l.tipo_base || 'gravada')
+      ..._calcLinea(f.aFact, precioUI(f.l), tipoIGVUI(f.l))
     }))
     const pkFresco = (await supabase.from('packing').select('*').eq('id', pk.id).single()).data || pk
     await window.abrirNuevaVentaDesdePacking?.(pkFresco, lineas)
@@ -1534,8 +1602,6 @@ async function _descargarPDFDesdeHTML(html, nombreArchivo) {
     ])
     const html2canvas = h2c.default || h2c
     const zv = doc.querySelector('.zv'); if (zv) zv.style.position = 'absolute'   // en canvas va en la 1ra hoja; luego se repite con jsPDF
-    // html2canvas no soporta texto con degradado (background-clip:text): color sólido de la misma paleta
-    doc.querySelectorAll('.zv-txt b').forEach(b => { b.style.background = 'none'; b.style.color = '#4f46e5' })
     // Alto REAL del contenido (no el del iframe): evita una 2da hoja en blanco
     const alto = Math.ceil(Math.max(...[...doc.body.children].map(el => el.getBoundingClientRect().bottom + (doc.defaultView.scrollY || 0)))) + 38
     const canvas = await html2canvas(doc.body, { scale: 2, backgroundColor: '#ffffff', useCORS: true, windowWidth: 794, height: alto, windowHeight: alto })
@@ -1552,8 +1618,8 @@ async function _descargarPDFDesdeHTML(html, nombreArchivo) {
       if (pag > 0) pdf.addPage()
       pdf.addImage(trozo.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, W, alto / pxPorMm)
       if (pag > 0) {   // firma del autor en hojas siguientes
-        pdf.setFont('helvetica', 'italic').setFontSize(7).setTextColor(130, 130, 150)
-        pdf.text('by: ZatVox', W / 2, 6, { align: 'center' })
+        pdf.setFont('helvetica', 'italic').setFontSize(7).setTextColor(17, 24, 39)
+        pdf.text('by: ZV', W - 10.6, 6, { align: 'right' })
       }
       y += alto; pag++
     }
@@ -1576,6 +1642,13 @@ window.imprimirPacking = async function (id) {
     const E = await _emisorPK(pk)
     const C = E.color, CT = _textoSobre(C), C10 = _tinte(C, 0.10), C25 = _tinte(C, 0.25)
     const CTXT = CT === '#ffffff' ? C : '#111827'   // color de marca usable como TEXTO sobre blanco
+    // Nombres EXACTOS de columnas según cómo se registraron los precios (sql/114)
+    const nIncl = lineas.filter(l => l.igv_incluido).length
+    const _pdfIGV = nIncl === 0
+      ? { colP: 'Valor unit. (sin IGV)', colT: 'Valor venta (sin IGV)', mixto: false, nota: '' }
+      : nIncl === lineas.length
+        ? { colP: 'Precio unit. (inc. IGV)', colT: 'Importe (inc. IGV)', mixto: false, nota: 'Precios incluyen IGV.' }
+        : { colP: 'Precio / Valor unit.', colT: 'Importe', mixto: true, nota: '* Precio e importe incluyen IGV. Las demás líneas se muestran sin IGV.' }
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>${_esc(pk.numero)}</title><base href="${base}">
 <style>
   @page { size: A4; margin: 14mm; }
@@ -1602,23 +1675,20 @@ window.imprimirPacking = async function (id) {
   .tot tr.t td { background:${C}; color:${CT}; font-weight:bold; }
   .logo-txt { display:inline-flex; align-items:center; justify-content:center; min-width:120px; height:64px; padding:0 16px; border-radius:14px; background:${C}; color:${CT}; font-size:26px; font-weight:800; letter-spacing:3px; }
   /* Marca de agua del autor — fija arriba en cada hoja impresa */
-  .zv { position:fixed; top:0; left:0; right:0; display:flex; justify-content:center; pointer-events:none; z-index:0; }
-  .zv-in { display:inline-flex; align-items:center; gap:7px; padding:3px 12px 3px 4px; border-radius:999px;
-           background:linear-gradient(90deg, rgba(17,24,39,.045), rgba(17,24,39,.02)); border:1px solid rgba(17,24,39,.08); opacity:.7; }
+  .zv { position:fixed; top:14px; right:40px; display:flex; pointer-events:none; z-index:0; }
+  .zv-in { display:inline-flex; align-items:center; gap:6px; opacity:.8; }
   .zv-mono { width:16px; height:16px; border-radius:5px; display:inline-flex; align-items:center; justify-content:center;
-             background:linear-gradient(135deg,#6366f1 0%,#06b6d4 100%); color:#fff; font:800 8px/1 Arial, sans-serif; letter-spacing:-.3px; }
+             background:#111827; color:#fff; font:800 8px/1 Arial, sans-serif; letter-spacing:-.3px; }
   .zv-txt { font:italic 400 9px/1 Georgia, 'Times New Roman', serif; color:#6b7280; letter-spacing:.4px; }
-  .zv-txt b { font:800 9.5px/1 Arial, Helvetica, sans-serif; font-style:normal; letter-spacing:1.6px;
-              background:linear-gradient(90deg,#4f46e5,#0891b2); -webkit-background-clip:text; background-clip:text; color:transparent; }
   .letras { font-weight:bold; margin-top:14px; }
 </style></head><body>
-  <div class="zv"><span class="zv-in"><span class="zv-mono">ZV</span><span class="zv-txt">by: <b>ZatVox</b></span></span></div>
+  <div class="zv"><span class="zv-in"><span class="zv-txt">by:</span><span class="zv-mono">ZV</span></span></div>
   <div class="top">
     <div class="logo">${E.logo
       ? `<img src="${_esc(E.logo)}" alt="${_esc(E.corto)}" style="width:200px; max-height:70px; object-fit:contain;" onerror="this.outerHTML='<span class=&quot;logo-txt&quot;>${_esc(E.corto)}</span>'">`
       : `<span class="logo-txt">${_esc(E.corto || E.nombre)}</span>`}</div>
     <div class="emp"><b>${_esc(E.nombre)}</b>${E.direccion ? '<br>' + _esc(E.direccion) : ''}${E.email ? `<br><b>Email:</b> ${_esc(E.email)}` : ''}${E.telefono ? `<br><b>Teléfono:</b> ${_esc(E.telefono)}` : ''}${E.web ? `<br><b>Sitio web:</b> ${_esc(E.web)}` : ''}</div>
-    <div class="doc"><b style="color:${CTXT};">Orden de Venta</b>RUC ${_esc(E.ruc)}<br><span style="font-size:14px;">${_esc(pk.numero)}</span></div>
+    <div class="doc"><b style="color:${CTXT};">${pk.estado === 'cotizacion' ? 'Cotización' : 'Orden de Venta'}</b>RUC ${_esc(E.ruc)}<br><span style="font-size:14px;">${_esc(pk.numero)}</span></div>
   </div>
   <div class="box">
     <span class="k">CLIENTE</span><span>${_esc(cliente?.nombre || '')}<br>RUC : ${_esc(cliente?.nro_documento || '')}</span>
@@ -1630,16 +1700,17 @@ window.imprimirPacking = async function (id) {
     <span class="k">F. VALIDEZ</span><span>${_esc(fechaDMY(pk.fecha_validez, ''))}</span>
     <span class="k">MONEDA</span><span>${pk.moneda === 'USD' ? 'DÓLARES' : 'SOLES'}</span>
   </div>
-  <table class="l"><thead><tr><th>Descripción</th><th class="n">N° Unid.</th><th class="n">Peso unit.</th><th class="n">Cantidad</th><th class="n">UdM</th><th class="n">Precio unitario</th><th class="n">Total</th></tr></thead><tbody>
+  <table class="l"><thead><tr><th>Descripción</th><th class="n">N° Unid.</th><th class="n">Peso unit.</th><th class="n">Cantidad</th><th class="n">UdM</th><th class="n">${_pdfIGV.colP}</th><th class="n">${_pdfIGV.colT}</th></tr></thead><tbody>
     ${lineas.map(l => { const un = +l.cantidad_unidades || 0; const pu = un > 0 ? (+l.cantidad || 0) / un : 0
       return `<tr><td class="desc">${_esc(l.descripcion)}</td>
       <td class="c n">${un ? formatNumber(un, 0) : '—'}</td>
       <td class="c n">${pu ? pu.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) + ' ' + _esc((l.unidad_medida || '').toLowerCase()) : '—'}</td>
       <td class="c n">${formatNumber(l.cantidad)}</td><td class="c n">${_esc((l.unidad_medida || '').toLowerCase())}</td>
-      <td class="c n">${sim} ${(+l.precio_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td><td class="r n">${f(l.subtotal)}</td></tr>
+      <td class="c n">${sim} ${precioUI(l).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}${_pdfIGV.mixto && l.igv_incluido ? ' *' : ''}</td><td class="r n">${f(l.igv_incluido ? l.total_linea : l.subtotal)}${_pdfIGV.mixto && l.igv_incluido ? ' *' : ''}</td></tr>
       ${l.nota ? `<tr class="nota"><td colspan="7">${_esc(l.nota)}</td></tr>` : ''}` }).join('')}
     ${pk.observaciones ? `<tr class="nota"><td colspan="7">${_esc(pk.observaciones).replace(/\n/g, '<br>')}</td></tr>` : ''}
   </tbody></table>
+  ${_pdfIGV.nota ? `<div style="margin-top:6px; font-size:10px; font-style:italic; color:#555;">${_pdfIGV.nota}</div>` : ''}
   <div class="letras">SON: ${numeroALetras(pk.total, pk.moneda)}</div>
   <table class="tot"><tr><td>OP. GRAVADA</td><td class="r">${f(pk.subtotal)}</td></tr>
     <tr><td>IGV 18%</td><td class="r">${f(pk.igv)}</td></tr><tr class="t"><td>TOTAL</td><td class="r">${f(pk.total)}</td></tr></table>

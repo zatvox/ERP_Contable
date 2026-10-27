@@ -217,8 +217,13 @@ export async function renderVentas(forzar = false) {
           <h3 class="card-title">Comprobantes de Venta</h3>
           <div style="display:flex; gap:8px;">
             <button id="btnEliminarVentasSeleccionadas" class="btn btn-danger btn-small" style="display:none;" onclick="window.eliminarVentasSeleccionadas()">🗑 Eliminar seleccionadas (0)</button>
-            <button class="btn btn-secondary btn-small" onclick="window.abrirModalImportarVentas()">📥 Importar</button>
             <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevaVenta()">+ Nueva Venta</button>
+            <div class="col-menu menu-tuerca">
+              <button type="button" class="card-menu-btn" onclick="event.stopPropagation(); this.parentElement.classList.toggle('open')" title="Más acciones">⚙️</button>
+              <div class="col-menu-dropdown">
+                <label onclick="this.closest('.col-menu').classList.remove('open'); window.abrirModalImportarVentas()">📥 Importar masivo</label>
+              </div>
+            </div>
           </div>
         </div>
         <div style="padding:12px 16px; border-bottom:1px solid var(--border-color, #e0e0e0); display:flex; gap:12px; flex-wrap:wrap; align-items:center;">

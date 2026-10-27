@@ -2562,3 +2562,64 @@ body.dark-mode .mon-pen { color: #6ee7b7; }
 .fila-ver { display:flex; align-items:center; gap:8px; }
 .fila-ver > .fila-ver-txt { flex:1; min-width:0; }
 .modal[data-modo="lectura"] input:disabled, .modal[data-modo="lectura"] select:disabled, .modal[data-modo="lectura"] textarea:disabled { opacity:1; cursor:default; }
+
+/* ============================================================================
+   DETALLE POR PESTAÑAS (2026-10-27) — shared/detalle-tabs.js
+   Cabecera-resumen fija + pestañas libres (estilo barra de la Liquidación).
+   ============================================================================ */
+.dt-wrap { display:flex; flex-direction:column; gap:12px; }
+.dt-cab > div:first-child { margin:0; }
+.dt-res { display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; padding:14px 16px;
+  background:var(--bg-secondary); border-radius:var(--radius-md); border-left:3px solid var(--color-info); }
+.dt-res .dt-k { font-size:.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary); }
+.dt-res .dt-nom { font-weight:600; font-size:1.05rem; margin-top:2px; }
+.dt-res .dt-sub { font-size:.85rem; color:var(--text-secondary); margin-top:2px; }
+.dt-res .dt-big { font-size:1.45rem; font-weight:700; text-align:right; line-height:1.2; }
+.dt-res .dt-big .mon { font-size:.55em; vertical-align:4px; }
+.dt-ins-fila { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+.dt-ins { font-size:.75rem; font-weight:600; padding:3px 9px; border-radius:999px; border:1px solid transparent; cursor:default; white-space:nowrap; }
+.dt-ins[data-dt-ir] { cursor:pointer; }
+.dt-ins.ok   { background:rgba(16,185,129,.12); color:#047857; border-color:rgba(16,185,129,.35); }
+.dt-ins.warn { background:rgba(245,158,11,.14); color:#b45309; border-color:rgba(245,158,11,.4); }
+body.dark-mode .dt-ins.ok   { color:#6ee7b7; }
+body.dark-mode .dt-ins.warn { color:#fcd34d; }
+.dt-tabs { display:flex; gap:4px; flex-wrap:wrap; border-bottom:2px solid var(--border-color); position:sticky; top:-20px; background:var(--bg-primary); z-index:2; padding-top:4px; }
+.dt-tab { display:inline-flex; align-items:center; gap:6px; padding:8px 14px; border:0; background:none; cursor:pointer;
+  color:var(--text-secondary); font-weight:600; font-size:.88rem; border-bottom:3px solid transparent; margin-bottom:-2px; border-radius:6px 6px 0 0; width:auto; }
+.dt-tab:hover { color:var(--text-primary); background:var(--bg-secondary); }
+.dt-tab.activa { color:var(--color-link); border-bottom-color:var(--color-link); }
+.dt-badge { font-size:.7rem; padding:0 6px; border-radius:999px; background:var(--bg-tertiary); color:var(--text-primary); }
+.dt-panel { min-height:300px; }
+.dt-panel .dt-h4 { margin:4px 0 8px !important; font-size:.95rem; color:var(--text-secondary); }
+.dt-panel .dt-h4 ~ .dt-h4 { margin-top:18px !important; }
+.dt-panel table.dt-2col tbody { display:grid; grid-template-columns:1fr 1fr; column-gap:18px; }
+.dt-panel table.dt-2col tr { display:grid; grid-template-columns:42% 58%; border-bottom:1px solid var(--border-color); }
+.dt-panel table.dt-2col td { width:auto !important; padding:8px 10px; }
+@media (max-width:720px) { .dt-panel table.dt-2col tbody { grid-template-columns:1fr; } }
+.dt-galeria { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:12px; }
+.dt-galeria .dt-adj { border:1px solid var(--border-color); border-radius:8px; padding:8px; display:flex; flex-direction:column; gap:6px; font-size:.78rem; }
+.dt-galeria .adj-thumb { width:100%; height:120px; flex:none; }
+
+/* Detalle con adjuntos en la cabecera (2026-10-27b): info a la izquierda (monto
+   en su esquina superior derecha), adjuntos a la derecha: 1ro mediano, resto chicos. */
+.dt-res.dt-res-adj { flex-wrap:nowrap; align-items:stretch; }
+.dt-res-info { flex:1; min-width:0; position:relative; }
+.dt-res-monto { float:right; margin:0 0 6px 16px; }
+.dt-cab-adj { display:flex; gap:8px; align-items:flex-start; flex:none; padding-left:14px; border-left:1px solid var(--border-color); }
+.dt-cab-adj-main { display:flex; flex-direction:column; gap:4px; width:132px; }
+.dt-cab-adj-item { position:relative; cursor:zoom-in; }
+.dt-cab-adj-item.grande .adj-thumb { width:132px; height:132px; flex:none; }
+.dt-cab-adj-item.chico  .adj-thumb { width:56px; height:56px; }
+.dt-cab-adj-mini { display:grid; grid-template-columns:repeat(2, 56px); gap:6px; }
+.dt-cab-adj-tag { position:absolute; left:3px; top:3px; font-size:9px; font-weight:700; text-transform:uppercase; padding:1px 4px; border-radius:3px; background:rgba(0,0,0,.6); color:#fff; pointer-events:none; }
+.dt-cab-adj-item.chico .dt-cab-adj-tag { font-size:8px; }
+.dt-cab-adj-link { font-size:.72rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:132px; }
+@media (max-width:720px) { .dt-res.dt-res-adj { flex-wrap:wrap; } .dt-cab-adj { border-left:0; padding-left:0; } }
+
+/* ⚙️ Tuerca de acciones secundarias de una tabla (importar, exportar,
+   anular correlativo…) — 2026-10-27. Reusa el dropdown de .col-menu. */
+.menu-tuerca .card-menu-btn { border: 1px solid var(--border-color); border-radius: var(--radius-sm, 6px); font-size: 1rem; letter-spacing: 0; }
+.menu-tuerca.open .card-menu-btn, .menu-tuerca .card-menu-btn:hover { background: var(--bg-tertiary, rgba(127,127,127,.12)); color: var(--text-primary); }
+.menu-tuerca .col-menu-dropdown label { cursor: pointer; white-space: nowrap; }
+.menu-tuerca .col-menu-dropdown label.peligro { color: var(--color-danger); }
+.badge-cotizacion { background-color: rgba(139, 92, 246, 0.18); color: #a78bfa; }

@@ -31,7 +31,8 @@ registrarColumnas('lotes', [
   { key: 'costo_unit',     label: 'Costo Unit.' },
   { key: 'costo_total',    label: 'Costo Total Lote' },
   { key: 'costo_cif',      label: 'Costo CIF / factura' },
-  { key: 'costo_real',     label: 'Costo real (editable)' },
+  { key: 'costo_real',     label: 'Costo real (contable)' },
+  { key: 'costo_comercial', label: 'Costo comercial' },
   { key: 'vencimiento',    label: 'Vencimiento' },
   { key: 'dias_restantes', label: 'Días Restantes' }
 ])

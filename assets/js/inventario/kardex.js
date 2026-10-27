@@ -61,7 +61,12 @@ export async function renderKardex() {
           <div style="display:flex; gap:8px; flex-wrap:wrap;">
             <button class="btn btn-primary btn-small" onclick="window.cargarKardex()">Ver Kardex</button>
             <button class="btn btn-secondary btn-small" onclick="window.abrirModalAjusteKardex()">+ Ajuste Inventario</button>
-            <button class="btn btn-secondary btn-small" onclick="window.exportarKardexExcel()" title="Exporta las filas seleccionadas (o todas si no marcas ninguna) con las columnas actualmente visibles">📊 Exportar Excel</button>
+            <div class="col-menu menu-tuerca">
+              <button type="button" class="card-menu-btn" onclick="event.stopPropagation(); this.parentElement.classList.toggle('open')" title="Más acciones">⚙️</button>
+              <div class="col-menu-dropdown">
+                <label onclick="this.closest('.col-menu').classList.remove('open'); window.exportarKardexExcel()">📊 Exportar Excel <small style="color:var(--text-secondary);">(seleccionadas o todas)</small></label>
+              </div>
+            </div>
           </div>
         </div>
         <div class="kardex-filtros-grid">

@@ -40,6 +40,7 @@ export const CONCEPTOS_CARPETA = {
   factura_gasto:   'Factura de gasto',
   rh:              'Recibo por honorarios',
   guia:            'Guía de remisión',
+  estadia:         'Constancia de estadía (naviera / terminal / SUNAT)',
   recibo:          'Recibo',
   otro:            'Otro'
 }
@@ -166,30 +167,96 @@ async function _pintarLista() {
   const cont = document.getElementById('acLista')
   if (!cont) return
   const adjs = await getAdjuntos('carpeta_importacion', _carpetaId)
-  if (!adjs.length) {
-    cont.innerHTML = `<p style="text-align:center; color:var(--text-secondary); padding:16px;">
-      Todavía no hay documentos. Empieza por la Proforma Invoice y la constancia del anticipo.</p>`
-    return
+  const d = window.hcUltimo?.d
+  const extra = d?.liq?.id ? await getAdjuntos('liquidacion_agente', d.liq.id) : []
+  const todos = [...adjs, ...extra]
+  const slots = window.hcDocSlots ? window.hcDocSlots(d || {}) : []
+  cont.innerHTML = window.acTarjetas(slots, todos, { gestion: true })
+}
+
+// ─── Tarjetas de documentos (compartidas: hoja de costeo y modal «Documentos») ──
+// Cada tarjeta = un tipo de documento: estado, miniatura clicable (lupa → visor grande),
+// nombre como enlace de descarga, y «＋» / arrastrar-y-soltar para adjuntar al instante.
+const _fmtKb = b => `${formatNumber((parseFloat(b) || 0) / 1024, 0)} KB`
+function _archivoHtml(a, gestion) {
+  const opts = gestion ? `<select class="dx-tipo" title="Cambiar el tipo de documento" onchange="window.acCambiarConcepto(${a.id}, this.value)">${Object.entries(CONCEPTOS_CARPETA).map(([k, l]) => `<option value="${k}" ${k === a.concepto ? 'selected' : ''}>${l}</option>`).join('')}</select>` : ''
+  return `<div class="dx-file"><span class="adj-thumb dx-thumb" data-adj-path="${esc_(a.path)}" data-adj-nombre="${esc_(a.nombre)}">…</span>
+    <div class="dx-fx"><a href="#" class="dx-link" title="Descargar ${esc_(a.nombre)}" onclick="event.preventDefault(); window.acDescargar(${a.id})">${esc_(a.nombre)}</a>
+    <small>${_fmtKb(a.tamano)} · ${fechaDMY(String(a.created_at || '').slice(0, 10))}</small>${opts}</div>
+    ${gestion ? `<button type="button" class="dx-x" title="Quitar" onclick="window.borrarAdjuntoCarpeta(${a.id}, '${(a.nombre || '').replace(/'/g, "\\'")}')">✕</button>` : ''}</div>`
+}
+const esc_ = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+function _tarjeta(sl, files, gestion) {
+  const ok = !!sl.ok || files.length > 0
+  const sube = sl.sube ? `window.acSubirA('${sl.sube}')` : (sl.subeFn || '')
+  return `<div class="dx-card ${ok ? 'ok' : 'vacio'}" ${sube ? `ondragover="event.preventDefault(); this.classList.add('dx-drop')" ondragleave="this.classList.remove('dx-drop')" ondrop="this.classList.remove('dx-drop'); window.acSoltar(event, '${sl.sube || ''}', ${sl.subeFn ? "'" + sl.subeFn.replace(/'/g, "&#39;") + "'" : "''"})"` : ''}>
+    <div class="dx-head"><span class="dx-ico">${sl.ico}</span><b>${sl.tit}</b>
+      <span class="dx-estado ${ok ? 'ok' : ''}">${ok ? '✔' : (sl.opcional ? 'Opcional' : 'Pendiente')}</span>
+      <span class="dx-acc">${sl.reg || ''}${sube ? `<button type="button" class="btn btn-secondary btn-small dx-mas" title="Adjuntar (o arrastra el archivo aquí)" onclick="${sube}">＋</button>` : ''}</span></div>
+    ${sl.sub ? `<div class="dx-sub">${sl.sub}</div>` : ''}
+    ${files.length ? `<div class="dx-files">${files.map(f => _archivoHtml(f, gestion)).join('')}</div>` : (sube ? '<div class="dx-vacio">Arrastra el archivo aquí o pulsa ＋</div>' : '')}
+  </div>`
+}
+function _mini(sl, files) {
+  const ok = !!sl.ok || files.length > 0
+  const f = files[0]
+  const img = f ? `<span class="adj-thumb dx-mt" data-adj-path="${esc_(f.path)}" data-adj-nombre="${esc_(f.nombre)}" title="${esc_(f.nombre)} — clic para ver en grande">…</span>` : `<span class="dx-mt dx-mt-vacio">${sl.ico}</span>`
+  const pg = sl.pago
+  const pbtn = pg ? `<button type="button" class="dx-pg" title="${esc_(pg.txt)}" onclick="event.stopPropagation(); ${pg.fn}">💳 Ver pago</button>` : ''
+  return `<div class="dx-mini ${ok ? 'ok' : 'vacio'}${pg ? ' con-pago' : ''}" onclick="window.abrirAdjuntosCarpeta()" title="${esc_(sl.tit)}${f ? '' : ' — sin archivo'}${pg ? ' · ' + esc_(pg.txt) : ''} · clic para gestionar">
+    <div class="dx-mw">${img}${pg ? '<span class="dx-pgb">💲</span>' : ''}${pbtn}${files.length > 1 ? `<span class="dx-n">${files.length}</span>` : ''}<span class="dx-ck ${ok ? 'ok' : ''}">${ok ? '✔' : ''}</span></div>
+    <div class="dx-cap">${sl.tit}</div></div>`
+}
+window.acTarjetas = function (slots, adjs, { gestion = false, compacto = false } = {}) {
+  window._acCache = Object.fromEntries((adjs || []).map(a => [a.id, a]))
+  const usados = new Set()
+  const html = (slots || []).map(sl => {
+    const files = (adjs || []).filter(a => !usados.has(a.id) && sl.match(a))
+    files.forEach(a => usados.add(a.id))
+    return compacto ? _mini(sl, files) : _tarjeta(sl, files, gestion)
+  })
+  const resto = (adjs || []).filter(a => !usados.has(a.id))
+  if (resto.length) html.push(compacto ? _mini({ ico: '📎', tit: 'Otros', ok: true }, resto) : _tarjeta({ ico: '📎', tit: 'Otros documentos', sube: 'otro', ok: true }, resto, gestion))
+  return `<div class="dx-grid${compacto ? ' dx-compacto' : ''}">${html.join('')}</div>`
+}
+
+/** Descarga con el nombre original (clic en el nombre del archivo). */
+window.acDescargar = async function (id) {
+  try {
+    const a = window._acCache?.[id]; if (!a) return
+    const url = await getUrlAdjunto(a.path, 600, a.nombre)
+    if (!url) throw new Error('Sin enlace')
+    const l = document.createElement('a'); l.href = url; l.download = a.nombre || ''; document.body.appendChild(l); l.click(); l.remove()
+  } catch (e) { showToast(e.message || 'No se pudo descargar', 'danger') }
+}
+
+async function _subirRapido(files, concepto) {
+  const id = carpetaActual(); if (!id) { showToast('Selecciona primero una carpeta', 'warning'); return }
+  const listos = [], errores = []
+  for (const f of files) {
+    const c = await _comprimir(f); const err = validarArchivoAdjunto(c)
+    if (err) errores.push(err); else listos.push({ file: c, concepto })
   }
-  cont.innerHTML = `
-    <table class="table">
-      <thead><tr><th>Tipo</th><th>Archivo</th><th style="text-align:right">Tamaño</th><th>Subido</th><th>Acciones</th></tr></thead>
-      <tbody>
-        ${adjs.map(a => `
-          <tr>
-            <td><select class="form-control" style="min-width:190px; padding:4px 6px;" title="Cambiar el tipo de documento" onchange="window.acCambiarConcepto(${a.id}, this.value)">
-              ${Object.entries(CONCEPTOS_CARPETA).map(([k, l]) => `<option value="${k}" ${k === a.concepto ? 'selected' : ''}>${l}</option>`).join('')}
-            </select></td>
-            <td>${a.nombre}</td>
-            <td style="text-align:right">${kb(a.tamano)}</td>
-            <td>${fechaDMY(String(a.created_at || '').slice(0, 10))}</td>
-            <td>
-              <button class="btn btn-small" onclick="window.verAdjuntoCarpeta(${a.id})">👁 Ver</button>
-              <button class="btn btn-small btn-danger" onclick="window.borrarAdjuntoCarpeta(${a.id}, '${(a.nombre || '').replace(/'/g, "\\'")}')">✕</button>
-            </td>
-          </tr>`).join('')}
-      </tbody>
-    </table>`
+  if (errores.length) showToast(errores[0], 'danger')
+  if (!listos.length) return
+  const user = await getCurrentUser()
+  const res = await subirAdjuntos('carpeta_importacion', id, listos, user?.db_id)
+  showToast(res?.errores?.length ? `${res.ok} subido(s). ${res.errores[0]}` : `${res.ok} documento(s) agregados`, res?.errores?.length ? 'warning' : 'success')
+  _carpetaId = id
+  if (document.getElementById('modal-adjuntos-carpeta')?.classList.contains('active') || document.getElementById('acLista')?.offsetParent) await _pintarLista()
+  window.renderHojaCosteo?.()
+}
+window.acSubirA = function (concepto) {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.multiple = true; inp.accept = 'application/pdf,image/*,.xlsx,.xls,.doc,.docx'
+  inp.setAttribute('data-sin-preview', '1')
+  inp.onchange = () => _subirRapido([...inp.files], concepto)
+  inp.click()
+}
+window.acSoltar = function (ev, concepto, fn) {
+  ev.preventDefault()
+  const files = [...(ev.dataTransfer?.files || [])]; if (!files.length) return
+  if (fn) { showToast('Este documento se adjunta desde su ventana propia', 'info'); try { new Function(fn)() } catch {} ; return }
+  _subirRapido(files, concepto || 'otro')
 }
 
 /** Corrige el tipo de un documento ya subido. */

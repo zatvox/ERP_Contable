@@ -11,7 +11,7 @@ import { TIPO_NC, TIPO_ND, esNota, nombreTipoComprobante } from '../notas.js'
 import { convertirEnBuscador, refrescarBuscador } from '../buscador-select.js'
 import { renderEditorCronograma, actualizarCronograma, leerCronograma, cargarCuotasExistentes } from '../cronograma.js'
 import { _invalidarCacheVentas } from './anulacion.js'
-import { _poblarSelectClientes, _poblarSelectVendedores } from './helpers.js'
+import { _poblarSelectClientes, _poblarSelectVendedores, calcLineaIGV, tipoIGVUI, precioUI } from './helpers.js'
 import { _esc } from './init.js'
 import { _guardarCuotasDeCxC } from './venta-nueva.js'
 import { _ventasListaEnriquecida, renderVentas } from './ventas-lista.js'
@@ -344,16 +344,14 @@ function _pintarLineasEdicionVenta() {
       <td style="text-align:right;">${(parseFloat(d.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 3 })}</td>
       <td>${_esc(d.unidad_medida || '-')}</td>
       <td style="text-align:right;">
-        <input type="number" step="0.000001" min="0.000001" value="${parseFloat(d.precio_unitario || 0)}"
+        <input type="number" step="0.000001" min="0.000001" value="${precioUI(d)}"
           id="evLineaPrecio-${idx}" style="width:100px; text-align:right;" ${(_evModoVista || c.bloqueos.precios) ? 'disabled' : ''}
           oninput="window.onCambiarLineaPrecioEdicion(${idx})">
       </td>
       <td>
         <select id="evLineaTipo-${idx}" ${(_evModoVista || c.bloqueos.precios) ? 'disabled' : ''} onchange="window.onCambiarLineaPrecioEdicion(${idx})">
-          <option value="gravada"${d.tipo_base === 'gravada' ? ' selected' : ''}>Gravada 18%</option>
-          <option value="gravada_incluido" title="El precio unitario que escribas ya trae el IGV incluido; se normaliza a la base al guardar.">Gravada 18% (incluido)</option>
-          <option value="exonerada"${d.tipo_base === 'exonerada' ? ' selected' : ''}>Exonerada</option>
-          <option value="inafecta"${d.tipo_base === 'inafecta' ? ' selected' : ''}>Inafecta</option>
+          ${[['gravada', 'Gravada 18%'], ['gravada_incluido', 'Gravada 18% (incluido)'], ['exonerada', 'Exonerada'], ['inafecta', 'Inafecta']]
+            .map(([v, t]) => `<option value="${v}"${tipoIGVUI(d) === v ? ' selected' : ''}>${t}</option>`).join('')}
         </select>
       </td>
       <td style="text-align:right;" id="evLineaSubtotal-${idx}">${parseFloat(d.subtotal || 0).toFixed(2)}</td>
@@ -373,32 +371,17 @@ window.onCambiarLineaPrecioEdicion = function (idx) {
   const tipoBase = document.getElementById(`evLineaTipo-${idx}`)?.value || 'gravada'
   const cantidad = parseFloat(d.cantidad) || 0
 
-  // "Gravada 18% (incluido)" es solo un modo de captura (igual que en
-  // Agregar Producto/Editar Línea de venta): el precio que se escribe ya
-  // trae el IGV incluido, y se normaliza a la base SIN IGV antes de guardar
-  // — tipo_base se persiste como 'gravada' (el CHECK de detalle_ventas no
-  // tiene un valor aparte para esto).
-  const igvIncluido = tipoBase === 'gravada_incluido'
-  const tipoBaseGuardar = igvIncluido ? 'gravada' : tipoBase
-  const igvPct = (tipoBase === 'gravada' || igvIncluido) ? 18 : 0
-
-  let subtotal, igvMonto, totalLinea, precioGuardar
-  if (igvIncluido && cantidad > 0) {
-    totalLinea = parseFloat((cantidad * precio).toFixed(2))
-    subtotal   = parseFloat((totalLinea / 1.18).toFixed(2))
-    igvMonto   = parseFloat((totalLinea - subtotal).toFixed(2))
-    precioGuardar = parseFloat((subtotal / cantidad).toFixed(6))
-  } else {
-    subtotal  = parseFloat((cantidad * precio).toFixed(2))
-    igvMonto  = parseFloat((subtotal * igvPct / 100).toFixed(2))
-    totalLinea = parseFloat((subtotal + igvMonto).toFixed(2))
-    precioGuardar = precio
-  }
+  // sql/114: "incluido" se guarda tal cual (igv_incluido + precio_con_igv);
+  // precio_unitario = base sin IGV.
+  const k = calcLineaIGV(cantidad, precio, tipoBase)
+  const subtotal = k.subtotal, igvMonto = k.igv_monto, totalLinea = k.total_linea
 
   // Se guarda en memoria (no en BD todavía) — recién se persiste al confirmar
   // "Guardar y propagar cambios", igual que el resto del formulario.
-  d._precioNuevo = precioGuardar
-  d._tipoBaseNuevo = tipoBaseGuardar
+  d._precioNuevo = k.precio_unitario
+  d._tipoBaseNuevo = k.tipo_base
+  d._igvInclNuevo = k.igv_incluido
+  d._precioConIgvNuevo = k.precio_con_igv
   d._subtotalNuevo = subtotal
   d._igvMontoNuevo = igvMonto
   d._totalLineaNuevo = totalLinea
@@ -659,13 +642,17 @@ window.guardarEdicionVenta = async function () {
 
         const precioCambio = d._precioNuevo != null && Math.abs(d._precioNuevo - precioOriginal) > 0.0001
         const tipoCambio_  = d._tipoBaseNuevo != null && d._tipoBaseNuevo !== tipoOriginal
-        if (precioCambio || tipoCambio_) {
+        const inclCambio   = d._igvInclNuevo != null && (d._igvInclNuevo !== !!d.igv_incluido ||
+          (d._igvInclNuevo && Math.abs((+d._precioConIgvNuevo || 0) - (+d.precio_con_igv || 0)) > 0.0000005))
+        if (precioCambio || tipoCambio_ || inclCambio) {
           huboCambioPrecios = true
           detallesCambiados.push({
             id: d.id,
             precio_unitario: d._precioNuevo ?? precioOriginal,
             tipo_base: d._tipoBaseNuevo ?? tipoOriginal,
             igv_porcentaje: (d._tipoBaseNuevo ?? tipoOriginal) === 'gravada' ? 18 : 0,
+            igv_incluido: d._igvInclNuevo ?? !!d.igv_incluido,
+            precio_con_igv: (d._igvInclNuevo ?? !!d.igv_incluido) ? (d._precioConIgvNuevo ?? d.precio_con_igv) : null,
             subtotal, igv_monto: igvMonto, total_linea: totalLinea
           })
         }
@@ -748,7 +735,9 @@ window.guardarEdicionVenta = async function () {
             igv_porcentaje: dc.igv_porcentaje,
             subtotal: dc.subtotal,
             igv_monto: dc.igv_monto,
-            total_linea: dc.total_linea
+            total_linea: dc.total_linea,
+            igv_incluido: dc.igv_incluido,
+            precio_con_igv: dc.precio_con_igv
           })
         } catch (e) {
           console.warn(`Línea ${dc.id} no actualizada:`, e.message)

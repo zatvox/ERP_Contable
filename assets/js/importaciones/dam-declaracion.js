@@ -41,8 +41,8 @@ const CAMPOS = [
   ['a_bl', 'A', '7.2', 'N° de B/L', 'text'],
   ['a_femb', 'A', '7.2', 'Fecha de embarque', 'date'],
   ['a_bultos', 'A', '7.12', 'Cantidad de bultos', 'num', TOL.int, 'Los bultos no coinciden con el BL / packing list.'],
-  ['a_bruto', 'A', '7.14', 'Peso bruto (kg)', 'num', TOL.kg, 'El peso bruto difiere del BL. Puede deberse al pesaje del terminal; confírmalo.'],
-  ['a_neto', 'A', '7.15', 'Peso neto (kg)', 'num', TOL.kg, 'El peso neto no coincide con el CI / packing list.'],
+  ['a_bruto', 'A', '7.15', 'Peso bruto (kg)', 'num', TOL.kg, 'El peso bruto difiere del BL. Puede deberse al pesaje del terminal; confírmalo.'],
+  ['a_neto', 'A', '7.14', 'Peso neto (kg)', 'num', TOL.kg, 'El peso neto no coincide con el CI / packing list.'],
   ['a_partida', 'A', '7.19', 'Subpartida nacional', 'text'],
   ['a_origen', 'A', '7.20', 'País de origen', 'text'],
   ['a_factura', 'A', '7.36', 'N° de factura comercial', 'text'],
@@ -69,7 +69,7 @@ const CAMPOS = [
   ['t_total', 'T', 'Liq.', 'Total liquidación (USD)', 'num', TOL.money],
   ['t_tc', 'T', '—', 'T.C. venta SUNAT', 'num', 0.0005],
   ['t_cancel', 'T', '—', 'Monto cancelado en soles (S/)', 'num', 1],
-  ['t_percep', 'T', '—', 'Percepción IGV (S/) — referencial', 'num', 1, 'La percepción depende de tu régimen (3.5 % / 5 % / 10 %): confírmala con tu agente.']
+  ['t_percep', 'T', '—', 'Percepción IGV (S/) — referencial', 'num', 1, 'Mayor entre 3.5 % × (valor aduana + tributos) y el monto fijo SUNAT × kg si la subpartida es «sensible al fraude» (DS 104-2026-EF). Confírmala con tu agente.']
 ]
 
 let _ctx = null    // { dam, ci, bls, bl, lineas, prov, emp, tasas }
@@ -110,7 +110,7 @@ function _propuesta() {
     b_fobunit: kg ? +(fob / kg).toFixed(6) : null, b_cantidad: kg, b_precio: n0(ci.valor_total_final_ci) || cif, b_otros: 0, b_transporte: flete,
     c_precio: n0(ci.valor_total_final_ci) || cif, c_indirectos: 0, c_declarado: cif,
     t_adv: adv, t_igv: igv, t_ipm: ipm, t_total: total, t_tc: tc || null, t_cancel: tc ? total * tc : null,
-    t_percep: tc ? (cif + adv + igv + ipm) * tc * tasas.per / 100 : null
+    t_percep: tc ? (window.calcularPercepcion ? window.calcularPercepcion({ baseSoles: (cif + adv + igv + ipm) * tc, kg, subpartida: dam.subpartida || lineas[0]?.partida_arancelaria, tasa: tasas.per }).monto : (cif + adv + igv + ipm) * tc * tasas.per / 100) : null
   }
   return p
 }

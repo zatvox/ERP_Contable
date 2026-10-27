@@ -130,8 +130,13 @@ function _esqueleto(card, id) {
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding-right:34px;">
         <h3 class="card-title">${_esc(opts.titulo)}</h3>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          <button class="btn btn-secondary btn-small" onclick="window._ctTabla('${id}','excel')">📊 Exportar Excel</button>
           <button class="btn btn-primary btn-small" onclick="window._ctTabla('${id}','nuevo')">+ Nuevo contacto</button>
+          <div class="col-menu menu-tuerca">
+            <button type="button" class="card-menu-btn" onclick="event.stopPropagation(); this.parentElement.classList.toggle('open')" title="Más acciones">⚙️</button>
+            <div class="col-menu-dropdown">
+              <label onclick="this.closest('.col-menu').classList.remove('open'); window._ctTabla('${id}','excel')">📊 Exportar Excel</label>
+            </div>
+          </div>
         </div>
       </div>
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; align-items:end;">

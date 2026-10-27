@@ -10,7 +10,7 @@
 //       <span class="adj-thumb" data-adj-path="ruta" data-adj-nombre="x.pdf"></span>
 //     y el observer los hidrata solo (URL firmada). Clic → visor grande.
 // ============================================================================
-import { getUrlAdjunto } from '../supabase-data.js'
+import { getUrlAdjunto, getUrlsAdjuntos } from '../supabase-data.js'
 
 const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/'
 let _pdfjsProm = null
@@ -115,12 +115,30 @@ setInterval(() => {
 
 // ── 3) Adjuntos ya guardados: hidratar <span class="adj-thumb" data-adj-path> ─
 const _cacheUrl = new Map()
+// Las miniaturas que aparecen juntas piden su URL firmada en UNA sola llamada (antes: 1 por miniatura).
+let _cola = new Map(), _timer = null
+function _urlDe(path) {
+  if (_cacheUrl.has(path)) return Promise.resolve(_cacheUrl.get(path))
+  return new Promise((ok, ko) => {
+    const e = _cola.get(path) || { res: [] }; e.res.push({ ok, ko }); _cola.set(path, e)
+    if (_timer) return
+    _timer = setTimeout(async () => {
+      const lote = _cola; _cola = new Map(); _timer = null
+      try {
+        const m = await getUrlsAdjuntos([...lote.keys()], 3600)
+        for (const [p, e2] of lote) { const u = m[p] || null; if (u) _cacheUrl.set(p, u); e2.res.forEach(r => u ? r.ok(u) : r.ko(new Error('sin url'))) }
+      } catch (err) {
+        // si falla el lote, cada una intenta por su cuenta
+        for (const [p, e2] of lote) { try { const u = await getUrlAdjunto(p, 3600); _cacheUrl.set(p, u); e2.res.forEach(r => r.ok(u)) } catch (e3) { e2.res.forEach(r => r.ko(e3)) } }
+      }
+    }, 25)
+  })
+}
 async function _hidratar(el) {
   el.dataset.ok = '1'
   const path = el.dataset.adjPath, nombre = el.dataset.adjNombre || path
   try {
-    let url = _cacheUrl.get(path)
-    if (!url) { url = await getUrlAdjunto(path, 3600); _cacheUrl.set(path, url) }
+    const url = await _urlDe(path)
     if (!url) throw new Error('sin url')
     el.title = `${nombre} — clic para ver en grande`
     el.onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); abrirVisor(url, '', nombre) }

@@ -10,6 +10,7 @@
 import { getCurrentUser } from './auth-supabase.js'
 import { supabase } from './supabase-client.js'
 import { miniaturaArchivoHTML, pintarMiniaturaArchivo } from './shared/adj-preview.js'
+import { tabularDetalle, dtInsignia } from './shared/detalle-tabs.js'
 import { getTipoCambioDia } from './sunat-api.js'
 import {
   getCuentasCobrar, updateCuentaCobrar,
@@ -3120,7 +3121,6 @@ window.verDetalleCP = async function(tipo, id) {
         ${fila('Banco', _esc(_bancosMap[reg.banco_id]?.nombre || '—'))}
         ${fila('Referencia / N° operación', _esc(reg.referencia || reg.numero_operacion || '—'))}
         ${fila('Observaciones', _esc(reg.observaciones || '—'))}
-        ${fila('📎 Archivos adjuntos', _htmlAdjuntos(tipo, reg.id, adjuntos, false))}
         ${fila('Registrado', reg.created_at ? new Date(reg.created_at).toLocaleString('es-PE') : '—')}
       </table>
 
@@ -3167,6 +3167,35 @@ window.verDetalleCP = async function(tipo, id) {
         ${fila('Conciliado', mov.reconciliado ? 'Sí' : 'No')}
         ${fila('Vínculo', movRes.modo === 'vinculado' ? 'Directo' : 'Por coincidencia (registro antiguo)')}
       </table>` : `<p style="color:var(--text-secondary);">${movRes.modo === 'ambiguo' ? 'Varios movimientos coinciden: revisa Bancos.' : 'Sin movimiento bancario.'}</p>`}`
+
+    // ── Vista por pestañas (2026-10-27) ──
+    const monB = _bancosMap[mov?.banco_id || reg.banco_id]?.moneda
+    const otraMon = mov && _monCod(monB) !== _monCod(reg.moneda)
+    const cab = `<div class="dt-res dt-res-adj">
+        <div class="dt-res-info">
+          <div class="dt-res-monto">
+            <div class="dt-k" style="text-align:right;">Monto</div>
+            <div class="dt-big">${_fm(reg.monto, reg.moneda)}</div>
+            ${otraMon ? `<div class="dt-sub" style="text-align:right;">Entró: ${_fm(mov.monto, monB)} · T.C. ${reg.tipo_cambio ?? '—'}</div>` : ''}
+            ${esCobro && parseFloat(reg.monto_retencion || 0) > 0 ? `<div class="dt-sub" style="text-align:right;">+ Ret. ${_fm(reg.monto_retencion, reg.moneda)}</div>` : ''}
+          </div>
+          <div class="dt-k">${esCobro ? 'Cliente' : 'Proveedor'}${doc ? ` · ${_esc(_descDocCP(doc))}` : ''}${esCobro && reg.numero_recibo ? ` · Recibo ${_esc(reg.numero_recibo)}` : ''}</div>
+          <div class="dt-nom">${_esc(_nombreContacto(reg.contact_id))}</div>
+          <div class="dt-sub">${fechaDMY(reg.fecha)} · ${_esc(reg.medio_pago || '—')} · ${_esc(_bancosMap[reg.banco_id]?.nombre || 'sin cuenta')}${reg.referencia || reg.numero_operacion ? ` · Op. ${_esc(reg.referencia || reg.numero_operacion)}` : ''}</div>
+          <div class="dt-ins-fila">
+            ${dtInsignia(asiento?.id ? `Asiento ${_esc(asiento.numero_asiento || '')}` : 'Sin asiento', !!asiento?.id, 'Asiento')}
+            ${dtInsignia(mov ? `Banco ${_numMB(mov.id)}` : 'Sin mov. bancario', !!mov || !reg.banco_id, 'Banco')}
+            ${adjuntos.length ? '' : dtInsignia('Sin archivos', false)}
+            ${doc ? dtInsignia(`Saldo doc. ${_monCod(doc.moneda)} ${formatNumber(Math.max(0, saldoDoc))}`, saldoDoc <= 0.01, 'Documento') : ''}
+          </div>
+        </div>
+        ${_htmlAdjCabecera(adjuntos)}
+      </div>`
+    tabularDetalle(body, {
+      cabecera: cab, primerTab: [esCobro ? '💵' : '💸', esCobro ? 'Cobro' : 'Pago'],
+      mapa: { 'Recibo': ['🧾', 'Recibo'], 'Documento': ['📄', 'Documento'], 'Asiento': ['📒', 'Asiento'], 'Movimiento': ['🏦', 'Banco'] },
+      unir: ['Cuotas'],
+    })
   } catch (e) {
     console.error('verDetalleCP:', e)
     body.innerHTML = `<p style="color:var(--color-danger);">Error: ${_esc(e.message)}</p>`
@@ -3505,6 +3534,19 @@ async function _verDetalleDocCP(tipoDoc, docId) {
         <tbody>${cuotas.map(q => `<tr><td>${q.numero_cuota}</td><td>${fechaDMY(q.fecha_vencimiento)}</td><td style="text-align:right;">${formatNumber(q.monto)}</td><td style="text-align:right;">${formatNumber(saldoCuota(q))}</td><td>${q.estado}</td>
           <td style="white-space:nowrap;">${_botonesCuota(tipoDoc, q.id)}</td></tr>`).join('')}</tbody>
       </table>` : ''}`
+
+    // ── Vista por pestañas (2026-10-27): la info-card queda fija arriba ──
+    const cardDoc = body.firstElementChild
+    if (cardDoc) cardDoc.insertAdjacentHTML('beforeend', `<div class="dt-ins-fila">
+        ${dtInsignia(`Pendiente ${_monCod(doc.moneda)} ${formatNumber(Math.max(0, pendiente))}`, pendiente <= 0.01, 'Resumen')}
+        ${dtInsignia(`${movs.length} ${esCxC ? 'cobro' : 'pago'}(s)`, true, esCxC ? 'Cobros' : 'Pagos')}
+        ${letrasDoc.length ? dtInsignia(`${letrasDoc.length} letra(s)`, true, 'Letras') : ''}
+        ${dtInsignia(doc.estado || '—', ['cobrado', 'pagado'].includes(doc.estado))}
+      </div>`)
+    tabularDetalle(body, {
+      usarPrimerBloqueComoCabecera: true, primerTab: ['📊', 'Resumen'],
+      mapa: { 'Cobros': ['💵', 'Cobros'], 'Pagos': ['💸', 'Pagos'], 'Letras': ['⇄', 'Letras'], 'Cuotas': ['📅', 'Cuotas'] }
+    })
   } catch (e) {
     console.error('_verDetalleDocCP:', e)
     body.innerHTML = `<p style="color:var(--color-danger);">Error: ${_esc(e.message)}</p>`
@@ -4808,6 +4850,18 @@ window.verDetalleLetra = async function (id) {
           <td style="text-align:right;">${formatNumber(abonos.reduce((t, a) => t + _n(a.gasto_portes) + _n(a.gasto_comision) + _n(a.gasto_otros), 0))}</td>
           <td style="text-align:right;">${formatNumber(abonos.reduce((t, a) => t + Math.abs(_n(a.monto_neto)), 0))}</td><td colspan="2"></td></tr></tfoot>`)
       : `<p style="color:var(--text-secondary);">${l.estado === 'refinanciada' ? 'Sin abonos directos: su saldo pasó a la refinanciación.' : 'Aún sin abonos.'}</p>`}`
+
+    // ── Vista por pestañas (2026-10-27) ──
+    const cardL = body.firstElementChild
+    if (cardL) cardL.insertAdjacentHTML('beforeend', `<div class="dt-ins-fila" style="flex-basis:100%;">
+        ${dtInsignia(l.estado, ['cobrada', 'pagada'].includes(l.estado) || !abierta)}
+        ${dtInsignia(`${abonos.length} abono(s)`, true, 'Abonos')}
+        ${abierta && _diasAtraso(l.fecha_vencimiento) ? dtInsignia(`${_diasAtraso(l.fecha_vencimiento)} d de atraso`, false) : ''}
+      </div>`)
+    tabularDetalle(body, {
+      usarPrimerBloqueComoCabecera: true, primerTab: ['📋', 'Datos'],
+      mapa: { 'Abonos': ['💵', 'Abonos'], 'Nace de': ['🔗', 'Origen'], 'Renovada': ['🔗', 'Refinanciación'], 'Unificada': ['🔗', 'Refinanciación'] }
+    })
   } catch (e) {
     console.error('verDetalleLetra:', e)
     body.innerHTML = `<p style="color:var(--color-danger);">Error: ${_esc(e.message)}</p>`
@@ -5438,6 +5492,29 @@ function _htmlAdjuntos(entidad, id, adjuntos, conQuitar) {
       <a href="#" onclick="window.verAdjunto(${a.id}, '${a.path}'); return false;">${_esc(a.nombre)}</a>
       ${conQuitar ? `· <a href="#" style="color:var(--color-danger);" onclick="window.quitarAdjunto('${entidad}', ${id}, ${a.id}); return false;">Quitar</a>` : ''}
     </div>`).join('')
+}
+
+/** Adjuntos en la cabecera del detalle: el 1ro mediano, los demás chicos a su derecha. */
+function _htmlAdjCabecera(adjuntos) {
+  if (!adjuntos?.length) return ''
+  const th = (a, cls) => `<div class="dt-cab-adj-item ${cls}" title="${_esc(ADJ_CONCEPTOS[a.concepto] || a.concepto)} · ${_esc(a.nombre)} — clic para ver en grande">
+      <span class="adj-thumb" data-adj-path="${_esc(a.path)}" data-adj-nombre="${_esc(a.nombre)}">…</span>
+      <span class="dt-cab-adj-tag">${_esc(ADJ_CONCEPTOS[a.concepto] || a.concepto)}</span></div>`
+  const [p, ...resto] = adjuntos
+  return `<div class="dt-cab-adj">
+      <div class="dt-cab-adj-main">${th(p, 'grande')}
+        <a href="#" class="dt-cab-adj-link" title="Abrir en otra pestaña" onclick="window.verAdjunto(${p.id}, '${p.path}'); return false;">↗ ${_esc(p.nombre)}</a></div>
+      ${resto.length ? `<div class="dt-cab-adj-mini">${resto.map(a => th(a, 'chico')).join('')}</div>` : ''}
+    </div>`
+}
+
+/** Galería de adjuntos (pestaña 📎 de los detalles). */
+function _htmlGaleriaAdjuntos(adjuntos) {
+  if (!adjuntos?.length) return '<p style="color:var(--text-secondary);">Sin archivos adjuntos.</p>'
+  return `<div class="dt-galeria">${adjuntos.map(a => `<div class="dt-adj">
+      <span class="adj-thumb" data-adj-path="${_esc(a.path)}" data-adj-nombre="${_esc(a.nombre)}">…</span>
+      <span class="badge badge-info" style="font-size:0.68rem; align-self:flex-start;">${ADJ_CONCEPTOS[a.concepto] || a.concepto}</span>
+      <a href="#" style="word-break:break-all;" onclick="window.verAdjunto(${a.id}, '${a.path}'); return false;">${_esc(a.nombre)}</a></div>`).join('')}</div>`
 }
 
 function _clipAdjunto(entidad, id) {

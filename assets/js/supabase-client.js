@@ -168,6 +168,7 @@ let _ultimoErrorInsert = null
 export function ultimoErrorInsert() { return _ultimoErrorInsert }
 
 export async function insert(table, data) {
+  _enVuelo.clear()
   _ultimoErrorInsert = null
   await esperarContextoEmpresa()
   try {
@@ -203,6 +204,7 @@ function _interpretarErrorInsert(error, tabla) {
 }
 
 export async function update(table, id, data) {
+  _enVuelo.clear()
   await esperarContextoEmpresa()
   try {
     // Nunca enviar 'id' ni 'created_at' en el payload: las PK son GENERATED ALWAYS (error 428C9)
@@ -222,6 +224,7 @@ let _ultimoErrorDelete = null
 export function ultimoErrorDelete() { return _ultimoErrorDelete }
 
 export async function deleteRecord(table, id) {
+  _enVuelo.clear()
   _ultimoErrorDelete = null
   try {
     const { error } = await supabase.from(table).delete().eq('id', id)
@@ -268,8 +271,24 @@ function _interpretarErrorDelete(error, tabla) {
   return { codigo, tabla: null, mensaje: error?.message || 'error desconocido' }
 }
 
+// Lecturas idénticas SIMULTÁNEAS comparten una sola petición (la pantalla de importaciones
+// pedía la misma tabla 3-6 veces a la vez). Solo vive mientras la petición está en vuelo
+// y se vacía en cada escritura, así nunca devuelve datos viejos.
+const _enVuelo = new Map()
+export function descartarLecturasEnVuelo() { _enVuelo.clear() }
+
 export async function query(table, filters = {}) {
   await esperarContextoEmpresa()
+  let key = null
+  try { key = `${table}|${JSON.stringify(filters)}|${JSON.stringify(empresasActivasCtx())}` } catch { /* sin clave: va directo */ }
+  if (!key) return _queryReal(table, filters)
+  let p = _enVuelo.get(key)
+  if (!p) { p = _queryReal(table, filters).finally(() => { if (_enVuelo.get(key) === p) _enVuelo.delete(key) }); _enVuelo.set(key, p) }
+  const r = await p
+  return Array.isArray(r) ? r.slice() : r
+}
+
+async function _queryReal(table, filters = {}) {
   try {
     let q = supabase.from(table).select('*')   // ídem: ya viene filtrado por empresa
     // Si un filtro llega en undefined/null (ej. función invocada sin argumento),

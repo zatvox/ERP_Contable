@@ -222,25 +222,10 @@ export function _stockTotalPorItem(itemId) {
 // disponible del producto (el campo queda editable: es solo una sugerencia
 // inicial, ahora que ya no hay un único lote elegido del que tomar el dato).
 export function _sugerirUnidadesLineaVenta() {
-  const inpUnid = document.getElementById('ventaLineaCantUnidades')
+  // 2026-10-27 pesaje: el kg ahora sale de N° unidades × peso por caja
+  // (linea-pesaje.js). Acá solo se sugiere el peso/caja como placeholder.
   const itemId = parseInt(document.getElementById('ventaItemSelect')?.value || 0)
-  const { totalKg, totalUnid } = _stockTotalPorItem(itemId)
-
-  if (inpUnid) {
-    const cantidad = parseFloat(document.getElementById('ventaLineaCantidad')?.value || 0)
-    if (itemId && totalKg > 0 && totalUnid > 0) {
-      const pesoPorUnidadProm = totalKg / totalUnid
-      inpUnid.value = parseFloat((cantidad / pesoPorUnidadProm).toFixed(2))
-      inpUnid.placeholder = 'Aproximado (promedio del stock) — ajusta si hace falta'
-    } else {
-      inpUnid.value = ''
-      inpUnid.placeholder = itemId ? 'Este producto no trackea unidades' : '—'
-    }
-  }
-
-  // Centralizado acá porque este helper ya se llama desde los puntos que
-  // pueden cambiar el total de la línea (producto, cantidad) — evita
-  // repetir la llamada en cada handler.
+  window._pesajeSugerir?.('venta', itemId)
   window._actualizarPreviewLineaVenta()
 }
 
@@ -292,52 +277,9 @@ function _nombreZona(ubicacionId) {
  * Guía de Despacho, acá solo se valida que la suma alcance.
  */
 export function _actualizarAvisoStockLineaVenta() {
-  const aviso = document.getElementById('ventaLineaStockAviso')
-  const panelLotes = document.getElementById('ventaLineaDesgloseLotes')
-  if (!aviso) return
   const itemId = parseInt(document.getElementById('ventaItemSelect')?.value || 0)
   const cantidad = parseFloat(document.getElementById('ventaLineaCantidad')?.value || 0)
-
-  if (!itemId) {
-    aviso.textContent = 'Selecciona un producto para ver su stock disponible.'
-    aviso.style.color = 'var(--text-secondary)'
-    if (panelLotes) panelLotes.innerHTML = ''
-    return
-  }
-
-  const { totalKg, totalUnid, lotes } = _stockTotalPorItem(itemId)
-  const insuficiente = cantidad > 0 && cantidad > totalKg
-
-  aviso.textContent = lotes.length === 0
-    ? 'Sin stock disponible en ninguna zona para este producto.'
-    : `Stock TOTAL disponible: ${formatQty(totalKg)} kg` +
-      (totalUnid > 0 ? ` / ${formatQty(totalUnid)} und` : '') +
-      ` (en ${lotes.length} lote${lotes.length === 1 ? '' : 's'})` +
-      (insuficiente ? ' — INSUFICIENTE para la cantidad pedida' : '')
-  aviso.style.color = lotes.length === 0 ? 'var(--color-warning)' : (insuficiente ? 'var(--color-danger)' : 'var(--color-success)')
-
-  // Desglose FIFO: qué lotes/zonas cubrirían la cantidad pedida si se
-  // despachara ahora — puramente informativo, no se guarda nada de esto.
-  if (panelLotes) {
-    if (lotes.length === 0) {
-      panelLotes.innerHTML = ''
-    } else {
-      let restante = cantidad > 0 ? cantidad : 0
-      panelLotes.innerHTML = '<table style="width:100%; border-collapse:collapse;">' +
-        '<tr style="color:var(--text-secondary);"><td style="padding:2px 6px 2px 0;">Lote</td><td style="padding:2px 6px;">Zona</td><td style="padding:2px 6px; text-align:right;">Disp. kg</td><td style="padding:2px 0; text-align:center;">Usaría</td></tr>' +
-        lotes.map(l => {
-          const usa = restante > 0 ? Math.min(restante, l.disp) : 0
-          restante = parseFloat((restante - usa).toFixed(4))
-          return `<tr>` +
-            `<td style="padding:2px 6px 2px 0;">${_esc(l.numero_lote)}</td>` +
-            `<td style="padding:2px 6px;">${_esc(l.zonaNombre)}</td>` +
-            `<td style="padding:2px 6px; text-align:right;">${formatQty(l.disp)}</td>` +
-            `<td style="padding:2px 0; text-align:center;">${usa > 0 ? '✓ ' + formatQty(usa) + ' kg' : '—'}</td>` +
-          `</tr>`
-        }).join('') +
-        '</table>'
-    }
-  }
+  window._pesajePanel?.({ pfx: 'venta', avisoId: 'ventaLineaStockAviso', panelId: 'ventaLineaDesgloseLotes', itemId, cantidad })
 }
 
 /**
@@ -385,4 +327,42 @@ window.onCambiarItemLineaVenta = async function () {
 window.onCambiarCantidadLineaVenta = function () {
   _sugerirUnidadesLineaVenta()
   _actualizarAvisoStockLineaVenta()
+}
+
+// ============================================================================
+// IGV incluido (sql/114, 2026-10-27) — una línea "Gravada 18% (incluido)" se
+// guarda tal cual: igv_incluido=true + precio_con_igv (lo que escribió el
+// usuario). precio_unitario sigue siendo la base SIN IGV para SUNAT/reportes.
+// ============================================================================
+
+/** Tipo de IGV como lo eligió el usuario (para selects, badges y PDFs). */
+export const tipoIGVUI = l => (l?.igv_incluido ? 'gravada_incluido' : (l?.tipo_base || 'gravada'))
+
+/** Precio como lo escribió el usuario (con IGV si fue "incluido"). */
+export const precioUI = l => (l?.igv_incluido && +l.precio_con_igv > 0 ? +l.precio_con_igv : +(l?.precio_unitario || 0))
+
+export const NOMBRE_TIPO_IGV = { gravada: 'Gravada 18%', gravada_incluido: 'Gravada 18% (incluido)', exonerada: 'Exonerada', inafecta: 'Inafecta' }
+
+/**
+ * Cálculo único de una línea. `precio` es el que escribió el usuario según
+ * `tipoUI` (con IGV si es 'gravada_incluido'). Devuelve los campos a guardar.
+ * Con "incluido" el TOTAL = cant × precio exacto al céntimo y la base se
+ * deriva de él (total / 1.18), igual que antes.
+ */
+export function calcLineaIGV(cant, precio, tipoUI) {
+  cant = +cant || 0; precio = +precio || 0
+  const incl = tipoUI === 'gravada_incluido'
+  const pct = (tipoUI === 'gravada' || incl) ? 18 : 0
+  let subtotal, igv, total, base
+  if (incl) {
+    total = +(cant * precio).toFixed(2); subtotal = +(total / 1.18).toFixed(2); igv = +(total - subtotal).toFixed(2)
+    base = cant > 0 ? +(subtotal / cant).toFixed(6) : +(precio / 1.18).toFixed(6)
+  } else {
+    subtotal = +(cant * precio).toFixed(2); igv = +(subtotal * pct / 100).toFixed(2); total = +(subtotal + igv).toFixed(2); base = precio
+  }
+  return {
+    subtotal, igv_monto: igv, total_linea: total, precio_unitario: base,
+    tipo_base: incl ? 'gravada' : tipoUI, igv_porcentaje: pct,
+    igv_incluido: incl, precio_con_igv: incl ? +precio.toFixed(6) : null,
+  }
 }

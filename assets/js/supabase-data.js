@@ -942,6 +942,17 @@ export async function getUrlAdjunto(path, expiresIn = 3600, descargarComo = null
   return data?.signedUrl || null
 }
 
+/** URLs firmadas de VARIOS archivos en 1 sola llamada ({ path: url }). Para miniaturas. */
+export async function getUrlsAdjuntos(paths, expiresIn = 3600) {
+  const lista = [...new Set((paths || []).filter(Boolean))]
+  if (!lista.length) return {}
+  const { data, error } = await supabase.storage.from(ADJ_BUCKET).createSignedUrls(lista, expiresIn)
+  if (error) throw new Error(`No se pudieron generar los enlaces: ${error.message}`)
+  const m = {}
+  for (const r of data || []) if (r.path && r.signedUrl) m[r.path] = r.signedUrl
+  return m
+}
+
 export async function eliminarAdjunto(adjId) {
   const adj = await getById('adjuntos', adjId)
   if (!adj) return

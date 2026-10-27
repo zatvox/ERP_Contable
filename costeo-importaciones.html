@@ -91,8 +91,6 @@
             </select>
           </div>
           <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevaCarpeta()">+ Nueva carpeta</button>
-          <button class="btn btn-secondary btn-small" onclick="window.abrirAdjuntosCarpeta()" title="Proforma, constancias, BL, DAM, liquidacion...">&#128206; Documentos</button>
-          <button class="btn btn-secondary btn-small" onclick="window.abrirPagosProveedor()" title="Anticipo, saldo, agente: constancia, SWIFT y comisiones">&#128181; Pagos</button>
           <button class="btn btn-secondary btn-small" onclick="exportarPDF()" id="btnExportar" style="display:none;">📥 PDF</button>
         </div>
 
@@ -231,7 +229,7 @@
           <div class="card">
             <div class="card-header">
               <h3 class="card-title">Datos de la DAM</h3>
-              <button class="btn btn-primary btn-small" onclick="openModal('modal-nuevo-dam'); cargarImportacionesEnSelect('newDAMImportacionSelector')">+ Agregar DAM</button>
+              <button class="btn btn-primary btn-small" onclick="window.abrirDAM()">+ Agregar DAM</button>
             </div>
             <div id="tabla-dam" class="table-container">
               <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Sin registros</p>
@@ -243,8 +241,8 @@
         <div id="tab-guia-remision" class="tab-content">
           <div class="card">
             <div class="card-header">
-              <h3 class="card-title">Guía de Remisión de Ingreso al Almacén</h3>
-              <button class="btn btn-primary btn-small" onclick="openModal('modal-nueva-guia'); cargarImportacionesEnSelect('newGuiaImportacionSelector')">+ Agregar Guía</button>
+              <h3 class="card-title">Guía de ingreso al almacén</h3>
+              <button class="btn btn-primary btn-small" onclick="window.abrirGuiaCarpeta()">🔗 Vincular / registrar guía</button>
             </div>
             <div id="tabla-guia-remision" class="table-container">
               <p style="text-align: center; color: var(--text-secondary); padding: 20px;">Sin registros</p>
@@ -1377,6 +1375,11 @@
   <script type="module" src="assets/js/importaciones/bl-modal.js"></script>
   <script type="module" src="assets/js/importaciones/dam-modal.js"></script>
   <script type="module" src="assets/js/importaciones/dam-declaracion.js"></script>
+  <script type="module" src="assets/js/importaciones/boletin-modal.js"></script>
+  <script type="module" src="assets/js/importaciones/liquidacion-agente-modal.js"></script>
+  <script type="module" src="assets/js/importaciones/guia-carpeta-modal.js"></script>
+  <script type="module" src="assets/js/importaciones/costos-lote-carpeta.js"></script>
+  <script type="module" src="assets/js/importaciones/estadia-modal.js"></script>
   <script type="module" src="assets/js/importaciones/hoja-costeo.js"></script>
   <script type="module" src="assets/js/importaciones/pi-modal.js"></script>
 </body>

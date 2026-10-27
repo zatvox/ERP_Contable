@@ -338,16 +338,32 @@ function initCalculosAutomaticos() {
  *   Carpeta 8 - PI … / CI … / DAM 436155                (etapa 3: nacionalizada)
  * Sin PI (carpeta histórica o "desde cero") simplemente omite esa parte.
  */
-export function etiquetaCarpeta(c, pi, ci) {
+export function etiquetaCarpeta(c, pi, ci, prod) {
   const partes = []
   const nPI = pi?.numero_proforma_proveedor || ci?.proforma_number
-  if (nPI) partes.push(`PI ${nPI}`)
+  // Con CI: Carpeta N - CI xxx - producto/categorías - DAM xxx. Sin CI cae a la PI.
   if (ci?.invoice_number) partes.push(`CI ${ci.invoice_number}`)
+  else if (nPI) partes.push(`PI ${nPI}`)
+  if (prod) partes.push(prod)
   if (c.numero_dam) partes.push(`DAM ${c.numero_dam}`)
   let txt = `Carpeta ${c.numero_carpeta}`
-  txt += partes.length ? ' - ' + partes.join(' / ') : (c.descripcion ? ' - ' + c.descripcion : '')
+  txt += partes.length ? ' - ' + partes.join(' - ') : (c.descripcion ? ' - ' + c.descripcion : '')
   if (c.estado && c.estado !== 'abierta') txt += ` · ${c.estado.toUpperCase()}`
   return txt
+}
+
+/** 1 producto → su nombre; varios → sus categorías (o "N productos" si no tienen categoría). Nunca lanza. */
+function _nombreProductos(lineas, itemPorId, catPorId) {
+  try {
+    const ids = [...new Set((lineas || []).map(l => l.product_id ?? l.item_id).filter(x => x != null))]
+    if (!ids.length) {
+      const d = (lineas || []).map(l => l.descripcion).filter(Boolean)
+      return d.length === 1 ? d[0] : ''
+    }
+    if (ids.length === 1) return itemPorId[ids[0]]?.nombre || ''
+    const cats = [...new Set(ids.map(i => catPorId[itemPorId[i]?.categoria_id]?.nombre).filter(Boolean))]
+    return cats.length ? cats.join(' / ') : `${ids.length} productos`
+  } catch { return '' }
 }
 
 async function cargarImportacionesList() {
@@ -358,11 +374,23 @@ async function cargarImportacionesList() {
     if (!selector) return
     const previo = selector.value
 
-    const [carpetas, cis, ocs] = await Promise.all([
+    const [carpetas, cis, ocs, dci, doc, items, cats, dams] = await Promise.all([
       query('carpetas_importacion', {}),
       query('comercial_invoices', {}),
-      query('orden_compra', { es_importacion: true })
+      query('orden_compra', { es_importacion: true }),
+      query('detalle_comercial_invoice', {}).catch(() => []),
+      query('detalle_orden_compra', {}).catch(() => []),
+      query('items', {}).catch(() => []),
+      query('categorias', {}).catch(() => []),
+      query('dams', {}).catch(() => [])
     ])
+    const itemPorId = {}, catPorId = {}, lCI = {}, lOC = {}
+    for (const i of items || []) itemPorId[i.id] = i
+    for (const k of cats || []) catPorId[k.id] = k
+    const damPorCI = {}
+    for (const m of dams || []) if (m.importacion_id && m.numero_dam) damPorCI[m.importacion_id] = m.numero_dam
+    for (const l of dci || []) (lCI[l.comercial_invoice_id] ||= []).push(l)
+    for (const l of doc || []) (lOC[l.orden_compra_id] ||= []).push(l)
     const ciPorId = {}, ciPorCarpeta = {}, ocPorId = {}
     for (const x of cis || []) { ciPorId[x.id] = x; if (x.carpeta_importacion_id) ciPorCarpeta[x.carpeta_importacion_id] = x }
     for (const o of ocs || []) ocPorId[o.id] = o
@@ -374,7 +402,8 @@ async function cargarImportacionesList() {
       lista.map(c => {
         const ci = ciPorId[c.comercial_invoice_id] || ciPorCarpeta[c.id] || null
         const pi = ocPorId[c.orden_compra_id] || null
-        return `<option value="${c.id}">${etiquetaCarpeta(c, pi, ci)}</option>`
+        const prod = _nombreProductos(ci ? lCI[ci.id] : (pi ? lOC[pi.id] : []), itemPorId, catPorId)
+        return `<option value="${c.id}">${etiquetaCarpeta(c.numero_dam || !ci ? c : { ...c, numero_dam: damPorCI[ci.id] }, pi, ci, prod)}</option>`
       }).join('')
     if (!lista.length) selector.innerHTML += '<option value="" disabled>(todavia no hay carpetas de importacion)</option>'
     if (previo && lista.some(c => String(c.id) === previo)) selector.value = previo
@@ -420,6 +449,12 @@ window.cargarImportacionesEnSelect = async function(selectId) {
 // Expuesta para que el modal de nueva carpeta pueda refrescar el selector.
 window.cargarImportacionesList = cargarImportacionesList
 
+/** Aviso único y útil al terminar de cargar una carpeta (reemplaza el viejo «Cabecera cargada»). */
+function _avisoCarga(carpeta, t0, nota = '') {
+  const seg = ((performance.now() - t0) / 1000).toFixed(1)
+  showToast(`✓ Carpeta ${carpeta.numero_carpeta} lista · ${seg} s${nota ? ' · ' + nota : ''}`, nota ? 'info' : 'success')
+}
+
 window.cargarImportacion = async function () {
   try {
     const selector = document.getElementById('costeoSelector')
@@ -431,7 +466,15 @@ window.cargarImportacion = async function () {
       return
     }
 
-    const carpeta = ((await query('carpetas_importacion', { id: carpetaId })) || [])[0]
+    const t0 = performance.now()
+    const host = document.getElementById('hoja-costeo')
+    if (host) host.innerHTML = `<div class="hc-cargando"><span class="hc-spin"></span> Cargando carpeta ${selector.selectedOptions?.[0]?.textContent?.split(' - ')[0] || ''}…</div>`
+    // Carpeta y CI en paralelo (el CI se busca por la carpeta; si no, por su id)
+    const [carpetaR, ciPorCarpeta] = await Promise.all([
+      query('carpetas_importacion', { id: carpetaId }),
+      query('comercial_invoices', { carpeta_importacion_id: carpetaId })
+    ])
+    const carpeta = (carpetaR || [])[0]
     if (!carpeta) {
       showToast('Carpeta no encontrada', 'danger')
       return
@@ -439,48 +482,36 @@ window.cargarImportacion = async function () {
     window.carpetaActual = carpeta
 
     // El Commercial Invoice de la carpeta (puede no existir todavia: etapa 1)
-    let ci = null
-    if (carpeta.comercial_invoice_id) {
-      ci = ((await query('comercial_invoices', { id: carpeta.comercial_invoice_id })) || [])[0]
-    }
-    if (!ci) {
-      ci = ((await query('comercial_invoices', { carpeta_importacion_id: carpetaId })) || [])[0]
-    }
+    const cis = ciPorCarpeta || []
+    let ci = cis.find(x => x.id === carpeta.comercial_invoice_id) || cis[0] || null
+    if (!ci && carpeta.comercial_invoice_id) ci = ((await query('comercial_invoices', { id: carpeta.comercial_invoice_id })) || [])[0] || null
 
     if (!ci) {
       // Carpeta sin CI: los tabs que dependen de el se auto-silencian, pero el
       // ledger y el resumen SI funcionan porque cuelgan de la carpeta.
       window.costeoActual = { id: null, carpeta_importacion_id: carpetaId }
-      showToast(`Carpeta ${carpeta.numero_carpeta}: todavia sin Commercial Invoice`, 'info')
-      await renderCostosLedger()
-      window.renderHojaCosteo?.()
+      await Promise.all([renderCostosLedger(), window.renderHojaCosteo?.()])
       mostrarOcultarBotonesEdicion()
+      _avisoCarga(carpeta, t0, 'sin Commercial Invoice todavía')
       return
     }
     window.costeoActual = ci
- 
-    // NUEVO: Cargar detalles y recalcular totales
-    const detalles = await getDetalleCIByComercialInvoiceId(window.costeoActual.id)
+
+    // Detalles y totales con UNA lectura (calcularTotalesCI repetía la misma consulta)
+    const [detalles, totales] = await Promise.all([getDetalleCIByComercialInvoiceId(window.costeoActual.id), calcularTotalesCI(window.costeoActual.id)])
     window.costeoActual.detalles = detalles || []
- 
-    // Recalcular totales
-    const totales = await calcularTotalesCI(window.costeoActual.id)
     window.costeoActual.total_unidades = totales.total_unidades
     window.costeoActual.cantidad_total_neto = totales.cantidad_total_neto
     window.costeoActual.cantidad_total_gross = totales.cantidad_total_gross
     window.costeoActual.valor_total_final_ci = totales.valor_total_final_ci
- 
-    await cargarCabecera()
-    await renderDetalleCI()
-    await renderBillOfLadings()
-    //await renderContenedores()
-    //await actualizarCabecera()
-    await renderDAM()
-    await renderGuiaRemision()
-    await renderCostosLedger()
-    await renderPagos()
-    window.renderHojaCosteo?.()
- 
+
+    // La hoja (lo que se ve) y las pestañas legacy cargan EN PARALELO, no una tras otra.
+    await Promise.all([
+      window.renderHojaCosteo?.(),
+      cargarCabecera(), renderDetalleCI(), renderBillOfLadings(), renderDAM(),
+      renderGuiaRemision(), renderCostosLedger(), renderPagos()
+    ])
+    _avisoCarga(carpeta, t0)
     mostrarOcultarBotonesEdicion()
   } catch (error) {
     console.error('Error en cargarImportacion:', error)
@@ -1492,7 +1523,6 @@ async function cargarCabecera() {
     document.getElementById('cabValorTotalCIF').value = (window.costeoActual.valor_total_final_ci || 0).toFixed(2)
     document.getElementById('cabValorTotalFOB').value = (window.costeoActual.valor_total_final_fob || 0).toFixed(2)
     
-    showToast('Cabecera cargada', 'success')
     // Cargar detalles en el tab 1
     await renderDetallesCabecera()
   } catch (error) {
@@ -2149,6 +2179,7 @@ window.calculoAutomaticoImpuestosNewDAM = async function () {
 // ============================================================================
 
 async function renderGuiaRemision() {
+  if (window.renderGuiasCarpeta) return window.renderGuiasCarpeta()   // vista nueva: guías de ingreso vinculadas (guia-carpeta-modal.js)
   try {
     if (!window.costeoActual || !window.costeoActual.id) {
       console.warn("No hay una importación seleccionada.")

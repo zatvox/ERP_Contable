@@ -202,6 +202,8 @@ export async function crearLineaCosto(doc, linea, userId) {
     }
   }
 
+  // Costo comercial (gestión): IGV/IPM/percepción también cuentan, salvo que el llamador diga otra cosa.
+  if (linea.entra_costo_gestion == null && ['credito_fiscal', 'percepcion'].includes(linea.clasificacion)) linea = { ...linea, entra_costo_gestion: true }
   const filaCosto = await insert('importacion_costos', { ...linea, documento_id: documentoId, created_by: userId })
   if (!filaCosto || !filaCosto.id) throw new Error(ultimoErrorInsert()?.message || 'No se pudo registrar la línea de costo')
   return { documentoId, costoId: filaCosto.id }
@@ -360,7 +362,7 @@ function _pintarTabla() {
           ${th('proveedor_nombre', 'Proveedor')}
           <th>Mon.</th>
           ${th('monto_moneda', 'Importe', 'text-align:right')}
-          <th style="text-align:right">IGV</th>
+          <th style="text-align:right" title="IGV en la moneda original de la factura">IGV (mon. orig.)</th>
           ${th('monto_usd', 'USD', 'text-align:right')}
           ${th('monto_pen', 'PEN', 'text-align:right')}
           <th>Clasificacion</th>
@@ -749,7 +751,7 @@ window.lcOnClasificacion = function () {
     // lo que no es inventario no puede ser costo NIC 2.
     cont.disabled = cl !== 'inventario'
   }
-  if (gest) gest.checked = ['inventario', 'solo_gestion', 'gasto_financiero'].includes(cl)
+  if (gest) gest.checked = ['inventario', 'solo_gestion', 'gasto_financiero', 'credito_fiscal', 'percepcion'].includes(cl)
 }
 
 window.lcOnBase = function () {

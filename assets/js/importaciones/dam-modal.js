@@ -19,6 +19,10 @@ import { aplicarModoVerEditar } from '../shared/ver-editar.js'
 import { declararEmpresaModal } from '../empresa.js'
 import { getTipoCambioDia } from '../sunat-api.js'
 import { crearLineaCosto } from './costos-ledger.js'
+import { getContacts } from '../supabase-data.js'
+import { MONTOS_FIJOS_PERCEPCION, PERCEPCION_NORMA } from './percepcion-montos-fijos.js'
+import { convertirEnBuscador, refrescarBuscador } from '../buscador-select.js'
+import { abrirModalContacto } from '../shared/contacto-modal.js'
 
 const $ = id => document.getElementById(id)
 const v = id => ($(id)?.value ?? '').toString().trim()
@@ -77,47 +81,53 @@ function _asegurarModalDAM() {
         <button class="modal-close" onclick="window.cerrarDAM()">&times;</button>
       </div>
       <div style="padding:6px 20px 0;">
+        <div class="costeo-selector dm-carpeta"><label>Carpeta:</label><select id="dmCarpeta" disabled></select></div>
+        <div class="dm-nota" style="margin-bottom:4px;">La DAM se registra en la carpeta abierta. Datos de la <b>DAM completa</b> del agente (Hoja A, B, C y DAV); lo marcado «consulta SUNAT» sale de la consulta de levante por N° de DUA.</div>
         <strong class="mod-sec">Identificación del despacho</strong>
         <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px;">
-          <div class="form-group" style="grid-column:span 2;"><label>N° de DAM * <small style="font-weight:400;">completo, ej. 118-2026-10-436155-01-7-00</small></label><input type="text" id="dmNro" maxlength="40"></div>
-          <div class="form-group"><label>Fecha de numeración *</label><input type="date" id="dmFecha"></div>
-          <div class="form-group"><label>Canal de control</label>
+          <div class="form-group" style="grid-column:span 2;"><label>N° de DAM * <span class="bl-en">(Hoja A · «No Declaración», ej. 118-2026-10-436155-01-7-00)</span></label><input type="text" id="dmNro" maxlength="40"></div>
+          <div class="form-group"><label>Fecha de numeración * <span class="bl-en">(Hoja A · «Fch. Numeración»)</span></label><input type="date" id="dmFecha"></div>
+          <div class="form-group"><label>Canal de control <span class="bl-en">(consulta SUNAT · semáforo)</span></label>
             <select id="dmCanal"><option value="">— sin canal —</option><option value="verde">🟢 Verde</option><option value="naranja">🟠 Naranja</option><option value="rojo">🔴 Rojo</option></select></div>
-          <div class="form-group"><label>Modalidad de despacho</label>
+          <div class="form-group"><label>Modalidad de despacho <span class="bl-en">(consulta SUNAT)</span></label>
             <select id="dmModalidad"><option value="">—</option><option>Anticipado</option><option>Excepcional</option><option>Diferido</option><option>Urgente</option></select></div>
-          <div class="form-group" style="grid-column:span 2;"><label>Agente de aduana</label><input type="text" id="dmAgente" maxlength="80" placeholder="Razón social del agente"></div>
+          <div class="form-group" style="grid-column:span 2;"><label>Agente de aduana <span class="bl-en">(Hoja A · 8 Declarante)</span></label><select id="dmAgente"><option value="">—</option></select></div>
           <div class="form-group"><label>Estado</label>
             <select id="dmEstado"><option value="pendiente">Pendiente</option><option value="pagado">Pagado</option></select></div>
-          <div class="form-group" style="grid-column:span 2;"><label>Depósito temporal / terminal</label><input type="text" id="dmDeposito" maxlength="100"></div>
-          <div class="form-group"><label>Llegada de la nave</label><input type="date" id="dmLlegada"></div>
-          <div class="form-group"><label>Levante autorizado</label><input type="datetime-local" id="dmLevante"></div>
+          <div class="form-group" style="grid-column:span 2;"><label>Depósito temporal / terminal <span class="bl-en">(Hoja A · 4.1 Almacén aduanero)</span></label><select id="dmDeposito"><option value="">—</option></select></div>
+          <div class="form-group"><label>Llegada de la nave <span class="bl-en">(DAM · 4.4 Fec. llegada)</span></label><input type="date" id="dmLlegada"></div>
+          <div class="form-group"><label>Levante autorizado <span class="bl-en">(consulta SUNAT · «Fecha levante»)</span></label><input type="datetime-local" id="dmLevante"></div>
         </div>
 
         <strong class="mod-sec">Valor en aduana declarado <small style="text-transform:none; letter-spacing:0; font-weight:400;">(original de la DAM; los ajustes se registran aparte)</small></strong>
+        <div class="dm-auto-aviso"><span>🪄 Los valores, tributos y pesos se llenan solos con tu CI y BL (ad valorem 6 % · IGV 15.5 % · IPM 2.5 %). Puedes editarlos: los editados se marcan en ámbar y los cruces del final avisan la diferencia.</span>
+          <button type="button" class="btn btn-secondary btn-small" data-solo-edicion onclick="window.dmAuto(true)" title="Vuelve a calcular todo con el CI y el BL">↺ Valores automáticos</button></div>
         <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px;">
-          <div class="form-group"><label>FOB USD</label><input type="number" id="dmFOB" step="0.001" oninput="window.dmRecalcular()"></div>
-          <div class="form-group"><label>Flete USD</label><input type="number" id="dmFlete" step="0.01" oninput="window.dmRecalcular()"></div>
-          <div class="form-group"><label>Seguro USD</label><input type="number" id="dmSeguro" step="0.01" oninput="window.dmRecalcular()"></div>
-          <div class="form-group"><label>CIF USD <small style="font-weight:400;">(FOB + flete + seguro)</small></label><input type="number" id="dmCIF" step="0.001" data-siempre-lectura></div>
+          <div class="form-group"><label>FOB USD <span class="bl-en">(Hoja A · 6.1 / Hoja C · 3.1)</span></label><input type="number" id="dmFOB" step="0.001" oninput="window.dmEdita(this)"></div>
+          <div class="form-group"><label>Flete USD <span class="bl-en">(Hoja A · 6.2 / Hoja C · 3.2)</span></label><input type="number" id="dmFlete" step="0.01" oninput="window.dmEdita(this)"></div>
+          <div class="form-group"><label>Seguro USD <span class="bl-en">(Hoja A · 6.3 / Hoja C · 3.3)</span></label><input type="number" id="dmSeguro" step="0.01" oninput="window.dmEdita(this)"></div>
+          <div class="form-group"><label>CIF USD <span class="bl-en">(Hoja A · 6.5 «Valor aduana» = FOB + flete + seguro)</span></label><input type="number" id="dmCIF" step="0.001" data-siempre-lectura></div>
         </div>
 
         <strong class="mod-sec">Tributos liquidados</strong>
         <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px;">
-          <div class="form-group"><label>Ad valorem USD</label><input type="number" id="dmAdv" step="0.01" oninput="window.dmRecalcular()"></div>
-          <div class="form-group"><label>IPM USD</label><input type="number" id="dmIPM" step="0.01" oninput="window.dmRecalcular()"></div>
-          <div class="form-group"><label>IGV USD</label><input type="number" id="dmIGV" step="0.01" oninput="window.dmRecalcular()"></div>
-          <div class="form-group"><label>Total liquidación USD</label><input type="number" id="dmTotal" step="0.01" data-siempre-lectura></div>
-          <div class="form-group"><label>Percepción S/</label><input type="number" id="dmPercep" step="0.01"></div>
-          <div class="form-group"><label>Fecha de pago de tributos</label><input type="date" id="dmFechaPago" onchange="window.dmTC()"></div>
-          <div class="form-group"><label>T.C. venta SUNAT <button type="button" class="btn btn-secondary btn-small" data-solo-edicion onclick="window.dmTC(true)" title="Consultar T.C. de la fecha de pago">⟳</button></label><input type="number" id="dmTC" step="0.001"></div>
+          <div class="form-group"><label>Ad valorem USD <span class="bl-en">(Hoja C · 4.1 Ad/Valorem)</span></label><input type="number" id="dmAdv" step="0.01" oninput="window.dmEdita(this)"></div>
+          <div class="form-group"><label>IPM USD <span class="bl-en">(Hoja C · 4.5 Imp. Prom. Municipal)</span></label><input type="number" id="dmIPM" step="0.01" oninput="window.dmEdita(this)"></div>
+          <div class="form-group"><label>IGV USD <span class="bl-en">(Hoja C · 4.6 Imp. Gral. Ventas)</span></label><input type="number" id="dmIGV" step="0.01" oninput="window.dmEdita(this)"></div>
+          <div class="form-group"><label>Total liquidación USD <span class="bl-en">(Hoja C · 4.13 Total)</span></label><input type="number" id="dmTotal" step="0.01" data-siempre-lectura></div>
+          <div class="form-group"><label>Percepción S/ <span class="bl-en">(Constancia de percepción IGV · «Total en soles»)</span></label><input type="number" id="dmPercep" step="0.01" oninput="window.dmEdita(this)"></div>
+          <div class="form-group"><label>Fecha de pago de tributos <span class="bl-en">(consulta SUNAT · «Fecha cancelación»)</span></label><input type="date" id="dmFechaPago" onchange="window.dmTC()"></div>
+          <div class="form-group"><label>T.C. venta SUNAT <button type="button" class="btn btn-secondary btn-small" data-solo-edicion onclick="window.dmTC(true)" title="Consultar T.C. de la fecha de pago">⟳</button></label><input type="number" id="dmTC" step="0.001" oninput="window.dmAuto()"></div>
+          <div class="form-group"><label>Subpartida nacional <span class="bl-en">(Hoja A · 7.19)</span></label><input type="text" id="dmSubpartida" maxlength="10" inputmode="numeric" placeholder="10 dígitos" oninput="window.dmAuto()"></div>
         </div>
         <div id="dmTCaviso" style="font-size:.78rem; color:var(--text-secondary); margin-top:-4px;"></div>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:2px;"><select id="dmTasaPerc" onchange="window.dmAuto()" style="width:auto; padding:4px 8px; font-size:.78rem;" title="Tasa de percepción de tu empresa"><option value="3.5">Tasa 3.5 % (general)</option><option value="5">Tasa 5 % (bienes usados)</option><option value="10">Tasa 10 % (1ª importación / no habido)</option></select><div id="dmPercNota" class="dm-nota" style="margin:0; flex:1; min-width:260px;"></div></div>
 
         <strong class="mod-sec">Mercadería despachada</strong>
         <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px;">
-          <div class="form-group"><label>Bultos</label><input type="number" id="dmBultos" step="1"></div>
-          <div class="form-group"><label>Peso bruto (kg)</label><input type="number" id="dmPesoBruto" step="0.001"></div>
-          <div class="form-group"><label>Peso neto (kg)</label><input type="number" id="dmPesoNeto" step="0.001"></div>
+          <div class="form-group"><label>Bultos <span class="bl-en">(Hoja A · 7.12 Cant. Bult.)</span></label><input type="number" id="dmBultos" step="1" oninput="window.dmEdita(this)"></div>
+          <div class="form-group"><label>Peso bruto (kg) <span class="bl-en">(Hoja A · 7.15 Peso Bruto)</span></label><input type="number" id="dmPesoBruto" step="0.001" oninput="window.dmEdita(this)"></div>
+          <div class="form-group"><label>Peso neto (kg) <span class="bl-en">(Hoja A · 7.14 Peso Neto)</span></label><input type="number" id="dmPesoNeto" step="0.001" oninput="window.dmEdita(this)"></div>
         </div>
 
         <strong class="mod-sec">Cruces automáticos <small style="text-transform:none; letter-spacing:0; font-weight:400;">(DAM contra CI y BL)</small></strong>
@@ -146,30 +156,143 @@ const CAMPOS_DAM = [
   ['dmAgente', 'agente_aduana'], ['dmEstado', 'estado'], ['dmDeposito', 'deposito_temporal'], ['dmLlegada', 'fecha_llegada'],
   ['dmFOB', 'valor_fob'], ['dmFlete', 'flete_maritimo'], ['dmSeguro', 'seguro_maritimo'],
   ['dmAdv', 'ad_valorem_usd'], ['dmIPM', 'imp_usd'], ['dmIGV', 'igv_usd'], ['dmPercep', 'percepcion'],
-  ['dmFechaPago', 'fecha_pago'], ['dmTC', 'tipo_cambio'], ['dmBultos', 'bultos'], ['dmPesoBruto', 'peso_bruto_kg'], ['dmPesoNeto', 'peso_neto_kg']
+  ['dmFechaPago', 'fecha_pago'], ['dmSubpartida', 'subpartida'], ['dmTC', 'tipo_cambio'], ['dmBultos', 'bultos'], ['dmPesoBruto', 'peso_bruto_kg'], ['dmPesoNeto', 'peso_neto_kg']
 ]
-const NUEVAS_DAM = ['canal_aduanero', 'modalidad_despacho', 'agente_aduana', 'deposito_temporal', 'fecha_llegada', 'fecha_levante', 'bultos', 'peso_bruto_kg', 'peso_neto_kg']
+const NUEVAS_DAM = ['subpartida', 'canal_aduanero', 'modalidad_despacho', 'agente_aduana', 'deposito_temporal', 'fecha_llegada', 'fecha_levante', 'bultos', 'peso_bruto_kg', 'peso_neto_kg']
+
+
+// ── Agente de aduana y Depósito temporal: buscador de contactos (nombre o RUC) ──
+// El value de cada opción es la razón social (así se guarda en dams.agente_aduana /
+// deposito_temporal sin tocar la BD); el texto muestra "Razón social — RUC".
+let _contactosDAM = [], _pendienteContacto = null
+const _opcionesContactos = () => '<option value="">—</option>' + _contactosDAM
+  .map(c => `<option value="${esc(c.nombre)}">${esc(c.nombre)}${c.nro_documento ? ' — ' + esc(c.nro_documento) : ''}</option>`).join('')
+
+async function _cargarContactosDAM() {
+  try { _contactosDAM = ((await getContacts(true)) || []).filter(c => c.nombre).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')) } catch (e) { console.warn('contactos DAM:', e) }
+  for (const id of ['dmAgente', 'dmDeposito']) {
+    const sel = $(id); if (!sel) continue
+    const actual = sel.value
+    sel.innerHTML = _opcionesContactos(); sel.value = actual
+    refrescarBuscador(sel)
+  }
+}
+function _montarBuscadoresDAM() {
+  const cfg = {
+    dmAgente: { placeholder: 'Escribe el nombre o RUC del agente...', label: 'Agregar agente de aduana (contacto nuevo)' },
+    dmDeposito: { placeholder: 'Escribe el nombre o RUC del depósito / terminal...', label: 'Agregar depósito o terminal (contacto nuevo)' }
+  }
+  for (const [id, c] of Object.entries(cfg)) {
+    const sel = $(id); if (!sel) continue
+    convertirEnBuscador(sel, { placeholder: c.placeholder, sinResultados: 'Ningún contacto coincide',
+      alCrearNuevo: { label: c.label, onClick: () => { _pendienteContacto = id; abrirModalContacto({ roles: ['proveedor'] }) } } })
+  }
+}
+/** Pone un valor guardado en el select; si ya no está en contactos (renombrado/borrado) lo conserva como opción. */
+function _ponerContacto(id, valor) {
+  const sel = $(id); if (!sel) return
+  if (valor && ![...sel.options].some(o => o.value === valor)) sel.insertAdjacentHTML('beforeend', `<option value="${esc(valor)}">${esc(valor)}</option>`)
+  sel.value = valor || ''
+  refrescarBuscador(sel)
+}
+window.addEventListener('contacto-guardado', async e => {
+  const c = e.detail?.contacto
+  await _cargarContactosDAM()
+  if (_pendienteContacto && c?.nombre && !c._eliminado) { _ponerContacto(_pendienteContacto, c.nombre); showToast(`${c.nombre} seleccionado`, 'success') }
+  _pendienteContacto = null
+})
 
 function _volcarDAM(dam, ref) {
-  for (const [id, col] of CAMPOS_DAM) { const el = $(id); if (el) el.value = dam?.[col] ?? '' }
+  for (const [id, col] of CAMPOS_DAM) { if (id === 'dmAgente' || id === 'dmDeposito') { _ponerContacto(id, dam?.[col] || ''); continue } const el = $(id); if (el) el.value = dam?.[col] ?? '' }
   $('dmLevante').value = _aLocalInput(dam?.fecha_levante)
-  if (!dam) {   // DAM nueva: sugerir desde el CI y el BL ya registrados (se puede corregir)
-    const { ci, bls } = ref
-    if (ci) {
-      $('dmFOB').value = n0(ci.valor_total_final_fob) || ''
-      $('dmFlete').value = n0(ci.costo_flete) || ''
-      $('dmSeguro').value = n0(ci.costo_seguro) || ''
-      $('dmPesoNeto').value = n0(ci.cantidad_total_neto) || ''
-    }
-    if (bls.length) {
-      $('dmBultos').value = bls.reduce((t, b) => t + n0(b.bultos), 0) || ''
-      $('dmPesoBruto').value = bls.reduce((t, b) => t + n0(b.peso_bruto), 0) || ''
-      if (bls[0].fecha_llegada) $('dmLlegada').value = bls[0].fecha_llegada
-    }
-    $('dmEstado').value = 'pendiente'
-  }
+  document.querySelectorAll('#modal-dam-carpeta input[type=number]').forEach(el => { if (el.id in AUTO_TOL) { el.dataset.auto = '1'; el.dataset.manual = dam ? '1' : '' } })
+  if (!dam) $('dmEstado').value = 'pendiente'
+  if (!dam && !$('dmSubpartida').value) $('dmSubpartida').value = (ref?.ci?.detalles || []).map(d => d.partida_arancelaria).find(Boolean) || ''
   $('dmTCaviso').textContent = ''
+  if (!dam) window.dmAuto(true); else window.dmRecalcular()
+}
+
+
+// ── Valores automáticos (CI + BL + tasas) — editables ────────────────────────
+const TASAS_DAM = { adv: 6, igv: 15.5, ipm: 2.5 }
+const AUTO_TOL = { dmFOB: 0.05, dmFlete: 0.05, dmSeguro: 0.05, dmAdv: 1, dmIPM: 1, dmIGV: 1, dmPercep: 1, dmBultos: 0.5, dmPesoBruto: 0.5, dmPesoNeto: 0.5 }
+
+
+// ── Percepción IGV en importación (S/) ───────────────────────────────────────
+// Ley 29173 art. 19 + DS 104-2026-EF (vigente desde 18/06/2026; tabla en percepcion-montos-fijos.js):
+//   base = valor en aduana + todos los tributos (ad valorem, IGV, IPM) × T.C. de la fecha de pago
+//   tasa 3.5 % general · 5 % bienes usados · 10 % primera importación / no habido / omisos
+//   «Mercancías sensibles al fraude» (54 subpartidas): se paga el MAYOR entre (tasa × base) y
+//   (monto fijo S/ por unidad × unidades de la DAM). Solo KG se multiplica solo (peso neto).
+const IDX_TASA = { 3.5: 1, 5: 2, 10: 3 }
+
+window.calcularPercepcion = function ({ baseSoles, kg, subpartida, tasa = 3.5 }) {
+  const porcentaje = baseSoles * tasa / 100
+  const fila = MONTOS_FIJOS_PERCEPCION[String(subpartida || '').replace(/\D/g, '')]
+  const unidad = fila?.[0] || null, fijoUnit = fila ? fila[IDX_TASA[tasa] || 1] : 0
+  const fijo = unidad === 'KG' ? fijoUnit * kg : 0
+  return { monto: Math.max(porcentaje, fijo), porcentaje, fijoUnit, fijo, unidad, usaFijo: fijo > porcentaje }
+}
+
+const _tasaPerc = () => Number($('dmTasaPerc')?.value) || 3.5
+
+function _autoPercep() {
+  const nota = $('dmPercNota'), tc = n0(v('dmTC'))
+  const cif = n0(v('dmFOB')) + n0(v('dmFlete')) + n0(v('dmSeguro'))
+  const trib = n0(v('dmAdv')) + n0(v('dmIGV')) + n0(v('dmIPM'))
+  if (!cif) { if (nota) nota.textContent = ''; return null }
+  if (!tc) { if (nota) nota.textContent = 'Indica la fecha de pago de tributos para traer el T.C. (la percepción se calcula en soles).'; return null }
+  const sub = v('dmSubpartida'), subN = String(sub || '').replace(/\D/g, ''), tasa = _tasaPerc(), kg = n0(v('dmPesoNeto'))
+  const base = (cif + trib) * tc
+  const r = window.calcularPercepcion({ baseSoles: base, kg, subpartida: sub, tasa })
+  let txt = `${tasa} % × S/ ${base.toLocaleString('es-PE', { maximumFractionDigits: 0 })} = <b>S/ ${r.porcentaje.toFixed(2)}</b>`
+  if (r.unidad === 'KG') txt += ` · monto fijo SUNAT (${PERCEPCION_NORMA.decreto}) S/ ${r.fijoUnit} × ${kg.toLocaleString('es-PE')} kg = <b>S/ ${r.fijo.toFixed(2)}</b> → se paga el <b>${r.usaFijo ? 'monto fijo' : 'porcentaje'}</b>`
+  else if (r.unidad) txt += ` · ⚠ esta subpartida es sensible al fraude y su monto fijo es por ${r.unidad} (S/ ${r.fijoUnit}): multiplícalo por las unidades de la DAM y escribe la percepción`
+  else if (subN.length === 10) txt += ' · esa subpartida NO está en la lista de mercancías sensibles al fraude: solo aplica el porcentaje'
+  else txt += ' · indica la subpartida para saber si aplica el monto fijo de SUNAT'
+  if (nota) nota.innerHTML = txt
+  return (r.unidad && r.unidad !== 'KG') ? null : r.monto
+}
+
+function _autoBase() {
+  const { ci, bls } = _ref, a = {}
+  if (ci) { a.dmFOB = n0(ci.valor_total_final_fob); a.dmFlete = n0(ci.costo_flete); a.dmSeguro = n0(ci.costo_seguro); a.dmPesoNeto = n0(ci.cantidad_total_neto) }
+  if (bls?.length) { a.dmBultos = bls.reduce((t, b) => t + n0(b.bultos), 0); a.dmPesoBruto = bls.reduce((t, b) => t + n0(b.peso_bruto), 0) }
+  return a
+}
+function _autoTributos() {   // sobre el CIF que hay en pantalla
+  const cif = n0(v('dmFOB')) + n0(v('dmFlete')) + n0(v('dmSeguro'))
+  // La aduana liquida en USD enteros: cada tributo se redondea y el total es la suma de los redondeados.
+  const adv = Math.round(cif * TASAS_DAM.adv / 100)
+  return { dmAdv: adv, dmIGV: Math.round((cif + adv) * TASAS_DAM.igv / 100), dmIPM: Math.round((cif + adv) * TASAS_DAM.ipm / 100) }
+}
+const _redondea = (id, x) => x ? String(+x.toFixed(['dmFOB', 'dmPesoBruto', 'dmPesoNeto'].includes(id) ? 3 : 2)) : ''
+
+/** Llena lo automático. forzar=true pisa también lo que el usuario editó. */
+window.dmAuto = function (forzar) {
+  if (forzar === true) document.querySelectorAll('#modal-dam-carpeta [data-auto]').forEach(el => { el.dataset.manual = '' })
+  const poner = a => { for (const [id, val] of Object.entries(a)) { const el = $(id); if (el && el.dataset.manual !== '1') el.value = _redondea(id, val) } }
+  poner(_autoBase()); poner(_autoTributos())
+  const pc = _autoPercep(); if (pc != null) poner({ dmPercep: pc })
   window.dmRecalcular()
+}
+function _autoTodos() { const a = { ..._autoBase(), ..._autoTributos() }; const pc = _autoPercep(); if (pc != null) a.dmPercep = pc; return a }
+
+function _marcarEditados() {
+  const a = _autoTodos()
+  for (const id of Object.keys(AUTO_TOL)) {
+    const el = $(id); if (!el) continue
+    const hay = a[id] != null && v(id) !== '' && Math.abs(n0(v(id)) - n0(a[id])) > AUTO_TOL[id]
+    el.classList.toggle('dm-editado', !!hay)
+    el.title = hay ? `Editado. Valor automático: ${_redondea(id, a[id])}` : ''
+  }
+}
+
+window.dmEdita = function (el) {
+  const a = _autoTodos()
+  // si el valor vuelve a ser el automático, deja de ser "manual"
+  el.dataset.manual = (a[el.id] != null && Math.abs(n0(el.value) - n0(a[el.id])) <= AUTO_TOL[el.id]) ? '' : '1'
+  window.dmAuto()
 }
 
 window.dmRecalcular = function () {
@@ -177,6 +300,7 @@ window.dmRecalcular = function () {
   $('dmCIF').value = (fob + fl + sg) ? (fob + fl + sg).toFixed(3) : ''
   const tot = n0(v('dmAdv')) + n0(v('dmIPM')) + n0(v('dmIGV'))
   $('dmTotal').value = tot ? tot.toFixed(2) : ''
+  _marcarEditados()
   _pintarCruces()
 }
 
@@ -187,7 +311,7 @@ window.dmTC = async function (forzar) {
   aviso.textContent = 'Consultando T.C. SUNAT…'
   try {
     const r = await getTipoCambioDia(f, { permitirApi: forzar === true })
-    if (r?.venta) { $('dmTC').value = Number(r.venta).toFixed(3); aviso.textContent = `T.C. venta SUNAT del ${fechaDMY(f)}: ${Number(r.venta).toFixed(3)} (${r.origen})` }
+    if (r?.venta) { $('dmTC').value = Number(r.venta).toFixed(3); aviso.textContent = `T.C. venta SUNAT del ${fechaDMY(f)}: ${Number(r.venta).toFixed(3)} (${r.origen})`; window.dmAuto() }
     else aviso.textContent = r?.error || 'Sin T.C. guardado para esa fecha: pulsa ⟳ para consultarlo.'
   } catch { aviso.textContent = 'No se pudo consultar el T.C.' }
 }
@@ -257,9 +381,14 @@ window.abrirDAM = async function (id) {
     const ci = ciActual()
     if (!ci) { showToast('Esta carpeta aún no tiene Commercial Invoice: registra primero el CI', 'warning'); return }
     _asegurarModalDAM()
+    _montarBuscadoresDAM()
+    await _cargarContactosDAM()
     _dam = id ? ((await query('dams', { id })) || [])[0] || null : null
     const bls = (await query('bill_of_ladings', { importacion_id: ci.id })) || []
     _ref = { ci, bls }
+    const selC = document.getElementById('costeoSelector')
+    const txtC = selC?.selectedOptions?.[0]?.text || carpeta()?.numero_carpeta || ''
+    $('dmCarpeta').innerHTML = `<option>${esc(txtC)}</option>`
     $('dmTitulo').textContent = _dam ? `DAM ${_dam.numero_dam}` : 'Nueva DAM'
     declararEmpresaModal('modal-dam-carpeta', carpeta()?.empresa_id)
     _volcarDAM(_dam, _ref)
@@ -330,7 +459,7 @@ function _asegurarModalAjuste() {
             <select id="ajMotivo">${Object.entries(MOTIVOS).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
           <div class="form-group"><label>N° de notificación</label><input type="text" id="ajNotif" maxlength="40" placeholder="118-2026-34680"></div>
           <div class="form-group"><label>Fecha de notificación</label><input type="date" id="ajFechaNotif"></div>
-          <div class="form-group"><label>N° de liquidación / autoliquidación *</label><input type="text" id="ajNumero" maxlength="40" placeholder="118-329439-26"></div>
+          <div class="form-group"><label>N° de liquidación de cobranza <small style="font-weight:400;">(llega con o después de la notificación; es lo que se paga en el banco)</small></label><input type="text" id="ajNumero" maxlength="40" placeholder="118-329439-26"></div>
           <div class="form-group"><label>Fecha de liquidación *</label><input type="date" id="ajFecha"></div>
           <div class="form-group"><label>Fecha de pago</label><input type="date" id="ajFechaPago" onchange="window.ajTC()"></div>
           <div class="form-group"><label>T.C. venta SUNAT <button type="button" class="btn btn-secondary btn-small" onclick="window.ajTC(true)" title="Consultar T.C.">⟳</button></label><input type="number" id="ajTC" step="0.001"></div>
@@ -445,6 +574,7 @@ window.abrirAjusteValor = async function (ajusteId) {
     $('ajBtnEliminar').style.display = _aj && !_aj.enviada_costeo ? '' : 'none'
     aplicarModoVerEditar('modal-dam-ajuste', !!_aj)
     if (_aj?.enviada_costeo) $('ajDestino').innerHTML += '<br>🔒 Ya está en el costeo: para corregir montos edita sus líneas en el ledger de costos.'
+    { const m = $('modal-dam-ajuste'); document.body.appendChild(m); m.style.zIndex = 2100 }   // siempre por encima de la DAM abierta
     window.openModal('modal-dam-ajuste')
   } catch (e) { console.error('abrirAjusteValor:', e); showToast('No se pudo abrir el ajuste', 'danger') }
 }
@@ -462,7 +592,8 @@ window.cerrarAjusteValor = async () => {
 window.guardarAjusteValor = async function () {
   try {
     if (!_dam) throw new Error('Falta la DAM')
-    if (!v('ajNumero')) throw new Error('Falta el N° de liquidación')
+    if (!v('ajNumero') && !v('ajNotif')) throw new Error('Indica el N° de notificación o el N° de liquidación')
+    if (!v('ajNumero') && v('ajEstado') === 'pagada') throw new Error('Un ajuste pagado necesita el N° de la liquidación de cobranza que se pagó')
     if (!v('ajFecha')) throw new Error('Falta la fecha de liquidación')
     if (v('ajEstado') === 'pagada' && !v('ajFechaPago')) throw new Error('Un ajuste pagado necesita su fecha de pago')
     if (v('ajEstado') === 'pagada' && n0(v('ajTotal')) > 0 && !(n0(v('ajTC')) >= 1)) throw new Error('Ingresa el T.C. venta SUNAT (usa ⟳)')

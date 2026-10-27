@@ -63,7 +63,8 @@ export async function renderLotes(forzar = false) {
             <th data-col-tabla="lotes" data-col="costo_unit"${colStyle('lotes','costo_unit')}>Costo Unit.</th>
             <th data-col-tabla="lotes" data-col="costo_total"${colStyle('lotes','costo_total')}>Costo Total Lote</th>
             <th data-col-tabla="lotes" data-col="costo_cif"${colStyle('lotes','costo_cif')} title="Costo de la factura de compra (sin IGV), en la moneda del lote">Costo CIF</th>
-            <th data-col-tabla="lotes" data-col="costo_real"${colStyle('lotes','costo_real')} title="CIF + costos de destino, por kg, en la moneda del lote. Editable: escribe y presiona Enter o sal del campo.">Costo real ✏️</th>
+            <th data-col-tabla="lotes" data-col="costo_real"${colStyle('lotes','costo_real')} title="Costo CONTABLE final (NIC 2) por kg, en USD. Solo lectura: lo calcula la carpeta de importación y se aplica desde Importaciones → «Aplicar al lote».">Costo real 🔒</th>
+            <th data-col-tabla="lotes" data-col="costo_comercial"${colStyle('lotes','costo_comercial')} title="Costo COMERCIAL (gestión) final por kg, en USD, desde la carpeta de importación.">Costo comercial</th>
             <th data-col-tabla="lotes" data-col="vencimiento"${colStyle('lotes','vencimiento')}>Vencimiento</th>
             <th data-col-tabla="lotes" data-col="dias_restantes"${colStyle('lotes','dias_restantes')}>Días Restantes</th>
           </tr>
@@ -107,6 +108,7 @@ export async function renderLotes(forzar = false) {
           <td data-col-tabla="lotes" data-col="costo_total"${colStyle('lotes','costo_total')}>S/. ${costoTotalLote.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td data-col-tabla="lotes" data-col="costo_cif" style="white-space:nowrap;${colStyle('lotes','costo_cif') ? ' display:none;' : ''}">${_celdaCostoCIF(lote)}</td>
           <td data-col-tabla="lotes" data-col="costo_real" style="white-space:nowrap;${colStyle('lotes','costo_real') ? ' display:none;' : ''}">${_celdaCostoReal(lote)}</td>
+          <td data-col-tabla="lotes" data-col="costo_comercial" style="white-space:nowrap;${colStyle('lotes','costo_comercial') ? ' display:none;' : ''}">${_celdaCostoComercial(lote)}</td>
           <td data-col-tabla="lotes" data-col="vencimiento"${colStyle('lotes','vencimiento')}>${vencCell}</td>
           <td data-col-tabla="lotes" data-col="dias_restantes"${colStyle('lotes','dias_restantes')}>${diasCell}</td>
         </tr>
@@ -123,7 +125,7 @@ export async function renderLotes(forzar = false) {
 
 // ─── Costo CIF / Costo real (2026-10-09, SQL 81) ────────────────────────────
 // costo_real = CIF + costos de destino, por unidad, en la moneda ORIGINAL del
-// lote. Se edita aquí mismo; más adelante lo llenará el módulo Importaciones.
+// lote. SOLO LECTURA (2026-10-27): lo escribe Importaciones → «Aplicar costo final al lote».
 function _simMoneda(m) { return m === 'USD' ? '$' : 'S/' }
 function _cifDe(lote) { return parseFloat(lote.costo_unit_original ?? lote.costo_unitario) || 0 }
 function _celdaCostoCIF(lote) {
@@ -138,43 +140,15 @@ function _pctDestino(lote) {
   return `<small id="lotePctReal-${lote.id}" style="display:block; color:${color}; font-size:0.72rem;">${pct >= 0 ? '+' : ''}${pct.toFixed(1)}% sobre CIF</small>`
 }
 function _celdaCostoReal(lote) {
-  const v = lote.costo_real != null ? parseFloat(lote.costo_real) : ''
-  return `<div style="display:flex; align-items:center; gap:4px;">
-      <span style="color:var(--text-secondary); font-size:0.8rem;">${_simMoneda(lote.moneda)}</span>
-      <input type="number" step="0.000001" min="0" value="${v === '' ? '' : v}" placeholder="—"
-             data-lote-real="${lote.id}" data-valor="${v === '' ? '' : v}"
-             style="width:96px; padding:3px 6px; text-align:right;"
-             onkeydown="if(event.key==='Enter'){this.blur()} if(event.key==='Escape'){this.value=this.dataset.valor; this.blur()}"
-             onchange="window.guardarCostoRealLote(${lote.id}, this)">
-    </div>${_pctDestino(lote)}`
+  const v = lote.costo_real != null ? parseFloat(lote.costo_real) : null
+  if (v == null) return `<span style="color:var(--text-secondary);" title="Aún no se aplicó el costo final de la carpeta">${lote.carpeta_importacion_id ? 'Pendiente' : '—'}</span>`
+  return `<span title="Costo contable final (NIC 2). Solo lectura.">${_simMoneda(lote.moneda)} ${v.toFixed(4)}</span>${_pctDestino(lote)}`
 }
-
-window.guardarCostoRealLote = async function (loteId, input) {
-  const lote = (_loteLista || []).find(l => l.id === loteId)
-  const txt = String(input.value || '').trim()
-  const valor = txt === '' ? null : parseFloat(txt)
-  if (valor !== null && (!(valor > 0) || isNaN(valor))) {
-    showToast('El costo real debe ser mayor a 0 (o déjalo vacío)', 'warning'); input.value = input.dataset.valor; return
-  }
-  const cif = lote ? _cifDe(lote) : 0
-  if (valor !== null && cif && valor < cif &&
-      !confirm(`El costo real (${valor}) es MENOR que el costo CIF (${cif.toFixed(6)}).\n\n¿Guardarlo igual?`)) {
-    input.value = input.dataset.valor; return
-  }
-  input.disabled = true
-  const r = await updateLote(loteId, { costo_real: valor, costo_real_actualizado_at: new Date().toISOString() })
-  input.disabled = false
-  if (!r) {
-    showToast('No se pudo guardar el costo real. ¿Corriste el SQL 81 (lotes.costo_real)?', 'danger', 7000)
-    input.value = input.dataset.valor; return
-  }
-  input.dataset.valor = valor ?? ''
-  if (lote) lote.costo_real = valor
-  const pct = document.getElementById(`lotePctReal-${loteId}`)
-  const html = lote ? _pctDestino(lote) : ''
-  if (pct) pct.outerHTML = html || ''
-  else if (html) input.closest('td')?.insertAdjacentHTML('beforeend', html)
-  showToast(valor === null ? 'Costo real borrado' : `Costo real ${lote?.numero_lote || ''} guardado ✓`, 'success')
+function _celdaCostoComercial(lote) {
+  const v = lote.costo_comercial != null ? parseFloat(lote.costo_comercial) : null
+  if (v == null) return `<span style="color:var(--text-secondary);">${lote.carpeta_importacion_id ? 'Pendiente' : '—'}</span>`
+  const cif = _cifDe(lote), pct = cif ? (v / cif - 1) * 100 : null
+  return `${_simMoneda(lote.moneda)} ${v.toFixed(4)}${pct != null ? `<small style="display:block; color:var(--text-secondary); font-size:0.72rem;">${pct >= 0 ? '+' : ''}${pct.toFixed(1)}% sobre CIF</small>` : ''}`
 }
 
 window.filtrarLotes = async function () {

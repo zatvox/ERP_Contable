@@ -148,8 +148,13 @@
                   <button class="btn btn-secondary btn-small" style="margin-right:8px;" onclick="window.exportarStockZonasExcel()" title="Exporta las filas seleccionadas (o todas si no marcas ninguna) con las columnas actualmente visibles">📊 Exportar Excel</button>
                   <button class="btn btn-secondary btn-small" onclick="window.exportarStockZonasPDF()" title="Exporta las filas seleccionadas (o todas si no marcas ninguna) con las columnas actualmente visibles">📄 Exportar PDF</button>
                 </span>
-                <button class="btn btn-secondary btn-small" onclick="window.abrirModalImportarTraslados()">📥 Importar</button>
                 <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevoTraslado()">+ Nuevo Traslado</button>
+                <div class="col-menu menu-tuerca">
+                  <button type="button" class="card-menu-btn" onclick="event.stopPropagation(); this.parentElement.classList.toggle('open')" title="Más acciones">⚙️</button>
+                  <div class="col-menu-dropdown">
+                    <label onclick="this.closest('.col-menu').classList.remove('open'); window.abrirModalImportarTraslados()">📥 Importar masivo</label>
+                  </div>
+                </div>
               </div>
             </div>
             <!-- FILTROS compartidos por ambos modos; "Zona" solo aplica y se

@@ -10,6 +10,8 @@ import { refrescarBuscador } from '../buscador-select.js'
 import { renderEditorCronograma, actualizarCronograma, leerCronograma } from '../cronograma.js'
 import { getModuloConfig } from '../config-modulo.js'
 import { _actualizarAvisoRetencionVenta, _actualizarAvisoStockLineaVenta, _poblarSelectClientes, _poblarSelectItems, _refrescarStockLoteEnVivo, _stockTotalPorItem, _sugerirUnidadesLineaVenta } from './helpers.js'
+import { calcLineaIGV, tipoIGVUI, precioUI } from './helpers.js'
+import { registrarPesaje, cargarPesaje } from './linea-pesaje.js'
 import { _aplicarAnticiposVentaSeleccionados } from './venta-anticipo.js'
 import { _setEv } from './ventas-editar.js'
 import { renderVentas } from './ventas-lista.js'
@@ -117,8 +119,17 @@ window.abrirModalNuevaVenta = async function() {
 // hace después, en la Guía de Despacho de Venta (ver TAB: GUÍAS DE DESPACHO),
 // igual que en Compras la OC no mueve stock y recién la Guía de Remisión lo hace.
 /** Abre el modal de "Agregar Producto a la Venta" (espejo de compras). */
+// Pesaje: N° unidades × peso por caja = kg (🔒 calculado)
+registrarPesaje('venta', {
+  und: 'ventaLineaCantUnidades', peso: 'ventaLineaPesoCaja', kg: 'ventaLineaCantidad', btn: 'btnCandadoKgVenta',
+  despues: () => { _actualizarAvisoStockLineaVenta(); window._actualizarPreviewLineaVenta?.() },
+})
+
 window.abrirModalLineaVenta = function () {
   S._ventaLineaEditIdx = null
+  cargarPesaje('venta', {})
+  _sugerirUnidadesLineaVenta()
+  _actualizarAvisoStockLineaVenta()
   const tipoSel = document.getElementById('ventaLineTipoBase')
   if (tipoSel) { tipoSel.value = S._ventaIGVSerie || 'gravada'; window._actualizarPreviewLineaVenta?.() }
   _setEv('tituloModalLineaVenta', 'Agregar Producto a la Venta')
@@ -154,25 +165,18 @@ window.editarLineaVenta = async function (idx) {
 
   await _refrescarStockLoteEnVivo()
 
-  const cantInput = document.getElementById('ventaLineaCantidad')
-  if (cantInput) cantInput.value = l.cantidad
+  _sugerirUnidadesLineaVenta()   // placeholder del peso/caja
+  cargarPesaje('venta', { cantidad: l.cantidad, unidades: l.cantidad_unidades })
 
-  _sugerirUnidadesLineaVenta()   // sugerencia de unidades — se pisa abajo con el valor real guardado
-
-  const unidInput = document.getElementById('ventaLineaCantUnidades')
-  if (unidInput) unidInput.value = l.cantidad_unidades || ''
   const precioInp = document.getElementById('ventaLineaPrecio')
-  if (precioInp) precioInp.value = l.precio_unitario
+  if (precioInp) precioInp.value = precioUI(l)   // con IGV si la línea fue "incluido" (sql/114)
   const descInp = document.getElementById('ventaLineaDesc')
   if (descInp) descInp.value = l.descripcion || ''
   const inpUnidad = document.getElementById('ventaLineaUnidad')
   if (inpUnidad) inpUnidad.value = l.unidad_medida || ''
-  // El modo "18% incluido" es solo de captura y no se conserva en la línea
-  // guardada (ver comentario en agregarLineaVenta) — al editar se muestra
-  // el tipo_base real ('gravada'/'exonerada'/'inafecta'), con el precio ya
-  // en base sin IGV.
+  // sql/114: la línea se reabre tal como se registró (incluido → precio con IGV).
   const tipoSel = document.getElementById('ventaLineTipoBase')
-  if (tipoSel) tipoSel.value = l.tipo_base || 'gravada'
+  if (tipoSel) tipoSel.value = tipoIGVUI(l)
 
   window._actualizarPreviewLineaVenta()
   _actualizarAvisoStockLineaVenta()
@@ -215,7 +219,7 @@ window.agregarLineaVenta = function() {
   const descInp    = document.getElementById('ventaLineaDesc')
   const tipoBase   = document.getElementById('ventaLineTipoBase')?.value || 'gravada'
 
-  const cantidad         = parseFloat(cantInput?.value || 1)
+  const cantidad         = parseFloat(cantInput?.value || 0)
   const cantidadUnidades = parseFloat(unidInput?.value || 0) || 0
   const precio      = parseFloat(precioInp?.value || opt?.getAttribute('data-precio') || 0)
   const descripcion = descInp?.value || opt?.text || ''
@@ -260,28 +264,10 @@ window.agregarLineaVenta = function() {
     return
   }
 
-  // "Gravada 18% (incluido)" es solo un modo de captura: el vendedor pasa
-  // el precio del pedido con IGV ya incluido. tipo_base se sigue guardando
-  // como 'gravada' (el CHECK de detalle_ventas no tiene un valor aparte
-  // para esto), pero precio_unitario se normaliza a la base SIN IGV antes
-  // de guardar, para que subtotal = cantidad * precio_unitario siga
-  // cumpliéndose en todo el sistema (ej. calcularTotalesLinea).
-  const igvIncluido = tipoBase === 'gravada_incluido'
-  const tipoBaseGuardar = igvIncluido ? 'gravada' : tipoBase
-  const igvPct = (tipoBase === 'gravada' || igvIncluido) ? 18 : 0
-
-  let subtotal, igvMonto, totalLine, precioUnitarioGuardar
-  if (igvIncluido) {
-    totalLine = parseFloat((cantidad * precio).toFixed(2))
-    subtotal  = parseFloat((totalLine / 1.18).toFixed(2))
-    igvMonto  = parseFloat((totalLine - subtotal).toFixed(2))
-    precioUnitarioGuardar = parseFloat((subtotal / cantidad).toFixed(6))
-  } else {
-    subtotal  = parseFloat((cantidad * precio).toFixed(2))
-    igvMonto  = parseFloat((subtotal * igvPct / 100).toFixed(2))
-    totalLine = parseFloat((subtotal + igvMonto).toFixed(2))
-    precioUnitarioGuardar = precio
-  }
+  // sql/114: "Gravada 18% (incluido)" se guarda TAL CUAL (igv_incluido +
+  // precio_con_igv). precio_unitario sigue siendo la base sin IGV para que
+  // subtotal = cantidad × precio_unitario se cumpla en SUNAT/reportes.
+  const calc = calcLineaIGV(cantidad, precio, tipoBase)
 
   // Sin lote/zona elegidos acá (eso lo decide la Guía de Despacho al
   // despachar). lote_id/ubicacion_id/stock_ubicacion_id quedan null —
@@ -289,9 +275,7 @@ window.agregarLineaVenta = function() {
   // venta nunca movió stock de verdad, solo lo registraba como referencia.
   const lineaGuardada = {
     item_id: itemId, descripcion, cantidad, cantidad_unidades: cantidadUnidades,
-    precio_unitario: precioUnitarioGuardar,
-    subtotal, tipo_base: tipoBaseGuardar, igv_porcentaje: igvPct,
-    igv_monto: igvMonto, total_linea: totalLine,
+    ...calc,
     unidad_medida: unidadMedida, ubicacion_id: null,
     lote_id: null, stock_ubicacion_id: null, numero_lote: null,
     costo_unitario: parseFloat(_costoPromedioFIFO(lotes, cantidad).toFixed(6))
@@ -313,7 +297,7 @@ window.agregarLineaVenta = function() {
   _renderLineasVenta()
 
   // Limpiar
-  if (cantInput)  cantInput.value  = '1'
+  if (cantInput)  cantInput.value  = ''
   if (unidInput)  unidInput.value  = ''
   if (precioInp)  precioInp.value  = ''
   if (descInp)    descInp.value    = ''
@@ -332,6 +316,7 @@ window.agregarLineaVenta = function() {
 function _badgeTipoIGV(tipoBase) {
   const map = {
     gravada:   { label: 'Gravada 18%', color: 'var(--color-info)' },
+    gravada_incluido: { label: 'Gravada 18% (incluido)', color: 'var(--color-info)' },
     exonerada: { label: 'Exonerada',   color: 'var(--color-warning)' },
     inafecta:  { label: 'Inafecta',    color: 'var(--text-secondary)' }
   }
@@ -359,8 +344,8 @@ function _renderLineasVenta() {
         <td style="text-align:right;">${(parseFloat(l.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 3 })}</td>
         <td>${l.unidad_medida || '-'}</td>
         <td style="text-align:right;">${(parseFloat(l.cantidad_unidades) || 0) > 0 ? (parseFloat(l.cantidad_unidades) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '-'}</td>
-        <td style="text-align:right;">${(+l.precio_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td>
-        <td>${_badgeTipoIGV(l.tipo_base)}</td>
+        <td style="text-align:right;"${l.igv_incluido ? ` title="Valor sin IGV: ${(+l.precio_unitario).toFixed(6)}"` : ''}>${precioUI(l).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td>
+        <td>${_badgeTipoIGV(tipoIGVUI(l))}</td>
         <td style="text-align:right;">${l.subtotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         <td><input type="number" step="0.01" min="0" value="${l.igv_monto.toFixed(2)}" style="width:90px; text-align:right;" title="Editable: ajusta por redondeo si hace falta" onchange="window.editarMontoIGVLineaVenta(${idx}, this.value)"></td>
         <td style="text-align:right; font-weight:bold;">${l.total_linea.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
@@ -633,6 +618,8 @@ window.guardarNuevaVenta = async function() {
         igv_porcentaje:   l.igv_porcentaje,
         igv_monto:        l.igv_monto,
         total_linea:      l.total_linea,
+        igv_incluido:     !!l.igv_incluido,
+        precio_con_igv:   l.igv_incluido ? +l.precio_con_igv : null,
         costo_unitario:   l.costo_unitario,
         ...(l.detalle_packing_id ? { detalle_packing_id: l.detalle_packing_id } : {})
       })
@@ -836,13 +823,14 @@ window.onCambiarSerieVenta = function () {
 const _NOMBRE_IGV = { gravada: 'Gravada 18%', gravada_incluido: 'Gravada 18% (incluido)', exonerada: 'Exonerada', inafecta: 'Inafecta' }
 
 function _recalcularLineaTipoIGV(l, tipo) {
-  const tipoBase = tipo === 'gravada_incluido' ? 'gravada' : tipo
-  const pct = tipoBase === 'gravada' ? 18 : 0
-  const subtotal = parseFloat(((+l.cantidad || 0) * (+l.precio_unitario || 0)).toFixed(2))
-  const igv = parseFloat((subtotal * pct / 100).toFixed(2))
-  // _tipo_orig: el tipo con que llegó la línea (ej. +18% del PK) para poder
-  // restaurarlo si luego se elige una serie sin tipo por defecto.
-  return { ...l, _tipo_orig: l._tipo_orig ?? (l.tipo_base || 'gravada'), tipo_base: tipoBase, igv_porcentaje: pct, subtotal, igv_monto: igv, total_linea: parseFloat((subtotal + igv).toFixed(2)) }
+  // Precio de partida según el destino: "incluido" parte del precio con IGV
+  // (el registrado, o base × 1.18); los demás conservan la base sin IGV.
+  const precio = tipo === 'gravada_incluido'
+    ? (l.igv_incluido ? precioUI(l) : +((+l.precio_unitario || 0) * 1.18).toFixed(6))
+    : (+l.precio_unitario || 0)
+  // _tipo_orig: el tipo con que llegó la línea (ej. incluido desde el PK) para
+  // poder restaurarlo si luego se elige una serie sin tipo por defecto.
+  return { ...l, _tipo_orig: l._tipo_orig ?? tipoIGVUI(l), _precio_orig: l._precio_orig ?? precioUI(l), ...calcLineaIGV(+l.cantidad || 0, precio, tipo) }
 }
 
 async function _aplicarIGVDeSerieVenta({ avisar = false } = {}) {
@@ -857,10 +845,10 @@ async function _aplicarIGVDeSerieVenta({ avisar = false } = {}) {
     // vuelven al tipo con que llegaron.
     let restauradas = 0
     S._ventaLineas = (S._ventaLineas || []).map(l => {
-      if (!l._tipo_orig || l._tipo_orig === l.tipo_base) return l
+      if (!l._tipo_orig || l._tipo_orig === tipoIGVUI(l)) return l
       restauradas++
-      const { _tipo_orig, ...r } = _recalcularLineaTipoIGV(l, l._tipo_orig)
-      return r
+      const { _tipo_orig, _precio_orig, ...r } = l
+      return { ...r, ...calcLineaIGV(+l.cantidad || 0, _precio_orig, _tipo_orig) }
     })
     if (restauradas) {
       _renderLineasVenta()
@@ -868,10 +856,9 @@ async function _aplicarIGVDeSerieVenta({ avisar = false } = {}) {
     }
     return
   }
-  const destino = def === 'gravada_incluido' ? 'gravada' : def
   let cambiadas = 0
   S._ventaLineas = (S._ventaLineas || []).map(l => {
-    if ((l.tipo_base || 'gravada') === destino) return l
+    if (tipoIGVUI(l) === def) return l
     cambiadas++
     return _recalcularLineaTipoIGV(l, def)
   })
@@ -1154,6 +1141,7 @@ window.abrirNuevaVentaDesdePacking = async function (pk, lineasPk) {
     cantidad: +l.cantidad, cantidad_unidades: +l.cantidad_unidades || 0,
     precio_unitario: +l.precio_unitario, subtotal: +l.subtotal, tipo_base: l.tipo_base,
     igv_porcentaje: +l.igv_porcentaje, igv_monto: +l.igv_monto, total_linea: +l.total_linea,
+    igv_incluido: !!l.igv_incluido, precio_con_igv: l.igv_incluido ? +l.precio_con_igv : null,   // sql/114: hereda tal cual
     unidad_medida: l.unidad_medida, ubicacion_id: null, lote_id: null, stock_ubicacion_id: null, numero_lote: null,
     costo_unitario: parseFloat(_costoPromedioFIFO(_stockTotalPorItem(l.item_id).lotes || [], +l.cantidad).toFixed(6)) || 0,
     // Enlace con la línea del PK (facturación parcial, sql/70) y su precio original
