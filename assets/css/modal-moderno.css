@@ -380,3 +380,7 @@ body.ui-moderna .modal .pp-drop-link { display: inline !important; text-transfor
 .hc-cargando{display:flex;align-items:center;justify-content:center;gap:10px;padding:26px;color:var(--text-secondary);font-size:.9rem}
 .hc-spin{width:16px;height:16px;border-radius:50%;border:2px solid color-mix(in srgb,var(--text-secondary) 30%,transparent);border-top-color:#3b82f6;animation:hcspin .7s linear infinite}
 @keyframes hcspin{to{transform:rotate(360deg)}}
+
+/* Tarjeta enfocada al abrir el gestor desde un icono */
+.dx-card.dx-foco{animation:dxfoco 1.1s ease-in-out 2;border-color:#3b82f6!important}
+@keyframes dxfoco{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 0 4px color-mix(in srgb,#3b82f6 40%,transparent)}}

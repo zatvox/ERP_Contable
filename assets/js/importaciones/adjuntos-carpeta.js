@@ -189,7 +189,7 @@ const esc_ = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<':
 function _tarjeta(sl, files, gestion) {
   const ok = !!sl.ok || files.length > 0
   const sube = sl.sube ? `window.acSubirA('${sl.sube}')` : (sl.subeFn || '')
-  return `<div class="dx-card ${ok ? 'ok' : 'vacio'}" ${sube ? `ondragover="event.preventDefault(); this.classList.add('dx-drop')" ondragleave="this.classList.remove('dx-drop')" ondrop="this.classList.remove('dx-drop'); window.acSoltar(event, '${sl.sube || ''}', ${sl.subeFn ? "'" + sl.subeFn.replace(/'/g, "&#39;") + "'" : "''"})"` : ''}>
+  return `<div class="dx-card ${ok ? 'ok' : 'vacio'}" data-tit="${esc_(sl.tit)}" ${sube ? `ondragover="event.preventDefault(); this.classList.add('dx-drop')" ondragleave="this.classList.remove('dx-drop')" ondrop="this.classList.remove('dx-drop'); window.acSoltar(event, '${sl.sube || ''}', ${sl.subeFn ? "'" + sl.subeFn.replace(/'/g, "&#39;") + "'" : "''"})"` : ''}>
     <div class="dx-head"><span class="dx-ico">${sl.ico}</span><b>${sl.tit}</b>
       <span class="dx-estado ${ok ? 'ok' : ''}">${ok ? '✔' : (sl.opcional ? 'Opcional' : 'Pendiente')}</span>
       <span class="dx-acc">${sl.reg || ''}${sube ? `<button type="button" class="btn btn-secondary btn-small dx-mas" title="Adjuntar (o arrastra el archivo aquí)" onclick="${sube}">＋</button>` : ''}</span></div>
@@ -203,7 +203,7 @@ function _mini(sl, files) {
   const img = f ? `<span class="adj-thumb dx-mt" data-adj-path="${esc_(f.path)}" data-adj-nombre="${esc_(f.nombre)}" title="${esc_(f.nombre)} — clic para ver en grande">…</span>` : `<span class="dx-mt dx-mt-vacio">${sl.ico}</span>`
   const pg = sl.pago
   const pbtn = pg ? `<button type="button" class="dx-pg" title="${esc_(pg.txt)}" onclick="event.stopPropagation(); ${pg.fn}">💳 Ver pago</button>` : ''
-  return `<div class="dx-mini ${ok ? 'ok' : 'vacio'}${pg ? ' con-pago' : ''}" onclick="window.abrirAdjuntosCarpeta()" title="${esc_(sl.tit)}${f ? '' : ' — sin archivo'}${pg ? ' · ' + esc_(pg.txt) : ''} · clic para gestionar">
+  return `<div class="dx-mini ${ok ? 'ok' : 'vacio'}${pg ? ' con-pago' : ''}" onclick="${sl.abrir || `window.abrirAdjuntosCarpeta('${String(sl.tit).replace(/'/g, "\\'")}')`}" title="${esc_(sl.tit)}${f ? '' : ' — sin archivo'}${pg ? ' · ' + esc_(pg.txt) : ''} · ${sl.abrir ? 'clic para abrir su registro' : 'clic para gestionar este documento'}">
     <div class="dx-mw">${img}${pg ? '<span class="dx-pgb">💲</span>' : ''}${pbtn}${files.length > 1 ? `<span class="dx-n">${files.length}</span>` : ''}<span class="dx-ck ${ok ? 'ok' : ''}">${ok ? '✔' : ''}</span></div>
     <div class="dx-cap">${sl.tit}</div></div>`
 }
@@ -296,7 +296,7 @@ window.cerrarAdjuntosCarpeta = function () {
   window.renderHojaCosteo?.()
 }
 
-window.abrirAdjuntosCarpeta = async function () {
+window.abrirAdjuntosCarpeta = async function (foco) {
   await esperarContextoEmpresa()
   _carpetaId = carpetaActual()
   if (!_carpetaId) { showToast('Selecciona primero una carpeta', 'warning'); return }
@@ -314,6 +314,11 @@ window.abrirAdjuntosCarpeta = async function () {
 
   await _pintarLista()
   window.openModal('modal-adjuntos-carpeta')
+  // Si se abrió desde un icono sin registro propio, enfoca esa tarjeta
+  if (typeof foco === 'string' && foco) setTimeout(() => {
+    const card = [...document.querySelectorAll('#modal-adjuntos-carpeta .dx-card')].find(x => x.dataset.tit === foco)
+    if (card) { card.scrollIntoView({ block: 'center', behavior: 'smooth' }); card.classList.add('dx-foco'); setTimeout(() => card.classList.remove('dx-foco'), 2200) }
+  }, 120)
 }
 
 export default { abrirAdjuntosCarpeta: window.abrirAdjuntosCarpeta, CONCEPTOS_CARPETA }
