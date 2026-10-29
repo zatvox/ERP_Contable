@@ -405,3 +405,17 @@ body.ui-moderna .modal .pp-drop-link { display: inline !important; text-transfor
 .llg-vacio { --c: #f59e0b; grid-template-columns: auto 1fr auto; }
 .llg-vacio small { display: block; color: var(--text-secondary); font-size: .76rem; }
 @media (max-width: 640px) { .llg { grid-template-columns: auto 1fr; } .llg-chip { grid-column: 1 / -1; justify-self: start; } }
+
+/* ── PDF de varias hojas: asignar tipo por hoja (Documentos de la carpeta) ── */
+.sp-wrap { margin-top: 10px; padding: 12px; border: 1px dashed color-mix(in srgb, #6366f1 55%, transparent); border-radius: 14px; background: color-mix(in srgb, #6366f1 7%, var(--bg-primary)); color: var(--text-primary); }
+.sp-head { font-size: .86rem; margin-bottom: 8px; }
+.sp-todas { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; font-size: .82rem; }
+.sp-todas select { flex: 1 1 220px; max-width: 320px; }
+.sp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.sp-card { display: flex; flex-direction: column; gap: 5px; padding: 8px; border-radius: 12px; border: 1px solid var(--border-color); background: var(--bg-primary); }
+.sp-thumb { position: relative; height: 150px; overflow: hidden; border-radius: 8px; background: #fff; display: flex; justify-content: center; cursor: zoom-in; border: 1px solid var(--border-color); }
+.sp-thumb canvas { max-width: 100%; height: auto; align-self: flex-start; }
+.sp-n { position: absolute; top: 4px; left: 4px; z-index: 1; min-width: 22px; height: 22px; line-height: 22px; text-align: center; border-radius: 11px; background: #6366f1; color: #fff; font-size: .75rem; font-weight: 700; }
+.sp-card select { width: 100%; font-size: .78rem; padding: 4px 6px; }
+.sp-sug { font-size: .7rem; color: #10b981; } .sp-sug.sp-no { color: var(--text-secondary); }
+.sp-res { margin-top: 10px; font-size: .82rem; padding: 8px 10px; border-radius: 10px; background: var(--bg-secondary); }

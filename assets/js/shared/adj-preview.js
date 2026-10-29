@@ -27,6 +27,7 @@ function _pdfjs() {
   return _pdfjsProm
 }
 
+export { _pdfjs as cargarPdfjs }
 const _esPdf = (tipo, nombre) => /pdf/i.test(tipo || '') || /\.pdf$/i.test(nombre || '')
 const _esImg = (tipo, nombre) => /^image\//i.test(tipo || '') || /\.(jpe?g|png|webp|gif)$/i.test(nombre || '')
 

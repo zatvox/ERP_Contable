@@ -16,6 +16,7 @@
 import { query, update, esperarContextoEmpresa } from '../supabase-client.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { showToast, formatNumber, fechaDMY } from '../helpers.js'
+import { cargarPdfjs, abrirVisor } from '../shared/adj-preview.js'
 import { subirAdjuntos, getAdjuntos, getUrlAdjunto, eliminarAdjunto, validarArchivoAdjunto } from '../supabase-data.js'
 
 const kb = b => `${formatNumber((parseFloat(b) || 0) / 1024, 0)} KB`
@@ -48,6 +49,121 @@ export const CONCEPTOS_CARPETA = {
 let _carpetaId = null
 let _carpetaNombre = ''
 let _pendientes = []
+let _split = null          // PDF de varias hojas en revisión: { file, buffer, doc, pages:[{n, concepto, sugerido}] }
+let _adjsAct = [], _slotsAct = []
+
+// ─── PDF con varias hojas: asignar tipo por hoja y separar al subir ───────────
+const PDFLIB = 'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js'
+let _pdfLibProm = null
+function _pdfLib() {
+  if (window.PDFLib) return Promise.resolve(window.PDFLib)
+  if (_pdfLibProm) return _pdfLibProm
+  _pdfLibProm = new Promise((ok, mal) => {
+    const s = document.createElement('script'); s.src = PDFLIB
+    s.onload = () => ok(window.PDFLib)
+    s.onerror = () => { _pdfLibProm = null; mal(new Error('No cargó pdf-lib (¿sin internet?)')) }
+    document.head.appendChild(s)
+  })
+  return _pdfLibProm
+}
+// Reglas de sugerencia por el texto de la hoja (las hojas escaneadas no traen texto: se eligen a mano)
+const REGLAS_HOJA = [
+  [/PROFORMA INVOICE/, 'proforma'], [/COMMERCIAL INVOICE/, 'invoice'], [/PACKING LIST/, 'packing'],
+  [/TECHNICAL SPECIFICATION|FICHA T[EÉ]CNICA/, 'ficha_tecnica'], [/BILL OF LADING|RIDER PAGE/, 'bl'],
+  [/CARGO TRANSPORTATION INSURANCE|INSURANCE POLICY|P[ÓO]LIZA/, 'poliza'], [/CERTIFICATE OF ORIGIN|CERTIFICADO DE ORIGEN/, 'certificado_origen']
+]
+const _sugerir = txt => { const t = String(txt || '').replace(/\s+/g, ' ').toUpperCase(); const r = REGLAS_HOJA.find(([re]) => re.test(t)); return r ? r[1] : '' }
+
+/** Tipos todavía PENDIENTES en la carpeta (sin archivo ni registro), en el orden del expediente. */
+function _tiposPendientes() {
+  return (_slotsAct || []).filter(sl => sl.sube && CONCEPTOS_CARPETA[sl.sube] && !(sl.ok || (_adjsAct || []).some(a => sl.match && sl.match(a)))).map(sl => sl.sube)
+    .filter((k, i, a) => a.indexOf(k) === i)
+}
+function _opcionesHoja(sel) {
+  const pend = _tiposPendientes()
+  const op = (k, l) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${l}</option>`
+  return `<option value="" ${sel ? '' : 'selected'}>— Elige el tipo —</option><option value="__omitir" ${sel === '__omitir' ? 'selected' : ''}>⛔ No subir esta hoja</option>`
+    + (pend.length ? `<optgroup label="Pendientes en esta carpeta">${pend.map(k => op(k, CONCEPTOS_CARPETA[k])).join('')}</optgroup>` : '')
+    + `<optgroup label="Todos los tipos">${Object.entries(CONCEPTOS_CARPETA).filter(([k]) => !pend.includes(k)).map(([k, l]) => op(k, l)).join('')}</optgroup>`
+}
+
+async function _analizarPdf(file) {
+  try {
+    const lib = await cargarPdfjs()
+    const buffer = await file.arrayBuffer()
+    const doc = await lib.getDocument({ data: buffer.slice(0) }).promise
+    if (doc.numPages < 2) return null
+    const pages = []
+    for (let n = 1; n <= doc.numPages; n++) {
+      let txt = ''
+      try { const p = await doc.getPage(n); txt = (await p.getTextContent()).items.map(i => i.str).join(' ') } catch { /* hoja escaneada */ }
+      const sug = _sugerir(txt)
+      pages.push({ n, concepto: sug, sugerido: !!sug })
+    }
+    return { file, buffer, doc, pages }
+  } catch (e) { console.warn('No se pudo analizar el PDF:', e); return null }
+}
+
+function _resumenSplit() {
+  const c = {}; let omit = 0, sin = 0
+  for (const p of _split.pages) { if (p.concepto === '__omitir') omit++; else if (!p.concepto) sin++; else c[p.concepto] = (c[p.concepto] || 0) + 1 }
+  const grupos = Object.entries(c).map(([k, n]) => `<b>${CONCEPTOS_CARPETA[k]}</b> (${n} hoja${n > 1 ? 's' : ''})`)
+  return (grupos.length ? `Se crearán <b>${grupos.length}</b> archivo${grupos.length > 1 ? 's' : ''}: ${grupos.join(' · ')}` : 'Aún no asignas ninguna hoja')
+    + (omit ? ` · ${omit} omitida${omit > 1 ? 's' : ''}` : '') + (sin ? ` · <span style="color:var(--color-warning,#b45309);">${sin} sin tipo</span>` : '')
+}
+
+function _pintarSplit() {
+  const host = document.getElementById('acPendientes'); if (!host || !_split) return
+  host.innerHTML = `<div class="sp-wrap">
+    <div class="sp-head"><span>📑 <b>${esc_(_split.file.name)}</b> tiene <b>${_split.pages.length} hojas</b>. Asigna el tipo de cada una y al subir se separan en archivos.</span></div>
+    <div class="sp-todas"><label>Todas son:</label><select id="spTodas">${_opcionesHoja('')}</select>
+      <button type="button" class="btn btn-secondary btn-small" onclick="window.acSplitTodas()">Aplicar a todas</button></div>
+    <div class="sp-grid">${_split.pages.map(p => `<div class="sp-card" id="spc${p.n}">
+      <div class="sp-thumb" onclick="window.acSplitVer(${p.n})" title="Ver en grande"><span class="sp-n">${p.n}</span><canvas id="spcv${p.n}"></canvas></div>
+      <select onchange="window.acSplitTipo(${p.n}, this.value)">${_opcionesHoja(p.concepto)}</select>
+      ${p.sugerido ? '<small class="sp-sug">✨ sugerido por el texto</small>' : '<small class="sp-sug sp-no">elige el tipo</small>'}</div>`).join('')}</div>
+    <div class="sp-res" id="spRes"></div></div>`
+  document.getElementById('spRes').innerHTML = _resumenSplit()
+  _split.pages.forEach(async p => {
+    try {
+      const pg = await _split.doc.getPage(p.n), v0 = pg.getViewport({ scale: 1 })
+      const vp = pg.getViewport({ scale: 190 / v0.width }), cv = document.getElementById('spcv' + p.n); if (!cv) return
+      cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height)
+      await pg.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise
+    } catch { /* sin miniatura */ }
+  })
+}
+window.acSplitArchivos = () => _archivosSplit()   // (también sirve para pruebas: devuelve los PDF ya separados, sin subirlos)
+window.acSplitTipo = (n, k) => { const p = _split?.pages.find(x => x.n === n); if (!p) return; p.concepto = k; p.sugerido = false
+  document.querySelector(`#spc${n} .sp-sug`)?.remove(); document.getElementById('spRes').innerHTML = _resumenSplit() }
+window.acSplitTodas = () => { const k = document.getElementById('spTodas')?.value; if (!k) { showToast('Elige primero el tipo para todas', 'warning'); return }
+  _split.pages.forEach(p => { p.concepto = k; p.sugerido = false }); _pintarSplit() }
+window.acSplitVer = async n => {
+  try { const pg = await _split.doc.getPage(n), v0 = pg.getViewport({ scale: 1 }), vp = pg.getViewport({ scale: 1100 / v0.width })
+    const cv = document.createElement('canvas'); cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height)
+    await pg.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise
+    abrirVisor(cv.toDataURL('image/jpeg', 0.85), 'image/jpeg', `hoja${n}.jpg`) } catch (e) { showToast('No se pudo abrir la hoja', 'warning') }
+}
+
+/** Separa el PDF según los tipos elegidos y devuelve los archivos a subir (1 por tipo, hojas en su orden). */
+async function _archivosSplit() {
+  const pages = _split.pages
+  const sin = pages.filter(p => !p.concepto); if (sin.length) throw new Error(`Falta el tipo de la${sin.length > 1 ? 's' : ''} hoja${sin.length > 1 ? 's' : ''} ${sin.map(p => p.n).join(', ')} (o márcala «No subir»)`)
+  const grupos = {}; for (const p of pages) if (p.concepto !== '__omitir') (grupos[p.concepto] ||= []).push(p.n - 1)
+  const claves = Object.keys(grupos); if (!claves.length) throw new Error('Todas las hojas están omitidas')
+  const base = _split.file.name.replace(/\.pdf$/i, '').replace(/^\s*\d+\.\s*/, '').slice(0, 45).trim()
+  if (claves.length === 1 && grupos[claves[0]].length === pages.length) return [{ file: _split.file, concepto: claves[0] }]   // todas del mismo tipo: se sube el original
+  const lib = await _pdfLib(); const src = await lib.PDFDocument.load(_split.buffer, { ignoreEncryption: true })
+  const items = []
+  for (const k of claves) {
+    const out = await lib.PDFDocument.create()
+    ;(await out.copyPages(src, grupos[k])).forEach(p => out.addPage(p))
+    const bytes = await out.save()
+    const nombre = `${CONCEPTOS_CARPETA[k].replace(/[\/:*?"<>|]/g, '')} — ${base}.pdf`
+    items.push({ file: new File([bytes], nombre, { type: 'application/pdf' }), concepto: k })
+  }
+  return items
+}
 
 const carpetaActual = () => window.costeoActual?.carpeta_importacion_id || null
 
@@ -117,7 +233,19 @@ window.acArchivosElegidos = async function (input) {
   const lista = document.getElementById('acPendientes')
   if (lista) lista.innerHTML = 'Preparando…'
 
+  _split = null
   const concepto = document.getElementById('acConcepto')?.value || 'otro'
+  const unico = (input.files || []).length === 1 ? input.files[0] : null
+  if (unico && (/pdf/i.test(unico.type) || /\.pdf$/i.test(unico.name))) {
+    _split = await _analizarPdf(unico)
+    if (_split) {
+      _pendientes = []
+      _pintarSplit()
+      const b = document.getElementById('acBtnSubir'); if (b) { b.style.display = ''; b.textContent = '⬆ Separar y subir' }
+      return
+    }
+  }
+  const bsub = document.getElementById('acBtnSubir'); if (bsub) bsub.textContent = '⬆ Subir'
   for (const f of input.files || []) {
     const comprimido = await _comprimir(f)
     const err = validarArchivoAdjunto(comprimido)
@@ -143,15 +271,17 @@ window.subirAdjuntosCarpeta = async function () {
   const btn = document.getElementById('acBtnSubir')
   try {
     if (!_carpetaId) throw new Error('Sin carpeta seleccionada')
-    if (!_pendientes.length) throw new Error('Elige al menos un archivo')
-    btn.disabled = true; btn.textContent = 'Subiendo…'
+    if (!_split && !_pendientes.length) throw new Error('Elige al menos un archivo')
+    btn.disabled = true; btn.textContent = _split ? 'Separando…' : 'Subiendo…'
 
     const user = await getCurrentUser()
-    const res = await subirAdjuntos('carpeta_importacion', _carpetaId, _pendientes, user?.db_id)
+    const aSubir = _split ? await _archivosSplit() : _pendientes
+    btn.textContent = 'Subiendo…'
+    const res = await subirAdjuntos('carpeta_importacion', _carpetaId, aSubir, user?.db_id)
     if (res?.errores?.length) showToast(`${res.ok} subido(s). ${res.errores[0]}`, 'warning')
     else showToast(`${res.ok} documento(s) agregados al expediente`, 'success')
 
-    _pendientes = []
+    _pendientes = []; _split = null
     const inp = document.getElementById('acArchivos'); if (inp) inp.value = ''
     const lista = document.getElementById('acPendientes'); if (lista) lista.innerHTML = ''
     if (btn) btn.style.display = 'none'
@@ -171,6 +301,7 @@ async function _pintarLista() {
   const extra = d?.liq?.id ? await getAdjuntos('liquidacion_agente', d.liq.id) : []
   const todos = [...adjs, ...extra]
   const slots = window.hcDocSlots ? window.hcDocSlots(d || {}) : []
+  _adjsAct = todos; _slotsAct = slots
   cont.innerHTML = window.acTarjetas(slots, todos, { gestion: true })
 }
 
@@ -305,7 +436,7 @@ window.abrirAdjuntosCarpeta = async function (foco) {
   _carpetaNombre = c?.numero_carpeta || _carpetaId
 
   _asegurarModal()
-  _pendientes = []
+  _pendientes = []; _split = null
   const inp = document.getElementById('acArchivos'); if (inp) inp.value = ''
   const pend = document.getElementById('acPendientes'); if (pend) pend.innerHTML = ''
   const btn = document.getElementById('acBtnSubir'); if (btn) btn.style.display = 'none'
