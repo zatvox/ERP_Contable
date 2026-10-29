@@ -92,8 +92,9 @@ function _asegurarModalDAM() {
           <div class="form-group"><label>Modalidad de despacho <span class="bl-en">(consulta SUNAT)</span></label>
             <select id="dmModalidad"><option value="">—</option><option>Anticipado</option><option>Excepcional</option><option>Diferido</option><option>Urgente</option></select></div>
           <div class="form-group" style="grid-column:span 2;"><label>Agente de aduana <span class="bl-en">(Hoja A · 8 Declarante)</span></label><select id="dmAgente"><option value="">—</option></select></div>
-          <div class="form-group"><label>Estado</label>
-            <select id="dmEstado"><option value="pendiente">Pendiente</option><option value="pagado">Pagado</option></select></div>
+          <div class="form-group"><label>Estado <span class="bl-en">(sale de los pagos)</span></label>
+            <select id="dmEstado" data-siempre-lectura><option value="pendiente">Pendiente</option><option value="pagado">Pagado</option></select></div>
+          <div id="dmPagosHost" style="grid-column:span 4;"></div>
           <div class="form-group" style="grid-column:span 2;"><label>Depósito temporal / terminal <span class="bl-en">(Hoja A · 4.1 Almacén aduanero)</span></label><select id="dmDeposito"><option value="">—</option></select></div>
           <div class="form-group"><label>Llegada de la nave <span class="bl-en">(DAM · 4.4 Fec. llegada)</span></label><input type="date" id="dmLlegada"></div>
           <div class="form-group"><label>Levante autorizado <span class="bl-en">(consulta SUNAT · «Fecha levante»)</span></label><input type="datetime-local" id="dmLevante"></div>
@@ -290,8 +291,9 @@ function _marcarEditados() {
 
 window.dmEdita = function (el) {
   const a = _autoTodos()
-  // si el valor vuelve a ser el automático, deja de ser "manual"
-  el.dataset.manual = (a[el.id] != null && Math.abs(n0(el.value) - n0(a[el.id])) <= AUTO_TOL[el.id]) ? '' : '1'
+  // Solo deja de ser "manual" si coincide EXACTO con el automático (la tolerancia AUTO_TOL es solo para
+  // resaltar en ámbar; usarla aquí pisaba lo que el usuario escribía: 2963 → 2964 con tolerancia 1).
+  el.dataset.manual = (a[el.id] != null && el.value !== '' && Math.abs(n0(el.value) - n0(a[el.id])) < 0.005) ? '' : '1'
   window.dmAuto()
 }
 
@@ -396,8 +398,30 @@ window.abrirDAM = async function (id) {
     $('dmBtnAjustar').style.display = _dam ? '' : 'none'
     aplicarModoVerEditar('modal-dam-carpeta', !!_dam)
     window.openModal('modal-dam-carpeta')
+    _pintarPagosDAM()
     await _pintarAjustes()
   } catch (e) { console.error('abrirDAM:', e); showToast('No se pudo abrir la DAM', 'danger') }
+}
+function _pintarPagosDAM() {
+  const h = $('dmPagosHost'); if (!h) return
+  h.innerHTML = _dam ? window.pagosBloqueHtml?.('dam_tributos', _dam.id, 'Pago de tributos') + window.pagosBloqueHtml?.('dam_percepcion', _dam.id, 'Pago de percepción')
+    : '<div class="dm-nota">Guarda la DAM para registrar el pago de sus tributos y de la percepción.</div>'
+}
+/** Tras registrar/editar/eliminar un pago: refresca el estado derivado de la DAM y del ajuste abiertos. */
+window.onPagosCambiaron = async () => {
+  try {
+    document.querySelectorAll('[data-pg-doc]').forEach(el => { el.innerHTML = window.pagosBloqueHtml?.(el.dataset.pgDoc, el.dataset.pgId || null, el.dataset.pgTit) || '' })
+    if (_dam && $('modal-dam-carpeta')?.classList.contains('show')) {
+      _dam = ((await query('dams', { id: _dam.id })) || [])[0] || _dam
+      for (const id of ['dmEstado', 'dmFechaPago', 'dmTC']) { const col = CAMPOS_DAM.find(c => c[0] === id)?.[1]; if (col && $(id)) $(id).value = _dam[col] ?? '' }
+      _pintarPagosDAM()
+    }
+    if (_aj && $('modal-dam-ajuste')?.classList.contains('show')) {
+      _aj = ((await query('dam_autoliquidaciones', { id: _aj.id })) || [])[0] || _aj
+      for (const [id, col] of [['ajEstado', 'estado'], ['ajFechaPago', 'fecha_pago'], ['ajTC', 'tipo_cambio']]) if ($(id)) $(id).value = _aj[col] ?? ''
+      _pintarPagosAjuste()
+    }
+  } catch (e) { console.warn('onPagosCambiaron', e) }
 }
 window.editarDAM = id => window.abrirDAM(id)
 window.abrirNuevaDAM = () => window.abrirDAM()
@@ -468,7 +492,7 @@ function _asegurarModalAjuste() {
         <strong class="mod-sec">Diferencia de valor <small style="text-transform:none; letter-spacing:0; font-weight:400;">(duda razonable)</small></strong>
         <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px;">
           <div class="form-group" style="grid-column:span 2;"><label>Indicador de precios de SUNAT</label><input type="text" id="ajIndicador" maxlength="60" placeholder="118-10-2026-80787 (Item 4)"></div>
-          <div class="form-group"><label>FOB unitario declarado</label><input type="number" id="ajFobDecl" step="0.000001" oninput="window.ajRecalcular()"></div>
+          <div class="form-group"><label>FOB unitario declarado <button type="button" class="ojo-btn" onclick="window.ajVerFuenteFOB()" title="Ver la DAM de donde sale: FOB declarado ÷ kg neto" aria-label="Ver la DAM de origen">↗</button></label><input type="number" id="ajFobDecl" step="0.000001" oninput="window.ajRecalcular()"><small id="ajFobDeclFuente" style="color:var(--text-secondary); font-size:.75rem;"></small></div>
           <div class="form-group"><label>FOB unitario de referencia</label><input type="number" id="ajFobRef" step="0.000001" oninput="window.ajRecalcular()"></div>
           <div class="form-group" style="grid-column:span 2;"><label>Valor adicional en aduana USD <small style="font-weight:400;">(referencia − declarado) × kg neto</small></label><input type="number" id="ajValorAdic" step="0.01" oninput="window.ajRecalcular(true)"></div>
           <div class="form-group" style="grid-column:span 2; align-self:end;"><button type="button" class="btn btn-secondary" data-solo-edicion onclick="window.ajEstimarTributos()">🧮 Estimar tributos con las tasas de la DAM</button></div>
@@ -489,8 +513,9 @@ function _asegurarModalAjuste() {
           <div class="form-group"><label>Garantía</label>
             <select id="ajGarTipo"><option value="">Ninguna</option><option value="deposito">Depósito</option><option value="carta_fianza">Carta fianza</option><option value="poliza">Póliza</option></select></div>
           <div class="form-group"><label>Monto de la garantía USD</label><input type="number" id="ajGarMonto" step="0.01"></div>
-          <div class="form-group"><label>Estado</label>
-            <select id="ajEstado"><option value="pendiente">Pendiente de pago</option><option value="pagada">Pagada</option><option value="desestimada">Desestimada (se sustentó el precio)</option></select></div>
+          <div class="form-group"><label>Estado <span class="bl-en">(sale de los pagos; «Desestimada» se elige aquí)</span></label>
+            <select id="ajEstado"><option value="pendiente">Pendiente de pago</option><option value="pagada" disabled>Pagada</option><option value="desestimada">Desestimada (se sustentó el precio)</option></select></div>
+          <div id="ajPagosHost" style="grid-column:span 4;"></div>
           <div class="form-group" style="grid-column:span 4;"><label>Observaciones</label><textarea id="ajObs" rows="2"></textarea></div>
         </div>
         <div class="dm-nota" id="ajAdjuntos">📎 Adjunta la notificación, la orden de garantía y la liquidación desde «Documentos de la carpeta» (tipos: Notificación de Aduanas, Autoliquidación, Liquidación).
@@ -520,6 +545,10 @@ function _volcarAjuste(a) {
   if (!a && _dam) {   // ajuste nuevo: FOB unitario declarado = FOB de la DAM ÷ kg neto
     const kg = n0(_dam.peso_neto_kg) || n0(_ref.ci?.cantidad_total_neto)
     if (kg && n0(_dam.valor_fob)) $('ajFobDecl').value = (n0(_dam.valor_fob) / kg).toFixed(6)
+  }
+  if (_dam) {   // de dónde sale el FOB unitario declarado
+    const kg = n0(_dam.peso_neto_kg) || n0(_ref?.ci?.cantidad_total_neto)
+    const h = $('ajFobDeclFuente'); if (h) h.textContent = n0(_dam.valor_fob) && kg ? `DAM ${_dam.numero_dam}: FOB US$ ${n2(_dam.valor_fob)} ÷ ${n2(kg)} kg` : ''
   }
   window.ajRecalcular()
 }
@@ -558,6 +587,16 @@ window.ajTC = async function (forzar) {
   } catch { if (forzar === true) showToast('No se pudo consultar el T.C.', 'danger') }
 }
 
+function _pintarPagosAjuste() {
+  const h = $('ajPagosHost'); if (!h) return
+  h.innerHTML = _aj?.id ? window.pagosBloqueHtml?.('ajuste_valor', _aj.id, 'Pago del ajuste de valor') : '<div class="dm-nota">Guarda el ajuste para registrar su pago.</div>'
+}
+/** Abre la declaración de la DAM (Hoja A) encima del ajuste: ahí está el FOB declarado del que sale el unitario. */
+window.ajVerFuenteFOB = async function () {
+  if (!_dam) { showToast('Esta DAM aún no está registrada', 'warning'); return }
+  await window.abrirDeclaracionDAM?.(_dam.id)
+  const m = $('modal-dam-declaracion'); if (m) { document.body.appendChild(m); m.style.zIndex = 2300 }
+}
 window.abrirAjusteValor = async function (ajusteId) {
   try {
     await esperarContextoEmpresa()
@@ -576,6 +615,7 @@ window.abrirAjusteValor = async function (ajusteId) {
     if (_aj?.enviada_costeo) $('ajDestino').innerHTML += '<br>🔒 Ya está en el costeo: para corregir montos edita sus líneas en el ledger de costos.'
     { const m = $('modal-dam-ajuste'); document.body.appendChild(m); m.style.zIndex = 2100 }   // siempre por encima de la DAM abierta
     window.openModal('modal-dam-ajuste')
+    _pintarPagosAjuste()
   } catch (e) { console.error('abrirAjusteValor:', e); showToast('No se pudo abrir el ajuste', 'danger') }
 }
 window.ajEditar = () => {

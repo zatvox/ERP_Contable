@@ -186,7 +186,7 @@
   <div id="modal-nueva-oc" class="modal">
     <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
       <div class="modal-header">
-        <h3 class="modal-title">Nueva Orden de Compra</h3>
+        <h3 class="modal-title" id="ocTituloModal">Nueva Orden de Compra</h3>
         <button class="modal-close" onclick="closeModal('modal-nueva-oc')">✕</button>
       </div>
       <form id="formNewOC">
@@ -203,7 +203,7 @@
                 </select>
                 <small id="ocProveedorDocInfo" style="display:none; color:var(--text-secondary); font-size:0.72rem;"></small>
               </div>
-              <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioProveedor()" style="margin-bottom: 0;">+ Nuevo</button>
+              <button type="button" class="btn btn-secondary btn-small" data-solo-edicion onclick="abrirFormularioProveedor()" style="margin-bottom: 0;">+ Nuevo</button>
             </div>
           </div>
 
@@ -349,7 +349,7 @@
         <div style="padding: 20px;">
           <h4 style="margin-bottom: 15px; color: var(--text-primary); display: flex; justify-content: space-between; align-items: center;">
             <span>Detalles de Productos</span>
-            <button type="button" class="btn btn-primary btn-small" onclick="abrirModalDetalleDesdeCrearOC()">+ Agregar Producto</button>
+            <button type="button" class="btn btn-primary btn-small" data-solo-edicion onclick="abrirModalDetalleDesdeCrearOC()">+ Agregar Producto</button>
           </h4>
 
           <div id="tabla-detalle-nueva-oc" style="margin-top: 15px;">
@@ -374,8 +374,10 @@
         </div>
       </form>
       <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeModal('modal-nueva-oc')">Cancelar</button>
-        <button class="btn btn-primary" onclick="guardarOC()">Guardar OC</button>
+        <button class="btn btn-secondary" data-solo-lectura onclick="closeModal('modal-nueva-oc')">Cerrar</button>
+        <button class="btn btn-primary" data-solo-lectura id="btnEditarOC" onclick="window.ocHabilitarEdicion()">✏️ Editar</button>
+        <button class="btn btn-secondary" data-solo-edicion onclick="window.ocCancelarEdicion()">Cancelar</button>
+        <button class="btn btn-primary" data-solo-edicion onclick="guardarOC()">💾 Guardar OC</button>
       </div>
     </div>
   </div>
@@ -389,17 +391,67 @@
       </div>
 
       <form id="formNewDetalleOC" style="padding: 20px;">
-        <div style="display: flex; gap: 20px; align-items: flex-end;">
-          <div class="form-group" style="flex: 1;">
-            <label>Producto *</label>
-            <div style="display: flex; gap: 10px; align-items: flex-end;">
-              <select id="newDetalleOCProducto" style="flex: 1;" required>
-                <option value="">-- Selecciona un producto --</option>
-              </select>
-              <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioProducto()" style="margin-bottom: 0;">+ Nuevo</button>
-            </div>
+        <div class="form-group">
+          <label>Producto *</label>
+          <div style="display: flex; gap: 10px; align-items: flex-end;">
+            <select id="newDetalleOCProducto" style="flex: 1; min-width: 0; width: 100%;" required>
+              <option value="">-- Selecciona un producto --</option>
+            </select>
+            <button type="button" class="btn btn-secondary btn-small" onclick="abrirFormularioProducto()" style="margin-bottom: 0; white-space: nowrap;">+ Nuevo</button>
           </div>
-          <div class="form-group" style="flex: 0 0 auto;">
+        </div>
+
+        <div class="grid grid-4">
+          <div class="form-group">
+            <label>Cantidad *</label>
+            <input type="number" id="newDetalleOCCantidad" placeholder="0" step="any" min="0" required oninput="calcularDetalleOC()">
+          </div>
+          <div class="form-group">
+            <label>Unidad de medida *</label>
+            <select id="newDetalleOCUnidad" required onchange="calcularDetalleOC()">
+              <option value="KG" selected>KG</option>
+              <option value="M">M</option>
+              <option value="UNIDAD">Unidad</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Precio unitario *</label>
+            <input type="number" id="newDetalleOCPrecio" placeholder="0.000000" step="0.000001" min="0" required oninput="calcularDetalleOC()">
+          </div>
+          <div class="form-group">
+            <label>Descuento %</label>
+            <input type="number" id="newDetalleOCDescuento" placeholder="0" step="0.01" min="0" max="100" value="0" oninput="calcularDetalleOC()">
+          </div>
+        </div>
+
+        <!-- Solo importación: el peso neto es la base del prorrateo del flete; el embalaje lo traen el Packing List y el BL -->
+        <div class="grid grid-2" id="ocDetalleGrupoImportacion" style="display:none;">
+          <div class="form-group">
+            <label id="lblDetalleOCPesoNeto">Peso neto (KG)</label>
+            <input type="number" id="newDetalleOCPesoNeto" step="0.01" placeholder="0.00">
+            <small id="ayudaDetalleOCPesoNeto" style="color: var(--text-secondary); font-size: 0.75rem;"></small>
+          </div>
+          <div class="form-group">
+            <label>Partida arancelaria <span style="font-weight:400; color:var(--text-secondary);">(opcional)</span></label>
+            <input type="text" id="newDetalleOCPartida" placeholder="Ej: 5402.33.00">
+          </div>
+          <details style="grid-column: 1 / -1;">
+            <summary style="cursor:pointer; font-size:0.85rem; color:var(--text-secondary);">Embalaje (opcional) — no viene en la proforma; lo traen el Packing List y el BL</summary>
+            <div class="grid grid-2" style="margin-top:10px;">
+              <div class="form-group">
+                <label>Bultos <span style="font-weight:400; color:var(--text-secondary);">(cajas, cartones o conos; no es la cantidad)</span></label>
+                <input type="number" id="newDetalleOCBultos" step="1" placeholder="0">
+              </div>
+              <div class="form-group">
+                <label>Peso bruto (KG) <span style="font-weight:400; color:var(--text-secondary);">(neto + embalaje)</span></label>
+                <input type="number" id="newDetalleOCPesoBruto" step="0.01" placeholder="0.00">
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <div class="grid grid-4">
+          <div class="form-group">
             <label>IGV (%)</label>
             <select id="newDetalleOCIGV" onchange="calcularDetalleOC()">
               <option value="18" selected>18%</option>
@@ -407,52 +459,6 @@
               <option value="0">0% — No gravada (factura del exterior)</option>
             </select>
           </div>
-        </div>
-
-        <div class="grid grid-4">
-          <div class="form-group">
-            <label>Cantidad *</label>
-            <input type="number" id="newDetalleOCCantidad" placeholder="0" step="1" min="1" required onchange="calcularDetalleOC()">
-          </div>
-          <div class="form-group">
-            <label>Unidad de Medida *</label>
-            <select id="newDetalleOCUnidad" placeholder="Ej: kg, m, unidad" required>
-              <option value="KG" selected>KG</option>
-              <option value="M">M</option>
-              <option value="UNIDAD">Unidad</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Precio Unitario *</label>
-            <input type="number" id="newDetalleOCPrecio" placeholder="0.000000" step="0.000001" min="0" required onchange="calcularDetalleOC()">
-          </div>
-          <div class="form-group">
-            <label>Descuento %</label>
-            <input type="number" id="newDetalleOCDescuento" placeholder="0" step="0.01" min="0" max="100" value="0" onchange="calcularDetalleOC()">
-          </div>
-        </div>
-
-        <!-- Solo importación: el prorrateo del flete necesita el peso -->
-        <div class="grid grid-4" id="ocDetalleGrupoImportacion" style="display:none;">
-          <div class="form-group">
-            <label>Peso neto (KG)</label>
-            <input type="number" id="newDetalleOCPesoNeto" step="0.01" placeholder="0.00">
-          </div>
-          <div class="form-group">
-            <label>Peso bruto (KG)</label>
-            <input type="number" id="newDetalleOCPesoBruto" step="0.01" placeholder="0.00">
-          </div>
-          <div class="form-group">
-            <label>Bultos</label>
-            <input type="number" id="newDetalleOCBultos" step="1" placeholder="0">
-          </div>
-          <div class="form-group">
-            <label>Partida arancelaria</label>
-            <input type="text" id="newDetalleOCPartida" placeholder="Ej: 5402.33.00">
-          </div>
-        </div>
-
-        <div class="grid grid-3">
           <div class="form-group">
             <label>Subtotal</label>
             <input type="number" id="newDetalleOCSubtotal" readonly disabled placeholder="0.00">
@@ -470,7 +476,7 @@
 
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="cerrarModalDetalleOC()">Cancelar</button>
-        <button class="btn btn-primary" onclick="crearDetalleOC()">Agregar Producto</button>
+        <button class="btn btn-primary" id="btnGuardarDetalleOC" onclick="crearDetalleOC()">Agregar Producto</button>
       </div>
     </div>
   </div>

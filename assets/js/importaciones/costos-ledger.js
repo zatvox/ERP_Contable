@@ -19,7 +19,9 @@
 
 import { supabase, insert, update, deleteRecord, query, ultimoErrorInsert, esperarContextoEmpresa } from '../supabase-client.js'
 import { getCurrentUser } from '../auth-supabase.js'
-import { showToast, formatNumber, fechaDMY } from '../helpers.js'
+import { showToast, formatNumber, fechaDMY, pintarDocumentoContacto } from '../helpers.js'
+import { convertirEnBuscador, refrescarBuscador } from '../buscador-select.js'
+import { abrirModalContacto } from '../shared/contacto-modal.js'
 import { getSuppliers, addCuentaPagar, subirAdjuntos, getAdjuntos, getUrlAdjunto,
          eliminarAdjuntosDe, validarArchivoAdjunto, getConteoAdjuntos } from '../supabase-data.js'
 import { getTipoCambioDia } from '../sunat-api.js'
@@ -540,14 +542,11 @@ function _asegurarModalLinea() {
         <div id="lcInfoCarpeta"></div>
 
         <strong style="display:block; margin:14px 0 8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Documento que sustenta el gasto</strong>
-        <div style="display:grid; grid-template-columns:1.4fr 1fr 0.8fr 1fr; gap:10px;">
+        <div style="display:grid; grid-template-columns:1.8fr 1fr 0.7fr 0.9fr; gap:10px;">
           <div class="form-group">
             <label>Proveedor *</label>
-            <div style="display:flex; gap:8px;">
-              <select id="lcProveedor" style="flex:1;"><option value="">-- Selecciona --</option></select>
-              <button type="button" class="btn btn-secondary btn-small" style="margin-bottom:0; white-space:nowrap;"
-                      onclick="window.abrirFormularioProveedorCosteo && window.abrirFormularioProveedorCosteo()">+ Nuevo</button>
-            </div>
+            <select id="lcProveedor"><option value="">-- Selecciona --</option></select>
+            <small id="lcProveedorDocInfo" style="display:none; color:var(--text-secondary); font-size:0.72rem;"></small>
           </div>
           <div class="form-group">
             <label>Tipo de documento *</label>
@@ -586,7 +585,6 @@ function _asegurarModalLinea() {
               <button type="button" class="btn btn-secondary btn-small" style="margin-bottom:0; white-space:nowrap;"
                       onclick="window.lcTCDelDia(true)" title="Traer el T.C. compra del dia">⟳</button>
             </div>
-            <small id="lcTCAviso" style="color:var(--text-secondary);"></small>
           </div>
           <div class="form-group">
             <label>Estado de pago</label>
@@ -598,13 +596,14 @@ function _asegurarModalLinea() {
             </select>
           </div>
         </div>
+        <small id="lcTCAviso" style="display:block; margin:-4px 0 6px; color:var(--text-secondary); font-size:.76rem;"></small>
 
         <hr style="border:none; border-top:1px solid var(--border-color); margin:14px 0;">
         <strong style="display:block; margin-bottom:4px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Clasificacion del costo</strong>
         <small style="display:block; margin-bottom:10px; color:var(--text-secondary); line-height:1.4;">
           Elige el concepto y el resto se llena solo: el concepto decide si la plata es costo NIC 2, credito fiscal o gasto financiero, y con que base se prorratea.
         </small>
-        <div style="display:grid; grid-template-columns:1.6fr 1.2fr 1.1fr 1fr; gap:10px;">
+        <div style="display:grid; grid-template-columns:1.5fr 1.1fr 1fr 1.2fr; gap:10px;">
           <div class="form-group">
             <label>Concepto *</label>
             <select id="lcConcepto" onchange="window.lcOnConcepto()">
@@ -817,12 +816,38 @@ window.lcArchivosElegidos = function (input) {
   }
 }
 
+// Proveedor: mismo buscador estándar de Compras (nombre o RUC) + alta de contacto con búsqueda por RUC
+let _pendienteProv = false
+function _syncProveedor() {
+  const sel = document.getElementById('lcProveedor'); if (!sel) return
+  refrescarBuscador(sel)
+  const id = parseInt(sel.value || 0)
+  pintarDocumentoContacto('lcProveedorDocInfo', id ? (_proveedores.find(p => p.id === id) || null) : null)
+}
+window.addEventListener('contacto-guardado', async e => {
+  if (!_pendienteProv) return
+  _pendienteProv = false
+  const c = e.detail?.contacto
+  _proveedores = []
+  await _llenarSelectoresModal()
+  if (c?.id && !c._eliminado) { const sel = document.getElementById('lcProveedor'); if (sel) { sel.value = String(c.id); _syncProveedor() } showToast(`${c.nombre || 'Proveedor'} seleccionado`, 'success') }
+})
+
 async function _llenarSelectoresModal() {
   if (!_proveedores.length) _proveedores = (await getSuppliers()) || []
   const prov = document.getElementById('lcProveedor')
   if (prov) {
+    const previo = prov.value
     prov.innerHTML = '<option value="">-- Selecciona --</option>' +
       _proveedores.map(p => `<option value="${p.id}">${p.nombre}${p.nro_documento ? ` (${p.nro_documento})` : ''}</option>`).join('')
+    prov.value = previo
+    if (!prov.dataset.bus) {
+      prov.dataset.bus = '1'
+      convertirEnBuscador(prov, { placeholder: 'Escribe el nombre o RUC del proveedor...', sinResultados: 'Ningún proveedor coincide',
+        alCrearNuevo: { label: 'Registrar proveedor nuevo (con búsqueda por RUC)', onClick: () => { _pendienteProv = true; abrirModalContacto({ roles: ['proveedor'] }) } } })
+      prov.addEventListener('change', _syncProveedor)
+    }
+    _syncProveedor()
   }
   const cont = document.getElementById('lcContenedor')
   if (cont) {
@@ -862,7 +887,7 @@ window.abrirModalLineaCosto = async function () {
   const set = (id, v) => { const e = document.getElementById(id); if (e) e.value = v }
   set('lcFecha', hoy); set('lcVencimiento', ''); set('lcSerie', ''); set('lcNumero', '')
   set('lcConcepto', ''); set('lcDescripcion', ''); set('lcMonto', ''); set('lcIGV', '')
-  set('lcRetencion', ''); set('lcObservaciones', ''); set('lcProveedor', '')
+  set('lcRetencion', ''); set('lcObservaciones', ''); set('lcProveedor', ''); _syncProveedor()
   set('lcTipoDoc', 'factura'); set('lcMoneda', 'USD'); set('lcEstadoPago', 'pendiente')
   const desc = document.getElementById('lcDescripcion'); if (desc) delete desc.dataset.tocado
   const prov = document.getElementById('lcProvisional'); if (prov) prov.checked = false
@@ -894,7 +919,7 @@ window.editarLineaCosto = async function (id) {
 
   const set = (campo, v) => { const e = document.getElementById(campo); if (e) e.value = (v === null || v === undefined) ? '' : v }
   document.getElementById('tituloModalLineaCosto').textContent = `Editar costo · ${l.concepto}`
-  set('lcProveedor', l.proveedor_id); set('lcTipoDoc', l.documento_tipo || 'factura')
+  set('lcProveedor', l.proveedor_id); _syncProveedor(); set('lcTipoDoc', l.documento_tipo || 'factura')
   const partes = (l.documento_numero || '').split('-')
   set('lcSerie', partes.length > 1 ? partes[0] : '')
   set('lcNumero', partes.length > 1 ? partes.slice(1).join('-') : partes[0])
@@ -1015,6 +1040,7 @@ window.guardarLineaCosto = async function () {
     showToast(_editandoId ? 'Costo actualizado' : 'Costo registrado', 'success')
     window.cerrarModalLineaCosto()
     await renderCostosLedger()
+    try { await window._alGuardarCosto?.() } catch (e2) { console.warn('alGuardarCosto', e2) }
   } catch (e) {
     console.error('guardarLineaCosto:', e)
     showToast(e.message || 'No se pudo guardar el costo', 'danger')

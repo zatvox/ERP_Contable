@@ -90,7 +90,7 @@ async function _cargar() {
   if (!carpeta) return null
   const carpetaId = carpeta.id
   // Ola 1: TODO lo que depende solo de la carpeta/CI, en paralelo (antes eran ~25 viajes uno tras otro).
-  const [pi, costos, pagos, dams, bls, items, prov, adjs, liqs, guias, estRows, lotesC, lineasRaw, docsAll, vDam, vAut, vDoc] = await Promise.all([
+  const [pi, costos, pagos, dams, bls, items, prov, adjs, liqs, guias, estRows, lotesC, lineasRaw, docsAll, lineasPI, vDam, vAut, vDoc, appsRaw, contRaw] = await Promise.all([
     carpeta.orden_compra_id ? query('orden_compra', { id: carpeta.orden_compra_id }) : [],
     query('importacion_costos', { carpeta_importacion_id: carpetaId }),
     query('importacion_pagos', { carpeta_importacion_id: carpetaId }),
@@ -106,7 +106,10 @@ async function _cargar() {
     ci ? query('detalle_comercial_invoice', { comercial_invoice_id: ci.id })
        : (carpeta.orden_compra_id ? query('detalle_orden_compra', { orden_compra_id: carpeta.orden_compra_id }) : []),
     query('documentos_importacion', {}),
-    getConteoAdjuntos('dam'), getConteoAdjuntos('autoliquidacion'), getConteoAdjuntos('documento_importacion')
+    ci && carpeta.orden_compra_id ? query('detalle_orden_compra', { orden_compra_id: carpeta.orden_compra_id }) : [],
+    getConteoAdjuntos('dam'), getConteoAdjuntos('autoliquidacion'), getConteoAdjuntos('documento_importacion'),
+    query('importacion_pago_aplicaciones', { carpeta_importacion_id: carpetaId }),
+    ci ? query('bl_contenedores', {}) : []
   ])
   const damRow = (dams || [])[0] || null
   const piRow = (pi || [])[0] || null
@@ -130,7 +133,7 @@ async function _cargar() {
   for (const d of docsAll || []) if (docIds.has(d.id)) docs[d.id] = d
   const mapaItems = {}; for (const i of items || []) mapaItems[i.id] = i
   const vouchers = { dam: vDam, aut: vAut, doc: vDoc }
-  return { tcInfo, carpeta, ci, pi: piRow, costos: costosOk, pagos: pagos || [], dam: damRow, ajustes, liq, abonosAg, guias, lotesC, estadia, bls: bls || [], lineas: lineas || [], docs, mapaItems, adjuntos: [...(adjs || []), ...(adjLiq || [])], vouchers, proveedor: (prov || [])[0] || null, estimado: !ci }
+  return { lineasPI: lineasPI || [], tcInfo, carpeta, ci, pi: piRow, costos: costosOk, pagos: pagos || [], apps: appsRaw || [], contenedores: (contRaw || []).filter(c => (bls || []).some(b => b.id === c.bl_id)), dam: damRow, ajustes, liq, abonosAg, guias, lotesC, estadia, bls: bls || [], lineas: lineas || [], docs, mapaItems, adjuntos: [...(adjs || []), ...(adjLiq || [])], vouchers, proveedor: (prov || [])[0] || null, estimado: !ci }
 }
 
 // ─── Cálculo ────────────────────────────────────────────────────────────────
@@ -219,14 +222,26 @@ export function calcularCronograma(d) {
   const mon = pi.currency || 'USD'
   const pct = pi.anticipo_porcentaje != null ? num(pi.anticipo_porcentaje) : 0
   const total = num(pi.total_oc)
-  const ok = d.pagos.filter(p => p.estado !== 'observado' && p.moneda === mon)
+  const ok = d.pagos.filter(p => p.estado !== 'observado' && (p.moneda === mon || (d.apps || []).length > 0))
   const antPags = ok.filter(p => p.tipo === 'anticipo').sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)))
   const salPags = ok.filter(p => p.tipo === 'saldo' || p.tipo === 'pago_total')
-  const antPag = antPags.reduce((t, p) => t + num(p.monto_transferido), 0)
-  const salPag = salPags.reduce((t, p) => t + num(p.monto_transferido), 0)
-  const antEsp = total * pct / 100, salEsp = total - antEsp
+  // Con SQL 116 el pagado sale de las aplicaciones (monto en moneda del documento); sin ellas, de los pagos como antes.
+  const vivos = new Set(d.pagos.filter(p => p.estado !== 'observado').map(p => p.id))
+  const apl = t => (d.apps || []).filter(a => a.doc_tipo === t && vivos.has(a.pago_id))
+  const tieneApps = (d.apps || []).length > 0
+  const antPag = tieneApps ? apl('oc_anticipo').reduce((t, a) => t + num(a.monto_doc), 0) : antPags.reduce((t, p) => t + num(p.monto_transferido), 0)
+  const salPag = tieneApps ? apl('ci_saldo').reduce((t, a) => t + num(a.monto_doc), 0) : salPags.reduce((t, p) => t + num(p.monto_transferido), 0)
+  // El anticipo se pacta sobre la PI; el saldo se calcula sobre el total REAL (CI) menos lo ya anticipado.
+  // Si el CI vino mayor que la PI (dentro de la tolerancia), el exceso se paga en el saldo.
+  const ciTotal = d.ci ? num(d.ci.valor_total_final_ci) : 0
+  const totalReal = ciTotal > 0 ? ciTotal : total
+  const antCierra = apl('oc_anticipo').some(a => String(a.concepto || '').includes('[cierra'))   // pagó menos y la diferencia pasó al saldo
+  const antEsp = antCierra && antPag > 0 ? antPag : total * pct / 100
+  const exceso = ciTotal > 0 ? ciTotal - total : 0
+  const salEsp = totalReal - (antPag > 0 ? antPag : antEsp)
   const antLimite = _sumaDias(pi.fecha, pi.dias_validez_anticipo)
-  const antFecha = antPags[0]?.fecha || null
+  const antIds = new Set(apl('oc_anticipo').map(a => a.pago_id))
+  const antFecha = (tieneApps ? ok.filter(p => antIds.has(p.id)).sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)))[0]?.fecha : antPags[0]?.fecha) || null
   const base = antFecha || antLimite
   const embEst = _sumaDias(base, pi.dias_embarque)
   const blFechas = (d.bls || []).map(b => b.fecha).filter(Boolean).sort()
@@ -235,8 +250,9 @@ export function calcularCronograma(d) {
   const salLimite = _sumaDias(embFecha, pi.dias_saldo_desde_bl)
   const estado = (pag, esp, limite) => pag >= esp - 0.01 && esp > 0 ? 'pagado' : pag > 0 ? 'parcial' : (limite && limite < _hoy() ? 'vencido' : 'pendiente')
   return {
-    mon, pct, total, antEsp, salEsp, antPag, salPag, antLimite, antFecha, embEst, embReal, embFecha, salLimite,
-    salProyectado: !embReal, antEstado: estado(antPag, antEsp, antLimite), salEstado: estado(salPag, salEsp, salLimite),
+    mon, pct, total, totalReal, exceso, salPct: totalReal > 0 ? salEsp / totalReal * 100 : 100 - pct, antEsp, salEsp, antPag, salPag, antLimite, antFecha, embEst, embReal, embFecha, salLimite,
+    tieneCI: !!d.ci, ciNum: d.ci?.invoice_number || '', ciFecha: d.ci?.fecha || null, ciTotal: ciTotal,
+    salProyectado: !embReal, antEstado: (() => { const e = estado(antPag, antEsp, antLimite); return e === 'parcial' && salPag > 0 && antPag + salPag >= totalReal - 0.01 ? 'pagado' : e })(), salEstado: estado(salPag, salEsp, salLimite),
     base: antFecha ? 'anticipo pagado' : 'límite del anticipo', diasEmb: pi.dias_embarque, diasSaldo: pi.dias_saldo_desde_bl
   }
 }
@@ -255,17 +271,131 @@ function _cronogramaHtml(c) {
   const anticipo = paso(c.antEstado, '💳', `Anticipo ${n2(c.pct)}%`, monto(c.mon, c.antEsp),
     c.antFecha ? `Pagado el ${fechaDMY(c.antFecha)}${c.antPag ? ' · ' + monto(c.mon, c.antPag) : ''}` : (c.antLimite ? `Límite ${fechaDMY(c.antLimite)}` : 'Sin plazo en la PI'),
     chip(c.antEstado), c.antEstado === 'pagado' ? '' : btn('anticipo', c.antPag ? 'Completar anticipo' : 'Pagar anticipo'))
+  const ciPaso = paso(c.tieneCI ? 'pagado' : 'pendiente', '🧾', 'Commercial Invoice', c.tieneCI ? monto(c.mon, c.ciTotal) : 'Por registrar',
+    c.tieneCI ? `${esc(c.ciNum)} · ${fechaDMY(c.ciFecha)}` : 'Llega del proveedor al embarcar. Regístralo para calcular el saldo real',
+    c.tieneCI ? chip('pagado') : chip('pendiente'),
+    `<button type="button" class="btn btn-primary btn-small cr-btn" onclick="${c.tieneCI ? 'window.verCI()' : 'window.abrirRegistrarCI()'}">${c.tieneCI ? '👁 Ver CI' : '🧾 Registrar CI'}</button>`)
   const embarque = paso(c.embReal ? 'pagado' : 'estimado', '🚢', 'Embarque', c.embFecha ? fechaDMY(c.embFecha) : '—',
     c.embReal ? 'Fecha real del B/L' : (c.embEst ? `Estimada: ${c.base} + ${c.diasEmb} días` : (falta ? 'Falta plazo de embarque en la PI' : 'Se calcula al pagar el anticipo')),
     chip(c.embReal ? 'hecho' : 'estimado'), '')
-  const saldo = paso(c.salEstado, '🏁', `Saldo ${n2(100 - c.pct)}%`, monto(c.mon, c.salEsp),
+  const saldo = paso(c.salEstado, '🏁', `Saldo ${n2(c.salPct)}%`, monto(c.mon, c.salEsp),
     c.salPag ? `Pagado ${monto(c.mon, c.salPag)}` : (c.salLimite ? `${c.salProyectado ? 'Vence aprox.' : 'Vence'} ${fechaDMY(c.salLimite)} · ${c.diasSaldo} días desde ${c.salProyectado ? 'el embarque est.' : 'el B/L'}` : 'Sin plazo de saldo en la PI'),
-    chip(c.salEstado), c.salEstado === 'pagado' ? '' : btn('saldo', c.salPag ? 'Completar saldo' : 'Pagar saldo'))
-  return `<div class="cr-wrap"><div class="cr-head">Cronograma de pagos <span>· PI ${c.mon} ${n2(c.total)}</span>
+    chip(c.salEstado), c.salEstado === 'pagado' ? '' : (c.tieneCI ? btn('saldo', c.salPag ? 'Completar saldo' : 'Pagar saldo') : '<div class="cr-sub" style="margin-top:4px;"><em>Primero registra el CI (paso 2)</em></div>'))
+  return `<div class="cr-wrap"><div class="cr-head">Cronograma de pagos <span>· PI ${c.mon} ${n2(c.total)}${c.exceso > 0.005 ? ` · CI ${c.mon} ${n2(c.totalReal)} (+${n2(c.exceso)} se paga en el saldo)` : ''}</span>
       <button type="button" class="btn btn-secondary btn-small" style="margin-left:auto;" onclick="window.abrirPagosProveedor()">Ver todos los pagos</button></div>
-    <div class="cr-grid">${anticipo}<div class="cr-flecha">→</div>${embarque}<div class="cr-flecha">→</div>${saldo}</div></div>`
+    <div class="cr-grid" style="grid-template-columns:1fr auto 1fr auto 1fr auto 1fr;">${anticipo}<div class="cr-flecha">→</div>${ciPaso}<div class="cr-flecha">→</div>${embarque}<div class="cr-flecha">→</div>${saldo}</div></div>`
 }
 
+
+
+// ─── Comparativo PI vs CI (lo pactado vs lo facturado) con semáforo de tolerancia ───
+function _comparativoHtml(d) {
+  const { pi, ci, lineasPI, lineas } = d
+  if (!pi || !ci || !(lineasPI || []).length || !(lineas || []).length) return ''
+  const tol = pi.tolerancia_porcentaje != null && pi.tolerancia_porcentaje !== '' ? num(pi.tolerancia_porcentaje) : 10
+  const idPI = l => l.item_id, idCI = l => l.product_id
+  const ids = [...new Set([...lineasPI.map(idPI), ...lineas.map(idCI)])]
+  const nom = id => { const it = d.mapaItems[id]; return it ? (it.sku ? `(${it.sku}) ${it.nombre}` : it.nombre) : 'Artículo ' + id }
+  const filas = ids.map(id => {
+    const a = lineasPI.filter(l => idPI(l) === id), b = lineas.filter(l => idCI(l) === id)
+    const kgP = a.reduce((t, l) => t + num(l.cantidad), 0), kgC = b.reduce((t, l) => t + num(l.cantidad_neto ?? l.cantidad), 0)
+    const vP = a.reduce((t, l) => t + num(l.subtotal ?? l.total), 0), vC = b.reduce((t, l) => t + num(l.costo_total), 0)
+    return { nombre: nom(id), kgP, kgC, vP, vC, enPI: a.length > 0, enCI: b.length > 0 }
+  })
+  const T = filas.reduce((t, f) => ({ kgP: t.kgP + f.kgP, kgC: t.kgC + f.kgC, vP: t.vP + f.vP, vC: t.vC + f.vC }), { kgP: 0, kgC: 0, vP: 0, vC: 0 })
+  const pct = (c, p) => p > 0 ? (c - p) / p * 100 : (c > 0 ? 100 : 0)
+  const estado = f => !f.enPI ? ['rojo', 'No estaba en la PI'] : !f.enCI ? ['ambar', 'No vino en el CI']
+    : (Math.abs(pct(f.kgC, f.kgP)) <= tol && Math.abs(pct(f.vC, f.vP)) <= tol) ? ['verde', 'Dentro de la tolerancia'] : ['ambar', 'Excede la tolerancia']
+  const COL = { verde: '#10b981', ambar: '#f59e0b', rojo: '#ef4444' }
+  const sg = e => `<span class="cr-chip" style="--c:${COL[e[0]]};">${e[1]}</span>`
+  const sgn = v => (v > 0 ? '+' : '') + n2(v)
+  const TDs = 'padding:5px 8px; text-align:right; border-bottom:1px solid var(--border-color); white-space:nowrap;'
+  const row = (f, tot) => { const e = tot ? estado({ ...f, enPI: true, enCI: true }) : estado(f)
+    return `<tr style="${tot ? 'font-weight:700; background:var(--bg-secondary);' : ''}"><td style="${TDs} text-align:left; white-space:normal;">${tot ? 'TOTAL' : esc(f.nombre)}</td>
+      <td style="${TDs}">${n2(f.kgP)}</td><td style="${TDs}">${n2(f.kgC)}</td><td style="${TDs}">${sgn(f.kgC - f.kgP)} <small>(${sgn(pct(f.kgC, f.kgP))}%)</small></td>
+      <td style="${TDs}">$ ${n2(f.vP)}</td><td style="${TDs}">$ ${n2(f.vC)}</td><td style="${TDs}">${sgn(f.vC - f.vP)}</td><td style="${TDs} text-align:center;">${sg(e)}</td></tr>` }
+  const eT = estado({ ...T, enPI: true, enCI: true }), dif = T.vC - T.vP
+  const msg = filas.some(f => !f.enPI) ? 'El CI trae artículos que no estaban en la PI: revisar con el proveedor antes de pagar.'
+    : Math.abs(dif) < 0.005 && Math.abs(T.kgC - T.kgP) < 0.005 ? 'El CI coincide con la PI.'
+    : eT[0] === 'verde' ? `El CI vino ${dif > 0 ? 'mayor' : 'menor'} que la PI pero dentro de la tolerancia ±${n2(tol)}%: el ${dif > 0 ? 'exceso' : 'menor valor'} de $ ${n2(Math.abs(dif))} se ${dif > 0 ? 'paga' : 'descuenta'} en el saldo.`
+    : `El CI excede la tolerancia ±${n2(tol)}% de la PI ($ ${sgn(dif)}): negociar o aceptar el excedente antes de pagar el saldo.`
+  return `<div style="margin-top:14px;"><div class="e3-sub" style="margin-bottom:6px;">Comparativo PI vs CI <small style="font-weight:400; color:var(--text-secondary);">· tolerancia ±${n2(tol)}%</small></div>
+    <div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse; font-size:.82rem;"><thead><tr style="color:var(--text-secondary);">
+      <th style="${TDs} text-align:left;">Artículo</th><th style="${TDs}">PI kg</th><th style="${TDs}">CI kg</th><th style="${TDs}">Dif. kg</th><th style="${TDs}">PI $</th><th style="${TDs}">CI $</th><th style="${TDs}">Dif. $</th><th style="${TDs} text-align:center;">Estado</th></tr></thead>
+      <tbody>${filas.map(f => row(f, false)).join('')}${row(T, true)}</tbody></table></div>
+    <div style="margin-top:8px; padding:8px 12px; border-left:3px solid ${COL[eT[0]]}; background:var(--bg-secondary); font-size:.84rem;">${msg}</div></div>`
+}
+
+/** Líneas de un documento (PI o CI) en solo lectura: artículo, kg, precio y subtotal. Para los modales. */
+window.hcLineasDoc = function (tipo) {
+  const d = window.hcUltimo?.d; if (!d) return ''
+  const rows = tipo === 'pi' ? (d.lineasPI?.length ? d.lineasPI : (!d.ci ? d.lineas : [])) : (d.ci ? d.lineas : [])
+  if (!rows.length) return ''
+  const nom = id => { const it = d.mapaItems[id]; return it ? (it.sku ? `(${it.sku}) ${it.nombre}` : it.nombre) : 'Artículo ' + id }
+  const TDs = 'padding:5px 8px; text-align:right; border-bottom:1px solid var(--border-color); white-space:nowrap;'
+  let tk = 0, tv = 0
+  const filas = rows.map(l => {
+    const kg = num(tipo === 'pi' ? l.cantidad : (l.cantidad_neto ?? l.cantidad)), pu = num(tipo === 'pi' ? l.precio_unitario : l.costo_unitario), st = num(tipo === 'pi' ? (l.subtotal ?? l.total) : l.costo_total)
+    tk += kg; tv += st
+    return `<tr><td style="${TDs} text-align:left; white-space:normal;">${esc(nom(tipo === 'pi' ? l.item_id : l.product_id))}</td><td style="${TDs}">${n2(kg)}</td><td style="${TDs}">${n3(pu)}</td><td style="${TDs}">$ ${n2(st)}</td></tr>`
+  }).join('')
+  return `<div style="margin:12px 0;"><div style="font-weight:600; font-size:.85rem; margin-bottom:6px;">Artículos del documento</div><div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse; font-size:.82rem;">
+    <thead><tr style="color:var(--text-secondary);"><th style="${TDs} text-align:left;">Artículo</th><th style="${TDs}">Cantidad kg</th><th style="${TDs}">Precio unit.</th><th style="${TDs}">Subtotal</th></tr></thead>
+    <tbody>${filas}<tr style="font-weight:700; background:var(--bg-secondary);"><td style="${TDs} text-align:left;">TOTAL</td><td style="${TDs}">${n2(tk)}</td><td style="${TDs}"></td><td style="${TDs}">$ ${n2(tv)}</td></tr></tbody></table></div></div>`
+}
+
+
+/** Pagos válidos ligados a un tipo de documento (por aplicaciones, SQL 116; sin ellas, por el tipo del pago). */
+function pagosPorTipos(d, tipos) {
+  const validos = (d.pagos || []).filter(p => p.estado !== 'observado')
+  if (!(d.apps || []).length) return validos.filter(p => tipos.includes(p.tipo))
+  const DOC = { anticipo: 'oc_anticipo', saldo: 'ci_saldo', pago_total: 'ci_saldo', tributos: 'dam_tributos', percepcion: 'dam_percepcion', ajuste_valor: 'ajuste_valor', agente: 'agente' }
+  const docs = new Set(tipos.map(t => DOC[t]).filter(Boolean))
+  const ids = new Set(d.apps.filter(a => docs.has(a.doc_tipo)).map(a => a.pago_id))
+  return validos.filter(p => ids.has(p.id))
+}
+
+// ─── Alerta de LLEGADA del BL: ancla para proyectar tributos y presupuesto de caja ─────
+// Patrón observado (carpeta 8): tributos ≈ 3 días antes de la llegada (despacho anticipado) y levante ≈ 10 días después.
+const DIAS_TRIBUTOS_ANTES = 3, DIAS_LEVANTE_DESPUES = 10
+function _diasHasta(iso) {
+  if (!iso) return null
+  const [y, m, dd] = String(iso).slice(0, 10).split('-').map(Number), h = new Date()
+  return Math.round((Date.UTC(y, m - 1, dd) - Date.UTC(h.getFullYear(), h.getMonth(), h.getDate())) / 86400000)
+}
+function _llegadaHtml(d) {
+  const { bls, dam, ci } = d
+  if (!ci) return ''
+  const conFecha = (bls || []).map(b => ({ b, f: b.fecha_llegada || b.fecha_eta, real: !!b.fecha_llegada })).filter(x => x.f)
+  if (!conFecha.length) {
+    return `<div class="llg llg-vacio"><span class="llg-ico">🛳️</span><div class="llg-tx"><b>Falta la fecha de llegada (ETA) del B/L</b>
+      <small>Con ella proyecto cuándo pagar los tributos y cuánta caja reservar.</small></div>
+      <button type="button" class="btn btn-primary btn-small" onclick="window.abrirBL(${(bls || [])[0]?.id ?? ''})">${(bls || []).length ? 'Completar ETA' : 'Registrar B/L'}</button></div>`
+  }
+  conFecha.sort((a, b) => a.f.localeCompare(b.f))
+  const trPag = dam?.estado === 'pagado'
+  const lev = dam?.fecha_levante
+  const fila = ({ b, f, real }, i) => {
+    const dias = _diasHasta(f)
+    const trF = _sumaDias(String(f).slice(0, 10), -DIAS_TRIBUTOS_ANTES), lvF = _sumaDias(String(f).slice(0, 10), DIAS_LEVANTE_DESPUES)
+    const diasTr = _diasHasta(trF)
+    const cls = lev ? 'ok' : dias < 0 ? 'llego' : dias <= 7 ? 'urge' : dias <= 20 ? 'pronto' : 'lejos'
+    const chipTxt = lev ? 'Levante autorizado' : real && dias <= 0 ? (dias === 0 ? 'Llegó hoy' : `Llegó hace ${-dias} d`) : dias === 0 ? 'Llega hoy' : dias < 0 ? `ETA vencida hace ${-dias} d` : `Faltan ${dias} d`
+    const tr = trPag ? '✓ Pagados' : (diasTr < 0 ? `¡Ya toca! (${-diasTr} d)` : diasTr === 0 ? 'Hoy' : `en ${diasTr} d`)
+    return `<div class="llg llg-${cls}">
+      <span class="llg-ico">🛳️</span>
+      <div class="llg-tx"><div class="llg-t">${real ? 'Llegada al Callao' : 'ETA al Callao'}${(bls || []).length > 1 ? ` <small>· B/L ${esc(String(b.nro_bill_lading || '').slice(-8))}</small>` : ''}</div>
+        <div class="llg-f">${fechaDMY(f)}</div><div class="llg-s">${real ? 'Fecha real de llegada' : 'Estimada: confirma cuando la nave arribe'}</div></div>
+      <span class="llg-chip">${chipTxt}</span>
+      <div class="llg-pasos">
+        <div class="llg-p ${trPag ? 'ok' : diasTr <= 0 ? 'warn' : ''}"><i>💰</i><b>Tributos</b><span>~ ${fechaDMY(trF)}</span><em>${tr}</em></div>
+        <div class="llg-p ${lev ? 'ok' : ''}"><i>✅</i><b>Levante</b><span>${lev ? fechaDMY(String(lev).slice(0, 10)) : '~ ' + fechaDMY(lvF)}</span><em>${lev ? 'Autorizado' : 'estimado'}</em></div>
+      </div>
+      ${i === 0 && !trPag ? `<div class="llg-nota">💡 Reserva en caja los tributos de la DAM (+ percepción) para esa fecha. Estimación: tributos ${DIAS_TRIBUTOS_ANTES} d antes de la llegada y levante ${DIAS_LEVANTE_DESPUES} d después (patrón de tus carpetas).</div>` : ''}
+    </div>`
+  }
+  return conFecha.map(fila).join('')
+}
 
 // ─── Línea de tiempo de la carpeta: en qué etapa voy y qué falta concluir ─────
 function _timelineHtml(d, c) {
@@ -273,7 +403,7 @@ function _timelineHtml(d, c) {
   const vivos = (ajustes || []).filter(a => a.estado !== 'desestimada')
   const locales = costos.filter(k => k.grupo === 'despacho' || k.grupo === 'nacionalizacion')
   const provis = locales.filter(k => k.es_provisional).length
-  const ult = tipos => d.pagos.filter(p => tipos.includes(p.tipo) && p.estado !== 'observado').map(p => p.fecha).sort().pop() || null
+  const ult = tipos => pagosPorTipos(d, tipos).map(p => p.fecha).sort().pop() || null
   const mon = c?.mon || 'USD'
   const btn = (t, f) => `<button type="button" class="btn btn-primary btn-small tl-btn" onclick="${f}">${t}</button>`
   const L = []
@@ -281,11 +411,16 @@ function _timelineHtml(d, c) {
   if (c) {
     L.push({ ico: '💳', tit: `Anticipo ${n2(c.pct)}%`, ok: c.antEstado === 'pagado', warn: c.antEstado === 'vencido', fecha: c.antFecha || c.antLimite, est: !c.antFecha,
       sub: c.antFecha ? `${mon} ${n2(c.antPag)} pagado` : (c.antLimite ? 'Límite de pago' : 'Sin plazo en la PI'), btn: c.antEstado === 'pagado' ? '' : btn(c.antPag ? 'Completar' : 'Pagar', "window.abrirPagoRapido('anticipo')") })
-    L.push({ ico: '🚢', tit: 'Embarque (B/L)', ok: !!c.embReal, fecha: c.embFecha, est: !c.embReal, sub: c.embReal ? 'Fecha real del B/L' : 'Fecha estimada' })
-    L.push({ ico: '🏁', tit: `Saldo ${n2(100 - c.pct)}%`, ok: c.salEstado === 'pagado', warn: c.salEstado === 'vencido', fecha: c.salPag ? ult(['saldo', 'pago_total']) : c.salLimite, est: !c.salPag,
-      sub: c.salPag ? `${mon} ${n2(c.salPag)} pagado` : (c.salLimite ? 'Vence' : 'Sin plazo de saldo'), btn: c.salEstado === 'pagado' ? '' : btn(c.salPag ? 'Completar' : 'Pagar', "window.abrirPagoRapido('saldo')") })
+    const ciD = d.ci
+    L.push({ ico: '🧾', tit: 'Commercial Invoice', ok: !!ciD, fecha: ciD?.fecha || null, est: !ciD,
+      sub: ciD ? `${esc(ciD.invoice_number || '')} · ${mon} ${n2(ciD.valor_total_final_ci)}` : 'Lo envía el proveedor al embarcar: regístralo para fijar el saldo real',
+      btn: ciD ? '' : btn('Registrar CI', 'window.abrirRegistrarCI()') })
+    L.push({ ico: '🚢', tit: 'Embarque (B/L)', ok: !!c.embReal, fecha: c.embFecha, est: !c.embReal, sub: c.embReal ? 'Fecha real del B/L' : (ciD ? 'Registra el B/L (fecha real de embarque)' : 'Fecha estimada · el B/L se registra después del CI'),
+      btn: !c.embReal && ciD ? btn('Registrar B/L', 'window.abrirBL()') : '' })
+    L.push({ ico: '🏁', tit: `Saldo ${n2(c.salPct)}%`, ok: c.salEstado === 'pagado', warn: c.salEstado === 'vencido', fecha: c.salPag ? ult(['saldo', 'pago_total']) : c.salLimite, est: !c.salPag,
+      sub: c.salPag ? `${mon} ${n2(c.salPag)} pagado` : (!d.ci ? 'Primero registra el CI: fija el monto real del saldo' : (c.salLimite ? 'Vence' : 'Sin plazo de saldo')), btn: c.salEstado === 'pagado' ? '' : (d.ci ? btn(c.salPag ? 'Completar' : 'Pagar', "window.abrirPagoRapido('saldo')") : '') })
   }
-  L.push({ ico: '📝', tit: 'Proforma del agente', ok: !!liq?.proforma_numero, fecha: liq?.proforma_fecha, sub: liq?.proforma_numero ? `N° ${esc(liq.proforma_numero)} · estimado para auditar` : 'Pre-liquidación de DESA: regístrala para auditar', btn: liq?.proforma_numero ? '' : btn('Registrar', 'window.abrirLiquidacionAgente()') })
+  L.push({ ico: '📝', tit: 'Proforma del agente', ok: !!liq?.proforma_numero, fecha: liq?.proforma_fecha, sub: liq?.proforma_numero ? `N° ${esc(liq.proforma_numero)} · estimado para auditar` : 'Pre-liquidación del agente aduanero: regístrala para auditar', btn: liq?.proforma_numero ? '' : btn('Registrar', 'window.abrirLiquidacionAgente()') })
   const canal = dam?.canal_aduanero ? (CANAL_E3[dam.canal_aduanero] || [dam.canal_aduanero])[0] : ''
   L.push({ ico: '🏛️', tit: 'DAM numerada', ok: !!dam, fecha: dam?.fecha_dam, sub: dam ? `Canal ${canal || 'sin indicar'}` : 'Falta registrar la DAM', btn: dam ? '' : btn('Registrar', 'window.abrirNuevaDAM()') })
   const pend = vivos.filter(a => a.estado === 'pendiente' || !a.numero).length
@@ -312,7 +447,7 @@ function _timelineHtml(d, c) {
   const conAsiento = costos.filter(k => k.asiento_id).length
   const G = [
     { ico: '📄', tit: 'PI y anticipo', subs: [sp('Proforma (PI)'), sp('Anticipo')] },
-    { ico: '🚢', tit: 'Embarque y saldo', subs: [sp('Embarque'), sp('Saldo')] },
+    { ico: '🚢', tit: 'CI, embarque y saldo', subs: [sp('Commercial'), sp('Embarque'), sp('Saldo')] },
     { ico: '🏛️', tit: 'Despacho aduanero', subs: [sp('DAM'), sp('Tributos'), sp('Levante')] },
     { ico: '🚚', tit: 'Llegada al almacén', subs: [sp('Guía de ingreso'), sp('Control de estadía')] },
     { ico: '🧾', tit: 'Gastos locales', subs: [sp('Gastos locales')] },
@@ -344,6 +479,7 @@ function _timelineHtml(d, c) {
   return `<div class="cr-wrap tl-wrap"><div class="cr-head">Línea de tiempo <span>· ${hechos} de ${L9.length} pasos</span>
       <button type="button" class="btn btn-secondary btn-small" style="margin-left:auto;" onclick="window.abrirPagosProveedor()">Ver pagos</button></div>
     <div class="tl-barra"><i style="width:${Math.round(hechos / L9.length * 100)}%"></i></div>
+    ${_llegadaHtml(d)}
     <div class="tl-sig">${sig ? `👉 <b>Sigue:</b> ${sig.tit}${sig.sub ? ' — ' + sig.sub : ''}` : '🎉 Carpeta completa'}</div>
     <ol class="tl-lista">${L9.map(fila).join('')}</ol></div>`
 }
@@ -359,7 +495,7 @@ function _slotsDocs(d) {
   const car = c => a => a.entidad === 'carpeta_importacion' && (Array.isArray(c) ? c : [c]).includes(a.concepto)
   const gs = d.guias || []
   // Pago relacionado con el documento: resalta el icono y deja un botón oculto (aparece al pasar el mouse)
-  const pgs = tipos => (d.pagos || []).filter(p => tipos.includes(p.tipo) && p.estado !== 'observado')
+  const pgs = tipos => pagosPorTipos(d, tipos)
   const pagoDe = (tipos, rot) => {
     const a = pgs(tipos); if (!a.length) return null
     const mon = a[0].moneda || 'USD', tot = a.reduce((t, p) => t + num(p.monto_transferido), 0)
@@ -369,12 +505,12 @@ function _slotsDocs(d) {
   const bolP = costosDe('boletin_quimico')
   const abAg = d.abonosAg || []
   return [
-    { ico: '📄', tit: 'Proforma (PI)', sube: 'proforma', ok: !!pi, abrir: pi ? `window.verPI(${pi.id})` : null, pago: pagoDe(['anticipo', 'pago_total'], 'Anticipo pagado'), match: car('proforma'), sub: pi ? `${esc(pi.numero_proforma_proveedor || pi.numero)} · ${fechaDMY(pi.fecha)}` : 'Sin registrar', reg: pi ? _btnReg('👁 Registro', `window.verPI(${pi.id})`) : '' },
-    { ico: '🧾', tit: 'Commercial Invoice', sube: 'invoice', ok: !!ci, abrir: ci ? 'window.verCI()' : null, pago: pagoDe(['saldo'], 'Saldo pagado'), match: car('invoice'), sub: ci ? `${esc(ci.invoice_number)} · ${fechaDMY(ci.fecha)}` : 'Aún no registrado', reg: ci ? _btnReg('👁 Registro', 'window.verCI()') : '' },
+    { ico: '📄', tit: 'Proforma (PI)', sube: 'proforma', ok: !!pi, abrir: pi ? `window.verPI(${pi.id})` : null, pago: pagoDe(['anticipo'], 'Anticipo pagado'), match: car('proforma'), sub: pi ? `${esc(pi.numero_proforma_proveedor || pi.numero)} · ${fechaDMY(pi.fecha)}` : 'Sin registrar', reg: pi ? _btnReg('👁 Registro', `window.verPI(${pi.id})`) : '' },
+    { ico: '🧾', tit: 'Commercial Invoice', sube: 'invoice', ok: !!ci, abrir: ci ? 'window.verCI()' : (pi ? 'window.abrirRegistrarCI()' : null), pago: pagoDe(['saldo', 'pago_total'], 'Saldo pagado'), match: car('invoice'), sub: ci ? `${esc(ci.invoice_number)} · ${fechaDMY(ci.fecha)}` : 'Aún no registrado', reg: ci ? _btnReg('👁 Registro', 'window.verCI()') : (pi ? _btnReg('+ Registrar CI', 'window.abrirRegistrarCI()') : '') },
     { ico: '📦', tit: 'Packing list', sube: 'packing', match: car('packing') },
     { ico: '🚢', tit: 'Bill of Lading', sube: 'bl', ok: !!bl, abrir: bl ? `window.abrirBL(${bl.id})` : (ci ? 'window.abrirBL()' : null), match: car('bl'),
-      sub: bl ? `${esc(bl.nro_bill_lading)} · ${bl.fecha ? 'embarque ' + fechaDMY(bl.fecha) : 'sin fecha'}${bl.fecha_eta ? ' · ETA ' + fechaDMY(bl.fecha_eta) : ''}` : (ci ? 'Sin registrar' : 'Requiere el CI'),
-      reg: bl ? _btnReg('👁 Registro', `window.abrirBL(${bl.id})`) + `<a class="btn btn-secondary btn-small dc-btn" href="${esc(window.urlRastreoBL?.(bl) || '#')}" target="_blank" rel="noopener">🔎 Rastrear</a>` : (ci ? _btnReg('+ Registrar', 'window.abrirBL()') : '') },
+      sub: bl ? `${esc(bl.nro_bill_lading)}${(d.contenedores || []).length ? ` · ${d.contenedores.length} contenedor${d.contenedores.length > 1 ? 'es' : ''}` : ''}${bls.length > 1 ? ` · ${bls.length} BL` : ''} · ${bl.fecha ? 'embarque ' + fechaDMY(bl.fecha) : 'sin fecha'}${bl.fecha_eta ? ' · ETA ' + fechaDMY(bl.fecha_eta) : ''}` : (ci ? 'Sin registrar' : 'Requiere el CI'),
+      reg: bl ? _btnReg('👁 Registro', `window.abrirBL(${bl.id})`) + bls.slice(1).map(b => _btnReg('👁 ' + esc(String(b.nro_bill_lading).slice(-6)), `window.abrirBL(${b.id})`)).join('') + _btnReg('+ Otro BL', 'window.abrirBL()') + `<a class="btn btn-secondary btn-small dc-btn" href="${esc(window.urlRastreoBL?.(bl) || '#')}" target="_blank" rel="noopener">🔎 Rastrear</a>` : (ci ? _btnReg('+ Registrar', 'window.abrirBL()') : '') },
     { ico: '🛡️', tit: 'Seguro (póliza)', sube: 'poliza', match: car('poliza') },
     { ico: '🌏', tit: 'Certificado de origen', sube: 'certificado_origen', match: car('certificado_origen') },
     { ico: '🧪', tit: 'Ficha técnica', sube: 'ficha_tecnica', match: car('ficha_tecnica') },
@@ -530,11 +666,12 @@ function _html(d, r) {
     ['Descripción', 'FOB unit.', 'Cantidad kg', 'FOB $', 'FOB S/ (unit.)'],
     r.art.map(a => fila([esc(a.nombre), n3(a.unit), n2(a.kg), '$ ' + n2(a.fobUsd), a.fobPenUnit != null ? 'S/ ' + n3(a.fobPenUnit) : dash])).join(''),
     fila(['TOTAL', '', n2(totKg), '$ ' + n2(r.fobUsd), ''], TOT), true) : sinRegistros()
+  const s1c = s1 + _comparativoHtml(d)
   const tit1 = `1.- Descripción${r.estimado && r.art.length ? ' <span style="font-weight:400; color:var(--color-warning,#b45309);">(estimado según la Proforma — aún no hay CI)</span>' : ''}`
 
   // 2. Valor de aduana + adelanto/balance
   const hayAduana = r.fobUsd > 0
-  const pagoProv = t => pagos.filter(p => p.tipo === t && p.estado !== 'observado')
+  const pagoProv = t => pagosPorTipos(d, [t])
   // Pagos al proveedor: cada uno con SU T.C. (el de su fecha de pago), nunca el de la DAM
   const pagosFilas = [['Adelanto', 'anticipo'], ['Balance', 'saldo']].flatMap(([lbl, t]) => pagoProv(t).map(p => {
     const usdP = p.moneda === 'USD' ? num(p.monto_transferido) : (num(p.tipo_cambio) > 0 ? num(p.monto_transferido) / num(p.tipo_cambio) : 0)
@@ -643,7 +780,7 @@ function _html(d, r) {
       ${_documentosHtml(d)}</div>${_timelineHtml(d, cr)}</div>
       <div class="hc-grid">
         <div class="hc-formato">
-          ${seccion(tit1, s1, true)}
+          ${seccion(tit1, s1c, true)}
           ${seccion('2.- Valor de aduana (OMC)', s2, true)}
           ${seccion('3.- Tributos de despacho', s2b)}
           ${seccion('4.- Gastos de cadena local', s3)}

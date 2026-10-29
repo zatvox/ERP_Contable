@@ -1,7 +1,7 @@
 // ============================================================================
 // liquidacion-agente-modal.js — Liquidación del agente aduanero + devolución de saldo
 // ----------------------------------------------------------------------------
-// Etapa 4 de la carpeta. La liquidación del agente (ej. DESA «2026-080») resume:
+// Etapa 4 de la carpeta. La liquidación del agente (ej. «2026-080») resume:
 //   · facturas/gastos que el agente pagó por el cliente (se LEEN del ledger:
 //     documentos_importacion de la carpeta; no se duplican costos)
 //   · abonos del cliente al agente (USD y/o S/)
@@ -16,7 +16,9 @@ import { showToast, formatNumber, fechaDMY } from '../helpers.js'
 import { aplicarModoVerEditar } from '../shared/ver-editar.js'
 import { declararEmpresaModal } from '../empresa.js'
 import { getTipoCambioDia } from '../sunat-api.js'
-import { subirAdjuntos, getAdjuntos } from '../supabase-data.js'
+import { subirAdjuntos, getAdjuntos, getContacts } from '../supabase-data.js'
+import { convertirEnBuscador, refrescarBuscador } from '../buscador-select.js'
+import { abrirModalContacto } from '../shared/contacto-modal.js'
 import { CONCEPTOS_COSTO, crearLineaCosto } from './costos-ledger.js'
 
 const $ = id => document.getElementById(id)
@@ -37,6 +39,10 @@ let _dam = null
 let _costos = []        // ledger de la carpeta (para la auditoría proforma vs real)
 let _prof = { numero: '', fecha: '', tc: '', gl: [], tr: [] }   // proforma del agente (pre-liquidación)
 
+/** Líneas de la proforma: cada una con su moneda y monto (las antiguas guardaban solo usd / pen). */
+const _normLineas = (arr, monDef) => (arr || []).map(l => ({ concepto: l.concepto || '', codigo: l.codigo || '',
+  moneda: l.moneda || (l.usd != null && l.pen == null ? 'USD' : l.pen != null && l.usd == null ? 'PEN' : monDef),
+  monto: l.monto ?? (l.moneda === 'PEN' || (l.pen != null && l.usd == null) ? l.pen : l.usd) ?? '' }))
 // ── datos ─────────────────────────────────────────────────────────────────────
 async function _cargarBase() {
   const c = carpeta()
@@ -66,7 +72,7 @@ async function _cargarLiq() {
   _dam = (dams || [])[0] || null
   _bancos = bancos || []
   _costos = base.costos
-  _prof = { numero: _liq?.proforma_numero || '', fecha: _liq?.proforma_fecha || '', tc: _liq?.proforma_tc || '', gl: [...(_liq?.proforma_items?.gl || [])], tr: [...(_liq?.proforma_items?.tr || [])] }
+  _prof = { numero: _liq?.proforma_numero || '', fecha: _liq?.proforma_fecha || '', tc: _liq?.proforma_tc || '', gl: _normLineas(_liq?.proforma_items?.gl, 'USD'), tr: _normLineas(_liq?.proforma_items?.tr, 'PEN') }
   return base
 }
 
@@ -90,26 +96,29 @@ function _asegurarModal() {
         <button class="modal-close" onclick="window.cerrarLiqAgente()">&times;</button></div>
       <div style="padding:4px 20px 0;">
         <div class="costeo-selector dm-carpeta"><label>Carpeta:</label><select id="laCarpeta" disabled></select></div>
+        <div class="form-group" style="margin:6px 0 2px;"><label>Agente aduanero <span class="bl-en">(busca por nombre o RUC · se hereda de la DAM si ya lo tiene)</span> <small id="laAgHint" style="font-weight:400; color:var(--text-secondary);"></small></label>
+          <select id="laAgente"></select></div>
         <div class="la-steps" id="laSteps"></div>
       </div>
       <div class="la-body" style="padding:0 20px 8px; overflow-y:auto; flex:1;">
 
         <section class="la-panel" data-p="1">
-          <div class="dm-explica">📝 <b>Paso 1 · Proforma del agente.</b> Estimación que te envía DESA antes del despacho (gastos locales en USD y derechos en S/). <b>No es costo</b>: sirve para auditar contra la liquidación final.</div>
+          <div class="dm-explica">📝 <b>Paso 1 · Proforma del agente.</b> Estimación que te envía <span class="la-ag">el agente</span> antes del despacho (gastos locales en USD y derechos en S/). <b>No es costo</b>: sirve para auditar contra la liquidación final.</div>
           <div class="la-grid">
             <div class="form-group"><label>N° de proforma</label><input type="text" id="laPfNumero" maxlength="40" placeholder="2026-091" oninput="window.laPfSet('numero', this.value)"></div>
-            <div class="form-group"><label>Fecha</label><input type="date" id="laPfFecha" onchange="window.laPfSet('fecha', this.value)"></div>
-            <div class="form-group"><label>T.C. de la proforma</label><input type="number" id="laPfTC" step="0.001" oninput="window.laPfSet('tc', this.value)"></div>
+            <div class="form-group"><label>Fecha</label><input type="date" id="laPfFecha" onchange="window.laPfSet('fecha', this.value); window.laPfTCDia(false)"></div>
+            <div class="form-group"><label>T.C. de la proforma <span id="laPfTCaviso" style="font-weight:400; color:var(--text-secondary); font-size:.75rem;"></span></label><div style="display:flex; gap:4px;"><input type="number" id="laPfTC" step="0.001" oninput="window.laPfSet('tc', this.value)"><button type="button" class="btn btn-secondary btn-small" data-solo-edicion onclick="window.laPfTCDia(true)" title="Consultar el T.C. venta SUNAT de la fecha de la proforma">⟳</button></div></div>
           </div>
-          <div class="la-pf-grid">
-            <div><div class="e3-sub">Gastos locales estimados (USD) <button type="button" class="btn btn-secondary btn-small" data-solo-edicion onclick="window.laPfAdd('gl')">+ Línea</button></div><div id="laPfGL"></div></div>
-            <div><div class="e3-sub">Derechos estimados (S/) <button type="button" class="btn btn-secondary btn-small" data-solo-edicion onclick="window.laPfAdd('tr')">+ Línea</button></div><div id="laPfTR"></div></div>
+          <div class="la-pf-grid" style="grid-template-columns:1fr;">
+            <div><div class="e3-sub">Gastos locales estimados <button type="button" class="btn btn-secondary btn-small" data-solo-edicion onclick="window.laPfAdd('gl')">+ Línea</button></div><div id="laPfGL"></div><div id="laPfGLsub"></div></div>
+            <div><div class="e3-sub">Derechos estimados <button type="button" class="btn btn-secondary btn-small" data-solo-edicion onclick="window.laPfAdd('tr')">+ Línea</button></div><div id="laPfTR"></div><div id="laPfTRsub"></div></div>
           </div>
+          <div id="laPfTot"></div>
           <div class="dm-nota">📎 PDF de la proforma: <button type="button" class="btn btn-secondary btn-small" onclick="window.laAdjuntar('proforma')">Subir PDF</button> <span id="laAdjProforma"></span></div>
         </section>
 
         <section class="la-panel" data-p="2">
-          <div class="dm-explica">💵 <b>Paso 2 · Abono sobre la proforma.</b> Lo que le abonaste a DESA para que despache (provisión de fondos). Ej.: USD 2,370 del 11/09.</div>
+          <div class="dm-explica">💵 <b>Paso 2 · Abono sobre la proforma.</b> Lo que le abonaste a <span class="la-ag">el agente</span> para que despache (provisión de fondos). Ej.: USD 2,370 del 11/09.</div>
           <div id="laResProf" style="margin-bottom:8px;"></div>
           <div class="e3-sub">Abonos de la proforma <button type="button" class="btn btn-secondary btn-small" data-solo-edicion onclick="window.laAddAbono('proforma')">+ Abono</button></div>
           <div id="laAbonosProf"></div>
@@ -123,10 +132,9 @@ function _asegurarModal() {
             <div class="form-group"><label>Fecha *</label><input type="date" id="laFecha"></div>
             <div class="form-group"><label>Estado</label>
               <select id="laEstado"><option value="conforme">Conforme</option><option value="observada">Observada</option><option value="borrador">Borrador</option></select></div>
-            <div class="form-group" style="grid-column:span 2;"><label>Agente de aduana</label><input type="text" id="laAgente" maxlength="120"></div>
             <div class="form-group"><label>DAM</label><input type="text" id="laDam" maxlength="60"></div>
           </div>
-          <div class="e3-sub">Facturas y gastos pagados por el agente <small style="font-weight:400">(marca las que van en esta liquidación)</small></div>
+          <div class="e3-sub">Facturas y gastos pagados por el agente <small style="font-weight:400">(marca las que van en esta liquidación)</small> <button type="button" class="btn btn-secondary btn-small" data-solo-edicion onclick="window.laNuevaFactura()">＋ Factura de gasto</button></div>
           <div id="laDocs" style="margin-bottom:8px;"></div>
           <div class="e3-sub">Auditoría · proforma vs liquidación final</div>
           <div id="laAudit" style="margin-bottom:8px;"></div>
@@ -175,7 +183,7 @@ function _pintarDocs() {
   $('laDocs').innerHTML = _docs.length ? `<table class="data-table" style="width:100%"><thead><tr><th></th><th>Concepto</th><th>N° doc.</th><th>Fecha</th><th style="text-align:right">Importe</th></tr></thead><tbody>${
     _docs.map((d, i) => `<tr><td><input type="checkbox" style="width:auto;margin:0" ${d.marcado ? 'checked' : ''} ${lectura ? 'disabled' : ''} onchange="window.laMarcar(${i}, this.checked)"></td>
       <td>${esc(d.titulo)}</td><td>${esc(d.numero)}</td><td>${fechaDMY(d.fecha)}</td><td style="text-align:right">${SIGNO(d.moneda)} ${n2(d.total)}</td></tr>`).join('')}</tbody></table>`
-    : '<div class="dm-nota">La carpeta aún no tiene facturas de gastos locales en el costeo.</div>'
+    : '<div class="dm-nota">La carpeta aún no tiene facturas de gastos locales. Usa «＋ Factura de gasto» para registrarlas (entran al costeo y a esta liquidación).</div>'
 }
 
 function _pintarAbonos() {
@@ -212,28 +220,67 @@ function _autoCodigo(txt, tipo) {
     : [[/valorem/, 'ad_valorem'], [/general venta|igv/, 'igv'], [/promoc|municip|ipm/, 'ipm'], [/percep/, 'percepcion']]
   return (reglas.find(([r]) => r.test(t)) || [])[1] || ''
 }
-window.laPfSet = (k, val) => { _prof[k] = val; window.laAuditar() }
-window.laPfAdd = tipo => { _prof[tipo].push({ concepto: '', [tipo === 'gl' ? 'usd' : 'pen']: '', codigo: '' }); _pintarProforma(); aplicarModoVerEditar('modal-liq-agente', false) }
+/** T.C. venta SUNAT del día de la proforma, desde la BD (y la API si hace falta). Sin forzar, solo llena si está vacío. */
+window.laPfTCDia = async function (forzar) {
+  const f = $('laPfFecha')?.value, av = $('laPfTCaviso'); if (!f) { if (forzar) showToast('Primero pon la fecha de la proforma', 'warning'); return }
+  if (!forzar && $('laPfTC').value) return
+  if (av) av.textContent = 'Buscando…'
+  let r = await getTipoCambioDia(f, { permitirApi: false }).catch(() => null)
+  if (!r?.venta) r = await getTipoCambioDia(f).catch(() => null)
+  if (r?.venta) { $('laPfTC').value = Number(r.venta).toFixed(3); window.laPfSet('tc', $('laPfTC').value); if (av) av.textContent = `(SUNAT venta ${fechaDMY(f)})` }
+  else if (av) av.textContent = '— no hay T.C. de esa fecha, ingrésalo a mano'
+}
+window.laPfSet = (k, val) => { _prof[k] = val; _subtotalesProf(); window.laAuditar() }
+window.laPfAdd = tipo => { _prof[tipo].push({ concepto: '', moneda: tipo === 'gl' ? 'USD' : 'PEN', monto: '', codigo: '' }); _pintarProforma(); aplicarModoVerEditar('modal-liq-agente', false) }
 window.laPfQuitar = (tipo, i) => { _prof[tipo].splice(i, 1); _pintarProforma(); aplicarModoVerEditar('modal-liq-agente', false); window.laAuditar() }
 window.laPfLinea = (tipo, i, k, val) => {
   const l = _prof[tipo][i]; l[k] = val
+  _subtotalesProf()
   if (k === 'concepto' && !l.codigo) { l.codigo = _autoCodigo(val, tipo); _pintarProforma(); aplicarModoVerEditar('modal-liq-agente', false) }
   window.laAuditar()
+}
+/** Monto de una línea de la proforma expresado en `mon` con el T.C. de la proforma (0 si falta el T.C. y hay que convertir). */
+const _enMon = (l, mon) => { const m = num(l.monto), tc = num(_prof.tc); if (l.moneda === mon) return m; if (!tc) return 0; return mon === 'PEN' ? m * tc : m / tc }
+function _subtotalesProf() {
+  const tc = num(_prof.tc)
+  const sub = lineas => ['USD', 'PEN'].map(m => [m, lineas.filter(l => l.moneda === m).reduce((t, l) => t + num(l.monto), 0)])
+  const bloque = (lineas, id, titulo) => {
+    const el = $(id); if (!el) return
+    if (!lineas.length) { el.innerHTML = ''; return }
+    const [[, u], [, p]] = sub(lineas)
+    const totU = lineas.reduce((t, l) => t + _enMon(l, 'USD'), 0), totP = lineas.reduce((t, l) => t + _enMon(l, 'PEN'), 0)
+    el.innerHTML = `<div style="font-size:.84rem; padding:6px 10px; background:var(--bg-secondary); border-radius:6px; margin-top:4px;">
+      <b>Subtotal ${titulo}:</b> US$ ${n2(u)} · S/ ${n2(p)}
+      ${(u && p && !tc) ? ' <span style="color:var(--color-warning,#b45309);">— falta el T.C. para unificar</span>' : `→ <b>US$ ${n2(totU)}</b> · <b>S/ ${n2(totP)}</b>`}</div>`
+  }
+  bloque(_prof.gl, 'laPfGLsub', 'gastos locales'); bloque(_prof.tr, 'laPfTRsub', 'derechos')
+  const t = $('laPfTot'); if (!t) return
+  const todas = [..._prof.gl, ..._prof.tr]
+  if (!todas.length) { t.innerHTML = ''; return }
+  const u = todas.filter(l => l.moneda === 'USD').reduce((a, l) => a + num(l.monto), 0), p = todas.filter(l => l.moneda === 'PEN').reduce((a, l) => a + num(l.monto), 0)
+  const totU = todas.reduce((a, l) => a + _enMon(l, 'USD'), 0), totP = todas.reduce((a, l) => a + _enMon(l, 'PEN'), 0)
+  t.innerHTML = `<div style="font-size:.9rem; padding:8px 12px; border-left:3px solid var(--color-primary,#6366f1); background:var(--bg-secondary); border-radius:6px; margin-top:8px;">
+    <b>Total de la proforma</b> · en dólares US$ ${n2(u)} · en soles S/ ${n2(p)} ${tc ? `→ equivale a <b>US$ ${n2(totU)}</b> ó <b>S/ ${n2(totP)}</b> (T.C. ${tc.toFixed(3)})` : '<span style="color:var(--color-warning,#b45309);">— pon el T.C. para ver el total unificado</span>'}</div>`
 }
 function _pintarProforma() {
   const lectura = $('modal-liq-agente')?.dataset.modo === 'lectura'
   const dis = lectura ? 'disabled' : ''
   const fila = (tipo, l, i) => {
-    const campo = tipo === 'gl' ? 'usd' : 'pen'
-    return `<div style="display:grid; grid-template-columns:1fr 90px 1fr auto; gap:6px; margin-bottom:5px; align-items:center;">
+    const otra = l.moneda === 'USD' ? 'PEN' : 'USD', tc = num(_prof.tc)
+    const eq = tc && num(l.monto) ? `≈ ${otra === 'PEN' ? 'S/' : 'US$'} ${n2(_enMon(l, otra))}` : ''
+    return `<div style="display:grid; grid-template-columns:1.4fr 76px 110px 100px 1.2fr auto; gap:6px; margin-bottom:5px; align-items:center;">
       <input type="text" value="${esc(l.concepto)}" placeholder="Concepto" ${dis} onchange="window.laPfLinea('${tipo}', ${i}, 'concepto', this.value)">
-      <input type="number" step="0.01" value="${l[campo] ?? ''}" placeholder="${tipo === 'gl' ? 'USD' : 'S/'}" ${dis} oninput="window.laPfLinea('${tipo}', ${i}, '${campo}', this.value)">
+      <select ${dis} onchange="window.laPfLinea('${tipo}', ${i}, 'moneda', this.value); window.laPfRepintar()"><option value="USD" ${l.moneda === 'USD' ? 'selected' : ''}>US$</option><option value="PEN" ${l.moneda === 'PEN' ? 'selected' : ''}>S/</option></select>
+      <input type="number" step="0.01" value="${l.monto ?? ''}" placeholder="Monto" ${dis} oninput="window.laPfLinea('${tipo}', ${i}, 'monto', this.value)" onchange="window.laPfRepintar()" style="text-align:right;">
+      <span style="font-size:.78rem; color:var(--text-secondary);">${eq}</span>
       <select ${dis} title="Con qué concepto del costeo se compara" onchange="window.laPfLinea('${tipo}', ${i}, 'codigo', this.value)">${_opcionesReal(tipo).map(([c, t]) => `<option value="${c}" ${l.codigo === c ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
       <button type="button" class="btn btn-secondary btn-small" data-solo-edicion onclick="window.laPfQuitar('${tipo}', ${i})">✕</button></div>`
   }
   $('laPfGL').innerHTML = _prof.gl.length ? _prof.gl.map((l, i) => fila('gl', l, i)).join('') : '<div class="dm-nota">Sin líneas.</div>'
   $('laPfTR').innerHTML = _prof.tr.length ? _prof.tr.map((l, i) => fila('tr', l, i)).join('') : '<div class="dm-nota">Sin líneas.</div>'
+  _subtotalesProf()
 }
+window.laPfRepintar = () => { _pintarProforma(); aplicarModoVerEditar('modal-liq-agente', false) }
 const _igvUsdC = c => c.moneda === 'PEN' ? num(c.igv_monto) / (num(c.tipo_cambio) || 1) : num(c.igv_monto)
 window.laAuditar = function () {
   const host = $('laAudit'); if (!host) return
@@ -251,7 +298,7 @@ window.laAuditar = function () {
   const etq = c => c === '__igv' ? 'IGV de los gastos locales' : (CONCEPTOS_COSTO.find(x => x.codigo === c)?.label || c || 'Sin equivalente')
   const bloque = (tipo, real, sign, campo) => {
     const prof = {}
-    for (const l of _prof[tipo]) { const k = l.codigo || '__sin'; (prof[k] = prof[k] || { n: [], v: 0 }); prof[k].n.push(l.concepto); prof[k].v += num(l[campo]) }
+    for (const l of _prof[tipo]) { const k = l.codigo || '__sin'; (prof[k] = prof[k] || { n: [], v: 0 }); prof[k].n.push(l.concepto); prof[k].v += _enMon(l, tipo === 'gl' ? 'USD' : 'PEN') }
     const claves = [...new Set([...Object.keys(prof), ...Object.keys(real).filter(k => Math.abs(real[k]) > 0.005)])]
     let tp = 0, tr = 0
     const filas = claves.map(k => {
@@ -289,14 +336,14 @@ window.laRecalcular = function () {
     if (s.USD.fact || s.USD.abono) h += linea('USD', s.USD)
     if (s.PEN.fact || s.PEN.abono) h += linea('PEN', s.PEN)
     const dev = num(v('laDevMonto')), favor = Math.max(0, s.USD.saldo)
-    if (favor > 0.005 && !dev) h += `<div class="la-alerta">🔔 <b>Saldo por recuperar: $ ${n2(favor)}</b> — DESA debe devolvértelo. Registra abajo la devolución (monto, fecha, operación).</div>`
+    if (favor > 0.005 && !dev) h += `<div class="la-alerta">🔔 <b>Saldo por recuperar: $ ${n2(favor)}</b> — ${esc(_nombreAg())} debe devolvértelo. Registra abajo la devolución (monto, fecha, operación).</div>`
     else if (dev && v('laDevEstado') === 'en_proceso') h += `<div class="la-alerta info">⏳ Devolución de $ ${n2(dev)} <b>en proceso</b>: confirma la recepción en el banco y cambia el estado a «Recibida».</div>`
     else if (dev && v('laDevEstado') === 'recibida') h += `<div class="la-alerta ok">✅ Devolución de $ ${n2(dev)} recibida. Saldo cerrado.</div>`
     if (dev && Math.abs(dev - favor) >= 0.005) h += `<div class="dm-cruce warn"><span class="dm-cruce-ico">⚠</span><div>La devolución ($ ${n2(dev)}) no coincide con el saldo a favor en dólares ($ ${n2(favor)}).</div></div>`
   }
   $('laResultado').innerHTML = h
   // resúmenes por etapa de abono
-  const glUsd = _prof.gl.reduce((t, l) => t + num(l.usd), 0), ab1 = _sumAb('proforma', 'USD')
+  const glUsd = _prof.gl.reduce((t, l) => t + _enMon(l, 'USD'), 0), ab1 = _sumAb('proforma', 'USD')
   $('laResProf').innerHTML = _prof.gl.length ? `<div class="dm-cruce ${ab1 >= glUsd - 0.005 ? 'ok' : 'warn'}"><span class="dm-cruce-ico">${ab1 >= glUsd - 0.005 ? '✔' : 'ℹ'}</span><div>Proforma (gastos locales): $ ${n2(glUsd)} · abonado: $ ${n2(ab1)}${ab1 < glUsd - 0.005 ? ` · falta $ ${n2(glUsd - ab1)}` : ab1 > glUsd + 0.005 ? ` · provisión de más $ ${n2(ab1 - glUsd)}` : ''}</div></div>` : '<div class="dm-nota">Registra las líneas de la proforma (paso 1) para comparar con el abono.</div>'
   const dU = s.USD.fact - ab1 - _sumAb('liquidacion', 'USD'), dP = s.PEN.fact - _sumAb('liquidacion', 'PEN')
   $('laResLiq').innerHTML = hayLiq ? `<div class="dm-cruce ok"><span class="dm-cruce-ico">ℹ</span><div>Facturas de la liquidación: $ ${n2(s.USD.fact)}${s.PEN.fact ? ' + S/ ' + n2(s.PEN.fact) : ''} · abonado en proforma: $ ${n2(ab1)} · pendiente por cubrir: $ ${n2(Math.max(0, s.USD.fact - s.USD.abono))}${s.PEN.fact ? ' + S/ ' + n2(Math.max(0, s.PEN.fact - s.PEN.abono)) : ''}</div></div>` : '<div class="dm-nota">Registra la liquidación final (paso 3).</div>'
@@ -360,11 +407,59 @@ window.laSetAbono = async (i, k, val) => {
   window.laRecalcular()
 }
 
+
+// ── Agente aduanero: buscador por nombre/RUC, heredado de la DAM ──────────────
+let _contactosAg = [], _pendienteAg = false
+const _opcAg = () => '<option value="">— sin definir —</option>' + _contactosAg.map(c => `<option value="${esc(c.nombre)}">${esc(c.nombre)}${c.nro_documento ? ' — ' + esc(c.nro_documento) : ''}</option>`).join('')
+/** Nombre corto del agente para los textos del modal (sin «S.A.C.» etc.); genérico si aún no hay. */
+function _nombreAg() { const n = v('laAgente'); return n ? n.replace(/\s+(S\.?\s?A\.?\s?C?\.?|S\.?\s?R\.?\s?L\.?|E\.?\s?I\.?\s?R\.?\s?L\.?)\s*$/i, '').trim() : 'el agente' }
+function _textosAgente() { document.querySelectorAll('#modal-liq-agente .la-ag').forEach(e => { e.textContent = _nombreAg() }) }
+async function _cargarContactosAg() {
+  try { _contactosAg = ((await getContacts(true)) || []).filter(c => c.nombre).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')) } catch (e) { console.warn('contactos agente:', e) }
+  const sel = $('laAgente'); if (!sel) return
+  const actual = sel.value; sel.innerHTML = _opcAg(); _ponerAgente(actual)
+}
+function _ponerAgente(valor) {
+  const sel = $('laAgente'); if (!sel) return
+  if (valor && ![...sel.options].some(o => o.value === valor)) sel.insertAdjacentHTML('beforeend', `<option value="${esc(valor)}">${esc(valor)}</option>`)
+  sel.value = valor || ''; refrescarBuscador(sel); _textosAgente()
+}
+function _montarBuscadorAg() {
+  const sel = $('laAgente'); if (!sel || sel.dataset.bus) return
+  sel.dataset.bus = '1'
+  convertirEnBuscador(sel, { placeholder: 'Escribe el nombre o RUC del agente...', sinResultados: 'Ningún contacto coincide',
+    alCrearNuevo: { label: 'Agregar agente (contacto nuevo, con búsqueda por RUC)', onClick: () => { _pendienteAg = true; abrirModalContacto({ roles: ['proveedor'] }) } } })
+  sel.addEventListener('change', () => { _textosAgente(); const h = $('laAgHint'); if (h) h.textContent = '' })
+}
+window.addEventListener('contacto-guardado', async e => {
+  if (!_pendienteAg) return
+  _pendienteAg = false
+  const c = e.detail?.contacto
+  await _cargarContactosAg()
+  if (c?.nombre && !c._eliminado) { _ponerAgente(c.nombre); showToast(`${c.nombre} seleccionado`, 'success') }
+})
+
+/** «＋ Factura de gasto»: abre el registro de costos de la carpeta y, al guardar, la factura queda marcada en esta liquidación. */
+window.laNuevaFactura = async function () {
+  const previos = new Set(_docs.map(d => d.id))
+  window._alGuardarCosto = async () => {
+    window._alGuardarCosto = null
+    const base = await _cargarBase(); _costos = base.costos
+    const marcados = new Map(_docs.map(d => [d.id, d.marcado]))
+    _docs = base.cand.map(d => ({ ...d, marcado: previos.has(d.id) ? !!marcados.get(d.id) : true }))
+    _pintarDocs(); window.laRecalcular(); window.laAuditar()
+  }
+  await window.abrirModalLineaCosto?.()
+  const m = document.getElementById('modal-linea-costo'); if (m) { document.body.appendChild(m); m.style.zIndex = 2300 }
+}
+
 function _volcar() {
   const c = carpeta()
   $('laNumero').value = _liq?.numero || ''
   $('laFecha').value = _liq?.fecha || ''
-  $('laAgente').value = _liq?.agente_nombre ?? _dam?.agente_aduana ?? ''
+  { const heredado = !_liq?.agente_nombre && !!_dam?.agente_aduana
+    _ponerAgente(_liq?.agente_nombre || _dam?.agente_aduana || '')
+    const h = $('laAgHint'); if (h) h.textContent = heredado ? '· tomado de la DAM' : '' }
   $('laDam').value = _liq?.dam_numero ?? _dam?.numero_dam ?? ''
   $('laEstado').value = _liq?.estado || 'conforme'
   $('laDevMonto').value = _liq?.dev_monto_usd || ''
@@ -388,7 +483,8 @@ window.abrirLiquidacionAgente = async function () {
     await esperarContextoEmpresa()
     const c = carpeta(); if (!c) { showToast('Abre primero una carpeta', 'warning'); return }
     _asegurarModal()
-    await _cargarLiq()
+    _montarBuscadorAg()
+    await Promise.all([_cargarLiq(), _cargarContactosAg()])
     const selC = document.getElementById('costeoSelector')
     $('laCarpeta').innerHTML = `<option>${esc(selC?.selectedOptions?.[0]?.text || c.numero_carpeta || '')}</option>`
     $('laTitulo').textContent = _liq ? `Agente aduanero · ${_liq.numero ? 'liquidación ' + _liq.numero : 'proforma ' + (_liq.proforma_numero || '')}` : 'Agente aduanero · proforma y liquidación'
@@ -401,7 +497,7 @@ window.abrirLiquidacionAgente = async function () {
     showToast(/importacion_liquidaciones_agente|relation|does not exist/i.test(e.message || '') ? 'Falta correr el SQL 107' : 'No se pudo abrir la liquidación del agente', 'danger')
   }
 }
-window.laEditar = () => { aplicarModoVerEditar('modal-liq-agente', false); _pintarProforma(); _pintarDocs(); _pintarAbonos() }
+window.laEditar = () => { aplicarModoVerEditar('modal-liq-agente', false); refrescarBuscador($('laAgente')); _pintarProforma(); _pintarDocs(); _pintarAbonos() }
 window.laCancelar = () => { if (_liq) window.abrirLiquidacionAgente(); else window.cerrarLiqAgente() }
 window.cerrarLiqAgente = () => { window.closeModal('modal-liq-agente'); window.renderHojaCosteo?.() }
 
@@ -460,11 +556,11 @@ window.guardarLiqAgente = async function () {
     if (dev > 0 && !v('laDevEstado')) throw new Error('Indica el estado de la devolución')
     const user = await getCurrentUser()
     const cab = {
-      carpeta_importacion_id: c.id, numero: numero || null, fecha: v('laFecha') || null, agente_nombre: v('laAgente') || null, dam_numero: v('laDam') || null,
+      carpeta_importacion_id: c.id, numero: numero || null, fecha: v('laFecha') || null, agente_nombre: v('laAgente') || null, agente_id: _contactosAg.find(c => c.nombre === v('laAgente'))?.id ?? null, dam_numero: v('laDam') || null,
       estado: numero ? v('laEstado') : 'borrador', dev_monto_usd: dev, dev_fecha: v('laDevFecha') || null, dev_medio: v('laDevMedio') || null,
       dev_operacion: v('laDevOp') || null, dev_banco_id: v('laDevBanco') ? Number(v('laDevBanco')) : null,
       proforma_numero: _prof.numero || null, proforma_fecha: _prof.fecha || null, proforma_tc: num(_prof.tc) || null,
-      proforma_items: { gl: _prof.gl.filter(l => l.concepto || num(l.usd)), tr: _prof.tr.filter(l => l.concepto || num(l.pen)) },
+      proforma_items: { gl: _prof.gl.filter(l => l.concepto || num(l.monto)).map(l => ({ ...l, monto: num(l.monto) })), tr: _prof.tr.filter(l => l.concepto || num(l.monto)).map(l => ({ ...l, monto: num(l.monto) })) },
       dev_estado: v('laDevEstado') || null, dev_comision_a_cargo: v('laDevComision'), observaciones: v('laObs') || null
     }
     let id = _liq?.id

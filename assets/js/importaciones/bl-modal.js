@@ -7,7 +7,8 @@
 // con el enlace ya armado + "Pegar tracking" (pegas el texto de la página y el
 // sistema detecta nave, ETA y llegada; tú revisas y guardas).
 // ============================================================================
-import { query, insert, update, ultimoErrorInsert, esperarContextoEmpresa } from '../supabase-client.js'
+import { query, insert, update, deleteRecord, ultimoErrorInsert, esperarContextoEmpresa, supabase } from '../supabase-client.js'
+import { getItems } from '../supabase-data.js'
 import { showToast, formatNumber } from '../helpers.js'
 import { aplicarModoVerEditar } from '../shared/ver-editar.js'
 
@@ -33,7 +34,7 @@ function _asegurarModal() {
   if ($('modal-bl-carpeta')) return
   document.body.insertAdjacentHTML('beforeend', `
   <div id="modal-bl-carpeta" class="modal">
-    <div class="modal-content" style="width:min(96vw, 860px); max-width:min(96vw, 860px); max-height:calc(100vh - 48px); overflow-y:auto;">
+    <div class="modal-content" style="width:min(96vw, 1040px); max-width:min(96vw, 1040px); max-height:calc(100vh - 48px); overflow-y:auto;">
       <div class="modal-header">
         <h3 class="modal-title" id="blTitulo">Bill of Lading</h3>
         <button class="modal-close" onclick="window.cerrarBL()">&times;</button>
@@ -50,18 +51,17 @@ function _asegurarModal() {
           <div class="form-group"><label>Embarque a bordo <span class="bl-en">(Date laden on board)</span></label><input type="date" id="blFecha"></div>
         </div>
 
-        <strong class="mod-sec">Contenedor y carga</strong>
-        <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px;">
-          <div class="form-group"><label>N° contenedor * <span class="bl-en">(Container no.)</span></label><input type="text" id="blCont" maxlength="20" style="text-transform:uppercase;"></div>
-          <div class="form-group"><label>Tipo <span class="bl-en">(Type, ej. 1x40HC)</span></label>
-            <select id="blTipoCont"><option>40HC</option><option>40GP</option><option>20GP</option><option>LCL</option></select></div>
-          <div class="form-group"><label>Precinto <span class="bl-en">(Seal no.)</span></label><input type="text" id="blPrecinto" maxlength="30"></div>
-          <div class="form-group"><label>Bultos <span class="bl-en">(Quantity / Packages)</span></label><input type="number" id="blBultos" step="1"></div>
-          <div class="form-group"><label>Peso bruto (kg) <span class="bl-en">(Gross weight)</span></label><input type="number" id="blPeso" step="0.01"></div>
-          <div class="form-group"><label>Volumen (CBM) <span class="bl-en">(Gross measurement)</span></label><input type="number" id="blCBM" step="0.001"></div>
+        <strong class="mod-sec">Totales que declara el BL <small style="text-transform:none; letter-spacing:0; font-weight:400;">(de todos los contenedores juntos)</small></strong>
+        <div style="display:grid; grid-template-columns:repeat(5, 1fr); gap:10px;">
+          <div class="form-group"><label>Bultos <span class="bl-en">(Packages)</span></label><input type="number" id="blBultos" step="1" onchange="window.blTotalesCambiaron()"></div>
+          <div class="form-group"><label>Peso bruto (kg) <span class="bl-en">(Gross weight)</span></label><input type="number" id="blPeso" step="0.01" onchange="window.blTotalesCambiaron()"></div>
+          <div class="form-group"><label>Volumen (CBM) <span class="bl-en">(Measurement)</span></label><input type="number" id="blCBM" step="0.001" onchange="window.blTotalesCambiaron()"></div>
           <div class="form-group"><label>ETA al puerto <span class="bl-en">(Estimated arrival)</span></label><input type="date" id="blETA"></div>
-          <div class="form-group"><label>Llegada / descarga <span class="bl-en">(Discharge / Arrival)</span></label><input type="date" id="blLlegada"></div>
+          <div class="form-group"><label>Llegada / descarga <span class="bl-en">(Discharge)</span></label><input type="date" id="blLlegada"></div>
         </div>
+
+        <strong class="mod-sec">Contenedores y mercadería <small style="text-transform:none; letter-spacing:0; font-weight:400;">(qué artículo del CI viaja en cada contenedor)</small></strong>
+        <div id="blContHost"></div>
 
         <strong class="mod-sec">Flete del BL <small style="text-transform:none; letter-spacing:0; font-weight:400;">(para auditar contra el flete del CI)</small></strong>
         <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:10px;">
@@ -97,16 +97,129 @@ window.blActualizarLink = function (soloComprobar) {
 
 const CAMPOS = [
   ['blNro', 'nro_bill_lading'], ['blBooking', 'booking_number'], ['blEstado', 'estado'], ['blNaviera', 'naviera'], ['blNave', 'nave_viaje'],
-  ['blFecha', 'fecha'], ['blCont', 'contenedor_number'], ['blTipoCont', 'tipo_contenedor'], ['blPrecinto', 'numero_precinto'],
+  ['blFecha', 'fecha'],
   ['blBultos', 'bultos'], ['blPeso', 'peso_bruto'], ['blCBM', 'volumen_cbm'], ['blETA', 'fecha_eta'], ['blLlegada', 'fecha_llegada'],
   ['blFleteUSD', 'flete_prepago_usd'], ['blFleteCNY', 'flete_prepago_cny'], ['blFleteDest', 'flete_destino_usd']
 ]
 
 function _volcar(bl) {
-  for (const [id, col] of CAMPOS) { const el = $(id); if (el) el.value = bl?.[col] ?? (id === 'blEstado' ? 'pendiente' : id === 'blTipoCont' ? '40HC' : '') }
+  for (const [id, col] of CAMPOS) { const el = $(id); if (el) el.value = bl?.[col] ?? (id === 'blEstado' ? 'pendiente' : '') }
   if (!bl && !v('blNaviera')) $('blNaviera').value = ''
   $('blPegar').value = ''; $('blPegarRes').textContent = ''
   window.blActualizarLink()
+}
+
+
+// ─── Contenedores y reparto de las líneas del CI (SQL 117) ────────────────────
+const n0 = x => parseFloat(x) || 0
+const f2 = x => formatNumber(n0(x), 2)
+let _conts = []      // [{ id?, numero, tipo, precinto, bultos, peso_bruto, volumen_cbm, lin: { [detalle_ci_id]: kg } }]
+let _lin = []        // líneas del CI [{ id, product_id, cantidad_neto, nombre }]
+let _sinSQL = false  // SQL 117 sin correr
+let _manualLin = false, _manualTot = false
+
+const _nuevoCont = () => ({ numero: '', tipo: '40HC', precinto: '', bultos: null, peso_bruto: null, volumen_cbm: null, lin: {} })
+const _partes = (total, n) => { const base = Math.floor(total / n * 100) / 100; const a = Array(n).fill(base); a[n - 1] = Math.round((total - base * (n - 1)) * 100) / 100; return a }
+const _modoLectura = () => $('modal-bl-carpeta')?.dataset.modo !== 'edicion'
+const _reaplicarModo = () => aplicarModoVerEditar('modal-bl-carpeta', _modoLectura())
+
+async function _cargarLineasCI(ciId) {
+  const [det, items] = await Promise.all([query('detalle_comercial_invoice', { comercial_invoice_id: ciId }), getItems()])
+  const mapa = {}; for (const i of items || []) mapa[i.id] = i
+  _lin = (det || []).map(d => { const it = mapa[d.product_id]; return { id: d.id, product_id: d.product_id, cantidad_neto: n0(d.cantidad_neto), nombre: it ? (it.sku ? `(${it.sku}) ${it.nombre}` : it.nombre) : `Artículo ${d.product_id}` } })
+}
+
+async function _cargarConts() {
+  _conts = []; _manualLin = false; _manualTot = false
+  const t = await supabase.from('bl_contenedores').select('id').limit(1)
+  _sinSQL = !!t.error
+  if (!_bl) { _conts = [_nuevoCont()]; _repartirLineas(); return }
+  if (_sinSQL) { _conts = [{ numero: _bl.contenedor_number || '', tipo: _bl.tipo_contenedor || '40HC', precinto: _bl.numero_precinto || '', bultos: _bl.bultos, peso_bruto: _bl.peso_bruto, volumen_cbm: _bl.volumen_cbm, lin: {} }]; _repartirLineas(); return }
+  const cs = ((await query('bl_contenedores', { bl_id: _bl.id })) || []).sort((a, b) => a.orden - b.orden || a.id - b.id)
+  const ids = new Set(cs.map(c => c.id))
+  const ls = ((await query('bl_contenedor_lineas', {})) || []).filter(l => ids.has(l.contenedor_id))
+  _conts = cs.map(c => ({ id: c.id, numero: c.numero, tipo: c.tipo || '40HC', precinto: c.precinto || '', bultos: c.bultos, peso_bruto: c.peso_bruto, volumen_cbm: c.volumen_cbm,
+    lin: Object.fromEntries(ls.filter(l => l.contenedor_id === c.id).map(l => [l.detalle_ci_id, n0(l.cantidad_neto)])) }))
+  if (!_conts.length) { _conts = [{ ..._nuevoCont(), numero: _bl.contenedor_number || '', tipo: _bl.tipo_contenedor || '40HC', precinto: _bl.numero_precinto || '', bultos: _bl.bultos, peso_bruto: _bl.peso_bruto, volumen_cbm: _bl.volumen_cbm }]; _repartirLineas() }
+  _manualLin = _conts.some(c => Object.keys(c.lin).length); _manualTot = true
+}
+
+/** Reparte cada línea del CI en partes iguales entre los contenedores. */
+function _repartirLineas() {
+  _conts.forEach(c => { c.lin = {} })
+  for (const l of _lin) _partes(l.cantidad_neto, _conts.length).forEach((kg, i) => { _conts[i].lin[l.id] = kg })
+}
+/** Reparte los totales del BL (bultos, kg, CBM) en partes iguales entre los contenedores. */
+function _repartirTotales() {
+  const n = _conts.length
+  const rep = (id, col, dec) => { const tot = n0(v(id)); if (!tot) return; const p = dec ? _partes(tot, n) : _partes(tot, n).map(Math.round); if (!dec) p[n - 1] = tot - p.slice(0, n - 1).reduce((a, b) => a + b, 0); p.forEach((x, i) => { _conts[i][col] = x }) }
+  rep('blBultos', 'bultos', false); rep('blPeso', 'peso_bruto', true); rep('blCBM', 'volumen_cbm', true)
+}
+
+window.blTotalesCambiaron = () => { if (!_manualTot) _repartirTotales(); _pintarConts() }
+window.blAgregarCont = () => { _conts.push(_nuevoCont()); if (!_manualLin) _repartirLineas(); if (!_manualTot) _repartirTotales(); _pintarConts() }
+window.blQuitarCont = i => { if (_conts.length <= 1) { showToast('El BL necesita al menos un contenedor', 'warning'); return }; _conts.splice(i, 1); if (!_manualLin) _repartirLineas(); if (!_manualTot) _repartirTotales(); _pintarConts() }
+window.blContSet = (i, k, val) => { const c = _conts[i]; if (!c) return; if (['bultos', 'peso_bruto', 'volumen_cbm'].includes(k)) { c[k] = val === '' ? null : n0(val); _manualTot = true } else c[k] = k === 'numero' ? String(val).toUpperCase().trim() : val; _pintarConts() }
+window.blLinSet = (i, detId, val) => { if (_conts[i]) { _conts[i].lin[detId] = n0(val); _manualLin = true; _pintarConts() } }
+window.blRepartirLineas = () => { _manualLin = false; _repartirLineas(); _pintarConts() }
+window.blRepartirTotales = () => { _manualTot = false; _repartirTotales(); _pintarConts() }
+
+const _chip = (ok, txt) => `<span style="display:inline-block; padding:1px 8px; border-radius:10px; font-size:.75rem; font-weight:600; color:#fff; background:${ok ? '#10b981' : '#f59e0b'};">${txt}</span>`
+
+function _cruces() {
+  const out = []
+  const ci = window.costeoActual || {}
+  const fila = (ok, txt) => out.push(`<div style="font-size:.84rem; padding:3px 0;">${ok ? '✅' : '⚠️'} ${txt}</div>`)
+  const sum = k => _conts.reduce((t, c) => t + n0(c[k]), 0)
+  const cmp = (lbl, bl, cont, tol) => { if (!bl && !cont) return; if (!bl) return; fila(Math.abs(bl - cont) <= tol, `${lbl}: BL declara <b>${f2(bl)}</b> · suma de contenedores <b>${f2(cont)}</b>${Math.abs(bl - cont) > tol ? ` (dif. ${f2(bl - cont)})` : ''}`) }
+  cmp('Bultos', n0(v('blBultos')), sum('bultos'), 0.5)
+  cmp('Peso bruto kg', n0(v('blPeso')), sum('peso_bruto'), 0.5)
+  cmp('Volumen CBM', n0(v('blCBM')), sum('volumen_cbm'), 0.05)
+  const totCI = _lin.reduce((t, l) => t + l.cantidad_neto, 0)
+  const totAsig = _conts.reduce((t, c) => t + Object.values(c.lin).reduce((a, b) => a + n0(b), 0), 0)
+  if (_lin.length) fila(Math.abs(totCI - totAsig) <= 0.5, `Mercadería: CI <b>${f2(totCI)}</b> kg neto · repartido en contenedores <b>${f2(totAsig)}</b> kg${Math.abs(totCI - totAsig) > 0.5 ? ` (dif. ${f2(totCI - totAsig)})` : ''}`)
+  const flCI = n0(ci.costo_flete), flBL = n0(v('blFleteUSD'))
+  if (flCI && flBL) fila(Math.abs(flCI - flBL) <= 0.05, `Flete: CI <b>US$ ${f2(flCI)}</b> · BL prepagado <b>US$ ${f2(flBL)}</b>`)
+  const nombres = _conts.map(c => c.numero).filter(Boolean)
+  if (new Set(nombres).size !== nombres.length) fila(false, 'Hay contenedores con el mismo número')
+  return out.join('')
+}
+
+function _pintarConts() {
+  const host = $('blContHost'); if (!host) return
+  const lect = _modoLectura()
+  const dis = lect ? 'disabled' : ''
+  const inp = (i, k, val, ancho, tipo = 'number', extra = '') => `<input type="${tipo}" ${tipo === 'number' ? 'step="any"' : ''} value="${_esc(val ?? '')}" ${dis} style="width:${ancho}; padding:4px 6px;" onchange="window.blContSet(${i}, '${k}', this.value)" ${extra}>`
+  const TD = 'padding:5px 6px; border-bottom:1px solid var(--border-color);'
+  const filasC = _conts.map((c, i) => `<tr>
+      <td style="${TD}">${inp(i, 'numero', c.numero, '130px', 'text', 'maxlength="20" placeholder="WHSU5068632"')}</td>
+      <td style="${TD}"><select ${dis} onchange="window.blContSet(${i}, 'tipo', this.value)">${['40HC', '40GP', '20GP', 'LCL'].map(o => `<option${o === c.tipo ? ' selected' : ''}>${o}</option>`).join('')}</select></td>
+      <td style="${TD}">${inp(i, 'precinto', c.precinto, '120px', 'text', 'maxlength="30"')}</td>
+      <td style="${TD}">${inp(i, 'bultos', c.bultos, '80px')}</td><td style="${TD}">${inp(i, 'peso_bruto', c.peso_bruto, '100px')}</td><td style="${TD}">${inp(i, 'volumen_cbm', c.volumen_cbm, '80px')}</td>
+      <td style="${TD}" data-solo-edicion><button type="button" class="btn btn-secondary btn-small" onclick="window.blQuitarCont(${i})" title="Quitar contenedor">🗑</button></td></tr>`).join('')
+  const tabC = `<div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse; font-size:.85rem;">
+    <thead><tr style="color:var(--text-secondary); text-align:left;"><th>N° contenedor *</th><th>Tipo</th><th>Precinto</th><th>Bultos</th><th>Peso bruto kg</th><th>CBM</th><th data-solo-edicion></th></tr></thead><tbody>${filasC}</tbody></table></div>
+    <div data-solo-edicion style="margin:8px 0; display:flex; gap:8px; flex-wrap:wrap;">
+      <button type="button" class="btn btn-secondary btn-small" onclick="window.blAgregarCont()">＋ Contenedor</button>
+      <button type="button" class="btn btn-secondary btn-small" onclick="window.blRepartirTotales()" title="Divide bultos, peso y CBM del BL en partes iguales">⚖ Repartir totales del BL</button></div>`
+  let tabL = '<div style="font-size:.85rem; color:var(--text-secondary); margin-top:8px;">El CI aún no tiene líneas: registra los artículos en el CI para repartirlos por contenedor.</div>'
+  if (_lin.length) {
+    const cab = _conts.map((c, i) => `<th style="text-align:right; padding:4px 6px;">${_esc(c.numero || 'Contenedor ' + (i + 1))}</th>`).join('')
+    const filasL = _lin.map(l => {
+      const asig = _conts.reduce((t, c) => t + n0(c.lin[l.id]), 0), dif = l.cantidad_neto - asig, ok = Math.abs(dif) <= 0.5
+      const celdas = _conts.map((c, i) => `<td style="${TD} text-align:right;"><input type="number" step="any" value="${n0(c.lin[l.id]) || ''}" ${dis} style="width:100px; text-align:right; padding:4px 6px;" onchange="window.blLinSet(${i}, ${l.id}, this.value)"></td>`).join('')
+      return `<tr><td style="${TD}">${_esc(l.nombre)}</td><td style="${TD} text-align:right;">${f2(l.cantidad_neto)}</td>${celdas}<td style="${TD} text-align:right;">${f2(asig)}</td><td style="${TD}">${ok ? _chip(true, 'Completo') : _chip(false, dif > 0 ? `Faltan ${f2(dif)}` : `Sobran ${f2(-dif)}`)}</td></tr>`
+    }).join('')
+    const pie = _conts.map(c => `<td style="padding:5px 6px; text-align:right; font-weight:700;">${f2(Object.values(c.lin).reduce((a, b) => a + n0(b), 0))}</td>`).join('')
+    tabL = `<div style="font-weight:600; font-size:.85rem; margin:12px 0 6px;">Mercadería por contenedor <small style="font-weight:400; color:var(--text-secondary);">(kg netos de cada artículo del CI)</small></div>
+      <div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse; font-size:.85rem;">
+      <thead><tr style="color:var(--text-secondary);"><th style="text-align:left; padding:4px 6px;">Artículo</th><th style="text-align:right; padding:4px 6px;">Según CI</th>${cab}<th style="text-align:right; padding:4px 6px;">Repartido</th><th></th></tr></thead>
+      <tbody>${filasL}<tr style="background:var(--bg-secondary);"><td style="padding:5px 6px; font-weight:700;">Total por contenedor</td><td></td>${pie}<td></td><td></td></tr></tbody></table></div>
+      <div data-solo-edicion style="margin:8px 0;"><button type="button" class="btn btn-secondary btn-small" onclick="window.blRepartirLineas()" title="Divide cada artículo en partes iguales entre los contenedores">⚖ Repartir artículos en partes iguales</button></div>`
+  }
+  const aviso = _sinSQL ? `<div style="padding:8px 12px; border-left:3px solid var(--color-warning,#f59e0b); background:var(--bg-secondary); font-size:.83rem; margin-bottom:8px;">Falta correr <code>assets/sql/117_bl_contenedores_lineas.sql</code> para guardar varios contenedores y su mercadería.</div>` : ''
+  host.innerHTML = aviso + tabC + tabL + `<div style="margin-top:10px; padding:8px 12px; background:var(--bg-secondary); border-radius:8px;"><div style="font-weight:600; font-size:.85rem; margin-bottom:4px;">Cruce BL ↔ CI</div>${_cruces() || '<span style="font-size:.84rem; color:var(--text-secondary);">Completa los totales del BL para cruzarlos.</span>'}</div>`
+  _reaplicarModo()
 }
 
 window.abrirBL = async function (id) {
@@ -119,21 +232,50 @@ window.abrirBL = async function (id) {
     if (id) _bl = ((await query('bill_of_ladings', { id })) || [])[0] || null
     $('blTitulo').textContent = _bl ? `Bill of Lading ${_bl.nro_bill_lading}` : 'Nuevo Bill of Lading'
     _volcar(_bl)
+    await _cargarLineasCI(ciId)
+    await _cargarConts()
+    $('modal-bl-carpeta').dataset.modo = _bl ? 'lectura' : 'edicion'
+    _pintarConts()
     aplicarModoVerEditar('modal-bl-carpeta', !!_bl)
     window.openModal('modal-bl-carpeta')
   } catch (e) { console.error('abrirBL:', e); showToast('No se pudo abrir el BL', 'danger') }
 }
 
-window.blEditar = () => aplicarModoVerEditar('modal-bl-carpeta', false)
-window.blCancelar = () => { if (_bl) { _volcar(_bl); aplicarModoVerEditar('modal-bl-carpeta', true) } else window.cerrarBL() }
+window.blEditar = () => { aplicarModoVerEditar('modal-bl-carpeta', false); _pintarConts() }
+window.blCancelar = async () => { if (_bl) { _volcar(_bl); await _cargarConts(); aplicarModoVerEditar('modal-bl-carpeta', true); _pintarConts() } else window.cerrarBL() }
 window.cerrarBL = () => { window.closeModal('modal-bl-carpeta'); window.renderHojaCosteo?.() }
+
+
+/** Sincroniza contenedores y líneas del BL: actualiza los existentes, crea los nuevos y borra los quitados. */
+async function _guardarConts(blId, conts) {
+  if (!blId) throw new Error('No se pudo obtener el id del BL guardado')
+  const previos = (await query('bl_contenedores', { bl_id: blId })) || []
+  const quedan = new Set(conts.map(c => c.id).filter(Boolean))
+  for (const p of previos) if (!quedan.has(p.id)) await deleteRecord('bl_contenedores', p.id)
+  let orden = 0
+  for (const c of conts) {
+    orden++
+    const fila = { bl_id: blId, numero: c.numero, tipo: c.tipo || null, precinto: c.precinto || null, bultos: c.bultos == null ? null : Math.round(n0(c.bultos)), peso_bruto: c.peso_bruto, volumen_cbm: c.volumen_cbm, orden }
+    let id = c.id
+    if (id) { if (!await update('bl_contenedores', id, fila)) throw new Error(`No se pudo actualizar el contenedor ${c.numero}`) }
+    else { const g = await insert('bl_contenedores', fila); if (!g?.id) throw new Error(`No se pudo crear el contenedor ${c.numero}: ${ultimoErrorInsert()?.message || ''}`); id = g.id; c.id = id }
+    const viejas = ((await query('bl_contenedor_lineas', { contenedor_id: id })) || [])
+    for (const l of viejas) await deleteRecord('bl_contenedor_lineas', l.id)
+    for (const l of _lin) {
+      const kg = n0(c.lin[l.id]); if (kg <= 0) continue
+      await insert('bl_contenedor_lineas', { contenedor_id: id, detalle_ci_id: l.id, cantidad_neto: kg })
+    }
+  }
+}
 
 window.guardarBL = async function () {
   try {
     const ciId = window.costeoActual?.id
     if (!ciId) throw new Error('Falta el Commercial Invoice de la carpeta')
     if (!v('blNro')) throw new Error('Falta el N° de BL')
-    if (!v('blCont')) throw new Error('Falta el N° de contenedor')
+    const conts = _conts.filter(c => c.numero)
+    if (!conts.length) throw new Error('Falta el N° de al menos un contenedor')
+    if (new Set(conts.map(c => c.numero)).size !== conts.length) throw new Error('Hay contenedores con el mismo número')
     const NUEVAS = ['booking_number', 'naviera', 'nave_viaje', 'tipo_contenedor', 'bultos', 'volumen_cbm', 'fecha_eta', 'fecha_llegada', 'flete_prepago_usd', 'flete_prepago_cny', 'flete_destino_usd']
     const numericos = ['bultos', 'peso_bruto', 'volumen_cbm', 'flete_prepago_usd', 'flete_prepago_cny', 'flete_destino_usd']
     const fila = { importacion_id: ciId }
@@ -141,9 +283,13 @@ window.guardarBL = async function () {
       let val = v(id)
       if (numericos.includes(col)) val = num(val)
       else if (val === '') val = null
-      if (col === 'nro_bill_lading' || col === 'contenedor_number') val = String(val).toUpperCase()
+      if (col === 'nro_bill_lading') val = String(val).toUpperCase()
       fila[col] = val
     }
+    // Resumen para los lectores antiguos (DAM, guías): todos los contenedores en un texto
+    fila.contenedor_number = conts.map(c => c.numero).join(', ')
+    fila.tipo_contenedor = conts[0].tipo || null
+    fila.numero_precinto = conts.map(c => c.precinto).filter(Boolean).join(', ') || null
     if (v('blPegar')) fila.tracking_actualizado = new Date().toISOString()
 
     const guardar = async datos => _bl ? await update('bill_of_ladings', _bl.id, datos) : await insert('bill_of_ladings', datos)
@@ -156,7 +302,10 @@ window.guardarBL = async function () {
         if (res) showToast('BL guardado SIN los campos nuevos: falta correr assets/sql/103_bl_campos_y_adjuntos_origen_ficha.sql', 'warning')
       }
       if (!res) throw new Error(msg || 'No se pudo guardar el BL')
-    } else showToast('Bill of Lading guardado', 'success')
+    } else if (!_sinSQL) {
+      await _guardarConts(_bl?.id || res?.id, conts)
+      showToast('Bill of Lading guardado', 'success')
+    } else showToast('BL guardado con un solo contenedor: falta correr el SQL 117', 'warning')
     window.closeModal('modal-bl-carpeta')
     if (typeof window.renderBillOfLadings === 'function') window.renderBillOfLadings()
     window.renderHojaCosteo?.()
@@ -213,7 +362,7 @@ export function parsearTracking(texto) {
   return out
 }
 const _TRK = {
-  booking_number: ['blBooking', 'Booking'], contenedor_number: ['blCont', 'Contenedor'], tipo_contenedor: ['blTipoCont', 'Tipo'],
+  booking_number: ['blBooking', 'Booking'], contenedor_number: [null, 'Contenedor'], tipo_contenedor: [null, 'Tipo'],
   nave_viaje: ['blNave', 'Nave y viaje'], naviera: ['blNaviera', 'Naviera'], fecha: ['blFecha', 'Embarque a bordo'],
   fecha_eta: ['blETA', 'ETA'], fecha_llegada: ['blLlegada', 'Llegada']
 }
@@ -226,7 +375,14 @@ window.blLeerTracking = function () {
 }
 window.blAplicarTracking = function () {
   const r = window._blTrk || {}
-  Object.entries(_TRK).forEach(([k, [id]]) => { if (r[k] && $(id)) $(id).value = r[k] })
+  Object.entries(_TRK).forEach(([k, [id]]) => { if (r[k] && id && $(id)) $(id).value = r[k] })
+  if (r.contenedor_number) {   // el contenedor leído se une a la tabla: si ya está, se completa; si hay una fila vacía, se usa; si no, se agrega
+    let c = _conts.find(x => x.numero === r.contenedor_number) || _conts.find(x => !x.numero)
+    if (!c) { c = _nuevoCont(); _conts.push(c); if (!_manualLin) _repartirLineas() }
+    c.numero = r.contenedor_number
+    if (r.tipo_contenedor) c.tipo = String(r.tipo_contenedor).replace(/^1x/i, '')
+    _pintarConts()
+  }
   $('blPegarRes').innerHTML = '✅ Datos aplicados. Revisa los campos y pulsa «Guardar BL».'
   $('blPegar').value = ''
 }

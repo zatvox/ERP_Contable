@@ -794,6 +794,7 @@ window.editarImportacion = async function () {
       ? `Proforma ${pi.numero_proforma_proveedor || pi.numero} del ${fechaDMY(pi.fecha)}. Los campos vacíos del CI se completan con lo que dice la PI.`
       : 'Esta carpeta no tiene Proforma enlazada.'
     window.costeoPI = pi
+    const lh = document.getElementById('editCILineas'); if (lh) { const cid = window.hcUltimo?.d?.ci?.id ?? ''; lh.innerHTML = (window.hcLineasDoc?.('ci') || '') + `<div data-pg-doc="ci_saldo" data-pg-id="${cid}" data-pg-tit="Pago del saldo">${window.pagosBloqueHtml?.('ci_saldo', cid || null, 'Pago del saldo') || ''}</div>` }
 
     // Abrir modal SIEMPRE en modo lectura (estándar Ver → Editar)
     window.openModal('modal-editar-importacion')

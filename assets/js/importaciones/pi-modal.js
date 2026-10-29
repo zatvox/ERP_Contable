@@ -48,6 +48,7 @@ function _asegurarModal() {
           <div class="form-group"><label>Incoterm</label>
             <select id="piIncoterm">${INCOTERMS.map(i => `<option value="${i}">${i}</option>`).join('')}</select></div>
         </div>
+        <div id="piLineas"></div>
         <small id="piNota" style="display:block; margin-top:10px; color:var(--text-secondary);"></small>
       </div>
       <div class="modal-footer">
@@ -83,6 +84,7 @@ window.verPI = async function (id) {
     document.getElementById('piNota').textContent = (_tieneCI
       ? 'El incoterm se cambia desde "Editar CI" (ahí se guarda el desglose de flete y seguro). '
       : '') + 'Proveedor, moneda, total y líneas se cambian en Compras → Órdenes de Compra; el estado con "Confirmar Proforma".'
+    const lh = document.getElementById('piLineas'); if (lh) lh.innerHTML = (window.hcLineasDoc?.('pi') || '') + `<div data-pg-doc="oc_anticipo" data-pg-id="${oc.id}" data-pg-tit="Pago del anticipo">${window.pagosBloqueHtml?.('oc_anticipo', oc.id, 'Pago del anticipo') || ''}</div>`
     window.openModal(MODAL)
     aplicarModoVerEditar(MODAL, true)
   } catch (e) { console.error('verPI:', e); showToast('No se pudo abrir la Proforma', 'danger') }

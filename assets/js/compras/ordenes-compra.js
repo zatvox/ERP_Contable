@@ -8,7 +8,7 @@ import { validarCamposPI } from '../importaciones/pi-validaciones.js'
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
 import { getCurrentUser } from '../auth-supabase.js'
-import { getOrderCompras, getOrderComprasPage, getOrderCompraById, addOrderCompra, updateOrderCompra, getCompraById, getCompraDetalles, updateCompra, addCompra, addCompraDetalle, getOrderCompraDetalles, addOrderCompraDetalle, addLote, getItems, getItemById, getSuppliers, getContactById, getCategorias, getMarcas, getPartidas, cargarSelectTipoDocumentos, addCuentaPagar, addCuotaPagar } from '../supabase-data.js'
+import { getOrderCompras, getOrderComprasPage, getOrderCompraById, addOrderCompra, updateOrderCompra, getCompraById, getCompraDetalles, updateCompra, addCompra, addCompraDetalle, getOrderCompraDetalles, addOrderCompraDetalle, updateOrderCompraDetalle, deleteOrderCompraDetalle, addLote, getItems, getItemById, getSuppliers, getContactById, getCategorias, getMarcas, getPartidas, cargarSelectTipoDocumentos, addCuentaPagar, addCuotaPagar } from '../supabase-data.js'
 import { showToast, formatNumber, formatQty } from '../helpers.js'
 import { refrescarBuscador } from '../buscador-select.js'
 import { _escCompras } from './buscadores.js'
@@ -123,52 +123,96 @@ window.cambiarPaginaOrdenes = async function (delta) {
   await renderOrdenes()  // pide solo los 50 de la nueva página al servidor
 }
 
+let _ocEditId = null          // OC abierta en el modal (null = OC nueva)
+let _ocDetalleIdsOrig = []    // ids de detalle al abrir, para sincronizar al guardar
+
+/** Una OC se puede editar mientras no haya generado compra ni carpeta. */
+function _ocEditable(oc) {
+  if (oc.carpeta_importacion_id) return { ok: false, motivo: 'ya tiene carpeta de importación' }
+  if (!oc.es_importacion && oc.status === 'confirmado') return { ok: false, motivo: 'ya fue confirmada y generó compra' }
+  if (oc.status === 'anulado' || oc.status === 'cancelado') return { ok: false, motivo: 'está anulada' }
+  return { ok: true }
+}
+
+/** Marca (o no) los botones de la tabla de productos según el modo del modal. */
+function _ocAplicarModoTabla() {
+  const lectura = document.getElementById('modal-nueva-oc')?.dataset.modo === 'lectura'
+  document.querySelectorAll('#tabla-detalle-nueva-oc [data-fila-acc]').forEach(e => { e.style.display = lectura ? 'none' : '' })
+}
+
 window.verOC = async function (id) {
   try {
     const oc = await getOrderCompraById(id)
-    if (!oc) {
-      showToast('Orden no encontrada', 'warning')
-      return
-    }
-
-    const prov = await getContactById(oc.contact_id)
+    if (!oc) { showToast('Orden no encontrada', 'warning'); return }
     const detalles = await getOrderCompraDetalles(id) || []
+    const items = await getItems() || []
+    const mapa = {}; for (const it of items) mapa[it.id] = it
 
-    let detallesText = 'Sin detalles'
-    if (detalles.length > 0) {
-      const detallesPromises = detalles.map(async d => {
-        const item = await getItemById(d.item_id)
-        const nombreProducto = item ? (item.nombre || item.name) : `#${d.item_id}`
-        return `producto: ${nombreProducto}
-          ${(parseFloat(d.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} kg x ${(parseFloat(d.precio_unitario) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })} ${oc.currency} = ${(parseFloat(d.total) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${oc.currency}`
-      })
-      const detallesArray = await Promise.all(detallesPromises)
-      detallesText = detallesArray.join('\n')
+    _ocEditId = id
+    _ocCompraOrigenId = null
+    _ocDetalleIdsOrig = detalles.map(d => d.id)
+    const form = document.getElementById('formNewOC'); if (form) form.reset()
+    const set = (k, val) => { const e = document.getElementById(k); if (e) e.value = val ?? '' }
+
+    const sel = document.getElementById('ocProveedor')
+    if (sel) { sel.value = String(oc.contact_id || ''); refrescarBuscador(sel) }
+    if (typeof window._onCambiarProveedorOC === 'function') window._onCambiarProveedorOC()
+    set('ocMoneda', oc.currency || 'PEN'); set('ocFecha', oc.fecha); set('ocTipoPago', oc.tipo_pago || 'credito')
+    const chk = document.getElementById('ocEsImportacion'); if (chk) chk.checked = !!oc.es_importacion
+    window.ocToggleImportacion()
+    if (oc.es_importacion) {
+      set('ocNumeroProforma', oc.numero_proforma_proveedor); set('ocIncoterm', oc.incoterm || 'CIF'); set('ocMarca', oc.marca)
+      set('ocPuertoEmbarque', oc.puerto_embarque); set('ocPuertoDestino', oc.puerto_destino); set('ocPaisOrigen', oc.pais_origen)
+      set('ocFleteEstimado', oc.flete_estimado || ''); set('ocSeguroEstimado', oc.seguro_estimado || '')
+      set('ocAnticipoPct', oc.anticipo_porcentaje); set('ocToleranciaPct', oc.tolerancia_porcentaje)
+      set('ocDiasValidezAnticipo', oc.dias_validez_anticipo); set('ocDiasEmbarque', oc.dias_embarque)
+      set('ocEntregaPactada', oc.entrega_pactada); set('ocDiasSaldoBL', oc.dias_saldo_desde_bl); set('ocValidezOferta', oc.validez_oferta)
+      window.ocOnIncoterm()
     }
 
-    const mensaje = `
-          OC #${oc.id}
-          Proveedor: ${prov?.nombre || '-'}
-          Fecha: ${fechaDMY(oc.fecha, '-')}
-          Moneda: ${oc.currency || 'PEN'}
-          Estado: ${oc.status || '-'}
+    detallesOCEnCreacion = detalles.map(d => {
+      const cant = parseFloat(d.cantidad) || 0, precio = parseFloat(d.precio_unitario) || 0
+      const it = mapa[d.item_id], sub = parseFloat(d.subtotal) || 0
+      const bruto = cant * precio
+      return {
+        _id: d.id, item_id: d.item_id,
+        nombre: it ? (it.sku ? `(${it.sku}) ${it.nombre || it.name}` : (it.nombre || it.name)) : `Item #${d.item_id}`,
+        cantidad: cant, unidad_medida: d.unidad_medida || 'KG',
+        peso_neto: d.peso_neto ?? null, peso_bruto: d.peso_bruto ?? null, bultos: d.bultos ?? null,
+        partida_arancelaria: d.partida_arancelaria ?? null,
+        precio_unitario: precio,
+        descuento: bruto > 0 ? Math.max(0, Math.round((1 - sub / bruto) * 10000) / 100) : 0,
+        igv_porcentaje: parseFloat(d.igv_porcentaje) || 0,
+        subtotal: sub, igv_monto: parseFloat(d.igv_monto) || 0, total: parseFloat(d.total) || 0
+      }
+    })
+    _renderTablaDetalleOC()
+    window.ocCalcularAnticipo()
 
-          DETALLES:
-          ${detallesText}
-
-          TOTALES:
-          Subtotal: ${oc.currency || 'PEN'} ${(oc.total_subtotal || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          IGV: ${oc.currency || 'PEN'} ${(oc.total_igv || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          Total: ${oc.currency || 'PEN'} ${(oc.total_oc || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              `
-
-    alert(mensaje)
+    const ed = _ocEditable(oc)
+    const bEd = document.getElementById('btnEditarOC')
+    if (bEd) { bEd.disabled = !ed.ok; bEd.title = ed.ok ? '' : 'No editable: ' + ed.motivo }
+    const t = document.getElementById('ocTituloModal'); if (t) t.textContent = `Orden de Compra ${oc.numero || '#' + oc.id}`
+    window.aplicarModoVerEditar('modal-nueva-oc', true)
+    _ocAplicarModoTabla()
+    window.openModal('modal-nueva-oc')
   } catch (error) {
     console.error('Error en verOC:', error)
     showToast('Error al ver la orden', 'danger')
   }
 }
 
+window.ocHabilitarEdicion = function () {
+  window.aplicarModoVerEditar('modal-nueva-oc', false)
+  if (document.getElementById('ocEsImportacion')?.checked) window.ocOnIncoterm()   // respeta flete/seguro bloqueados por incoterm
+  _ocAplicarModoTabla()
+}
+
+/** Cancelar: descarta cambios (OC existente → vuelve a lectura; nueva → cierra). */
+window.ocCancelarEdicion = function () {
+  if (_ocEditId) window.verOC(_ocEditId)
+  else window.closeModal('modal-nueva-oc')
+}
 
 /**
  * Confirmar una PROFORMA (OC de importación): solo cambia el estado. NO crea
@@ -265,7 +309,11 @@ window.guardarCompletarPI = async function () {
 /** Abrir el formulario de OC en blanco (descarta cualquier compra de origen pendiente). */
 window.ocNueva = function () {
   _ocCompraOrigenId = null
+  _ocEditId = null
   detallesOCEnCreacion = []
+  const form = document.getElementById('formNewOC'); if (form) form.reset()
+  const t = document.getElementById('ocTituloModal'); if (t) t.textContent = 'Nueva Orden de Compra'
+  window.aplicarModoVerEditar('modal-nueva-oc', false)
   _renderTablaDetalleOC()
   window.openModal('modal-nueva-oc')
 }
@@ -278,6 +326,9 @@ window.ocDesdeCompra = async function (compraId) {
     const detalles = (await getCompraDetalles(compraId)) || []
     if (!detalles.length) { showToast('La compra no tiene detalle', 'warning'); return }
 
+    _ocEditId = null
+    { const t = document.getElementById('ocTituloModal'); if (t) t.textContent = 'Nueva Orden de Compra' }
+    window.aplicarModoVerEditar('modal-nueva-oc', false)
     window.openModal('modal-nueva-oc')
     const form = document.getElementById('formNewOC'); if (form) form.reset()
 
@@ -797,7 +848,7 @@ window.guardarOC = async function () {
       if (errPI) { showToast(errPI, 'warning'); return }
       // La misma PI del mismo proveedor no se registra dos veces.
       const yaExiste = (await getOrderCompras() || []).find(o => o.es_importacion && o.contact_id === supplierId &&
-        String(o.numero_proforma_proveedor || '').trim().toUpperCase() === imp.numero_proforma_proveedor.toUpperCase())
+        o.id !== _ocEditId && String(o.numero_proforma_proveedor || '').trim().toUpperCase() === imp.numero_proforma_proveedor.toUpperCase())
       if (yaExiste) { showToast(`Ya existe la proforma ${imp.numero_proforma_proveedor} de este proveedor (OC ${yaExiste.numero || yaExiste.id})`, 'warning'); return }
       const sinPeso = detallesOCEnCreacion.filter(d => !(parseFloat(d.peso_neto) > 0))
       if (sinPeso.length) {
@@ -815,6 +866,45 @@ window.guardarOC = async function () {
       totalIGV += detalle.igv_monto
       totalMonto += detalle.total
     })
+
+    // ── EDICIÓN de una OC existente: actualiza cabecera y sincroniza líneas ──
+    if (_ocEditId) {
+      const id = _ocEditId
+      const actual = await getOrderCompraById(id)
+      const ed = actual ? _ocEditable(actual) : { ok: false, motivo: 'no existe' }
+      if (!ed.ok) { showToast('No se puede editar: ' + ed.motivo, 'warning'); return }
+      const cab = {
+        contact_id: supplierId, fecha, currency: moneda, tipo_pago: tipoPago,
+        cantidad_total: detallesOCEnCreacion.reduce((t, d) => t + d.cantidad, 0),
+        total_subtotal: totalSubtotal, total_igv: totalIGV, total_oc: totalMonto,
+        ...imp
+      }
+      if (!imp.es_importacion) Object.assign(cab, { numero_proforma_proveedor: null, incoterm: null })
+      let okCab = await updateOrderCompra(id, cab)
+      if (!okCab) {   // columnas SQL 93/99 ausentes: reintento reducido
+        const red = { ...cab }; for (const c of CAMPOS_OC_SQL93) delete red[c]
+        okCab = await updateOrderCompra(id, red)
+        if (okCab) showToast('Guardada, pero faltan columnas de los SQL 93/99 (plazos, entrega, validez).', 'warning')
+      }
+      if (!okCab) { showToast('No se pudo actualizar la OC', 'danger'); return }
+      const filaDe = d => ({
+        item_id: d.item_id, cantidad: d.cantidad, precio_unitario: d.precio_unitario, unidad_medida: d.unidad_medida,
+        peso_neto: d.peso_neto ?? null, peso_bruto: d.peso_bruto ?? null, bultos: d.bultos ?? null,
+        partida_arancelaria: d.partida_arancelaria ?? null, igv_porcentaje: d.igv_porcentaje,
+        subtotal: d.subtotal, igv_monto: d.igv_monto, total: d.total
+      })
+      let fallos = 0
+      const conservados = new Set(detallesOCEnCreacion.filter(d => d._id).map(d => d._id))
+      for (const d of detallesOCEnCreacion) {
+        const r = d._id ? await updateOrderCompraDetalle(d._id, filaDe(d)) : await addOrderCompraDetalle({ orden_compra_id: id, ...filaDe(d) })
+        if (!r) fallos++
+      }
+      for (const oid of _ocDetalleIdsOrig) if (!conservados.has(oid)) { if (!(await deleteOrderCompraDetalle(oid))) fallos++ }
+      showToast(fallos ? `OC actualizada con ${fallos} línea(s) con error. Revisa y vuelve a guardar.` : 'Orden de Compra actualizada', fallos ? 'warning' : 'success')
+      await renderOrdenes()
+      await window.verOC(id)
+      return
+    }
 
     // 1. Crear OC principal (sin detalles de productos)
     const idPrevio = await getOrderCompras().then(ocs => ocs.length > 0 ? Math.max(...ocs.map(o => o.id)) + 1 : 1)
@@ -892,6 +982,7 @@ window.guardarOC = async function () {
         (falt.length ? ` Quedó en blanco: ${falt.join(', ')} (se completa con «Completar PI» o con el CI).` : ''), falt.length ? 'info' : 'success')
     } else showToast('Orden de Compra creada exitosamente', 'success')
     window.closeModal('modal-nueva-oc')
+    _ocEditId = null
     _ocCompraOrigenId = null
     detallesOCEnCreacion = []
     await renderOrdenes()
@@ -909,6 +1000,7 @@ window.guardarOC = async function () {
 // ============================================================================
 
 let detallesOCEnCreacion = []
+let _detalleOCEditIdx = null   // índice de la línea que se está editando (null = agregando)
 let _ocContextConfirmar = null   // contexto para modal-confirmar-compra
 
 window.abrirModalDetalleDesdeCrearOC = async function () {
@@ -924,6 +1016,8 @@ window.abrirModalDetalleDesdeCrearOC = async function () {
     await cargarItemsSelectDetalle()
     
     // Limpiar formulario
+    _detalleOCEditIdx = null
+    { const t = document.getElementById('tituloModalDetalleOC'); if (t) t.textContent = 'Agregar Producto a OC'; const b = document.getElementById('btnGuardarDetalleOC'); if (b) b.textContent = 'Agregar Producto' }
     document.getElementById('formNewDetalleOC').reset()
     document.getElementById('newDetalleOCDescuento').value = '0'
 
@@ -967,6 +1061,17 @@ export async function cargarItemsSelectDetalle(targetId = 'newDetalleOCProducto'
 
 window.calcularDetalleOC = function () {
   try {
+    // Peso neto: con unidad KG es la misma cantidad (automático); con M o unidad hay que indicarlo
+    {
+      const pn = document.getElementById('newDetalleOCPesoNeto'), lbl = document.getElementById('lblDetalleOCPesoNeto'), ay = document.getElementById('ayudaDetalleOCPesoNeto')
+      const esKg = (document.getElementById('newDetalleOCUnidad')?.value || 'KG') === 'KG'
+      if (pn) {
+        pn.readOnly = esKg
+        if (esKg) pn.value = document.getElementById('newDetalleOCCantidad')?.value || ''
+        if (lbl) lbl.textContent = esKg ? 'Peso neto (KG)' : 'Peso neto total de la línea (KG) *'
+        if (ay) ay.textContent = esKg ? 'Igual a la cantidad (se compra por kilo).' : 'Cuánto pesa en total esta línea; sirve para repartir el flete.'
+      }
+    }
     const cantidad = parseFloat(document.getElementById('newDetalleOCCantidad')?.value || 0)
     const precio = parseFloat(document.getElementById('newDetalleOCPrecio')?.value || 0)
     const descuento = parseFloat(document.getElementById('newDetalleOCDescuento')?.value || 0)
@@ -1008,7 +1113,7 @@ function _renderTablaDetalleOC() {
             <th style="text-align:right;">P. Unitario</th>
             <th style="text-align:right;">Subtotal</th>
             <th style="text-align:right;">IGV</th>
-            <th style="text-align:right;">Total</th><th></th>
+            <th style="text-align:right;">Total</th><th data-fila-acc></th>
           </tr>
         </thead>
         <tbody>`
@@ -1021,11 +1126,12 @@ function _renderTablaDetalleOC() {
           <td style="text-align:right;">${formatNumber(d.subtotal)}</td>
           <td style="text-align:right;">${formatNumber(d.igv_monto)}</td>
           <td style="text-align:right; font-weight:bold;">${formatNumber(d.total)}</td>
-          <td><button type="button" class="btn btn-small btn-danger" onclick="window.quitarDetalleOC(${idx})">✕</button></td>
+          <td style="white-space:nowrap;" data-fila-acc><button type="button" class="btn btn-small btn-secondary" onclick="window.editarDetalleOC(${idx})" title="Editar este producto">✏️</button> <button type="button" class="btn btn-small btn-danger" onclick="window.quitarDetalleOC(${idx})" title="Quitar">✕</button></td>
         </tr>`
       })
       html += '</tbody></table>'
       container.innerHTML = html
+      _ocAplicarModoTabla()
     }
   }
 
@@ -1064,7 +1170,7 @@ window.crearDetalleOC = function () {
 
     const numOrNull = id => { const x = parseFloat(document.getElementById(id)?.value); return Number.isFinite(x) ? x : null }
 
-    detallesOCEnCreacion.push({
+    const _lineaNueva = {
       item_id:         itemId,
       nombre:          sel?.selectedOptions[0]?.text || '',
       cantidad,
@@ -1076,28 +1182,60 @@ window.crearDetalleOC = function () {
       bultos:              numOrNull('newDetalleOCBultos'),
       partida_arancelaria: document.getElementById('newDetalleOCPartida')?.value?.trim() || null,
       precio_unitario: precio,
+      descuento:       descuento,
       igv_porcentaje:  igvPct,
       subtotal:        parseFloat(subtotal.toFixed(2)),
       igv_monto:       parseFloat(igvMonto.toFixed(2)),
       total:           parseFloat(total.toFixed(2))
-    })
+    }
+    const _editando = _detalleOCEditIdx != null && detallesOCEnCreacion[_detalleOCEditIdx]
+    if (_editando) detallesOCEnCreacion[_detalleOCEditIdx] = { ...detallesOCEnCreacion[_detalleOCEditIdx], ..._lineaNueva }
+    else detallesOCEnCreacion.push(_lineaNueva)
 
     _renderTablaDetalleOC()
     window.ocCalcularAnticipo()
     window.cerrarModalDetalleOC()
-    showToast('Producto agregado a la orden', 'success')
+    showToast(_editando ? 'Producto actualizado' : 'Producto agregado a la orden', 'success')
   } catch (error) {
     console.error('Error en crearDetalleOC:', error)
     showToast('Error al agregar el producto', 'danger')
   }
 }
 
+/** Edita una línea ya agregada: abre el mismo modal con sus datos. */
+window.editarDetalleOC = async function (idx) {
+  const d = detallesOCEnCreacion[idx]; if (!d) return
+  try {
+    await cargarItemsSelectDetalle()
+    const $ = id => document.getElementById(id)
+    const sel = $('newDetalleOCProducto'); sel.value = String(d.item_id); refrescarBuscador(sel)
+    $('newDetalleOCCantidad').value = d.cantidad ?? ''
+    $('newDetalleOCUnidad').value = d.unidad_medida || 'KG'
+    $('newDetalleOCPrecio').value = d.precio_unitario ?? ''
+    const bruto = (parseFloat(d.cantidad) || 0) * (parseFloat(d.precio_unitario) || 0)
+    $('newDetalleOCDescuento').value = d.descuento ?? (bruto > 0 ? Math.max(0, Math.round((1 - (parseFloat(d.subtotal) || 0) / bruto) * 10000) / 100) : 0)
+    $('newDetalleOCIGV').value = String(d.igv_porcentaje ?? 0)
+    $('newDetalleOCPesoNeto').value = d.peso_neto ?? ''
+    $('newDetalleOCPesoBruto').value = d.peso_bruto ?? ''
+    $('newDetalleOCBultos').value = d.bultos ?? ''
+    $('newDetalleOCPartida').value = d.partida_arancelaria || ''
+    const esImp = !!$('ocEsImportacion')?.checked
+    const grupoImp = $('ocDetalleGrupoImportacion'); if (grupoImp) grupoImp.style.display = esImp ? 'grid' : 'none'
+    _detalleOCEditIdx = idx
+    $('tituloModalDetalleOC').textContent = 'Editar producto de la OC'
+    $('btnGuardarDetalleOC').textContent = 'Guardar cambios'
+    calcularDetalleOC()
+    if (d.peso_neto != null && (d.unidad_medida || 'KG') !== 'KG') $('newDetalleOCPesoNeto').value = d.peso_neto
+    window.openModal('modal-nuevo-detalle-oc')
+  } catch (e) { console.error('editarDetalleOC:', e); showToast('No se pudo abrir el producto', 'danger') }
+}
 window.quitarDetalleOC = function (idx) {
   detallesOCEnCreacion.splice(idx, 1)
   _renderTablaDetalleOC()
 }
 
 window.cerrarModalDetalleOC = function () {
+  _detalleOCEditIdx = null
   const form = document.getElementById('formNewDetalleOC')
   if (form) form.reset()
   window.closeModal('modal-nuevo-detalle-oc')
