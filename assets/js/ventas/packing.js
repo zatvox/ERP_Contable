@@ -219,10 +219,30 @@ export async function renderPacking(forzar = true) {
         </div>
       </div>
       <div style="padding:12px 16px; border-bottom:1px solid var(--border-color); display:flex; gap:12px; flex-wrap:wrap;">
-        <input type="text" id="buscarPacking" placeholder="Buscar por N° PK, cliente u O/C..." style="flex:1; min-width:240px; max-width:420px;" oninput="window.filtrarPacking()">
+        <input type="text" id="buscarPacking" placeholder="Buscar por N° PK/COT, cliente, vendedor, O/C, moneda o factura..." style="flex:1; min-width:260px; max-width:420px;" oninput="window.filtrarPacking()">
         <select id="filtroEstadoPacking" onchange="window.filtrarPacking()" style="max-width:190px;">
           <option value="">Estado: todos</option>
           ${Object.entries(ESTADOS).map(([k, [l]]) => `<option value="${k}">${l}</option>`).join('')}
+        </select>
+        <select id="filtroAnuladosPacking" onchange="window.filtrarPacking()" style="max-width:210px;" title="Los PK anulados se conservan pero no cuentan">
+          <option value="activos" selected>Solo vigentes</option>
+          <option value="todos">Vigentes y anulados</option>
+          <option value="anulados">Solo anulados</option>
+        </select>
+        <select id="filtroFacturaPacking" onchange="window.filtrarPacking()" style="max-width:190px;" title="Avance de facturación del PK">
+          <option value="">Facturación: todos</option>
+          <option value="sin">Sin facturar</option>
+          <option value="parcial">Parcial</option>
+          <option value="por_facturar">Sin facturar + Parcial</option>
+          <option value="facturado">Facturado</option>
+        </select>
+        <select id="filtroValidezPacking" onchange="window.filtrarPacking()" style="max-width:170px;" title="Según la fecha 'Válido hasta'">
+          <option value="">Validez: todas</option>
+          <option value="vigente">Vigente</option>
+          <option value="vencida">Vencida</option>
+        </select>
+        <select id="filtroVendedorPacking" onchange="window.filtrarPacking()" style="max-width:220px;">
+          <option value="">Vendedor: todos</option>
         </select>
       </div>
       <div class="table-container"><table>
@@ -358,9 +378,45 @@ window.filtrarPacking = function () {
   if (!tbody) return
   const q = (document.getElementById('buscarPacking')?.value || '').toLowerCase().trim()
   const fe = document.getElementById('filtroEstadoPacking')?.value || ''
+  const fAnul = document.getElementById('filtroAnuladosPacking')?.value || 'activos'
+  const fFact = document.getElementById('filtroFacturaPacking')?.value || ''
+  const fVal = document.getElementById('filtroValidezPacking')?.value || ''
+  const selVend = document.getElementById('filtroVendedorPacking')
+  const fVend = selVend?.value || ''
   const hoy = _hoy()
-  const lista = _pkLista.filter(p => (!fe || p.estado === fe) &&
-    (!q || `${p.numero} ${p._cliente || ''} ${p.orden_compra_cliente || ''}`.toLowerCase().includes(q)))
+  // Vendedor: opciones según los PK cargados (conserva la selección)
+  if (selVend) {
+    const vends = [...new Set(_pkLista.map(p => p.vendedor_id).filter(Boolean))]
+      .map(id => [String(id), _nombreVendedor(id)]).sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'es'))
+    const firma = vends.map(v => v[0]).join(',')
+    if (selVend.dataset.firma !== firma) {
+      selVend.innerHTML = '<option value="">Vendedor: todos</option>' + vends.map(([id, n]) => `<option value="${id}">${_esc(n)}</option>`).join('') + '<option value="__sin">(sin vendedor)</option>'
+      selVend.value = fVend; selVend.dataset.firma = firma
+    }
+  }
+  const _abierto = p => ['cotizacion', 'borrador', 'enviado', 'parcial'].includes(p.estado)
+  const _fact = p => p.estado === 'facturado' ? 'facturado' : (p.estado === 'parcial' || p._facturas?.length) ? 'parcial' : 'sin'
+  const lista = _pkLista.filter(p => {
+    const anulado = p.estado === 'anulado'
+    if (fAnul === 'activos' && anulado && fe !== 'anulado') return false
+    if (fAnul === 'anulados' && !anulado) return false
+    if (fe && p.estado !== fe) return false
+    if (fFact) {
+      if (anulado) return false
+      const f = _fact(p)
+      if (fFact === 'por_facturar' ? f === 'facturado' : f !== fFact) return false
+    }
+    if (fVal) {
+      const vencida = _abierto(p) && p.fecha_validez && p.fecha_validez < hoy
+      if (fVal === 'vencida' ? !vencida : (vencida || !_abierto(p))) return false
+    }
+    if (fVend && (fVend === '__sin' ? p.vendedor_id : String(p.vendedor_id) !== fVend)) return false
+    if (q) {
+      const texto = `${p.numero} ${p._cliente || ''} ${_nombreVendedor(p.vendedor_id) || ''} ${p.orden_compra_cliente || ''} ${p.moneda || ''} ${(p._facturas || []).map(f => f.numero).join(' ')} ${(ESTADOS[p.estado] || [''])[0]}`
+      if (!texto.toLowerCase().includes(q)) return false
+    }
+    return true
+  })
   if (_pkSort.col) {
     const k = _pkSort.dir === 'asc' ? 1 : -1
     lista.sort((a, b) => {
