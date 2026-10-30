@@ -25,6 +25,8 @@ import { getCurrentUser } from '../auth-supabase.js'
 import { formatNumber, fechaDMY, showToast } from '../helpers.js'
 import { ojoBtn } from '../shared/ver-editar.js'
 import { CONCEPTOS_CARPETA } from './adjuntos-carpeta.js'
+import { anticipoDeCI, resumenEmbarcado } from './ci-multi.js'
+import { cargarObservaciones, observacionesHtml } from './observaciones-carpeta.js'
 
 const num = v => parseFloat(v) || 0
 const n2 = v => formatNumber(num(v), 2)
@@ -44,7 +46,7 @@ const TOT = 'font-weight:700; background:var(--bg-secondary, #1f2937);'
 const seccion = (titulo, cuerpo, ajustada = false, acciones = '') => `
   <div style="margin-top:14px;${ajustada ? ' width:fit-content; max-width:100%;' : ''}">
     <div style="font-weight:700; padding:6px 10px; background:var(--color-primary-soft, rgba(59,130,246,.18)); border-radius:6px 6px 0 0; white-space:nowrap;${acciones ? ' display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;' : ''}"><span>${titulo}</span>${acciones}</div>
-    ${cuerpo}
+    <div class="hc-vm">${cuerpo}</div>
   </div>`
 const sinRegistros = (cols = 1) => `<div style="padding:12px; text-align:center; color:var(--text-secondary); border:1px dashed var(--border-color); border-top:0; border-radius:0 0 6px 6px;">Sin registros</div>`
 const tabla = (head, filas, pie = '', ajustada = false) => `
@@ -78,7 +80,7 @@ window.hcModoFD = m => {
   _modoFD = m === 'contable' ? 'contable' : 'comercial'
   try { localStorage.setItem('hojaCosteoModoFD', _modoFD) } catch { /* */ }
   const h = document.getElementById('hc-sec5')
-  if (h && _sec5) h.innerHTML = _sec5()      // solo la sección 5
+  if (h && _sec5) { h.innerHTML = _sec5(); window.hcVerMas?.(h) }      // solo la sección 5
   else window.renderHojaCosteo?.()
 }
 
@@ -89,8 +91,10 @@ async function _cargar() {
   const ci = window.costeoActual?.id ? window.costeoActual : null
   if (!carpeta) return null
   const carpetaId = carpeta.id
+  await cargarObservaciones(carpetaId)
   // Ola 1: TODO lo que depende solo de la carpeta/CI, en paralelo (antes eran ~25 viajes uno tras otro).
-  const [pi, costos, pagos, dams, bls, items, prov, adjs, liqs, guias, estRows, lotesC, lineasRaw, docsAll, lineasPI, vDam, vAut, vDoc, appsRaw, contRaw] = await Promise.all([
+  const [cisAll, pi, costos, pagos, dams, bls, items, prov, adjs, liqs, guias, estRows, lotesC, lineasRaw, docsAll, lineasPI, vDam, vAut, vDoc, appsRaw, contRaw] = await Promise.all([
+    query('comercial_invoices', { carpeta_importacion_id: carpetaId }),
     carpeta.orden_compra_id ? query('orden_compra', { id: carpeta.orden_compra_id }) : [],
     query('importacion_costos', { carpeta_importacion_id: carpetaId }),
     query('importacion_pagos', { carpeta_importacion_id: carpetaId }),
@@ -111,6 +115,8 @@ async function _cargar() {
     query('importacion_pago_aplicaciones', { carpeta_importacion_id: carpetaId }),
     ci ? query('bl_contenedores', {}) : []
   ])
+  const cisL = (cisAll || []).slice().sort((a, b) => a.id - b.id)
+  const damsAll = cisL.length > 1 ? (await Promise.all(cisL.map(c => query('dams', { importacion_id: c.id })))).flat() : (dams || [])
   const damRow = (dams || [])[0] || null
   const piRow = (pi || [])[0] || null
   const liq = (liqs || [])[0] || null
@@ -133,7 +139,7 @@ async function _cargar() {
   for (const d of docsAll || []) if (docIds.has(d.id)) docs[d.id] = d
   const mapaItems = {}; for (const i of items || []) mapaItems[i.id] = i
   const vouchers = { dam: vDam, aut: vAut, doc: vDoc }
-  return { lineasPI: lineasPI || [], tcInfo, carpeta, ci, pi: piRow, costos: costosOk, pagos: pagos || [], apps: appsRaw || [], contenedores: (contRaw || []).filter(c => (bls || []).some(b => b.id === c.bl_id)), dam: damRow, ajustes, liq, abonosAg, guias, lotesC, estadia, bls: bls || [], lineas: lineas || [], docs, mapaItems, adjuntos: [...(adjs || []), ...(adjLiq || [])], vouchers, proveedor: (prov || [])[0] || null, estimado: !ci }
+  return { cis: cisL, damsAll, lineasPI: lineasPI || [], tcInfo, carpeta, ci, pi: piRow, costos: costosOk, pagos: pagos || [], apps: appsRaw || [], contenedores: (contRaw || []).filter(c => (bls || []).some(b => b.id === c.bl_id)), dam: damRow, ajustes, liq, abonosAg, guias, lotesC, estadia, bls: bls || [], lineas: lineas || [], docs, mapaItems, adjuntos: [...(adjs || []), ...(adjLiq || [])], vouchers, proveedor: (prov || [])[0] || null, estimado: !ci }
 }
 
 // ─── Cálculo ────────────────────────────────────────────────────────────────
@@ -230,7 +236,8 @@ export function calcularCronograma(d) {
   const apl = t => (d.apps || []).filter(a => a.doc_tipo === t && vivos.has(a.pago_id))
   const tieneApps = (d.apps || []).length > 0
   const antPag = tieneApps ? apl('oc_anticipo').reduce((t, a) => t + num(a.monto_doc), 0) : antPags.reduce((t, p) => t + num(p.monto_transferido), 0)
-  const salPag = tieneApps ? apl('ci_saldo').reduce((t, a) => t + num(a.monto_doc), 0) : salPags.reduce((t, p) => t + num(p.monto_transferido), 0)
+  const multi = (d.cis || []).length > 1
+  const salPag = tieneApps ? apl('ci_saldo').filter(a => !multi || !d.ci || a.doc_id == null || a.doc_id === d.ci.id).reduce((t, a) => t + num(a.monto_doc), 0) : salPags.reduce((t, p) => t + num(p.monto_transferido), 0)
   // El anticipo se pacta sobre la PI; el saldo se calcula sobre el total REAL (CI) menos lo ya anticipado.
   // Si el CI vino mayor que la PI (dentro de la tolerancia), el exceso se paga en el saldo.
   const ciTotal = d.ci ? num(d.ci.valor_total_final_ci) : 0
@@ -238,7 +245,9 @@ export function calcularCronograma(d) {
   const antCierra = apl('oc_anticipo').some(a => String(a.concepto || '').includes('[cierra'))   // pagó menos y la diferencia pasó al saldo
   const antEsp = antCierra && antPag > 0 ? antPag : total * pct / 100
   const exceso = ciTotal > 0 ? ciTotal - total : 0
-  const salEsp = totalReal - (antPag > 0 ? antPag : antEsp)
+  // Con varios CI el anticipo (bolsa de la PI) se reparte: este CI solo absorbe su parte
+  const antCI = d.ci && (multi || d.ci.anticipo_asignado != null) ? anticipoDeCI(d.ci, d.cis, antPag > 0 ? antPag : antEsp) : (antPag > 0 ? antPag : antEsp)
+  const salEsp = totalReal - antCI
   const antLimite = _sumaDias(pi.fecha, pi.dias_validez_anticipo)
   const antIds = new Set(apl('oc_anticipo').map(a => a.pago_id))
   const antFecha = (tieneApps ? ok.filter(p => antIds.has(p.id)).sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)))[0]?.fecha : antPags[0]?.fecha) || null
@@ -252,7 +261,7 @@ export function calcularCronograma(d) {
   return {
     mon, pct, total, totalReal, exceso, salPct: totalReal > 0 ? salEsp / totalReal * 100 : 100 - pct, antEsp, salEsp, antPag, salPag, antLimite, antFecha, embEst, embReal, embFecha, salLimite,
     tieneCI: !!d.ci, ciNum: d.ci?.invoice_number || '', ciFecha: d.ci?.fecha || null, ciTotal: ciTotal,
-    salProyectado: !embReal, antEstado: (() => { const e = estado(antPag, antEsp, antLimite); return e === 'parcial' && salPag > 0 && antPag + salPag >= totalReal - 0.01 ? 'pagado' : e })(), salEstado: estado(salPag, salEsp, salLimite),
+    salProyectado: !embReal, antEstado: (() => { const e = estado(antPag, antEsp, antLimite); return e === 'parcial' && salPag > 0 && !multi && antPag + salPag >= totalReal - 0.01 ? 'pagado' : e })(), salEstado: estado(salPag, salEsp, salLimite),
     base: antFecha ? 'anticipo pagado' : 'límite del anticipo', diasEmb: pi.dias_embarque, diasSaldo: pi.dias_saldo_desde_bl
   }
 }
@@ -647,17 +656,55 @@ function _html(d, r) {
 
   const productos = r.art.length
     ? r.art.map(a => `${esc(a.nombre)}${a.partida ? ` <span style="color:var(--text-secondary);">· ${esc(a.partida)}</span>` : ''}`).join('<br>') : ''
-  const cabecera = `<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); border:1px solid var(--border-color); border-bottom:0; border-radius:6px; overflow:hidden;">
-      ${cab('Proveedor', esc(d.proveedor?.nombre), '', 2)}
-      ${cab('Producto y subpartida', productos, '', 2)}
-      ${cab('Proforma (PI)', pi ? `${esc(pi.numero_proforma_proveedor || pi.numero)} · ${fechaDMY(pi.fecha)}${pi.incoterm ? ' · ' + esc(pi.incoterm) : ''}` : '', pi ? ojoBtn(`window.verPI(${pi.id})`, 'Ver / editar la Proforma') : '')}
-      ${cab('Commercial invoice', ci ? `${esc(ci.invoice_number)} · ${fechaDMY(ci.fecha)}` : '', ci ? ojoBtn('window.verCI()', 'Ver / editar el Commercial Invoice') : '')}
-      ${cab('Términos', [ci?.terminos_delivery || pi?.incoterm, ci?.terminos_payment].filter(Boolean).map(esc).join(' · '))}
-      ${cab('Embarque y origen', [ci?.puerto_embarque || pi?.puerto_embarque, ci?.pais_origen || pi?.pais_origen].filter(Boolean).map(esc).join(' → '))}
-      ${cab('Fecha de embarque', cr?.embFecha ? `${fechaDMY(cr.embFecha)} <span style="color:var(--text-secondary); font-size:0.8rem;">${cr.embReal ? '(B/L)' : '(estimada)'}</span>${bls[0]?.fecha_eta ? ` · ETA ${fechaDMY(bls[0].fecha_eta)}` : ''}` : '')}
-      ${cab('Estado', ci?.status ? esc(ci.status) : '')}
-      ${cab('DAM', dam ? `${esc(dam.numero_dam)} · ${fechaDMY(dam.fecha_dam)}` : '')}
-      ${cab('Canal y BL', [dam?.canal_aduanero ? `<span class="cr-chip" style="--c:${(CANAL_E3[dam.canal_aduanero] || [])[1] || '#6b7280'};">Canal ${(CANAL_E3[dam.canal_aduanero] || [dam.canal_aduanero])[0]}</span>` : '', bls.length ? [...new Set(bls.map(b => esc(b.nro_bill_lading)))].join(' · ') : ''].filter(Boolean).join(' ') )}
+  const cisL = d.cis || []
+  const multiCI = cisL.length > 1
+  const emb = resumenEmbarcado(pi, cisL)
+  const mon$ = pi?.currency || 'USD'
+  const tile = (ico, k, v, ojo = '') => `<div class="hcx-tile"><span class="hcx-ico">${ico}</span><div class="hcx-tb"><div class="hcx-k">${k}</div><div class="hcx-v">${v || dash}</div></div>${ojo}</div>`
+  const prov = d.proveedor?.nombre || ''
+  const _pill = a => `<span class="hcx-pill">${esc(a.nombre)}${a.partida ? ` <small>${esc(a.partida)}</small>` : ''}</span>`
+  const PILLS_VISIBLES = 3
+  const prodPills = r.art.length ? r.art.slice(0, PILLS_VISIBLES).map(_pill).join('')
+    + (r.art.length > PILLS_VISIBLES ? `<span class="hcx-mas" hidden>${r.art.slice(PILLS_VISIBLES).map(_pill).join('')}</span><button type="button" class="hcx-vermas" onclick="window.hcPills(this)" data-n="${r.art.length - PILLS_VISIBLES}">Ver más… (+${r.art.length - PILLS_VISIBLES})</button>` : '') : ''
+  const estadoCI = ci?.status ? `<span class="cr-chip" style="--c:${ci.status === 'confirmado' ? '#10b981' : '#6b7280'};">${esc(ci.status)}</span>` : ''
+  const ciTabs = cisL.map((c, i) => `<button type="button" class="hcx-ci ${ci && c.id === ci.id ? 'on' : ''}" onclick="window.cambiarCI(${c.id})" title="Trabajar con este CI: BL, DAM, guía y costeo pasan a ser los de este CI">
+      <span class="hcx-ci-n">CI ${i + 1}</span><span class="hcx-ci-d">${esc(c.invoice_number)}</span><span class="hcx-ci-m">${mon$} ${n2(c.valor_total_final_ci)}</span></button>`).join('')
+  // Solo se ofrece partir la PI si aún queda saldo por embarcar (fuera de la tolerancia); con la PI completa solo confundiría
+  const addCI = pi && (!cisL.length || !emb.completa) ? (cisL.length
+    ? `<button type="button" class="hcx-add" onclick="window.abrirRegistrarOtroCI()" title="La PI se embarca en más de un Commercial Invoice (cada uno con su BL, ETA, DAM y saldo)">＋ ${multiCI ? 'Otro CI' : 'La PI se divide en otro CI'}</button>`
+    : `<button type="button" class="hcx-add" onclick="window.abrirRegistrarCI()">＋ Registrar CI</button>`) : ''
+  const barra = pi && cisL.length && (multiCI || emb.pct < 100 - emb.tol) ? `<div class="hcx-bar" title="Valor facturado en CI frente al total de la Proforma">
+      <div class="hcx-bar-t"><span>Embarcado de la PI</span><strong>${mon$} ${n2(emb.valor)} / ${n2(emb.totPI)} · ${emb.pct.toFixed(0)}%</strong>${emb.completa ? '<span class="cr-chip" style="--c:#10b981;">PI completa</span>' : `<span class="cr-chip" style="--c:#f59e0b;">Faltan ${mon$} ${n2(Math.max(0, emb.pendiente))}</span>`}</div>
+      <div class="hcx-bar-b"><i style="width:${Math.min(100, emb.pct)}%"></i></div></div>` : ''
+  const blTxt = bls.length ? [...new Set(bls.map(b => esc(b.nro_bill_lading)))].join(' · ') : ''
+  const canalTxt = dam?.canal_aduanero ? `<span class="cr-chip" style="--c:${(CANAL_E3[dam.canal_aduanero] || [])[1] || '#6b7280'};">Canal ${(CANAL_E3[dam.canal_aduanero] || [dam.canal_aduanero])[0]}</span>` : ''
+  const cabecera = `<div class="hcx">
+      <div class="hcx-hero">
+        <div class="hcx-av">${esc((prov || '?').trim().charAt(0).toUpperCase())}</div>
+        <div class="hcx-hb"><div class="hcx-k">Proveedor</div><div class="hcx-prov">${esc(prov) || dash}</div>${prodPills ? `<div class="hcx-prods">${prodPills}</div>` : ''}</div>
+        ${estadoCI}
+      </div>
+      <div class="hcx-docs">
+        <div class="hcx-doc">
+          <div class="hcx-k">📄 Proforma (PI)</div>
+          <div class="hcx-v">${pi ? `${esc(pi.numero_proforma_proveedor || pi.numero)}` : dash}${pi?.incoterm ? ` <span class="hcx-tag">${esc(pi.incoterm)}</span>` : ''}</div>
+          <div class="hcx-sub">${pi ? fechaDMY(pi.fecha) : ''}${pi ? ` · ${mon$} ${n2(pi.total_oc)}` : ''}</div>
+          ${pi ? `<span class="hcx-ojo">${ojoBtn(`window.verPI(${pi.id})`, 'Ver / editar la Proforma')}</span>` : ''}
+        </div>
+        <div class="hcx-doc hcx-doc-ci">
+          <div class="hcx-k">🧾 Commercial invoice${multiCI ? ` <span class="hcx-tag hcx-tag-hi">${cisL.length} CI en esta PI</span>` : ''}</div>
+          ${cisL.length ? `<div class="hcx-cis">${ciTabs}${addCI}</div>` : `<div class="hcx-v">${dash}</div><div class="hcx-cis">${addCI}</div>`}
+          ${ci ? `<div class="hcx-sub">CI activo: <strong>${esc(ci.invoice_number)}</strong> · ${fechaDMY(ci.fecha)}</div><span class="hcx-ojo">${ojoBtn('window.verCI()', 'Ver / editar el Commercial Invoice')}</span>` : ''}
+        </div>
+      </div>
+      ${barra}
+      <div class="hcx-tiles">
+        ${tile('📑', 'Términos', [ci?.terminos_delivery || pi?.incoterm, ci?.terminos_payment].filter(Boolean).map(esc).join(' · '))}
+        ${tile('🚢', 'Embarque y origen', [ci?.puerto_embarque || pi?.puerto_embarque, ci?.pais_origen || pi?.pais_origen].filter(Boolean).map(esc).join(' → '))}
+        ${tile('📅', 'Embarque / ETA', cr?.embFecha ? `${fechaDMY(cr.embFecha)} <small>${cr.embReal ? '(B/L)' : '(estimada)'}</small>${bls[0]?.fecha_eta ? ` · ETA <strong>${fechaDMY(bls[0].fecha_eta)}</strong>` : ''}` : '')}
+        ${tile('🏛️', 'DAM', dam ? `${esc(dam.numero_dam)} · ${fechaDMY(dam.fecha_dam)}` : '')}
+        ${tile('🔖', 'Canal y BL', [canalTxt, blTxt].filter(Boolean).join(' '))}
+      </div>
     </div>`
 
   // 1. Descripción
@@ -777,7 +824,7 @@ function _html(d, r) {
       </div></div>
     <div style="padding:0 16px 16px;">
       <div class="hc-top"><div class="hc-cab">${cabecera}
-      ${_documentosHtml(d)}</div>${_timelineHtml(d, cr)}</div>
+      ${_documentosHtml(d)}${observacionesHtml(d)}</div>${_timelineHtml(d, cr)}</div>
       <div class="hc-grid">
         <div class="hc-formato">
           ${seccion(tit1, s1c, true)}
@@ -811,6 +858,7 @@ export async function renderHojaCosteo() {
     const cal = d ? _calcular(d) : null
     window.hcUltimo = d ? { d, c: cal } : null
     host.innerHTML = d ? _html(d, cal) : ''
+    window.hcVerMas?.(host)
     if (d) { window.renderEtapa4Liquidacion?.(); window.renderCostosLote?.() }
   } catch (e) {
     console.error('renderHojaCosteo:', e)
@@ -819,6 +867,25 @@ export async function renderHojaCosteo() {
 }
 
 window.renderHojaCosteo = renderHojaCosteo
+
+/** «Ver más…»: las secciones altas (tablas largas) se recortan y se expanden con un clic. */
+const VM_ALTO = 340
+window.hcVerMas = function (root = document) {
+  root.querySelectorAll('.hc-vm').forEach(el => {
+    if (el.dataset.vm) return
+    el.dataset.vm = '1'
+    if (el.scrollHeight <= VM_ALTO + 60) return
+    el.classList.add('hc-vm-cerrado'); el.style.maxHeight = VM_ALTO + 'px'
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'hcx-vermas hc-vm-btn'; b.textContent = 'Ver más…'
+    b.onclick = () => { const c = el.classList.toggle('hc-vm-cerrado'); el.style.maxHeight = c ? VM_ALTO + 'px' : 'none'; b.textContent = c ? 'Ver más…' : 'Ver menos' }
+    el.after(b)
+  })
+}
+window.hcPills = function (btn) {
+  const mas = btn.previousElementSibling, abierto = mas.hidden
+  mas.hidden = !abierto
+  btn.textContent = abierto ? 'Ver menos' : `Ver más… (+${btn.dataset.n})`
+}
 export default { renderHojaCosteo }
 
 

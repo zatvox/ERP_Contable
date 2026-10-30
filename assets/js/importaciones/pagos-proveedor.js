@@ -29,6 +29,7 @@ import { miniaturaArchivoHTML, pintarMiniaturaArchivo } from '../shared/adj-prev
 import { getBancos, ADJ_CONCEPTOS, subirAdjuntos, getAdjuntos, eliminarAdjuntosDe, validarArchivoAdjunto, addMovimientoBanco, deleteMovimientoBanco } from '../supabase-data.js'
 import { getTipoCambioDia } from '../sunat-api.js'
 import { crearLineaCosto } from './costos-ledger.js'
+import { anticipoDeCI } from './ci-multi.js'
 
 const num = x => parseFloat(x) || 0
 const n2 = x => formatNumber(num(x), 2)
@@ -61,7 +62,7 @@ const GRUPOS = {
 const _grupoDe = l => GRUPO_DOC[l.doc_tipo] || 'otro'
 const MARCA_COMISION = id => `Pago importación #${id}`
 
-let _ctx = { carpetaId: null, carpeta: null, oc: null, ci: null, dam: null, ajustes: [], proveedor: null, pagos: [], apps: [], bancos: [], sinSQL: false }
+let _ctx = { carpetaId: null, carpeta: null, oc: null, ci: null, cis: [], dams: [], dam: null, ajustes: [], proveedor: null, pagos: [], apps: [], bancos: [], sinSQL: false }
 let _archivos = []
 let _editId = null          // pago en edición (null = nuevo)
 let _lineas = []            // obligaciones mostradas en el formulario
@@ -75,7 +76,7 @@ const conv = (m, de, a, tc) => (de === a || !tc) ? m : (de === 'USD' && a === 'P
 async function _cargar() {
   await esperarContextoEmpresa()
   const carpetaId = carpetaActual()
-  _ctx = { carpetaId, carpeta: null, oc: null, ci: null, dam: null, ajustes: [], proveedor: null, pagos: [], apps: [], bancos: [], sinSQL: false }
+  _ctx = { carpetaId, carpeta: null, oc: null, ci: null, cis: [], dams: [], dam: null, ajustes: [], proveedor: null, pagos: [], apps: [], bancos: [], sinSQL: false }
   if (!carpetaId) return false
   const carpeta = ((await query('carpetas_importacion', { id: carpetaId })) || [])[0] || null
   _ctx.carpeta = carpeta
@@ -86,18 +87,20 @@ async function _cargar() {
     getBancos().catch(() => [])
   ])
   _ctx.oc = (oc || [])[0] || null
-  _ctx.ci = (cis || []).find(x => x.id === carpeta?.comercial_invoice_id) || (cis || [])[0] || null
+  _ctx.cis = (cis || []).slice().sort((a, b) => a.id - b.id)
+  _ctx.ci = _ctx.cis.find(x => x.id === window.costeoActual?.id) || _ctx.cis.find(x => x.id === carpeta?.comercial_invoice_id) || _ctx.cis[0] || null
   _ctx.pagos = (pagos || []).sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)) || a.id - b.id)
   _ctx.bancos = (bancos || []).filter(b => b.activo !== false)
   const [prov, dams, apps] = await Promise.all([
     _ctx.oc?.contact_id ? query('contacts', { id: _ctx.oc.contact_id }) : [],
-    _ctx.ci ? query('dams', { importacion_id: _ctx.ci.id }) : [],
+    _ctx.cis.length ? Promise.all(_ctx.cis.map(c => query('dams', { importacion_id: c.id }))).then(r => r.flat()) : [],
     query('importacion_pago_aplicaciones', { carpeta_importacion_id: carpetaId })
   ])
   _ctx.proveedor = (prov || [])[0] || null
-  _ctx.dam = (dams || [])[0] || null
+  _ctx.dams = dams || []
+  _ctx.dam = _ctx.dams.find(x => x.importacion_id === _ctx.ci?.id) || _ctx.dams[0] || null
   _ctx.apps = apps || []
-  _ctx.ajustes = _ctx.dam ? ((await query('dam_autoliquidaciones', { dam_id: _ctx.dam.id })) || []).filter(a => a.estado !== 'desestimada') : []
+  _ctx.ajustes = _ctx.dams.length ? (await Promise.all(_ctx.dams.map(x => query('dam_autoliquidaciones', { dam_id: x.id })))).flat().filter(a => a && a.estado !== 'desestimada') : []
   // Si la tabla no existe, query() devuelve [] sin avisar: lo detectamos con una lectura directa
   try {
     const { supabase } = await import('../supabase-client.js')
@@ -139,16 +142,22 @@ export function obligacionesCarpeta(ctx = _ctx) {
     const tot = totPI * pct / 100
     out.push({ doc_tipo: 'oc_anticipo', doc_id: oc.id, titulo: `Anticipo ${n2(pct)}% · PI ${oc.numero_proforma_proveedor || oc.numero}`, moneda: monPI, total: tot })
   }
-  if (oc && totReal > 0) {
+  const cisL = (ctx.cis && ctx.cis.length) ? ctx.cis : (ci ? [ci] : [])
+  if (oc && (totReal > 0 || cisL.length)) {
     const antPag = _pagadoDe('oc_anticipo', oc.id)
     const antBase = antPag > 0 ? antPag : totPI * pct / 100
-    out.push({ doc_tipo: 'ci_saldo', doc_id: ci?.id ?? null, titulo: `Saldo · ${ci ? 'CI ' + (ci.invoice_number || '') : 'PI'}`, moneda: monPI, total: Math.max(0, totReal - antBase) })
+    for (const c of (cisL.length ? cisL : [null])) {
+      const tr = c && num(c.valor_total_final_ci) > 0 ? num(c.valor_total_final_ci) : totPI
+      const antC = c ? anticipoDeCI(c, cisL, antBase) : antBase
+      out.push({ doc_tipo: 'ci_saldo', doc_id: c?.id ?? null, titulo: `Saldo · ${c ? 'CI ' + (c.invoice_number || '') : 'PI'}`, moneda: monPI, total: Math.max(0, tr - antC) })
+    }
   }
-  if (dam) {
-    const trib = num(dam.ad_valorem_usd) + num(dam.imp_usd) + num(dam.igv_usd)
-    if (trib > 0) out.push({ doc_tipo: 'dam_tributos', doc_id: dam.id, titulo: `Tributos DAM ${dam.numero_dam || ''}`, moneda: 'USD', total: trib })
-    if (num(dam.percepcion) > 0) out.push({ doc_tipo: 'dam_percepcion', doc_id: dam.id, titulo: `Percepción DAM ${dam.numero_dam || ''}`, moneda: 'PEN', total: num(dam.percepcion) })
-    for (const a of ctx.ajustes || []) {
+  const damsL = (ctx.dams && ctx.dams.length) ? ctx.dams : (dam ? [dam] : [])
+  for (const dm of damsL) {
+    const trib = num(dm.ad_valorem_usd) + num(dm.imp_usd) + num(dm.igv_usd)
+    if (trib > 0) out.push({ doc_tipo: 'dam_tributos', doc_id: dm.id, titulo: `Tributos DAM ${dm.numero_dam || ''}`, moneda: 'USD', total: trib })
+    if (num(dm.percepcion) > 0) out.push({ doc_tipo: 'dam_percepcion', doc_id: dm.id, titulo: `Percepción DAM ${dm.numero_dam || ''}`, moneda: 'PEN', total: num(dm.percepcion) })
+    for (const a of (ctx.ajustes || []).filter(a => a.dam_id == null || a.dam_id === dm.id)) {
       const t = num(a.ad_valorem_usd) + num(a.ipm_usd) + num(a.igv_usd) + num(a.intereses_usd)
       if (t > 0) out.push({ doc_tipo: 'ajuste_valor', doc_id: a.id, titulo: `Ajuste de valor ${a.numero || ''}`, moneda: 'USD', total: t })
     }
@@ -820,7 +829,7 @@ window.ppEliminar = async function (id) {
 /** Bloque «Pagos» para incrustar en el modal de un documento (PI, CI, DAM, ajuste…). Usa lo cargado por la hoja. */
 window.pagosBloqueHtml = function (docTipo, docId, titulo = 'Pagos') {
   const d = window.hcUltimo?.d; if (!d) return ''
-  const ctx = { oc: d.pi, ci: d.ci, dam: d.dam, ajustes: (d.ajustes || []).filter(a => a.estado !== 'desestimada') }
+  const ctx = { oc: d.pi, ci: d.ci, cis: d.cis, dams: d.damsAll, dam: d.dam, ajustes: (d.ajustes || []).filter(a => a.estado !== 'desestimada') }
   const pagos = d.pagos || [], apps = d.apps || []
   const vivos = new Set(pagos.filter(valido).map(p => p.id))
   const mias = apps.filter(a => a.doc_tipo === docTipo && (a.doc_id ?? null) == (docId ?? null))
@@ -836,7 +845,7 @@ window.pagosBloqueHtml = function (docTipo, docId, titulo = 'Pagos') {
 /** Estado calculado de un documento (para la hoja, la línea de tiempo y los modales). */
 window.hcObligacion = function (docTipo, docId) {
   const d = window.hcUltimo?.d; if (!d) return null
-  const ctx = { oc: d.pi, ci: d.ci, dam: d.dam, ajustes: (d.ajustes || []).filter(a => a.estado !== 'desestimada') }
+  const ctx = { oc: d.pi, ci: d.ci, cis: d.cis, dams: d.damsAll, dam: d.dam, ajustes: (d.ajustes || []).filter(a => a.estado !== 'desestimada') }
   const save = { pagos: _ctx.pagos, apps: _ctx.apps }
   _ctx.pagos = d.pagos || []; _ctx.apps = d.apps || []
   try { return obligacionesCarpeta(ctx).find(o => o.doc_tipo === docTipo && (o.doc_id ?? null) == (docId ?? null)) || null }

@@ -7,6 +7,7 @@ import { estaAnulado } from '../anulacion.js'
 import { signoDocumento } from '../notas.js'
 import { cacheado } from '../data-cache.js'
 import { crearReporte, nombreMes } from '../reportes.js'
+import { construirHistorialCarpeta } from './historial-carpeta.js'
 
 // ============================================================================
 // REPORTES GERENCIALES DE COMPRAS — Fase 2
@@ -15,6 +16,7 @@ import { crearReporte, nombreMes } from '../reportes.js'
 export const _repComprasListos = {}
 
 export async function construirReporteCompras(panelId) {
+  if (panelId === 'repcm-carpeta') return construirHistorialCarpeta(panelId)   // historial por carpeta (kardex de la importación)
   if (_repComprasListos[panelId]) return
   _repComprasListos[panelId] = true
   const cont = document.getElementById(panelId)

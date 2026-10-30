@@ -455,6 +455,14 @@ function _avisoCarga(carpeta, t0, nota = '') {
   showToast(`✓ Carpeta ${carpeta.numero_carpeta} lista · ${seg} s${nota ? ' · ' + nota : ''}`, nota ? 'info' : 'success')
 }
 
+/** Cambia el CI activo de la carpeta (la hoja, el BL, la DAM, etc. pasan a trabajar con ese CI). */
+window.cambiarCI = async function (ciId) {
+  const c = window.carpetaActual?.id; if (!c) return
+  window.ciActivoPorCarpeta = window.ciActivoPorCarpeta || {}
+  window.ciActivoPorCarpeta[c] = parseInt(ciId)
+  await window.cargarImportacion()
+}
+
 window.cargarImportacion = async function () {
   try {
     const selector = document.getElementById('costeoSelector')
@@ -483,7 +491,11 @@ window.cargarImportacion = async function () {
 
     // El Commercial Invoice de la carpeta (puede no existir todavia: etapa 1)
     const cis = ciPorCarpeta || []
-    let ci = cis.find(x => x.id === carpeta.comercial_invoice_id) || cis[0] || null
+    // Una PI puede tener varios CI: el "activo" (el que muestran BL, DAM, guías y la hoja) lo elige el usuario
+    window.ciActivoPorCarpeta = window.ciActivoPorCarpeta || {}
+    const _pref = window.ciActivoPorCarpeta[carpetaId]
+    const _orden = cis.slice().sort((x, y) => x.id - y.id)
+    let ci = _orden.find(x => x.id === _pref) || _orden.find(x => x.id === carpeta.comercial_invoice_id) || _orden[0] || null
     if (!ci && carpeta.comercial_invoice_id) ci = ((await query('comercial_invoices', { id: carpeta.comercial_invoice_id })) || [])[0] || null
 
     if (!ci) {

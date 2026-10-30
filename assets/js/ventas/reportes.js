@@ -6,6 +6,7 @@ import { getCustomers, getLotes, getItems, getVentas, getTodosDetalleVentas, get
 import { estaAnulado } from '../anulacion.js'
 import { esNota, signoDocumento, nombreTipoComprobante } from '../notas.js'
 import { cacheado } from '../data-cache.js'
+import { supabase } from '../supabase-client.js'
 import { crearReporte, nombreMes } from '../reportes.js'
 
 // ============================================================================
@@ -459,6 +460,26 @@ export async function construirReporteVentas(panelId) {
         return { cu: mon === 'USD' ? cuOrig : (tcC > 0 ? cuOrig / tcC : 0), tc: tcC }
       }
 
+      // Packing asociado (2026-10-30): por línea (detalle_packing_id, facturación
+      // parcial) y, si no, el de la cabecera (ventas.packing_id). Sin PK → '-'.
+      const _chunks = (arr, n = 200) => Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n))
+      const detPkIds = [...new Set((detalles || []).map(d => d.detalle_packing_id).filter(Boolean))]
+      const dpAPk = {}
+      for (const ch of _chunks(detPkIds)) {
+        const { data } = await supabase.from('detalle_packing').select('id, packing_id').in('id', ch)
+        ;(data || []).forEach(r => { dpAPk[r.id] = r.packing_id })
+      }
+      const pkIds = [...new Set([...activas.map(v => v.packing_id), ...Object.values(dpAPk)].filter(Boolean))]
+      const pkNum = {}
+      for (const ch of _chunks(pkIds)) {
+        const { data } = await supabase.from('packing').select('id, numero').in('id', ch)
+        ;(data || []).forEach(r => { pkNum[r.id] = r.numero })
+      }
+      const _pkDe = (v, d) => {
+        const id = (d?.detalle_packing_id && dpAPk[d.detalle_packing_id]) || v.packing_id
+        return id ? (pkNum[id] || `PK #${id}`) : '-'
+      }
+
       const filasVend = []
       activas.forEach(v => {
         const sg = signoDocumento(v.tipo_comprobante)
@@ -500,6 +521,7 @@ export async function construirReporteVentas(panelId) {
           filasVend.push({
             ...comun,
             producto: d ? (it.nombre || `Item ${d.item_id}`) : '(sin detalle)',
+            packing: _pkDe(v, d),
             lote: d ? (lote?.numero_lote || (d.lote_id ? `Lote ${d.lote_id}` : '(sin lote)')) : '(sin detalle)',
             base_orig: baseLineaDoc,
             tc: tcV,
@@ -528,7 +550,7 @@ export async function construirReporteVentas(panelId) {
         dimensiones: [
           _dimVendedor, _dimFecha, { key: 'cliente', label: 'Cliente' },
           _dimComprobante, _dimTipo, _dimMoneda,
-          { key: 'producto', label: 'Producto' }, { key: 'lote', label: 'Lote' }
+          { key: 'producto', label: 'Producto' }, { key: 'lote', label: 'Lote' }, { key: 'packing', label: 'Packing (PK)' }
         ],
         medidas: [
           { key: 'base', label: 'Ventas sin IGV (S/)', agg: 'sum', formato: 'money' },
@@ -553,7 +575,7 @@ export async function construirReporteVentas(panelId) {
           { key: 'tc_compra', label: 'T.C. compra', agg: 'ratio', formato: 'tc', num: f => Math.abs(f.kg) * f.tc_compra, den: f => f.tc_compra ? Math.abs(f.kg) : 0 }
         ],
         filtros: [
-          { key: 'buscar', label: 'Buscar', tipo: 'texto', campos: ['vendedor', 'cliente', 'comprobante', 'producto', 'lote'], placeholder: 'Vendedor, cliente, comprobante, producto o lote...' },
+          { key: 'buscar', label: 'Buscar', tipo: 'texto', campos: ['vendedor', 'cliente', 'comprobante', 'producto', 'lote', 'packing'], placeholder: 'Vendedor, cliente, comprobante, producto, lote o PK...' },
           _filtroVendedor(filasVend),
           { key: 'rango', label: 'Emisión', tipo: 'rango', campo: 'fecha' }
         ],

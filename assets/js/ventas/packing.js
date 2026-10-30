@@ -25,6 +25,7 @@ import { registrarColumnas, colStyle } from '../col-menu.js'
 import { getTCVenta, textoAvisoTC } from '../sunat-api.js'
 import { vincularTCEnVivo } from '../tc-en-vivo.js'
 import { estaAnulado } from '../anulacion.js'
+import { descargarPDFDesdeHTML as _descargarPDFDesdeHTML } from '../shared/pdf-documento.js'   // PDF A4 con saltos de página limpios
 
 // Datos del emisor para el PDF (mismos del PDF de Odoo). Logo: assets/img/logo-jhiro.png
 const EMPRESA = {
@@ -1579,53 +1580,6 @@ export function numeroALetras(monto, moneda = 'PEN') {
   if (resto) partes.push(_menorMil(resto))
   const mon = moneda === 'USD' ? 'DÓLARES' : 'SOLES'
   return `${partes.join(' ') || 'CERO'} ${mon} Y ${cent ? _menorMil(cent) : 'CERO'} CENTAVOS`
-}
-
-/** Convierte el HTML del documento en un PDF A4 y lo DESCARGA (sin abrir
- *  ventana ni diálogo de impresión). html2canvas + jsPDF, mismas librerías
- *  que el estado de cuenta. Si el contenido pasa de una hoja, se corta en
- *  varias páginas y la firma "by: ZatVox" se repite en cada una. */
-async function _descargarPDFDesdeHTML(html, nombreArchivo) {
-  const ifr = document.createElement('iframe')
-  ifr.style.cssText = 'position:fixed; left:-10000px; top:0; width:794px; height:1123px; border:0; visibility:hidden;'
-  document.body.appendChild(ifr)
-  try {
-    const doc = ifr.contentDocument
-    doc.open(); doc.write(html); doc.close()
-    doc.body.style.margin = '0'; doc.body.style.padding = '38px 40px'; doc.body.style.background = '#fff'
-    // Esperar fuentes e imágenes (logo)
-    await new Promise(r => setTimeout(r, 120))
-    await Promise.all([...doc.images].map(img => img.complete ? null : new Promise(r => { img.onload = img.onerror = r })))
-    const [{ jsPDF }, h2c] = await Promise.all([
-      import('https://cdn.jsdelivr.net/npm/jspdf@2.5.2/+esm'),
-      import('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/+esm')
-    ])
-    const html2canvas = h2c.default || h2c
-    const zv = doc.querySelector('.zv'); if (zv) zv.style.position = 'absolute'   // en canvas va en la 1ra hoja; luego se repite con jsPDF
-    // Alto REAL del contenido (no el del iframe): evita una 2da hoja en blanco
-    const alto = Math.ceil(Math.max(...[...doc.body.children].map(el => el.getBoundingClientRect().bottom + (doc.defaultView.scrollY || 0)))) + 38
-    const canvas = await html2canvas(doc.body, { scale: 2, backgroundColor: '#ffffff', useCORS: true, windowWidth: 794, height: alto, windowHeight: alto })
-    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-    const W = 210, H = 297
-    const pxPorMm = canvas.width / W
-    const altoPagPx = Math.floor(H * pxPorMm)
-    let y = 0, pag = 0
-    while (canvas.height - y > 24) {   // ignora restos de pocos px (redondeo)
-      const alto = Math.min(altoPagPx, canvas.height - y)
-      const trozo = document.createElement('canvas')
-      trozo.width = canvas.width; trozo.height = alto
-      trozo.getContext('2d').drawImage(canvas, 0, y, canvas.width, alto, 0, 0, canvas.width, alto)
-      if (pag > 0) pdf.addPage()
-      pdf.addImage(trozo.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, W, alto / pxPorMm)
-      if (pag > 0) {   // firma del autor en hojas siguientes
-        pdf.setFont('helvetica', 'italic').setFontSize(7).setTextColor(17, 24, 39)
-        pdf.text('by: ZV', W - 10.6, 6, { align: 'right' })
-      }
-      y += alto; pag++
-    }
-    pdf.save(nombreArchivo)
-    showToast('PDF descargado ✅', 'success')
-  } finally { ifr.remove() }
 }
 
 window.imprimirPacking = async function (id) {

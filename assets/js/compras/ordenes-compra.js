@@ -14,6 +14,7 @@ import { refrescarBuscador } from '../buscador-select.js'
 import { _escCompras } from './buscadores.js'
 import { renderCompras } from './compras-lista.js'
 import { _autoFetchTCCompra } from './init.js'
+import './oc-pdf.js'
 
 // ============================================================================
 // ÓRDENES DE COMPRA
@@ -100,6 +101,7 @@ export async function renderOrdenes() {
           <td data-col-tabla="ordenes-compra" data-col="carpeta"${colStyle('ordenes-compra','carpeta')}>${oc.carpeta_importacion_id && carpetaNum[oc.carpeta_importacion_id] != null ? 'Carpeta ' + carpetaNum[oc.carpeta_importacion_id] : (oc.es_importacion ? '<span style="color:var(--text-secondary);">—</span>' : '')}</td>
           <td>${menuAccionesFila([
             { label: 'Ver', icono: '👁', onclick: `window.verOC(${oc.id})` },
+            { label: 'PDF', icono: '📄', onclick: `window.imprimirOC(${oc.id})` },
             oc.es_importacion && !oc.carpeta_importacion_id ? { label: 'Completar PI', icono: '📝', onclick: `window.completarProformaOC(${oc.id})` } : null,
             oc.status === 'borrador' ? (oc.es_importacion
               ? { label: 'Confirmar Proforma', icono: '✅', onclick: `window.confirmarProformaOC(${oc.id})` }
@@ -148,7 +150,7 @@ window.verOC = async function (id) {
     const items = await getItems() || []
     const mapa = {}; for (const it of items) mapa[it.id] = it
 
-    _ocEditId = id
+    _ocEditId = id; window._ocIdActual = id
     _ocCompraOrigenId = null
     _ocDetalleIdsOrig = detalles.map(d => d.id)
     const form = document.getElementById('formNewOC'); if (form) form.reset()

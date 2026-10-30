@@ -83,10 +83,12 @@ function _asegurarModalDAM() {
       <div style="padding:6px 20px 0;">
         <div class="costeo-selector dm-carpeta"><label>Carpeta:</label><select id="dmCarpeta" disabled></select></div>
         <div class="dm-nota" style="margin-bottom:4px;">La DAM se registra en la carpeta abierta. Datos de la <b>DAM completa</b> del agente (Hoja A, B, C y DAV); lo marcado «consulta SUNAT» sale de la consulta de levante por N° de DUA.</div>
+        <div class="la-steps" id="dmSteps"></div>
+        <section class="la-panel" data-p="1">
         <strong class="mod-sec">Identificación del despacho</strong>
         <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px;">
           <div class="form-group" style="grid-column:span 2;"><label>N° de DAM * <span class="bl-en">(Hoja A · «No Declaración», ej. 118-2026-10-436155-01-7-00)</span></label><input type="text" id="dmNro" maxlength="40"></div>
-          <div class="form-group"><label>Fecha de numeración * <span class="bl-en">(Hoja A · «Fch. Numeración»)</span></label><input type="date" id="dmFecha"></div>
+          <div class="form-group"><label>Fecha de numeración * <span class="bl-en">(Hoja A · «Fch. Numeración»)</span></label><input type="date" id="dmFecha" onchange="window.dmTC()"></div>
           <div class="form-group"><label>Canal de control <span class="bl-en">(consulta SUNAT · semáforo)</span></label>
             <select id="dmCanal"><option value="">— sin canal —</option><option value="verde">🟢 Verde</option><option value="naranja">🟠 Naranja</option><option value="rojo">🔴 Rojo</option></select></div>
           <div class="form-group"><label>Modalidad de despacho <span class="bl-en">(consulta SUNAT)</span></label>
@@ -94,12 +96,15 @@ function _asegurarModalDAM() {
           <div class="form-group" style="grid-column:span 2;"><label>Agente de aduana <span class="bl-en">(Hoja A · 8 Declarante)</span></label><select id="dmAgente"><option value="">—</option></select></div>
           <div class="form-group"><label>Estado <span class="bl-en">(sale de los pagos)</span></label>
             <select id="dmEstado" data-siempre-lectura><option value="pendiente">Pendiente</option><option value="pagado">Pagado</option></select></div>
-          <div id="dmPagosHost" style="grid-column:span 4;"></div>
           <div class="form-group" style="grid-column:span 2;"><label>Depósito temporal / terminal <span class="bl-en">(Hoja A · 4.1 Almacén aduanero)</span></label><select id="dmDeposito"><option value="">—</option></select></div>
           <div class="form-group"><label>Llegada de la nave <span class="bl-en">(DAM · 4.4 Fec. llegada)</span></label><input type="date" id="dmLlegada"></div>
+          <div class="form-group"><label>Nave <span class="bl-en">(DAM · medio de transporte)</span></label><input type="text" id="dmNave" maxlength="60"></div>
+          <div class="form-group"><label>Puerto de origen <span class="bl-en">(DAM · país/puerto de embarque)</span></label><input type="text" id="dmPuerto" maxlength="60"></div>
           <div class="form-group"><label>Levante autorizado <span class="bl-en">(consulta SUNAT · «Fecha levante»)</span></label><input type="datetime-local" id="dmLevante"></div>
         </div>
 
+        </section>
+        <section class="la-panel" data-p="2">
         <strong class="mod-sec">Valor en aduana declarado <small style="text-transform:none; letter-spacing:0; font-weight:400;">(original de la DAM; los ajustes se registran aparte)</small></strong>
         <div class="dm-auto-aviso"><span>🪄 Los valores, tributos y pesos se llenan solos con tu CI y BL (ad valorem 6 % · IGV 15.5 % · IPM 2.5 %). Puedes editarlos: los editados se marcan en ámbar y los cruces del final avisan la diferencia.</span>
           <button type="button" class="btn btn-secondary btn-small" data-solo-edicion onclick="window.dmAuto(true)" title="Vuelve a calcular todo con el CI y el BL">↺ Valores automáticos</button></div>
@@ -117,13 +122,21 @@ function _asegurarModalDAM() {
           <div class="form-group"><label>IGV USD <span class="bl-en">(Hoja C · 4.6 Imp. Gral. Ventas)</span></label><input type="number" id="dmIGV" step="0.01" oninput="window.dmEdita(this)"></div>
           <div class="form-group"><label>Total liquidación USD <span class="bl-en">(Hoja C · 4.13 Total)</span></label><input type="number" id="dmTotal" step="0.01" data-siempre-lectura></div>
           <div class="form-group"><label>Percepción S/ <span class="bl-en">(Constancia de percepción IGV · «Total en soles»)</span></label><input type="number" id="dmPercep" step="0.01" oninput="window.dmEdita(this)"></div>
-          <div class="form-group"><label>Fecha de pago de tributos <span class="bl-en">(consulta SUNAT · «Fecha cancelación»)</span></label><input type="date" id="dmFechaPago" onchange="window.dmTC()"></div>
+          <div class="form-group"><label>Último día de pago <span class="bl-en">(liquidación · vencimiento)</span></label><input type="date" id="dmUltimoDia" onchange="window.dmPasos()"></div>
+          <div class="form-group"><label>TLC aplicable <span class="bl-en">(ad valorem liberado)</span></label><select id="dmTLC"><option value="">No</option><option value="1">Sí, por TLC</option></select></div>
+          <div class="form-group"><label>Fecha de pago de tributos <span class="bl-en">(se llena sola al registrar el pago)</span></label><input type="date" id="dmFechaPago" data-siempre-lectura title="Sale del pago registrado más abajo (Pago de tributos)"></div>
           <div class="form-group"><label>T.C. venta SUNAT <button type="button" class="btn btn-secondary btn-small" data-solo-edicion onclick="window.dmTC(true)" title="Consultar T.C. de la fecha de pago">⟳</button></label><input type="number" id="dmTC" step="0.001" oninput="window.dmAuto()"></div>
           <div class="form-group"><label>Subpartida nacional <span class="bl-en">(Hoja A · 7.19)</span></label><input type="text" id="dmSubpartida" maxlength="10" inputmode="numeric" placeholder="10 dígitos" oninput="window.dmAuto()"></div>
         </div>
         <div id="dmTCaviso" style="font-size:.78rem; color:var(--text-secondary); margin-top:-4px;"></div>
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:2px;"><select id="dmTasaPerc" onchange="window.dmAuto()" style="width:auto; padding:4px 8px; font-size:.78rem;" title="Tasa de percepción de tu empresa"><option value="3.5">Tasa 3.5 % (general)</option><option value="5">Tasa 5 % (bienes usados)</option><option value="10">Tasa 10 % (1ª importación / no habido)</option></select><div id="dmPercNota" class="dm-nota" style="margin:0; flex:1; min-width:260px;"></div></div>
 
+        </section>
+        <section class="la-panel" data-p="3">
+        <div id="dmPagosHost" style="margin-top:6px;"></div>
+        </section>
+
+        <section class="la-panel" data-p="4">
         <strong class="mod-sec">Mercadería despachada</strong>
         <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px;">
           <div class="form-group"><label>Bultos <span class="bl-en">(Hoja A · 7.12 Cant. Bult.)</span></label><input type="number" id="dmBultos" step="1" oninput="window.dmEdita(this)"></div>
@@ -131,6 +144,8 @@ function _asegurarModalDAM() {
           <div class="form-group"><label>Peso neto (kg) <span class="bl-en">(Hoja A · 7.14 Peso Neto)</span></label><input type="number" id="dmPesoNeto" step="0.001" oninput="window.dmEdita(this)"></div>
         </div>
 
+        </section>
+        <section class="la-panel" data-p="5">
         <strong class="mod-sec">Cruces automáticos <small style="text-transform:none; letter-spacing:0; font-weight:400;">(DAM contra CI y BL)</small></strong>
         <div id="dmAuditoria" class="dm-cruces"></div>
 
@@ -138,8 +153,11 @@ function _asegurarModalDAM() {
           <strong class="mod-sec">Ajustes de valor y contingencias <small style="text-transform:none; letter-spacing:0; font-weight:400;">(se suman a la DAM, no la reemplazan)</small></strong>
           <div id="dmAjustes"></div>
         </div>
+        </section>
       </div>
       <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.dmIr(window.dmPasoActual - 1)">‹ Anterior</button>
+        <button class="btn btn-secondary" onclick="window.dmIr(window.dmPasoActual + 1)">Siguiente ›</button>
         <button class="btn btn-secondary" id="dmBtnDeclaracion" onclick="window.abrirDeclaracionDAM()">📋 Declaración completa</button>
         <button class="btn btn-secondary" id="dmBtnAjustar" onclick="window.abrirAjusteValor()">⚖️ Ajustar valor</button>
         <button class="btn btn-secondary" id="dmBtnCosteo" data-solo-lectura onclick="window.enviarDAMCosteo()" title="Crea las líneas de tributos de la DAM en el costeo">➡ Tributos al costeo</button>
@@ -157,9 +175,9 @@ const CAMPOS_DAM = [
   ['dmAgente', 'agente_aduana'], ['dmEstado', 'estado'], ['dmDeposito', 'deposito_temporal'], ['dmLlegada', 'fecha_llegada'],
   ['dmFOB', 'valor_fob'], ['dmFlete', 'flete_maritimo'], ['dmSeguro', 'seguro_maritimo'],
   ['dmAdv', 'ad_valorem_usd'], ['dmIPM', 'imp_usd'], ['dmIGV', 'igv_usd'], ['dmPercep', 'percepcion'],
-  ['dmFechaPago', 'fecha_pago'], ['dmSubpartida', 'subpartida'], ['dmTC', 'tipo_cambio'], ['dmBultos', 'bultos'], ['dmPesoBruto', 'peso_bruto_kg'], ['dmPesoNeto', 'peso_neto_kg']
+  ['dmFechaPago', 'fecha_pago'], ['dmNave', 'nave'], ['dmPuerto', 'puerto_origen'], ['dmUltimoDia', 'ultimo_dia_pago'], ['dmSubpartida', 'subpartida'], ['dmTC', 'tipo_cambio'], ['dmBultos', 'bultos'], ['dmPesoBruto', 'peso_bruto_kg'], ['dmPesoNeto', 'peso_neto_kg']
 ]
-const NUEVAS_DAM = ['subpartida', 'canal_aduanero', 'modalidad_despacho', 'agente_aduana', 'deposito_temporal', 'fecha_llegada', 'fecha_levante', 'bultos', 'peso_bruto_kg', 'peso_neto_kg']
+const NUEVAS_DAM = ['nave', 'puerto_origen', 'ultimo_dia_pago', 'tlc_aplica', 'subpartida', 'canal_aduanero', 'modalidad_despacho', 'agente_aduana', 'deposito_temporal', 'fecha_llegada', 'fecha_levante', 'bultos', 'peso_bruto_kg', 'peso_neto_kg']
 
 
 // ── Agente de aduana y Depósito temporal: buscador de contactos (nombre o RUC) ──
@@ -206,6 +224,7 @@ window.addEventListener('contacto-guardado', async e => {
 function _volcarDAM(dam, ref) {
   for (const [id, col] of CAMPOS_DAM) { if (id === 'dmAgente' || id === 'dmDeposito') { _ponerContacto(id, dam?.[col] || ''); continue } const el = $(id); if (el) el.value = dam?.[col] ?? '' }
   $('dmLevante').value = _aLocalInput(dam?.fecha_levante)
+  $('dmTLC').value = dam?.tlc_aplica ? '1' : ''
   document.querySelectorAll('#modal-dam-carpeta input[type=number]').forEach(el => { if (el.id in AUTO_TOL) { el.dataset.auto = '1'; el.dataset.manual = dam ? '1' : '' } })
   if (!dam) $('dmEstado').value = 'pendiente'
   if (!dam && !$('dmSubpartida').value) $('dmSubpartida').value = (ref?.ci?.detalles || []).map(d => d.partida_arancelaria).find(Boolean) || ''
@@ -307,13 +326,13 @@ window.dmRecalcular = function () {
 }
 
 window.dmTC = async function (forzar) {
-  const f = v('dmFechaPago'); const aviso = $('dmTCaviso')
-  if (!f) { if (forzar === true) showToast('Primero indica la fecha de pago de tributos', 'warning'); return }
+  const pagada = v('dmFechaPago'); const f = pagada || v('dmFecha'); const aviso = $('dmTCaviso')
+  if (!f) { if (forzar === true) showToast('Primero indica la fecha de numeración de la DAM', 'warning'); return }
   if (!forzar && v('dmTC') && _dam?.tipo_cambio) return
   aviso.textContent = 'Consultando T.C. SUNAT…'
   try {
     const r = await getTipoCambioDia(f, { permitirApi: forzar === true })
-    if (r?.venta) { $('dmTC').value = Number(r.venta).toFixed(3); aviso.textContent = `T.C. venta SUNAT del ${fechaDMY(f)}: ${Number(r.venta).toFixed(3)} (${r.origen})`; window.dmAuto() }
+    if (r?.venta) { $('dmTC').value = Number(r.venta).toFixed(3); aviso.textContent = `T.C. venta SUNAT del ${fechaDMY(f)}: ${Number(r.venta).toFixed(3)} (${r.origen})${pagada ? '' : ' · ESTIMADO con la fecha de numeración: se actualiza solo al registrar el pago'}`; window.dmAuto() }
     else aviso.textContent = r?.error || 'Sin T.C. guardado para esa fecha: pulsa ⟳ para consultarlo.'
   } catch { aviso.textContent = 'No se pudo consultar el T.C.' }
 }
@@ -399,12 +418,17 @@ window.abrirDAM = async function (id) {
     aplicarModoVerEditar('modal-dam-carpeta', !!_dam)
     window.openModal('modal-dam-carpeta')
     _pintarPagosDAM()
+    window.dmIr(1)
     await _pintarAjustes()
   } catch (e) { console.error('abrirDAM:', e); showToast('No se pudo abrir la DAM', 'danger') }
 }
 function _pintarPagosDAM() {
   const h = $('dmPagosHost'); if (!h) return
-  h.innerHTML = _dam ? window.pagosBloqueHtml?.('dam_tributos', _dam.id, 'Pago de tributos') + window.pagosBloqueHtml?.('dam_percepcion', _dam.id, 'Pago de percepción')
+  const _ob = t => window.hcObligacion?.(t, _dam?.id)
+  const pend = [['dam_tributos', _ob('dam_tributos')], ['dam_percepcion', _ob('dam_percepcion')]].filter(([, o]) => o && o.estado !== 'pagado')
+  const btnTodo = _dam && pend.length ? `<div class="dm-pagar-bar"><span>💳 ${pend.length === 2 ? 'Tributos y percepción pendientes' : (pend[0][0] === 'dam_tributos' ? 'Tributos pendientes' : 'Percepción pendiente')}</span>
+      <button type="button" class="btn btn-primary btn-small" onclick="window.dmPagarTodo()">＋ Pagar ${pend.length === 2 ? 'tributos y percepción' : (pend[0][0] === 'dam_tributos' ? 'tributos' : 'percepción')}</button></div>` : ''
+  h.innerHTML = _dam ? btnTodo + window.pagosBloqueHtml?.('dam_tributos', _dam.id, 'Pago de tributos') + window.pagosBloqueHtml?.('dam_percepcion', _dam.id, 'Pago de percepción')
     : '<div class="dm-nota">Guarda la DAM para registrar el pago de sus tributos y de la percepción.</div>'
 }
 /** Tras registrar/editar/eliminar un pago: refresca el estado derivado de la DAM y del ajuste abiertos. */
@@ -423,6 +447,31 @@ window.onPagosCambiaron = async () => {
     }
   } catch (e) { console.warn('onPagosCambiaron', e) }
 }
+window.dmPagarTodo = () => {
+  const sel = ['dam_tributos', 'dam_percepcion'].filter(t => { const o = window.hcObligacion?.(t, _dam?.id); return o && o.estado !== 'pagado' }).map(t => `${t}:${_dam.id}`)
+  window.abrirPagoRapido(sel.length ? sel : 'tributos')
+}
+// ── Etapas (como la liquidación del agente) ────────────────────────────────
+window.dmPasoActual = 1
+const _PASOS_DAM = [['Declaración', '📋'], ['Valor y tributos', '🧾'], ['Pagos', '💳'], ['Mercadería', '📦'], ['Cruces y ajustes', '⚖️']]
+function _pintarPasosDAM() {
+  const host = $('dmSteps'); if (!host) return
+  const pend = _dam ? ['dam_tributos', 'dam_percepcion'].some(t => { const o = window.hcObligacion?.(t, _dam.id); return o && o.estado !== 'pagado' }) : false
+  const est = [
+    v('dmNro') && v('dmFecha') ? 'ok' : '',
+    n0(v('dmCIF')) > 0 ? (v('dmUltimoDia') ? 'ok' : 'warn') : '',
+    !_dam ? '' : (pend ? 'warn' : 'ok'),
+    n0(v('dmPesoBruto')) > 0 ? 'ok' : '',
+    ''
+  ]
+  host.innerHTML = _PASOS_DAM.map(([t, ico], i) => `<button type="button" class="la-step ${est[i]} ${window.dmPasoActual === i + 1 ? 'act' : ''}" onclick="window.dmIr(${i + 1})"><span class="la-dot">${est[i] === 'ok' ? '✓' : est[i] === 'warn' ? '!' : i + 1}</span>${ico} ${t}</button>`).join('<span class="la-sep"></span>')
+}
+window.dmPasos = _pintarPasosDAM
+window.dmIr = n => {
+  n = Math.max(1, Math.min(5, n)); window.dmPasoActual = n
+  document.querySelectorAll('#modal-dam-carpeta .la-panel').forEach(p => { p.style.display = Number(p.dataset.p) === n ? '' : 'none' })
+  _pintarPasosDAM()
+}
 window.editarDAM = id => window.abrirDAM(id)
 window.abrirNuevaDAM = () => window.abrirDAM()
 window.dmEditar = () => aplicarModoVerEditar('modal-dam-carpeta', false)
@@ -437,8 +486,7 @@ window.guardarDAMCarpeta = async function () {
     const fechaPago = v('dmFechaPago') || null, tc = num(v('dmTC')) || 0
     const adv = n0(v('dmAdv')), ipm = n0(v('dmIPM')), igv = n0(v('dmIGV')), per = n0(v('dmPercep'))
     if (fechaPago && fechaPago < v('dmFecha')) throw new Error('La fecha de pago de tributos no puede ser anterior a la fecha de la DAM')
-    if (v('dmEstado') === 'pagado' && !fechaPago) throw new Error('Una DAM pagada necesita la fecha de pago de tributos (de ahí sale el T.C.)')
-    if ((adv + ipm + igv + per > 0 || v('dmEstado') === 'pagado') && !(tc >= 1 && tc <= 10)) throw new Error('Ingresa el T.C. venta SUNAT de la fecha de pago (usa ⟳)')
+    if ((adv + ipm + igv + per > 0 || v('dmEstado') === 'pagado') && !(tc >= 1 && tc <= 10)) throw new Error('Ingresa el T.C. venta SUNAT (usa ⟳)')
 
     const fila = { importacion_id: ci.id }
     for (const [id, col] of CAMPOS_DAM) {
@@ -446,6 +494,7 @@ window.guardarDAMCarpeta = async function () {
       fila[col] = val === '' ? null : (/^(valor_|flete|seguro|ad_valorem|imp_usd|igv_usd|percepcion|tipo_cambio|peso_|bultos)/.test(col) ? num(val) : val)
     }
     fila.fecha_levante = _deLocalInput(v('dmLevante'))
+    fila.tlc_aplica = v('dmTLC') === '1'
     fila.valor_cif = num(v('dmCIF')) || 0
     fila.total_liquidacion = adv + ipm + igv
     fila.total_liquidacion_sol = tc ? +((adv + ipm + igv) * tc).toFixed(2) : 0
@@ -455,7 +504,7 @@ window.guardarDAMCarpeta = async function () {
     const { res, quitadas, error } = await _guardarTolerante('dams', _dam?.id, fila)
     if (!res) throw new Error(error || 'No se pudo guardar la DAM')
     const nuevas = quitadas.filter(c => NUEVAS_DAM.includes(c) || c === 'fecha_pago')
-    if (nuevas.length) showToast('DAM guardada SIN algunos campos nuevos: falta correr assets/sql/104_dam_levante_ajustes_declaracion.sql', 'warning')
+    if (nuevas.length) showToast('DAM guardada SIN algunos campos nuevos: falta correr assets/sql/120_alertas_campos_dam_bl.sql', 'warning')
     else showToast('DAM guardada', 'success')
     window.closeModal('modal-dam-carpeta')
     window.renderHojaCosteo?.(); window.renderDAM?.()

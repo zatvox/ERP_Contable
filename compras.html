@@ -162,11 +162,13 @@
             <button class="subtab" data-sub="repcm-proveedores">Por proveedor</button>
             <button class="subtab" data-sub="repcm-productos">Por producto</button>
             <button class="subtab" data-sub="repcm-pagos">Estado de pago</button>
+            <button class="subtab" data-sub="repcm-carpeta">Historial por carpeta</button>
           </div>
           <div id="repcm-evolucion"   class="subtab-panel active"></div>
           <div id="repcm-proveedores" class="subtab-panel"></div>
           <div id="repcm-productos"   class="subtab-panel"></div>
           <div id="repcm-pagos"       class="subtab-panel"></div>
+          <div id="repcm-carpeta"     class="subtab-panel"></div>
         </div>
 
         <!-- TAB CONFIGURACIÓN -->
@@ -183,8 +185,18 @@
   </div>
 
   <!-- MODAL NUEVA OC -->
-  <div id="modal-nueva-oc" class="modal">
-    <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+  <style>
+#modal-nueva-oc .grid{align-items:start;gap:14px 20px}
+#modal-nueva-oc .form-group{display:flex;flex-direction:column;margin-bottom:0;min-width:0}
+#modal-nueva-oc .grid + .grid,#modal-nueva-oc .form-group + .grid{margin-top:14px}
+#modal-nueva-oc .grid .form-group>label{display:flex;align-items:flex-end;min-height:2.3em;line-height:1.2;margin-bottom:4px;flex-wrap:wrap;column-gap:5px}
+#modal-nueva-oc .grid .form-group>label input[type=checkbox]{flex:none}
+#modal-nueva-oc .form-group>small{display:block;margin-top:5px;line-height:1.35;font-size:.74rem}
+#modal-nueva-oc .form-group input,#modal-nueva-oc .form-group select{width:100%;box-sizing:border-box}
+#modal-nueva-oc .form-group>div[style*="flex"] select{min-width:0}
+</style>
+<div id="modal-nueva-oc" class="modal">
+    <div class="modal-content oc-modal" style="max-width: min(96vw, 1180px); width: 96vw; max-height: 92vh; overflow-y: auto; overflow-x: hidden; box-sizing: border-box;">
       <div class="modal-header">
         <h3 class="modal-title" id="ocTituloModal">Nueva Orden de Compra</h3>
         <button class="modal-close" onclick="closeModal('modal-nueva-oc')">✕</button>
@@ -228,7 +240,7 @@
                 <option value="contado">Contado</option>
               </select>
             </div>
-            <div class="form-group" style="align-self:end;">
+            <div class="form-group">
               <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
                 <input type="checkbox" id="ocEsImportacion" style="width:auto; margin:0;"
                        onchange="window.ocToggleImportacion()">
@@ -375,6 +387,7 @@
       </form>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-solo-lectura onclick="closeModal('modal-nueva-oc')">Cerrar</button>
+        <button class="btn btn-secondary" data-solo-lectura id="btnPdfOC" onclick="window.imprimirOC(window._ocIdActual)">📄 PDF</button>
         <button class="btn btn-primary" data-solo-lectura id="btnEditarOC" onclick="window.ocHabilitarEdicion()">✏️ Editar</button>
         <button class="btn btn-secondary" data-solo-edicion onclick="window.ocCancelarEdicion()">Cancelar</button>
         <button class="btn btn-primary" data-solo-edicion onclick="guardarOC()">💾 Guardar OC</button>
