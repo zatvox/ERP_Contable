@@ -93,14 +93,19 @@ function _asegurarModalDAM() {
             <select id="dmCanal"><option value="">— sin canal —</option><option value="verde">🟢 Verde</option><option value="naranja">🟠 Naranja</option><option value="rojo">🔴 Rojo</option></select></div>
           <div class="form-group"><label>Modalidad de despacho <span class="bl-en">(consulta SUNAT)</span></label>
             <select id="dmModalidad"><option value="">—</option><option>Anticipado</option><option>Excepcional</option><option>Diferido</option><option>Urgente</option></select></div>
-          <div class="form-group" style="grid-column:span 2;"><label>Agente de aduana <span class="bl-en">(Hoja A · 8 Declarante)</span></label><select id="dmAgente"><option value="">—</option></select></div>
+          <div class="form-group" style="grid-column:span 2;"><label>Agente de aduana <span class="bl-en">(Hoja A · 8.1 Declarante)</span></label><select id="dmAgente"><option value="">—</option></select></div>
           <div class="form-group"><label>Estado <span class="bl-en">(sale de los pagos)</span></label>
             <select id="dmEstado" data-siempre-lectura><option value="pendiente">Pendiente</option><option value="pagado">Pagado</option></select></div>
-          <div class="form-group" style="grid-column:span 2;"><label>Depósito temporal / terminal <span class="bl-en">(Hoja A · 4.1 Almacén aduanero)</span></label><select id="dmDeposito"><option value="">—</option></select></div>
-          <div class="form-group"><label>Llegada de la nave <span class="bl-en">(DAM · 4.4 Fec. llegada)</span></label><input type="date" id="dmLlegada"></div>
-          <div class="form-group"><label>Nave <span class="bl-en">(DAM · medio de transporte)</span></label><input type="text" id="dmNave" maxlength="60"></div>
-          <div class="form-group"><label>Puerto de origen <span class="bl-en">(DAM · país/puerto de embarque)</span></label><input type="text" id="dmPuerto" maxlength="60"></div>
+          <div class="form-group" style="grid-column:span 2;"><label>Depósito temporal / terminal <span class="bl-en">(Hoja A · 4.1 Terminal de Almacenamiento)</span></label><select id="dmDeposito"><option value="">—</option></select></div>
           <div class="form-group"><label>Levante autorizado <span class="bl-en">(consulta SUNAT · «Fecha levante»)</span></label><input type="datetime-local" id="dmLevante"></div>
+        </div>
+        <strong class="mod-sec" style="margin-top:14px;">Transporte y embarque <span class="bl-en">(Hoja A · casillas 3 y 7)</span></strong>
+        <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px;">
+          <div class="form-group" style="grid-column:span 2;"><label>Empresa de transporte <span class="bl-en">(Hoja A · 3.1)</span></label><input type="text" id="dmEmpTrans" maxlength="80" placeholder="Ej: TRANSMERIDIAN S.A.C."></div>
+          <div class="form-group"><label>N° de manifiesto <span class="bl-en">(Hoja A · 3.2)</span></label><input type="text" id="dmManifiesto" maxlength="30" placeholder="Ej: 1182026764"></div>
+          <div class="form-group"><label>Fecha término descarga <span class="bl-en">(Hoja A · 3.4 Fch.Term.Desc/Embar)</span></label><input type="date" id="dmLlegada"></div>
+          <div class="form-group"><label>Puerto de embarque <span class="bl-en">(Hoja A · 7.6, ej. SHANGHAI)</span></label><input type="text" id="dmPuerto" maxlength="60"></div>
+          <div class="form-group"><label>Doc. de transporte <span class="bl-en">(Hoja A · 7.8 = N° B/L)</span></label><input type="text" id="dmDocTrans" maxlength="40" placeholder="Ej: YIJH60111600"></div>
         </div>
 
         </section>
@@ -175,9 +180,9 @@ const CAMPOS_DAM = [
   ['dmAgente', 'agente_aduana'], ['dmEstado', 'estado'], ['dmDeposito', 'deposito_temporal'], ['dmLlegada', 'fecha_llegada'],
   ['dmFOB', 'valor_fob'], ['dmFlete', 'flete_maritimo'], ['dmSeguro', 'seguro_maritimo'],
   ['dmAdv', 'ad_valorem_usd'], ['dmIPM', 'imp_usd'], ['dmIGV', 'igv_usd'], ['dmPercep', 'percepcion'],
-  ['dmFechaPago', 'fecha_pago'], ['dmNave', 'nave'], ['dmPuerto', 'puerto_origen'], ['dmUltimoDia', 'ultimo_dia_pago'], ['dmSubpartida', 'subpartida'], ['dmTC', 'tipo_cambio'], ['dmBultos', 'bultos'], ['dmPesoBruto', 'peso_bruto_kg'], ['dmPesoNeto', 'peso_neto_kg']
+  ['dmFechaPago', 'fecha_pago'], ['dmEmpTrans', 'empresa_transporte'], ['dmManifiesto', 'nro_manifiesto'], ['dmDocTrans', 'doc_transporte'], ['dmPuerto', 'puerto_origen'], ['dmUltimoDia', 'ultimo_dia_pago'], ['dmSubpartida', 'subpartida'], ['dmTC', 'tipo_cambio'], ['dmBultos', 'bultos'], ['dmPesoBruto', 'peso_bruto_kg'], ['dmPesoNeto', 'peso_neto_kg']
 ]
-const NUEVAS_DAM = ['nave', 'puerto_origen', 'ultimo_dia_pago', 'tlc_aplica', 'subpartida', 'canal_aduanero', 'modalidad_despacho', 'agente_aduana', 'deposito_temporal', 'fecha_llegada', 'fecha_levante', 'bultos', 'peso_bruto_kg', 'peso_neto_kg']
+const NUEVAS_DAM = ['empresa_transporte', 'nro_manifiesto', 'doc_transporte', 'puerto_origen', 'ultimo_dia_pago', 'tlc_aplica', 'subpartida', 'canal_aduanero', 'modalidad_despacho', 'agente_aduana', 'deposito_temporal', 'fecha_llegada', 'fecha_levante', 'bultos', 'peso_bruto_kg', 'peso_neto_kg']
 
 
 // ── Agente de aduana y Depósito temporal: buscador de contactos (nombre o RUC) ──

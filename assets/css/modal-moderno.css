@@ -534,3 +534,45 @@ body.ui-moderna .modal .pp-drop-link { display: inline !important; text-transfor
 .hc-chk { margin-left:14px; font-size:.78rem; cursor:pointer; } .hc-chk input { vertical-align:middle; }
 .hc-bl-t { display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; margin:10px 0 4px; padding:4px 2px; border-bottom:1px solid var(--border-color); font-size:.82rem; }
 .hc-bl-t small { color:var(--text-secondary); } .hc-bl-t span { margin-left:auto; font-variant-numeric:tabular-nums; }
+
+/* ============================================================================
+   ALINEACIÓN DE CAMPOS EN MODALES (2026-10-30)
+   Todos los campos de una fila quedan a la MISMA altura aunque sus etiquetas
+   ocupen 1 o 2 líneas: etiqueta con alto mínimo de 2 líneas, texto pegado
+   abajo, y el control (input/select/buscador) empieza siempre en la misma línea.
+   Aplica a rejillas inline (grid-template-columns), .grid/.grid-N y .form-row.
+   ============================================================================ */
+.modal-content div[style*="grid-template-columns"],
+.modal-content .grid,
+.modal-content .form-row { align-items: start; row-gap: 12px !important; }
+.modal-content div[style*="grid-template-columns"] > .form-group,
+.modal-content .grid > .form-group,
+.modal-content .form-row > .form-group { display: flex; flex-direction: column; justify-content: flex-start; margin-bottom: 0; min-width: 0; }
+.modal-content div[style*="grid-template-columns"] > .form-group > label,
+.modal-content .grid > .form-group > label,
+.modal-content .form-row > .form-group > label { display: flex; flex-wrap: wrap; align-items: flex-end; column-gap: 5px; min-height: 2.5em; line-height: 1.25; margin-bottom: 4px; }
+.modal-content div[style*="grid-template-columns"] > .form-group > :is(input, select, textarea, .bsq-caja),
+.modal-content .grid > .form-group > :is(input, select, textarea, .bsq-caja),
+.modal-content .form-row > .form-group > :is(input, select, textarea, .bsq-caja) { width: 100%; box-sizing: border-box; }
+/* Un campo de ayuda/aviso bajo el control no debe empujar al resto de la fila */
+.modal-content div[style*="grid-template-columns"] > .form-group > small { margin-top: 4px; }
+/* La lista del buscador nunca es parte del flujo (evita barras horizontales fantasma) */
+.bsq-lista { max-width: calc(100vw - 24px); }
+/* Pie de modal: botones del mismo alto y texto en una línea */
+.modal-footer { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; align-items: stretch; }
+.modal-footer .btn { white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; }
+
+/* Select original del buscador: realmente OCULTO (antes heredaba width/padding del tema, quedaba fuera del campo
+   y generaba la barra horizontal y los recuadros fantasma en los modales con buscador) */
+.bsq-caja > select.bsq-select-oculto {
+  position: absolute !important; left: 0 !important; top: 0 !important;
+  width: 1px !important; height: 1px !important; min-width: 0 !important; max-width: 1px !important;
+  margin: 0 !important; padding: 0 !important; border: 0 !important;
+  opacity: 0 !important; pointer-events: none !important; overflow: hidden !important;
+}
+
+.modal-footer .btn { padding: 7px 14px; font-size: .85rem; min-height: 36px; }
+
+/* Hoja de costeo: botón ▸/▾ de las filas de familia */
+.hc-famb { border:0; background:transparent; color:var(--text-primary); cursor:pointer; font-size:.85rem; padding:0 4px; }
+.hc-famb:hover { color:#3b82f6; }

@@ -20,7 +20,7 @@
 // ============================================================================
 
 import { query, esperarContextoEmpresa } from '../supabase-client.js'
-import { getItems, getAdjuntos, getConteoAdjuntos, subirAdjuntos } from '../supabase-data.js'
+import { getItems, getFamilias, getFamiliaLotes, getAdjuntos, getConteoAdjuntos, subirAdjuntos } from '../supabase-data.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { formatNumber, fechaDMY, showToast } from '../helpers.js'
 import { ojoBtn } from '../shared/ver-editar.js'
@@ -58,6 +58,39 @@ const tabla = (head, filas, pie = '', ajustada = false) => `
 let _modoFD = 'comercial'
 try { _modoFD = localStorage.getItem('hojaCosteoModoFD') === 'contable' ? 'contable' : 'comercial' } catch { /* sin storage */ }
 let _sec5 = null
+// Agrupar por familia (inventario › Familias, SQL 66): un lote = producto + N° lote; un lote pertenece a UNA familia.
+let _agrFam = true
+try { _agrFam = localStorage.getItem('hojaCosteoAgrFam') !== '0' } catch { /* sin storage */ }
+window.hcAgrFam = on => {
+  _agrFam = !!on
+  try { localStorage.setItem('hojaCosteoAgrFam', _agrFam ? '1' : '0') } catch { /* */ }
+  const h = document.getElementById('hoja-costeo'), u = window.hcUltimo
+  if (h && u) { h.innerHTML = _html(u.d, u.c); window.hcVerMas?.(h) } else window.renderHojaCosteo?.()
+}
+window.hcFamToggle = btn => {
+  const id = btn.dataset.fam, abre = btn.dataset.ab !== '1'
+  btn.dataset.ab = abre ? '1' : '0'; btn.textContent = abre ? '▾' : '▸'
+  document.querySelectorAll(`tr[data-famh="${id}"]`).forEach(tr => { tr.hidden = !abre })
+}
+// Junta los artículos de la carpeta por familia. Criterio: los lotes de la carpeta (lotes.item_id + numero_lote)
+// que figuran en familia_lotes. Costo unitario de la familia = FOB total ÷ kg total (promedio ponderado).
+function _artPorFamilia(d, art, tc) {
+  const clave = (i, n) => `${i}|${String(n || '').trim().toLowerCase()}`
+  const famDe = {}; for (const fl of d.famLotes || []) famDe[clave(fl.item_id, fl.numero_lote)] = fl.familia_id
+  const nom = {}; for (const f of d.familias || []) nom[f.id] = f.nombre
+  const famDeItem = {}
+  for (const l of d.lotesC || []) { const f = famDe[clave(l.item_id, l.numero_lote)]; if (f && famDeItem[l.item_id] == null) famDeItem[l.item_id] = f }
+  const out = [], grupos = {}
+  for (const a of art) {
+    const f = famDeItem[a.itemId]
+    if (!f) { out.push(a); continue }
+    if (!grupos[f]) { grupos[f] = { esFam: true, famId: f, nombre: nom[f] || 'Familia #' + f, kg: 0, fobUsd: 0, hijos: [] }; out.push(grupos[f]) }
+    const g = grupos[f]; g.kg += a.kg; g.fobUsd += a.fobUsd; g.hijos.push(a)
+  }
+  for (const g of Object.values(grupos)) { g.unit = g.kg ? g.fobUsd / g.kg : 0; g.fobPenUnit = tc ? g.unit * tc : null }
+  return { filas: out, hayFam: out.some(x => x.esFam) }
+}
+const _chkFam = (hay) => hay ? `<label style="font-weight:400; font-size:.8rem; display:inline-flex; gap:6px; align-items:center; cursor:pointer;"><input type="checkbox" ${_agrFam ? 'checked' : ''} onchange="window.hcAgrFam(this.checked)"> Agrupar por familia</label>` : ''
 // Globo de ayuda (position:fixed para que no lo recorte el scroll de las tablas)
 if (!window.__hcTipInit) {
   window.__hcTipInit = true
@@ -93,7 +126,7 @@ async function _cargar() {
   const carpetaId = carpeta.id
   await cargarObservaciones(carpetaId)
   // Ola 1: TODO lo que depende solo de la carpeta/CI, en paralelo (antes eran ~25 viajes uno tras otro).
-  const [cisAll, pi, costos, pagos, dams, bls, items, prov, adjs, liqs, guias, estRows, lotesC, lineasRaw, docsAll, lineasPI, vDam, vAut, vDoc, appsRaw, contRaw] = await Promise.all([
+  const [cisAll, pi, costos, pagos, dams, bls, items, prov, adjs, liqs, guias, estRows, lotesC, lineasRaw, docsAll, lineasPI, vDam, vAut, vDoc, appsRaw, contRaw, familias, famLotes] = await Promise.all([
     query('comercial_invoices', { carpeta_importacion_id: carpetaId }),
     carpeta.orden_compra_id ? query('orden_compra', { id: carpeta.orden_compra_id }) : [],
     query('importacion_costos', { carpeta_importacion_id: carpetaId }),
@@ -113,7 +146,8 @@ async function _cargar() {
     ci && carpeta.orden_compra_id ? query('detalle_orden_compra', { orden_compra_id: carpeta.orden_compra_id }) : [],
     getConteoAdjuntos('dam'), getConteoAdjuntos('autoliquidacion'), getConteoAdjuntos('documento_importacion'),
     query('importacion_pago_aplicaciones', { carpeta_importacion_id: carpetaId }),
-    ci ? query('bl_contenedores', {}) : []
+    ci ? query('bl_contenedores', {}) : [],
+    getFamilias().catch(() => []), getFamiliaLotes().catch(() => [])
   ])
   const cisL = (cisAll || []).slice().sort((a, b) => a.id - b.id)
   const damsAll = cisL.length > 1 ? (await Promise.all(cisL.map(c => query('dams', { importacion_id: c.id })))).flat() : (dams || [])
@@ -139,7 +173,7 @@ async function _cargar() {
   for (const d of docsAll || []) if (docIds.has(d.id)) docs[d.id] = d
   const mapaItems = {}; for (const i of items || []) mapaItems[i.id] = i
   const vouchers = { dam: vDam, aut: vAut, doc: vDoc }
-  return { cis: cisL, damsAll, lineasPI: lineasPI || [], tcInfo, carpeta, ci, pi: piRow, costos: costosOk, pagos: pagos || [], apps: appsRaw || [], contenedores: (contRaw || []).filter(c => (bls || []).some(b => b.id === c.bl_id)), dam: damRow, ajustes, liq, abonosAg, guias, lotesC, estadia, bls: bls || [], lineas: lineas || [], docs, mapaItems, adjuntos: [...(adjs || []), ...(adjLiq || [])], vouchers, proveedor: (prov || [])[0] || null, estimado: !ci }
+  return { cis: cisL, damsAll, lineasPI: lineasPI || [], tcInfo, carpeta, ci, pi: piRow, costos: costosOk, pagos: pagos || [], apps: appsRaw || [], contenedores: (contRaw || []).filter(c => (bls || []).some(b => b.id === c.bl_id)), dam: damRow, ajustes, liq, abonosAg, guias, lotesC, familias: familias || [], famLotes: famLotes || [], estadia, bls: bls || [], lineas: lineas || [], docs, mapaItems, adjuntos: [...(adjs || []), ...(adjLiq || [])], vouchers, proveedor: (prov || [])[0] || null, estimado: !ci }
 }
 
 // ─── Cálculo ────────────────────────────────────────────────────────────────
@@ -709,9 +743,14 @@ function _html(d, r) {
 
   // 1. Descripción
   const totKg = r.art.reduce((t, a) => t + a.kg, 0)
+  const FAM = _artPorFamilia(d, r.art, tc)
+  const artV = _agrFam && FAM.hayFam ? FAM.filas : r.art
+  const filaArt = a => fila([esc(a.nombre), n3(a.unit), n2(a.kg), '$ ' + n2(a.fobUsd), a.fobPenUnit != null ? 'S/ ' + n3(a.fobPenUnit) : dash])
+  const filaFam = a => fila([`<button type="button" class="hc-famb" data-fam="${a.famId}" onclick="window.hcFamToggle(this)" title="Ver los ${a.hijos.length} productos">▸</button> <span class="badge badge-info">Familia</span> <strong>${esc(a.nombre)}</strong> <span style="color:var(--text-secondary); font-size:.78rem;">· ${a.hijos.length} productos</span>`, n3(a.unit), n2(a.kg), '$ ' + n2(a.fobUsd), a.fobPenUnit != null ? 'S/ ' + n3(a.fobPenUnit) : dash])
+    + a.hijos.map(h => fila([`<span style="padding-left:26px; color:var(--text-secondary);">${esc(h.nombre)}</span>`, n3(h.unit), n2(h.kg), '$ ' + n2(h.fobUsd), h.fobPenUnit != null ? 'S/ ' + n3(h.fobPenUnit) : dash], 'color:var(--text-secondary);').replace('<tr ', `<tr data-famh="${a.famId}" hidden `)).join('')
   const s1 = r.art.length ? tabla(
     ['Descripción', 'FOB unit.', 'Cantidad kg', 'FOB $', 'FOB S/ (unit.)'],
-    r.art.map(a => fila([esc(a.nombre), n3(a.unit), n2(a.kg), '$ ' + n2(a.fobUsd), a.fobPenUnit != null ? 'S/ ' + n3(a.fobPenUnit) : dash])).join(''),
+    artV.map(a => a.esFam ? filaFam(a) : filaArt(a)).join(''),
     fila(['TOTAL', '', n2(totKg), '$ ' + n2(r.fobUsd), ''], TOT), true) : sinRegistros()
   const s1c = s1 + _comparativoHtml(d)
   const tit1 = `1.- Descripción${r.estimado && r.art.length ? ' <span style="font-weight:400; color:var(--color-warning,#b45309);">(estimado según la Proforma — aún no hay CI)</span>' : ''}`
@@ -806,13 +845,18 @@ function _html(d, r) {
     <div style="height:8px;"></div>
     <div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse;"><thead><tr>
       ${th('Artículo', false).replace('text-align:right;', 'text-align:left;')}${th('Costo FOB unit. S/')}${th('Costo FOB unit. $')}${th('Costo contable S/', cont)}${th('Costo contable $', cont)}${th('Costo comercial S/', !cont)}${th('Costo comercial $', !cont)}
-    </tr></thead><tbody>${r.art.map(a => `<tr>${td(esc(a.nombre), false, true)}${td(a.fobPenUnit != null ? n3(a.fobPenUnit) : dash)}${td(n3(a.unit))}
-      ${td(a.fobPenUnit != null && r.fdPenC != null ? `<strong>S/ ${n2(a.fobPenUnit * r.fdPenC)}</strong>` : dash, cont)}${td(`<strong>$ ${n2(a.unit * r.fdUsdC)}</strong>`, cont)}
-      ${td(a.fobPenUnit != null && r.fdPen != null ? `<strong>S/ ${n2(a.fobPenUnit * r.fdPen)}</strong>` : dash, !cont)}${td(`<strong>$ ${n2(a.unit * r.fdUsd)}</strong>`, !cont)}</tr>`).join('')}</tbody></table></div>
+    </tr></thead><tbody>${artV.map(a => {
+      const cols = x => `${td(x.fobPenUnit != null ? n3(x.fobPenUnit) : dash)}${td(n3(x.unit))}
+      ${td(x.fobPenUnit != null && r.fdPenC != null ? `<strong>S/ ${n2(x.fobPenUnit * r.fdPenC)}</strong>` : dash, cont)}${td(`<strong>$ ${n2(x.unit * r.fdUsdC)}</strong>`, cont)}
+      ${td(x.fobPenUnit != null && r.fdPen != null ? `<strong>S/ ${n2(x.fobPenUnit * r.fdPen)}</strong>` : dash, !cont)}${td(`<strong>$ ${n2(x.unit * r.fdUsd)}</strong>`, !cont)}`
+      if (!a.esFam) return `<tr>${td(esc(a.nombre), false, true)}${cols(a)}</tr>`
+      return `<tr>${td(`<button type="button" class="hc-famb" data-fam="s5-${a.famId}" onclick="window.hcFamToggle(this)" title="Ver los ${a.hijos.length} productos">▸</button> <span class="badge badge-info">Familia</span> <strong>${esc(a.nombre)}</strong> <span style="color:var(--text-secondary); font-size:.78rem;">· ${a.hijos.length} productos</span>`, false, true)}${cols(a)}</tr>`
+        + a.hijos.map(h => `<tr data-famh="s5-${a.famId}" hidden style="color:var(--text-secondary);">${td(`<span style="padding-left:26px;">${esc(h.nombre)}</span>`, false, true)}${cols(h)}</tr>`).join('')
+    }).join('')}</tbody></table></div>
     <div style="font-size:0.78rem; color:var(--text-secondary); padding:6px 2px;">${cont
       ? 'Costo contable (NIC 2): CIF + solo lo que forma parte del costo del inventario (ad valorem, boletín químico, gastos locales sin IGV). No entran IGV, IPM, percepción ni gastos financieros.'
       : 'Costo comercial (gerencia): CIF + todo lo pagado que se considera costo (ad valorem, gastos locales, financieros, IGV, IPM y percepción).'}</div>` : sinRegistros()
-    return seccion('6.- Factor de distribución y costo Perú', s5, false, hayFactor ? btnFD : '')
+    return seccion('6.- Factor de distribución y costo Perú', s5, false, hayFactor ? `<span style="display:inline-flex; gap:14px; align-items:center;">${_chkFam(FAM.hayFam)}${btnFD}</span>` : '')
   }
   _sec5 = sec5
 
@@ -827,7 +871,7 @@ function _html(d, r) {
       ${_documentosHtml(d)}${observacionesHtml(d)}</div>${_timelineHtml(d, cr)}</div>
       <div class="hc-grid">
         <div class="hc-formato">
-          ${seccion(tit1, s1c, true)}
+          ${seccion(tit1, s1c, true, _chkFam(FAM.hayFam))}
           ${seccion('2.- Valor de aduana (OMC)', s2, true)}
           ${seccion('3.- Tributos de despacho', s2b)}
           ${seccion('4.- Gastos de cadena local', s3)}

@@ -29,6 +29,8 @@ export function aplicarModoVerEditar(modalId, lectura) {
     if (el.type === 'hidden') return
     el.disabled = lectura || el.hasAttribute('data-siempre-lectura')
   })
+  // Un campo-buscador deshabilitado no dispara blur: su lista (fixed) quedaba abierta y flotando fuera del campo.
+  m.querySelectorAll('.bsq-caja.abierta').forEach(c => c.classList.remove('abierta'))
   m.querySelectorAll('[data-solo-lectura]').forEach(b => { b.style.display = lectura ? '' : 'none' })
   m.querySelectorAll('[data-solo-edicion]').forEach(b => { b.style.display = lectura ? 'none' : '' })
 }

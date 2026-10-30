@@ -89,8 +89,9 @@ function _reglas(d) {
     if (pb && num(dam.peso_bruto_kg) && Math.abs(pb - num(dam.peso_bruto_kg)) / pb > 0.005) add('peso_bl_dam', 'alerta', 'Documentos', 'Peso bruto distinto entre B/L y DAM',
       `B/L ${rBL(kg(pb))} vs DAM ${rDAM(kg(dam.peso_bruto_kg))} (diferencia ${kg(Math.abs(pb - num(dam.peso_bruto_kg)))}).`)
 
-    if (dam.nave && bl0?.nave_viaje && String(dam.nave).trim().toLowerCase() !== String(bl0.nave_viaje).trim().toLowerCase())
-      add('nave_bl_dam', 'alerta', 'Documentos', 'Nave distinta entre B/L y DAM', `B/L: ${rBL(bl0.nave_viaje)} · DAM: ${rDAM(dam.nave)}.`)
+    const norm = x => String(x || '').replace(/[\s\-]/g, '').toLowerCase()
+    if (dam.doc_transporte && bl0?.nro_bill_lading && norm(dam.doc_transporte) !== norm(bl0.nro_bill_lading))
+      add('doc_transp_bl', 'alerta', 'Documentos', 'Doc. de transporte de la DAM distinto al B/L', `DAM 7.8: ${rDAM(dam.doc_transporte)} · B/L: ${rBL(bl0.nro_bill_lading)}.`)
 
     const pts = [['PI', pi?.puerto_embarque], ['B/L', bl0?.puerto_embarque], ['DAM', dam.puerto_origen]].filter(p => p[1] && String(p[1]).trim())
     if (new Set(pts.map(p => String(p[1]).trim().toLowerCase())).size > 1) add('puerto_origen', 'alerta', 'Documentos', 'Puerto de origen no coincide',

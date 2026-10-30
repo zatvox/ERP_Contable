@@ -126,6 +126,7 @@ export function convertirEnBuscador(selector, opciones = {}) {
   }
 
   function abrir() {
+    if (input.disabled || input.readOnly) return   // en modo «ver» no se abre la lista
     pintarLista(input.value === input.dataset.textoElegido ? '' : input.value)
     caja.classList.add('abierta')
     _posicionarLista()
