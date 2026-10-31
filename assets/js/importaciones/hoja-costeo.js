@@ -22,7 +22,7 @@
 import { query, esperarContextoEmpresa } from '../supabase-client.js'
 import { getItems, getFamilias, getFamiliaLotes, getAdjuntos, getConteoAdjuntos, subirAdjuntos } from '../supabase-data.js'
 import { getCurrentUser } from '../auth-supabase.js'
-import { formatNumber, fechaDMY, showToast } from '../helpers.js'
+import { formatNumber, fechaDMY, showToast, hacerTablaOrdenable } from '../helpers.js'
 import { ojoBtn } from '../shared/ver-editar.js'
 import { CONCEPTOS_CARPETA } from './adjuntos-carpeta.js'
 import { anticipoDeCI, resumenEmbarcado } from './ci-multi.js'
@@ -58,6 +58,9 @@ const tabla = (head, filas, pie = '', ajustada = false) => `
 let _modoFD = 'comercial'
 try { _modoFD = localStorage.getItem('hojaCosteoModoFD') === 'contable' ? 'contable' : 'comercial' } catch { /* sin storage */ }
 let _sec5 = null
+let _etapaUlt = null   // etapa actual de la carpeta (la fija _timelineHtml)
+// Todas las tablas de la hoja se ordenan asc/desc al pulsar el encabezado
+const _ordenables = root => (root || document).querySelectorAll('#hoja-costeo table, table').forEach(t => { if (t.tHead && t.closest('#hoja-costeo, .hc-formato')) hacerTablaOrdenable(t) })
 // Agrupar por familia (inventario › Familias, SQL 66): un lote = producto + N° lote; un lote pertenece a UNA familia.
 let _agrFam = true
 try { _agrFam = localStorage.getItem('hojaCosteoAgrFam') !== '0' } catch { /* sin storage */ }
@@ -65,7 +68,7 @@ window.hcAgrFam = on => {
   _agrFam = !!on
   try { localStorage.setItem('hojaCosteoAgrFam', _agrFam ? '1' : '0') } catch { /* */ }
   const h = document.getElementById('hoja-costeo'), u = window.hcUltimo
-  if (h && u) { h.innerHTML = _html(u.d, u.c); window.hcVerMas?.(h) } else window.renderHojaCosteo?.()
+  if (h && u) { h.innerHTML = _html(u.d, u.c); window.hcVerMas?.(h); _ordenables(h) } else window.renderHojaCosteo?.()
 }
 window.hcFamToggle = btn => {
   const id = btn.dataset.fam, abre = btn.dataset.ab !== '1'
@@ -113,7 +116,7 @@ window.hcModoFD = m => {
   _modoFD = m === 'contable' ? 'contable' : 'comercial'
   try { localStorage.setItem('hojaCosteoModoFD', _modoFD) } catch { /* */ }
   const h = document.getElementById('hc-sec5')
-  if (h && _sec5) { h.innerHTML = _sec5(); window.hcVerMas?.(h) }      // solo la sección 5
+  if (h && _sec5) { h.innerHTML = _sec5(); window.hcVerMas?.(h); _ordenables(h) }      // solo la sección 5
   else window.renderHojaCosteo?.()
 }
 
@@ -243,7 +246,8 @@ function _calcular(d) {
   const fdUsdC = fobUsd > 0 ? numUsdC / fobUsd : null
   const fdPenC = fobPen > 0 && numPenC != null ? numPenC / fobPen : null
   const sinDesglose = !!ci && kFob === 1 && ['CIF', 'CFR', 'CIP', 'CPT', 'DAP', 'DDP'].includes(String(ci.terminos_delivery || '').toUpperCase()) && !fleteUsd && !seguroUsd
-  return { tc, kFob, sinDesglose, art, fobUsd, fobPen, fleteUsd, seguroUsd, cifUsd, cifPen, trib, locales, financ, numUsd, numPen, fdUsd, fdPen, numUsdC, numPenC, fdUsdC, fdPenC, detCom, detCont, estimado }
+  const advSinLedger = dam && num(dam.ad_valorem_usd) > 0 && !sumaLedger('ad_valorem').length ? num(dam.ad_valorem_usd) : 0   // la DAM lo declara pero aún no está en el costeo
+  return { advSinLedger, tc, kFob, sinDesglose, art, fobUsd, fobPen, fleteUsd, seguroUsd, cifUsd, cifPen, trib, locales, financ, numUsd, numPen, fdUsd, fdPen, numUsdC, numPenC, fdUsdC, fdPenC, detCom, detCont, estimado }
 }
 
 
@@ -519,6 +523,10 @@ function _timelineHtml(d, c) {
       <div class="tl-tx"><div class="tl-tit">${x.ico} ${x.tit}${x.fecha ? ` <span class="tl-f">${fechaDMY(x.fecha)}</span>` : ''}</div>${chips(x)}<div class="tl-sub">${x.sub || ''}</div></div>${x.btn || ''}</li>`
   }
   const sig = L9[iAct]
+  // Etapa del ciclo (las 4 del menú) a la que pertenece el primer paso pendiente
+  const ET = [[1, 'Compra y anticipo'], [2, 'Embarque y saldo'], [3, 'Nacionalización'], [3, 'Nacionalización'], [3, 'Nacionalización'], [4, 'Liquidación y cierre'], [4, 'Liquidación y cierre'], [4, 'Liquidación y cierre'], [4, 'Liquidación y cierre']]
+  _etapaUlt = iAct < 0 ? { n: 4, nombre: 'Liquidación y cierre', paso: 'Carpeta completa', completa: true, hechos, total: L9.length }
+    : { n: ET[iAct][0], nombre: ET[iAct][1], paso: sig.tit, falta: sig.sub || '', completa: false, hechos, total: L9.length }
   return `<div class="cr-wrap tl-wrap"><div class="cr-head">Línea de tiempo <span>· ${hechos} de ${L9.length} pasos</span>
       <button type="button" class="btn btn-secondary btn-small" style="margin-left:auto;" onclick="window.abrirPagosProveedor()">Ver pagos</button></div>
     <div class="tl-barra"><i style="width:${Math.round(hechos / L9.length * 100)}%"></i></div>
@@ -579,6 +587,35 @@ function _documentosHtml(d) {
     ${window.acTarjetas ? window.acTarjetas(slots, adjs, { compacto: true }) : ''}</div>`
 }
 
+
+// Aviso de etapa del encabezado del card: 4 etapas en segmentos + paso actual
+function _etapaHeaderHtml() {
+  const E = _etapaUlt; if (!E) return ''
+  const seg = NOMBRES_ETAPA.map((nom, i) => {
+    const n = i + 1, c = E.completa || n < E.n ? 'ok' : n === E.n ? 'act' : 'pen'
+    return `<li class="${c}"><span class="hc-eb-n">${c === 'ok' ? '✓' : n}</span><span class="hc-eb-t">${nom}</span></li>`
+  }).join('')
+  const falta = String(E.falta || '').replace(/<[^>]+>/g, '')
+  return `<div class="hc-eb" title="${esc(E.completa ? 'Todos los pasos están completos' : 'Paso actual: ' + E.paso + (falta ? ' — ' + falta : ''))}">
+    <ol class="hc-eb-seg">${seg}</ol>
+    <div class="hc-eb-now"><span class="hc-eb-k">${E.completa ? 'Estado' : 'Paso actual'}</span><b>${esc(E.completa ? 'Carpeta completa' : E.paso)}</b><span class="hc-eb-c">${E.hechos} de ${E.total} pasos</span></div>
+  </div>`
+}
+
+// ─── Columna derecha: estado de la carpeta + paneles por etapa (la etapa actual va primero) ───
+const NOMBRES_ETAPA = ['Compra y anticipo', 'Embarque y saldo', 'Nacionalización', 'Liquidación y cierre']
+function _chipEtapa(n) { const E = _etapaUlt || { n: 1, completa: false }; const c = E.completa || n < E.n ? ['ok', 'Completa'] : n === E.n ? ['act', 'En curso'] : ['pen', 'Pendiente']; return `<span class="hc-acc-c ${c[0]}">${c[1]}</span>` }
+// Liquidación del agente en la franja del título (botón + chips + avisos desplegables)
+function _liqPanelHtml() {
+  return `<div class="hc-liq-head"><div id="e4-liq-host"></div>
+    <details class="hc-liq-av" id="hc-liq-av" hidden><summary id="hc-liq-av-s">Avisos</summary><div id="hc-estado-avisos" class="hc-avisos"></div></details></div>`
+}
+function _asideHtml(d) {
+  const E = _etapaUlt || { n: 1, completa: false }
+  let paneles = [[3, 'Etapa 3 · Despacho en aduanas', _etapa3Html(d)], [4, 'Etapa 4 · Costo final al lote', '<div id="e4-lote-host"></div>']].filter(p => p[2])
+  if (E.n >= 4) paneles = [...paneles.filter(p => p[0] === 4), ...paneles.filter(p => p[0] !== 4)]
+  return paneles.map((p, i) => `<details class="hc-acc"${i === 0 ? ' open' : ''}><summary><span class="hc-acc-t">${p[1]}</span>${_chipEtapa(p[0])}</summary><div class="hc-acc-b">${p[2]}</div></details>`).join('')
+}
 
 // ─── Etapa 3: despacho en Aduanas y contingencias ───────────────────────────────
 const CANAL_E3 = { verde: ['Verde', '#10b981'], naranja: ['Naranja', '#f59e0b'], rojo: ['Rojo', '#ef4444'] }
@@ -682,6 +719,7 @@ function _html(d, r) {
   const { carpeta, ci, pi, dam, bls, pagos, docs } = d
   const tc = r.tc
   const cr = calcularCronograma(d)
+  const tlHtml = _timelineHtml(d, cr)   // fija _etapaUlt (etapa actual) antes de pintar la cabecera
   const fila = (cols, extra = '') => `<tr style="${extra}">${cols.map((c, i) => `<td style="${i === 0 ? TDL : TD}">${c}</td>`).join('')}</tr>`
   // Cabecera compacta: celdas etiqueta-arriba / valor-abajo en 2 columnas (span=2 ocupa todo el ancho)
   const cab = (k, v, ojo = '', span = 1) => `<div style="grid-column:${span > 1 ? '1 / -1' : 'auto'}; display:flex; align-items:center; gap:8px; padding:6px 12px; border-bottom:1px solid var(--border-color); min-width:0;">
@@ -729,6 +767,10 @@ function _html(d, r) {
           <div class="hcx-k">🧾 Commercial invoice${multiCI ? ` <span class="hcx-tag hcx-tag-hi">${cisL.length} CI en esta PI</span>` : ''}</div>
           ${cisL.length ? `<div class="hcx-cis">${ciTabs}${addCI}</div>` : `<div class="hcx-v">${dash}</div><div class="hcx-cis">${addCI}</div>`}
           ${ci ? `<div class="hcx-sub">CI activo: <strong>${esc(ci.invoice_number)}</strong> · ${fechaDMY(ci.fecha)}</div><span class="hcx-ojo">${ojoBtn('window.verCI()', 'Ver / editar el Commercial Invoice')}</span>` : ''}
+        </div>
+        <div class="hcx-doc hcx-doc-ag">
+          <div class="hcx-k">🧑‍💼 Agente aduanero</div>
+          ${_liqPanelHtml()}
         </div>
       </div>
       ${barra}
@@ -834,7 +876,7 @@ function _html(d, r) {
   }
   const HL = 'background:color-mix(in srgb, #3b82f6 16%, transparent);'
   const th = (t, hl) => `<th style="${TH}${hl ? HL : ''}">${t}</th>`
-  const td = (t, hl, first) => `<td style="${first ? TDL : TD}${hl ? HL : ''}">${t}</td>`
+  const td = (t, hl, first) => `<td style="${first ? TDL + 'white-space:nowrap;' : TD}${hl ? HL : ''}">${t}</td>`
   const btnFD = `<span style="display:inline-flex; gap:0; border:1px solid var(--border-color); border-radius:999px; overflow:hidden; font-size:.74rem; font-weight:600;">
       <button type="button" onclick="window.hcModoFD('contable')" title="Factor sin crédito fiscal ni conceptos que no son costo según NIC 2" style="padding:3px 12px; border:0; cursor:pointer; ${cont ? 'background:#3b82f6; color:#fff;' : 'background:transparent; color:var(--text-secondary);'}">Costo contable (NIC 2)</button>
       <button type="button" onclick="window.hcModoFD('comercial')" title="Factor con todo lo que se pagó (costo para gerencia)" style="padding:3px 12px; border:0; cursor:pointer; ${!cont ? 'background:#3b82f6; color:#fff;' : 'background:transparent; color:var(--text-secondary);'}">Costo comercial</button></span>`
@@ -855,7 +897,8 @@ function _html(d, r) {
     }).join('')}</tbody></table></div>
     <div style="font-size:0.78rem; color:var(--text-secondary); padding:6px 2px;">${cont
       ? 'Costo contable (NIC 2): CIF + solo lo que forma parte del costo del inventario (ad valorem, boletín químico, gastos locales sin IGV). No entran IGV, IPM, percepción ni gastos financieros.'
-      : 'Costo comercial (gerencia): CIF + todo lo pagado que se considera costo (ad valorem, gastos locales, financieros, IGV, IPM y percepción).'}</div>` : sinRegistros()
+      : 'Costo comercial (gerencia): CIF + todo lo pagado que se considera costo (ad valorem, gastos locales, financieros, IGV, IPM y percepción).'}</div>
+    ${r.advSinLedger ? `<div class="hc-aviso warn" style="margin-top:6px;">⚠ El factor aún <b>no incluye el ad valorem</b> de la DAM ($ ${n2(r.advSinLedger)}): pasa solo al costeo cuando registres el pago de los tributos.</div>` : ''}` : sinRegistros()
     return seccion('6.- Factor de distribución y costo Perú', s5, false, hayFactor ? `<span style="display:inline-flex; gap:14px; align-items:center;">${_chkFam(FAM.hayFam)}${btnFD}</span>` : '')
   }
   _sec5 = sec5
@@ -868,7 +911,7 @@ function _html(d, r) {
       </div></div>
     <div style="padding:0 16px 16px;">
       <div class="hc-top"><div class="hc-cab">${cabecera}
-      ${_documentosHtml(d)}${observacionesHtml(d)}</div>${_timelineHtml(d, cr)}</div>
+      ${_documentosHtml(d)}${observacionesHtml(d)}</div>${tlHtml}</div>
       <div class="hc-grid">
         <div class="hc-formato">
           ${seccion(tit1, s1c, true, _chkFam(FAM.hayFam))}
@@ -878,11 +921,7 @@ function _html(d, r) {
           ${seccion('5.- Gastos financieros', s4)}
           <div id="hc-sec5">${sec5()}</div>
         </div>
-        <aside class="hc-e3">
-          ${_etapa3Html(d)}
-          <div id="e4-liq-host"></div>
-          <div id="e4-lote-host"></div>
-        </aside>
+        <aside class="hc-e3">${_asideHtml(d)}</aside>
       </div>
     </div></div>`
 }
@@ -903,6 +942,7 @@ export async function renderHojaCosteo() {
     window.hcUltimo = d ? { d, c: cal } : null
     host.innerHTML = d ? _html(d, cal) : ''
     window.hcVerMas?.(host)
+    _ordenables(host)
     if (d) { window.renderEtapa4Liquidacion?.(); window.renderCostosLote?.() }
   } catch (e) {
     console.error('renderHojaCosteo:', e)

@@ -23,8 +23,18 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+-- Prueba carpeta 5 (liquidación Everest 2026-470): compras #177–#187 ya registradas
+-- y abonos de esa liquidación → pendientes de regularizar.
+UPDATE public.documentos_importacion SET regularizacion = 'pendiente'
+ WHERE compra_id BETWEEN 177 AND 187 AND regularizacion IS NULL;
+UPDATE public.importacion_liquidacion_abonos SET regularizacion = 'pendiente'
+ WHERE liquidacion_agente_id = 4 AND concepto <> 'proforma' AND regularizacion IS NULL;
+
 COMMIT;
 NOTIFY pgrst, 'reload schema';
 
 SELECT table_name, column_name FROM information_schema.columns
  WHERE column_name = 'regularizacion' AND table_name IN ('documentos_importacion','importacion_liquidacion_abonos');
+
+SELECT 'docs_pendientes' AS que, count(*) FROM public.documentos_importacion WHERE regularizacion = 'pendiente'
+UNION ALL SELECT 'abonos_pendientes', count(*) FROM public.importacion_liquidacion_abonos WHERE regularizacion = 'pendiente';

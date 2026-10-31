@@ -1,5 +1,5 @@
 import { fechaDMY } from '../helpers.js'
-import { declararEmpresaModal, empresaById } from '../empresa.js'
+import { declararEmpresaModal, empresaById, badgeEmpresa, textoEmpresa } from '../empresa.js'
 import { exigirEmpresaDeTrabajo } from '../empresa.js'
 // ============================================================================
 // ventas/packing.js — TAB "Packing (PK)": cotización / orden de venta (2026-09-30)
@@ -248,9 +248,9 @@ export async function renderPacking(forzar = true) {
       <div class="table-container"><table>
         <thead><tr>
           ${_th('sel', '<input type="checkbox" id="selTodosPK" style="width:auto; margin:0;" onchange="window.toggleSelTodosPK(this.checked)" title="Seleccionar todos los eliminables">', 'width:32px;')}
-          ${_thS('numero', 'N° PK')}${_thS('emision', 'Emisión')}${_thS('validez', 'Validez')}${_thS('cliente', 'Cliente')}${_thS('vendedor', 'Vendedor')}${_thS('oc', 'O/C')}
+          ${_thS('empresa', 'Empresa')}${_thS('numero', 'N° PK')}${_thS('emision', 'Emisión')}${_thS('validez', 'Validez')}${_thS('cliente', 'Cliente')}${_thS('vendedor', 'Vendedor')}${_thS('oc', 'O/C')}
           ${_thS('moneda', 'Moneda')}${_thS('total', 'Total', 'text-align:right;')}${_thS('estado', 'Estado')}${_thS('factura', 'Factura')}${_th('acciones', 'Acciones')}</tr></thead>
-        <tbody id="tabla-packing-body"><tr><td colspan="12" style="text-align:center;">Cargando...</td></tr></tbody>
+        <tbody id="tabla-packing-body"><tr><td colspan="13" style="text-align:center;">Cargando...</td></tr></tbody>
       </table></div>`
   }
   try {
@@ -290,13 +290,13 @@ export async function renderPacking(forzar = true) {
       for (const p of sospechosos) { try { await recalcularEstadoPacking(p.id) } catch (e) { console.warn('Recalculo PK', p.numero, e) } }
     }
   } catch (e) {
-    document.getElementById('tabla-packing-body').innerHTML = `<tr><td colspan="12" style="text-align:center; color:var(--color-danger);">${_esc(e.message)}</td></tr>`
+    document.getElementById('tabla-packing-body').innerHTML = `<tr><td colspan="13" style="text-align:center; color:var(--color-danger);">${_esc(e.message)}</td></tr>`
   }
 }
 
 // ─── Columnas (menú ⋮) y selección masiva — 2026-10-16 ─────────────────────
 registrarColumnas('packing', [
-  { key: 'sel', label: 'Selección (☑)' }, { key: 'numero', label: 'N° PK' }, { key: 'emision', label: 'Emisión' },
+  { key: 'sel', label: 'Selección (☑)' }, { key: 'empresa', label: 'Empresa' }, { key: 'numero', label: 'N° PK' }, { key: 'emision', label: 'Emisión' },
   { key: 'validez', label: 'Validez' }, { key: 'cliente', label: 'Cliente' }, { key: 'vendedor', label: 'Vendedor' },
   { key: 'oc', label: 'O/C' }, { key: 'moneda', label: 'Moneda' }, { key: 'total', label: 'Total' },
   { key: 'estado', label: 'Estado' }, { key: 'factura', label: 'Factura' }, { key: 'acciones', label: 'Acciones' }
@@ -311,6 +311,7 @@ let _pkSort = { col: null, dir: 'asc' }
 const _ORDEN_EST_PK = { cotizacion: -1, borrador: 0, enviado: 1, parcial: 2, facturado: 3, anulado: 4 }
 function _valorOrdenPK(p, col) {
   switch (col) {
+    case 'empresa':  return textoEmpresa(p.empresa_id).toLowerCase()
     case 'numero':   return (parseInt(p.correlativo) || 0) || String(p.numero || '')
     case 'emision':  return p.fecha_emision || ''
     case 'validez':  return p.fecha_validez || ''
@@ -412,7 +413,7 @@ window.filtrarPacking = function () {
     }
     if (fVend && (fVend === '__sin' ? p.vendedor_id : String(p.vendedor_id) !== fVend)) return false
     if (q) {
-      const texto = `${p.numero} ${p._cliente || ''} ${_nombreVendedor(p.vendedor_id) || ''} ${p.orden_compra_cliente || ''} ${p.moneda || ''} ${(p._facturas || []).map(f => f.numero).join(' ')} ${(ESTADOS[p.estado] || [''])[0]}`
+      const texto = `${p.numero} ${textoEmpresa(p.empresa_id)} ${p._cliente || ''} ${_nombreVendedor(p.vendedor_id) || ''} ${p.orden_compra_cliente || ''} ${p.moneda || ''} ${(p._facturas || []).map(f => f.numero).join(' ')} ${(ESTADOS[p.estado] || [''])[0]}`
       if (!texto.toLowerCase().includes(q)) return false
     }
     return true
@@ -431,7 +432,7 @@ window.filtrarPacking = function () {
   })
   const selTodos = document.getElementById('selTodosPK'); if (selTodos) selTodos.checked = false
   window.actualizarBotonEliminarPK?.()
-  if (!lista.length) { tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;">Sin PK registrados</td></tr>'; window.actualizarBotonEliminarPK(); return }
+  if (!lista.length) { tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;">Sin PK registrados</td></tr>'; window.actualizarBotonEliminarPK(); return }
   tbody.innerHTML = lista.map(p => {
     const [lbl, cls] = ESTADOS[p.estado] || [p.estado, 'badge-secondary']
     const esCot = p.estado === 'cotizacion'
@@ -442,6 +443,7 @@ window.filtrarPacking = function () {
       ${_td('sel', elim
         ? `<input type="checkbox" class="pk-sel" value="${p.id}" style="width:auto; margin:0;" onchange="window.actualizarBotonEliminarPK()">`
         : `<input type="checkbox" disabled style="width:auto; margin:0;" title="Tiene factura: no se puede eliminar">`, 'width:32px;')}
+      ${_td('empresa', badgeEmpresa(p.empresa_id))}
       <td data-col-tabla="packing" data-col="numero"${_cs('numero')}><strong>${_esc(p.numero)}</strong>${p._adjuntos ? ` <span title="${p._adjuntos} adjunto(s)" style="cursor:pointer;" onclick="window.verAdjuntosPacking(${p.id})">📎</span>` : ''}</td>
       ${_td('emision', _esc(fechaDMY(p.fecha_emision, '')))}
       <td data-col-tabla="packing" data-col="validez"${_csR('validez', vencido ? 'color:var(--color-danger); font-weight:600;' : '')} title="${vencido ? 'Validez vencida' : ''}">${_esc(fechaDMY(p.fecha_validez, '—'))}</td>

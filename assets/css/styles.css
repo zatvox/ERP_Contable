@@ -2623,3 +2623,10 @@ body.dark-mode .dt-ins.warn { color:#fcd34d; }
 .menu-tuerca .col-menu-dropdown label { cursor: pointer; white-space: nowrap; }
 .menu-tuerca .col-menu-dropdown label.peligro { color: var(--color-danger); }
 .badge-cotizacion { background-color: rgba(139, 92, 246, 0.18); color: #a78bfa; }
+/* Pill de empresa dentro de tablas (columna "Empresa", 2026-10-31) */
+.emp-pill.emp-pill-tabla {
+  display: inline-block; padding: 1px 8px; border-radius: 999px; white-space: nowrap;
+  border: 1px solid color-mix(in srgb, var(--emp) 45%, transparent);
+  background: color-mix(in srgb, var(--emp) 14%, transparent);
+  color: var(--emp); font-weight: 700; font-size: 0.7rem; letter-spacing: 0.05em;
+}

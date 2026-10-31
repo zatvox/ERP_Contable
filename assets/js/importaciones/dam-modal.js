@@ -484,6 +484,7 @@ window.dmCancelar = () => { if (_dam) { _volcarDAM(_dam, _ref); aplicarModoVerEd
 window.cerrarDAM = () => { window.closeModal('modal-dam-carpeta'); window.renderHojaCosteo?.(); window.renderDAM?.() }
 
 window.guardarDAMCarpeta = async function () {
+  if (window.validarRequeridos?.(['dmNro', 'dmFecha']) === false) return
   try {
     const ci = ciActual(); if (!ci) throw new Error('Falta el Commercial Invoice de la carpeta')
     if (!v('dmNro')) throw new Error('Falta el N° de DAM')
@@ -760,14 +761,17 @@ window.enviarAjusteCosteo = async function (ajusteId) {
 }
 
 // ── Enviar los tributos de la DAM ORIGINAL al costeo (ledger) ────────────────
-window.enviarDAMCosteo = async function () {
+// opts.auto = true: lo llama el registro del pago de tributos (sin confirmar, sin duplicar, sin exigir archivos)
+window.enviarDAMCosteo = async function (opts = {}) {
+  const auto = opts.auto === true
   try {
-    const d = _dam; if (!d) throw new Error('Guarda primero la DAM')
-    if (d.estado !== 'pagado') throw new Error('La DAM debe estar pagada (con fecha de pago y T.C.) para enviar sus tributos')
-    const c = carpeta(); if (!c) throw new Error('Sin carpeta de importación')
-    const tc = n0(d.tipo_cambio); if (tc < 1) throw new Error('La DAM no tiene T.C.: edítala y usa ⟳')
+    const d = opts.dam || _dam; if (!d) throw new Error('Guarda primero la DAM')
+    if (d.estado !== 'pagado') { if (auto) return { skip: 'pendiente' }; throw new Error('La DAM debe estar pagada (con fecha de pago y T.C.) para enviar sus tributos') }
+    const c = opts.carpeta || carpeta(); if (!c) throw new Error('Sin carpeta de importación')
+    const tc = n0(d.tipo_cambio); if (tc < 1) { if (auto) { showToast('La DAM quedó pagada sin T.C.: no pude enviar los tributos al costeo', 'warning', 6000); return { skip: 'sin_tc' } } throw new Error('La DAM no tiene T.C.: edítala y usa ⟳') }
     const previas = ((await query('importacion_costos', { carpeta_importacion_id: c.id })) || [])
       .filter(k => !k.anulado && ['ad_valorem', 'igv', 'ipm', 'percepcion'].includes(k.concepto_codigo) && !/adicional/i.test(k.concepto || ''))
+    if (previas.length && auto) return { ya: true }
     if (previas.length) throw new Error(`El costeo ya tiene ${previas.length} línea(s) de tributos de esta carpeta. Para no duplicar, revísalas en «Costos» antes de enviar.`)
     const lineas = [
       ['ad_valorem', 'Ad Valorem', 'tributos', 'inventario', n0(d.ad_valorem_usd), 'USD'],
@@ -777,7 +781,7 @@ window.enviarDAMCosteo = async function () {
     ].filter(l => l[4] > 0)
     if (!lineas.length) throw new Error('La DAM no tiene tributos para enviar')
     const lista = lineas.map(l => `  · ${l[1]}: ${l[5] === 'PEN' ? 'S/' : '$'} ${n2(l[4])}`).join('\n')
-    if (!confirm(`Se crearán ${lineas.length} línea(s) de tributos en el costeo de la carpeta ${c.numero_carpeta}:\n${lista}\n\nT.C. ${tc}. ¿Continuar?`)) return
+    if (!auto && !confirm(`Se crearán ${lineas.length} línea(s) de tributos en el costeo de la carpeta ${c.numero_carpeta}:\n${lista}\n\nT.C. ${tc}. ¿Continuar?`)) return
     const user = await getCurrentUser()
     const total = n0(d.ad_valorem_usd) + n0(d.igv_usd) + n0(d.imp_usd)
     const doc = {
@@ -794,9 +798,19 @@ window.enviarDAMCosteo = async function () {
       }, user?.db_id)
       documentoId = r.documentoId
     }
-    showToast(`Listo: ${lineas.length} línea(s) de tributos en el costeo`, 'success')
+    showToast(auto ? `Tributos de la DAM enviados al costeo automáticamente (${lineas.length} línea${lineas.length > 1 ? 's' : ''})` : `Listo: ${lineas.length} línea(s) de tributos en el costeo`, 'success')
     window.renderHojaCosteo?.(); window.renderCostosLedger?.()
-  } catch (e) { console.error('enviarDAMCosteo:', e); showToast(e.message || 'No se pudo enviar al costeo', 'danger') }
+    return { enviado: lineas.length }
+  } catch (e) { console.error('enviarDAMCosteo:', e); showToast(e.message || 'No se pudo enviar al costeo', 'danger'); return { error: e.message } }
+}
+
+// Desde la hoja / alertas: carga la DAM de la carpeta y envía sus tributos al costeo
+window.enviarDAMCosteoCarpeta = async function () {
+  const c = carpeta(); if (!c) return
+  const ds = (await query('dams', { carpeta_importacion_id: c.id })) || []
+  if (!ds.length) { showToast('La carpeta no tiene DAM', 'warning'); return }
+  _dam = ds[0]
+  return window.enviarDAMCosteo()
 }
 
 export default { cargarAjustes, CANALES, MOTIVOS }

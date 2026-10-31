@@ -4,6 +4,7 @@ import { fechaDMY } from '../helpers.js'
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
 import { S } from './state.js'
+import { badgeEmpresa, textoEmpresa } from '../empresa.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { colStyle } from '../col-menu.js'
 import { getCompraById, getLoteById, updateLote, deleteLote, getItems, getItemById, getMarcas, getGuiasIngresoCompra, getGuiaIngresoCompraById, updateGuiaIngresoCompra, deleteGuiaIngresoCompra, getDetalleGuiasIngresoCompra, getAlmacenes, getUbicaciones, getUbicacionVendors, addKardexMovimiento, getKardexByCompra, deleteKardexMovimiento, ultimoErrorDelete, updateStockUbicacion, getStockUbicacionesByLote, recalcularLoteDesdeBultos, getLoteBultosByLote, deleteLoteBulto } from '../supabase-data.js'
@@ -50,6 +51,7 @@ let _guiaSort = { col: null, dir: 'asc' } // orden por columna, tab Guías
 
 function _valorOrdenGuia({ g, compra, detalles }, campo) {
   switch (campo) {
+    case 'empresa':      return textoEmpresa(g.empresa_id)
     case 'numero_guia':  return g.numero_guia || ''
     case 'fecha_guia':   return g.fecha_guia || ''
     case 'referencia':   return compra?.referencia || `Compra #${g.compra_id}`
@@ -144,7 +146,7 @@ export async function renderGuias(forzar = false) {
     const busqueda = (document.getElementById('buscarGuia')?.value || '').trim().toLowerCase()
     const listaFiltrada = busqueda
       ? _guiasListaEnriquecida.filter(({ g, compra }) => {
-          return `${g.numero_guia || ''} ${g.fecha_guia || ''} ${fechaDMY(g.fecha_guia, '')} ${g.observaciones || ''} ${compra?.referencia || ''} ${compra?.proveedor_nombre || ''}`
+          return `${g.numero_guia || ''} ${textoEmpresa(g.empresa_id)} ${g.fecha_guia || ''} ${fechaDMY(g.fecha_guia, '')} ${g.observaciones || ''} ${compra?.referencia || ''} ${compra?.proveedor_nombre || ''}`
             .toLowerCase().includes(busqueda)
         })
       : _guiasListaEnriquecida
@@ -166,6 +168,7 @@ export async function renderGuias(forzar = false) {
         <thead>
           <tr>
             <th data-col-tabla="guias-ingreso" data-col="sel" style="width:32px;${colStyle('guias-ingreso','sel') ? 'display:none;' : ''}"><input type="checkbox" id="selAllGuias" onchange="window.toggleSeleccionTodasGuias(this.checked)" title="Seleccionar todas"></th>
+            ${_thOrdenable('Empresa', 'empresa', _guiaSort, 'ordenarGuias', 'guias-ingreso')}
             ${_thOrdenable('N° Guía', 'numero_guia', _guiaSort, 'ordenarGuias', 'guias-ingreso')}
             ${_thOrdenable('Fecha', 'fecha_guia', _guiaSort, 'ordenarGuias', 'guias-ingreso', 'fecha')}
             ${_thOrdenable('Compra (Referencia)', 'referencia', _guiaSort, 'ordenarGuias', 'guias-ingreso')}
@@ -189,6 +192,7 @@ export async function renderGuias(forzar = false) {
           <td data-col-tabla="guias-ingreso" data-col="sel" style="text-decoration:none; opacity:1;${colStyle('guias-ingreso','sel') ? ' display:none;' : ''}">${gAnulada
             ? `<input type="checkbox" disabled title="Guía anulada: su stock ya fue retirado">`
             : `<input type="checkbox" class="gi-sel" value="${g.id}" onchange="window.actualizarBotonEliminarGuias()">`}</td>
+          <td data-col-tabla="guias-ingreso" data-col="empresa"${colStyle('guias-ingreso','empresa')}>${badgeEmpresa(g.empresa_id)}</td>
           <td data-col-tabla="guias-ingreso" data-col="numero_guia"${colStyle('guias-ingreso','numero_guia')}><strong>${g.numero_guia}</strong></td>
           <td data-col-tabla="guias-ingreso" data-col="fecha"${colStyle('guias-ingreso','fecha')}>${fechaDMY(g.fecha_guia, '-')}</td>
           <td data-col-tabla="guias-ingreso" data-col="referencia"${colStyle('guias-ingreso','referencia')}>${compra?.referencia || `Compra #${g.compra_id}`}</td>

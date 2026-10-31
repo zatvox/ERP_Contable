@@ -6,6 +6,7 @@ import { fechaDMY } from '../helpers.js'
 import { S } from './state.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { colStyle, colMenuHtml } from '../col-menu.js'
+import { badgeEmpresa, textoEmpresa } from '../empresa.js'
 import { getItems, getLotes, getLoteById, getAlmacenes, getUbicaciones, getStockUbicaciones, addStockUbicacion, updateStockUbicacion, deleteStockUbicacion, updateLoteBulto, getKardex, addKardexMovimiento, obtenerSiguienteNumeroSecuencia, getVentas, getCompras, getContacts } from '../supabase-data.js'
 import { showToast, formatQty } from '../helpers.js'
 import { _aplicarOrdenFilas } from './resumen-stock.js'
@@ -97,8 +98,9 @@ export async function renderHistorialMovimientos() {
     for (const f of _historialMovFilasCache) {
       const it = itemsById.get(f.raw.item_id) || {}
       const fechaDMY = f.fecha ? String(f.fecha).slice(0, 10).split('-').reverse().join('/') : ''
+      f.empresa = textoEmpresa(f.raw.empresa_id)
       f._txt = [
-        f.fecha, fechaDMY, f.documento, f.docReferencia, f.contacto, f.producto, it.sku, f.lote,
+        f.empresa, f.fecha, fechaDMY, f.documento, f.docReferencia, f.contacto, f.producto, it.sku, f.lote,
         f.tipo, f.tipoLabel, f.desde, f.a, f.raw.concepto,
         f.cantidadEntrada || '', f.cantidadSalida || '', f.unidadEntrada || '', f.unidadSalida || '',
         f.cantidadEntrada ? formatQty(f.cantidadEntrada) : '', f.cantidadSalida ? formatQty(f.cantidadSalida) : ''
@@ -179,6 +181,7 @@ window.aplicarFiltrosHistorial = function () {
   })
 
   _aplicarOrdenFilas(filas, window._historialMovOrden, {
+    empresa:   f => f.empresa || '',
     fecha:     f => f.fecha || '',
     documento: f => f.documento,
     docReferencia: f => f.docReferencia,
@@ -226,6 +229,7 @@ function _pintarTablaHistorial(filas) {
       <table class="tabla-datos" style="font-size:0.9rem;">
         <thead>
           <tr>
+            ${_thOrdenHistorial('empresa', 'Empresa')}
             ${_thOrdenHistorial('fecha', 'Fecha')}
             ${_thOrdenHistorial('documento', 'N° Documento')}
             ${_thOrdenHistorial('docReferencia', 'Doc. Referencia')}
@@ -266,6 +270,7 @@ function _pintarTablaHistorial(filas) {
             }
             return `
               <tr>
+                <td data-col-tabla="historial-movimientos" data-col="empresa"${colStyle('historial-movimientos', 'empresa')}>${badgeEmpresa(f.raw.empresa_id)}</td>
                 <td data-col-tabla="historial-movimientos" data-col="fecha"${colStyle('historial-movimientos', 'fecha')}>${fechaDMY(f.fecha, '-')}</td>
                 <td data-col-tabla="historial-movimientos" data-col="documento"${colStyle('historial-movimientos', 'documento')}>${f.documento}</td>
                 <td data-col-tabla="historial-movimientos" data-col="docReferencia"${colStyle('historial-movimientos', 'docReferencia')}>${f.docReferencia}</td>
@@ -317,6 +322,7 @@ function _filaTotalesHistorial(filas) {
 
   return `
     <tr style="font-weight:600; border-top:2px solid var(--border-color);">
+      <td data-col-tabla="historial-movimientos" data-col="empresa"${colStyle('historial-movimientos', 'empresa')}></td>
       <td data-col-tabla="historial-movimientos" data-col="fecha"${colStyle('historial-movimientos', 'fecha')}>Total — ${filas.length} mov.</td>
       <td data-col-tabla="historial-movimientos" data-col="documento"${colStyle('historial-movimientos', 'documento')}></td>
       <td data-col-tabla="historial-movimientos" data-col="docReferencia"${colStyle('historial-movimientos', 'docReferencia')}></td>

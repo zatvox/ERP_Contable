@@ -71,6 +71,9 @@ function _reglas(d) {
     if (ob && ob.estado !== 'pagado') add('dam_trib_pend', 'alerta', 'Pagos', 'Tributos de la DAM pendientes de pago',
       `Tributos ${rDAM(usd(num(dam.ad_valorem_usd) + num(dam.imp_usd) + num(dam.igv_usd)))} sin pago aplicado. ${ref('Pagar', `window.pagarDocumento('dam_tributos','${dam.id}')`, 'Registrar el pago')}`)
 
+    if (dam.estado === 'pagado' && num(dam.ad_valorem_usd) > 0 && !costos.some(k => !k.anulado && k.concepto_codigo === 'ad_valorem' && !/adicional/i.test(k.concepto || '')))
+      add('trib_sin_costeo', 'critica', 'Costos', 'Tributos de la DAM sin enviar al costeo',
+        `El ad valorem ${rDAM(usd(dam.ad_valorem_usd))} no está en el costeo: el factor de distribución y el costo al lote quedan subvaluados. ${ref('Enviar', 'window.enviarDAMCosteoCarpeta()', 'Crear las líneas de tributos en el costeo')}`)
     if (!dam.fecha_levante) add('dam_sin_levante', 'alerta', 'Aduanas', 'Levante sin fecha',
       `Falta la fecha de levante en la ${rDAM('DAM')}. Sin ella no se aplica el costo al lote.`)
     if (!num(dam.tipo_cambio)) add('dam_sin_tc', 'alerta', 'Aduanas', 'DAM sin tipo de cambio', `Registra el T.C. SUNAT en la ${rDAM('DAM')}.`)
@@ -81,9 +84,16 @@ function _reglas(d) {
     const cif = num(dam.valor_fob) + num(dam.flete_maritimo) + num(dam.seguro_maritimo)
     if (num(dam.valor_cif) && Math.abs(cif - num(dam.valor_cif)) > 0.5) add('dam_cif_no_suma', 'critica', 'Aduanas', 'CIF de la DAM no suma',
       `FOB ${rDAM(usd(dam.valor_fob))} + flete ${usd(dam.flete_maritimo)} + seguro ${usd(dam.seguro_maritimo)} = ${usd(cif)} ≠ CIF ${rDAM(usd(dam.valor_cif))}.`)
-    if (ci && num(dam.flete_maritimo) + num(dam.seguro_maritimo) > 0 && Math.abs(num(dam.valor_fob) - num(ci.valor_total_final_ci)) < 1)
-      add('dam_fob_igual_ci', 'critica', 'Aduanas', 'Posible doble conteo de flete/seguro en el valor en aduana',
-        `El FOB de la ${rDAM('DAM')} (${rDAM(usd(dam.valor_fob))}) es igual al total del ${rCI('CI ' + (ci.invoice_number || ''))} (${rCI(usd(ci.valor_total_final_ci))}) y además suma flete ${usd(dam.flete_maritimo)} y seguro ${usd(dam.seguro_maritimo)}. Si el CI ya los incluye, se pagaron tributos de más: confirma con el agente.`)
+    // FOB de la DAM = total del CI y la DAM suma flete/seguro: solo es doble conteo si el CI YA incluye flete/seguro (incoterm tipo C/D).
+    // Con incoterm FOB/EXW/FCA/FAS es lo correcto: CIF aduana = FOB (CI) + flete + seguro.
+    if (ci && num(dam.flete_maritimo) + num(dam.seguro_maritimo) > 0 && Math.abs(num(dam.valor_fob) - num(ci.valor_total_final_ci)) < 1) {
+      const inc = [d.carpeta?.incoterm, ci.terminos_delivery, pi?.incoterm].find(x => x && String(x).trim()) || ''
+      const cTerm = /\b(cif|cfr|c\s*&\s*f|cip|cpt|dap|dat|ddp)\b/i.test(inc), fTerm = /\b(fob|exw|fca|fas)\b/i.test(inc)
+      if (cTerm) add('dam_fob_igual_ci', 'critica', 'Aduanas', 'Posible doble conteo de flete/seguro en el valor en aduana',
+        `El incoterm es ${esc(inc)} (flete/seguro ya incluidos en el CI), pero el FOB de la ${rDAM('DAM')} (${rDAM(usd(dam.valor_fob))}) es igual al total del ${rCI('CI ' + (ci.invoice_number || ''))} (${rCI(usd(ci.valor_total_final_ci))}) y además suma flete ${usd(dam.flete_maritimo)} y seguro ${usd(dam.seguro_maritimo)}. Se pagaron tributos de más: confirma con el agente.`)
+      else if (!fTerm) add('dam_fob_igual_ci', 'info', 'Aduanas', 'No se pudo validar el valor en aduana (falta incoterm)',
+        `El FOB de la ${rDAM('DAM')} es igual al total del ${rCI('CI ' + (ci.invoice_number || ''))} y suma flete/seguro. Registra el incoterm de la carpeta (FOB = correcto; CIF/CFR = doble conteo).`)
+    }
 
     const pb = bls.reduce((s, b) => s + num(b.peso_bruto), 0)
     if (pb && num(dam.peso_bruto_kg) && Math.abs(pb - num(dam.peso_bruto_kg)) / pb > 0.005) add('peso_bl_dam', 'alerta', 'Documentos', 'Peso bruto distinto entre B/L y DAM',

@@ -1,5 +1,5 @@
 import { fechaDMY } from '../helpers.js'
-import { declararEmpresaModal } from '../empresa.js'
+import { declararEmpresaModal, badgeEmpresa, textoEmpresa } from '../empresa.js'
 // ============================================================================
 // compras/compras-lista.js — parte de compras.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
@@ -31,6 +31,7 @@ let _compSort = { col: null, dir: 'asc' } // orden por columna, tab Compras
 
 registrarColumnas('compras', [
   { key: 'sel',          label: 'Seleccionar' },
+  { key: 'empresa',      label: 'Empresa' },
   { key: 'id',           label: 'Id' },
   { key: 'proveedor',    label: 'Proveedor' },
   { key: 'fecha',        label: 'Fecha Emisión' },
@@ -47,6 +48,7 @@ registrarColumnas('compras', [
 
 registrarColumnas('guias-ingreso', [
   { key: 'sel',          label: 'Seleccionar' },
+  { key: 'empresa',      label: 'Empresa' },
   { key: 'numero_guia',  label: 'N° Guía' },
   { key: 'fecha',        label: 'Fecha' },
   { key: 'referencia',   label: 'Compra (Referencia)' },
@@ -91,6 +93,7 @@ export function _thOrdenable(label, campo, sortState, funcOrdenar, tabla, colKey
 
 function _valorOrdenCompra(c, campo) {
   switch (campo) {
+    case 'empresa':        return textoEmpresa(c.empresa_id)
     case 'id':             return c.id
     case 'proveedor':      return c.proveedor_nombre || ''
     case 'fecha_emision':  return c.fecha_emision || ''
@@ -151,7 +154,7 @@ export async function renderCompras(forzar = false) {
     const listaFiltrada = busqueda
       ? porEstado.filter(c => {
           const comprobante = c.serie ? `${c.serie}-${c.numero}` : (c.numero || '')
-          return `${c.proveedor_nombre || ''} ${c.referencia || ''} ${comprobante} ${c.descripcion || ''}`
+          return `${c.proveedor_nombre || ''} ${textoEmpresa(c.empresa_id)} ${c.referencia || ''} ${comprobante} ${c.descripcion || ''}`
             .toLowerCase().includes(busqueda)
         })
       : porEstado
@@ -193,6 +196,7 @@ export async function renderCompras(forzar = false) {
         <thead>
           <tr>
             <th data-col-tabla="compras" data-col="sel" style="width:32px;${colStyle('compras','sel') ? 'display:none;' : ''}"><input type="checkbox" id="selAllCompras" onchange="window.toggleSeleccionTodasCompras(this.checked)" title="Seleccionar todas"></th>
+            ${_thOrdenable('Empresa', 'empresa', _compSort, 'ordenarCompras', 'compras')}
             ${_thOrdenable('Id', 'id', _compSort, 'ordenarCompras', 'compras')}
             ${_thOrdenable('Proveedor', 'proveedor', _compSort, 'ordenarCompras', 'compras')}
             ${_thOrdenable('Fecha Emisión', 'fecha_emision', _compSort, 'ordenarCompras', 'compras', 'fecha')}
@@ -240,6 +244,7 @@ export async function renderCompras(forzar = false) {
           <td data-col-tabla="compras" data-col="sel"${colStyle('compras','sel')}>${anulada
             ? `<input type="checkbox" disabled title="Comprobante anulado">`
             : `<input type="checkbox" class="compra-sel" value="${c.id}" onchange="window.actualizarBotonEliminarComprasSeleccionadas()">`}</td>
+          <td data-col-tabla="compras" data-col="empresa"${colStyle('compras','empresa')}>${badgeEmpresa(c.empresa_id)}</td>
           <td data-col-tabla="compras" data-col="id"${colStyle('compras','id')}><strong>${c.id}</strong></td>
           <td data-col-tabla="compras" data-col="proveedor"${colStyle('compras','proveedor')}>${c.proveedor_nombre || '-'}</td>
           <td data-col-tabla="compras" data-col="fecha"${colStyle('compras','fecha')}>${fechaDMY(c.fecha_emision, '-')}</td>

@@ -20,6 +20,7 @@ import { subirAdjuntos, getAdjuntos, getContacts } from '../supabase-data.js'
 import { convertirEnBuscador, refrescarBuscador } from '../buscador-select.js'
 import { abrirModalContacto } from '../shared/contacto-modal.js'
 import { CONCEPTOS_COSTO, crearLineaCosto } from './costos-ledger.js'
+import './gasto-factura.js'
 
 const $ = id => document.getElementById(id)
 const v = id => ($(id)?.value ?? '').toString().trim()
@@ -48,12 +49,20 @@ async function _cargarBase() {
   const c = carpeta()
   const costos = ((await query('importacion_costos', { carpeta_importacion_id: c.id })) || []).filter(k => !k.anulado)
   const ids = [...new Set(costos.map(k => k.documento_id).filter(Boolean))]
-  const todos = ids.length ? ((await query('documentos_importacion', {})) || []) : []
-  const docs = todos.filter(d => ids.includes(d.id))
+  let docs = []
+  for (let i = 0; i < ids.length; i += 80) {   // .in() por tandas: query() corta en 1,000 filas
+    const { data } = await supabase.from('documentos_importacion').select('*').in('id', ids.slice(i, i + 80))
+    docs = docs.concat(data || [])
+  }
   const fiscales = new Set(costos.filter(k => ['credito_fiscal', 'percepcion'].includes(k.clasificacion)).map(k => k.documento_id))
   const cand = docs.filter(d => !TIPOS_EXCLUIDOS.includes(d.tipo) && !fiscales.has(d.id) && !(d.tipo === 'voucher_bancario'))
   const concepto = id => costos.find(k => k.documento_id === id)?.concepto || ''
-  return { costos, cand: cand.map(d => ({ id: d.id, titulo: concepto(d.id) || d.tipo, numero: [d.serie, d.numero].filter(Boolean).join('-') || '—', fecha: d.fecha_emision, moneda: d.moneda, total: num(d.monto_total) })) }
+  return { costos, cand: cand.map(d => {
+    const ks = costos.filter(k => k.documento_id === d.id)
+    const igv = num(d.igv_monto), tot = num(d.monto_total)
+    return { id: d.id, titulo: concepto(d.id) || d.tipo, numero: [d.serie, d.numero].filter(Boolean).join('-') || '—', fecha: d.fecha_emision, moneda: d.moneda, total: tot,
+      igv, base: d.monto_sin_igv != null ? num(d.monto_sin_igv) : Math.max(0, tot - igv), costoIds: ks.map(k => k.id), compra_id: d.compra_id || null, regul: d.regularizacion || null }
+  }) }
 }
 
 async function _cargarLiq() {
@@ -178,12 +187,130 @@ function _asegurarModal() {
   </div>`)
 }
 
+let _celda = null   // celda en edición (doble clic, estilo Excel): { i, col }
+const COLS_ED = ['concepto', 'numero', 'fecha', 'base', 'igv']
 function _pintarDocs() {
   const lectura = $('modal-liq-agente')?.dataset.modo === 'lectura'
-  $('laDocs').innerHTML = _docs.length ? `<table class="data-table" style="width:100%"><thead><tr><th></th><th>Concepto</th><th>N° doc.</th><th>Fecha</th><th style="text-align:right">Importe</th></tr></thead><tbody>${
-    _docs.map((d, i) => `<tr><td><input type="checkbox" style="width:auto;margin:0" ${d.marcado ? 'checked' : ''} ${lectura ? 'disabled' : ''} onchange="window.laMarcar(${i}, this.checked)"></td>
-      <td>${esc(d.titulo)}</td><td>${esc(d.numero)}</td><td>${fechaDMY(d.fecha)}</td><td style="text-align:right">${SIGNO(d.moneda)} ${n2(d.total)}</td></tr>`).join('')}</tbody></table>`
-    : '<div class="dm-nota">La carpeta aún no tiene facturas de gastos locales. Usa «＋ Factura de gasto» para registrarlas (entran al costeo y a esta liquidación).</div>'
+  if (!_docs.length) { $('laDocs').innerHTML = '<div class="dm-nota">La carpeta aún no tiene facturas de gastos locales. Usa «＋ Factura de gasto» para registrarlas (entran al costeo y a esta liquidación).</div>'; return }
+  const sub = { USD: { b: 0, i: 0, t: 0, n: 0 }, PEN: { b: 0, i: 0, t: 0, n: 0 } }
+  for (const d of _docs.filter(x => x.marcado)) { const m = sub[d.moneda === 'PEN' ? 'PEN' : 'USD']; m.b += d.base; m.i += d.igv; m.t += d.total; m.n++ }
+  const fila = (d, i) => {
+    const S = SIGNO(d.moneda)
+    const chk = `<td><input type="checkbox" style="width:auto;margin:0" ${d.marcado ? 'checked' : ''} ${lectura ? 'disabled' : ''} onchange="window.laMarcar(${i}, this.checked)"></td>`
+    const editable = !lectura && d.costoIds.length === 1
+    // Celda editable: doble clic → input; si no, texto
+    const cel = (col, html, tipo, valor, cls = '') => {
+      if (_celda && _celda.i === i && _celda.col === col) {
+        const num_ = tipo === 'number'
+        return `<td class="${cls} la-cel-ed">${num_ ? `<span class="la-mon">${S}</span>` : ''}<input id="laC_in" class="la-celda" type="${tipo}" ${num_ ? 'step="0.01"' : ''} value="${esc(valor)}" onkeydown="window.laCeldaTecla(event, ${i}, '${col}')" onblur="window.laCeldaBlur(${i}, '${col}')"></td>`
+      }
+      return `<td class="${cls} ${editable ? 'la-cel' : ''}" ${editable ? `ondblclick="window.laCeldaEd(${i}, '${col}')" title="Doble clic para editar"` : ''}>${html}</td>`
+    }
+    const estado = d.compra_id
+      ? `<span class="badge badge-success" title="Compra #${d.compra_id} en el Registro de Compras">Compra #${d.compra_id}</span>${d.regul === 'pendiente' ? ' <span class="badge badge-warning" title="Pagada por el agente: concílíala en Cuentas por Pagar">Por regularizar</span>' : ''}`
+      : (d.costoIds.length === 1 ? `<button type="button" class="la-reg" onclick="window.laRegistrarGasto(${d.costoIds[0]})" title="Abre el modal de compra de gasto con esta factura">🧾 Registrar gasto</button>` : '')
+    return `<tr>${chk}
+      ${cel('concepto', `<div class="la-glosa"><span>${esc(d.titulo)}</span>${estado}</div>`, 'text', d.titulo)}
+      ${cel('numero', esc(d.numero), 'text', d.numero === '—' ? '' : d.numero)}
+      ${cel('fecha', fechaDMY(d.fecha), 'date', d.fecha || '')}
+      ${cel('base', `<span class="la-mon">${S}</span>${n2(d.base)}`, 'number', d.base.toFixed(2), 'la-num')}
+      ${cel('igv', `<span class="la-mon">${S}</span>${n2(d.igv)}`, 'number', d.igv.toFixed(2), 'la-num')}
+      <td class="la-num"><b><span class="la-mon">${S}</span>${n2(d.total)}</b></td>
+      <td class="la-acc">${lectura || d.costoIds.length !== 1 ? '' : `<button type="button" class="la-edit" data-solo-edicion title="${d.compra_id ? 'Editar gasto (modal completo)' : 'Registrar / editar gasto (modal completo)'}" onclick="window.laRegistrarGasto(${d.costoIds[0]})">✏️</button><button type="button" class="la-edit la-del" data-solo-edicion title="Eliminar esta glosa" onclick="window.laFilaEliminar(${i})">✕</button>`}</td></tr>`
+  }
+  const pie = ['USD', 'PEN'].filter(m => sub[m].n).map(m => `<tr class="la-sub"><td></td><td colspan="3">Subtotal ${m === 'USD' ? 'dólares' : 'soles'} (${sub[m].n} marcadas)</td>
+      <td class="la-num"><span class="la-mon">${SIGNO(m)}</span>${n2(sub[m].b)}</td><td class="la-num"><span class="la-mon">${SIGNO(m)}</span>${n2(sub[m].i)}</td><td class="la-num"><b><span class="la-mon">${SIGNO(m)}</span>${n2(sub[m].t)}</b></td><td></td></tr>`).join('')
+  $('laDocs').innerHTML = `<div style="overflow-x:auto;"><table class="data-table la-tabla" style="width:100%"><thead><tr><th></th><th>Concepto (glosa)</th><th>N° doc.</th><th>Fecha</th><th class="la-num">Base imponible</th><th class="la-num">IGV</th><th class="la-num">Total</th><th></th></tr></thead><tbody>${_docs.map(fila).join('')}</tbody><tfoot>${pie}</tfoot></table></div>`
+  if (_celda) setTimeout(() => { const e = $('laC_in'); if (e) { e.focus(); if (e.select && e.type !== 'date') e.select() } }, 0)
+}
+
+async function _refrescarDocs() {
+  const previos = new Map(_docs.map(d => [d.id, d.marcado]))
+  const base = await _cargarBase(); _costos = base.costos
+  _docs = base.cand.map(d => ({ ...d, marcado: previos.has(d.id) ? !!previos.get(d.id) : true }))
+  _pintarDocs(); aplicarModoVerEditar('modal-liq-agente', $('modal-liq-agente')?.dataset.modo === 'lectura'); window.laRecalcular(); window.laAuditar()
+}
+window.laRegistrarGasto = async function (costoId) {
+  window._alGuardarCosto = async () => { window._alGuardarCosto = null; await _refrescarDocs() }
+  await window.abrirGastoFactura?.(costoId)
+}
+window.laCeldaEd = (i, col) => { if (_celda) return; _celda = { i, col }; _pintarDocs(); aplicarModoVerEditar('modal-liq-agente', false) }
+let _guardandoCelda = false
+window.laCeldaTecla = (ev, i, col) => {
+  if (ev.key === 'Enter') { ev.preventDefault(); _celdaGuardar(i, col, 0) }
+  else if (ev.key === 'Escape') { ev.preventDefault(); _celda = null; _pintarDocs(); aplicarModoVerEditar('modal-liq-agente', false) }
+  else if (ev.key === 'Tab') { ev.preventDefault(); _celdaGuardar(i, col, ev.shiftKey ? -1 : 1) }
+}
+window.laCeldaBlur = (i, col) => { setTimeout(() => { if (_celda && _celda.i === i && _celda.col === col && !_guardandoCelda) _celdaGuardar(i, col, 0) }, 120) }
+async function _celdaGuardar(i, col, salto) {
+  if (_guardandoCelda || !_celda) return
+  const d = _docs[i], inp = $('laC_in'); if (!d || !inp) { _celda = null; return }
+  _guardandoCelda = true
+  const val = inp.value.trim()
+  try {
+    const cambios = {}; cambios[col] = val
+    const previo = col === 'concepto' ? d.titulo : col === 'numero' ? (d.numero === '—' ? '' : d.numero) : col === 'fecha' ? (d.fecha || '') : col === 'base' ? d.base.toFixed(2) : d.igv.toFixed(2)
+    if (val !== previo) await _aplicarCambio(i, cambios)
+    _celda = null
+    // siguiente celda (Tab) en la misma fila
+    if (salto) { const k = COLS_ED.indexOf(col) + salto; if (k >= 0 && k < COLS_ED.length) _celda = { i, col: COLS_ED[k] } }
+    if (val !== previo) await _refrescarDocs(); else { _pintarDocs(); aplicarModoVerEditar('modal-liq-agente', false) }
+    if (_celda) { _pintarDocs(); aplicarModoVerEditar('modal-liq-agente', false) }
+  } catch (e) { console.error('laCelda', e); showToast(e.message || 'No se pudo guardar la celda', 'danger'); _celda = null; _pintarDocs(); aplicarModoVerEditar('modal-liq-agente', false) }
+  finally { _guardandoCelda = false }
+}
+async function _aplicarCambio(i, c) {
+  const d = _docs[i]
+  if (d.costoIds.length !== 1) throw new Error('Este documento tiene varias líneas de costo: edítalo desde el ledger')
+  let concepto = 'concepto' in c ? c.concepto : d.titulo
+  let numTxt = 'numero' in c ? c.numero : (d.numero === '—' ? '' : d.numero)
+  let fecha = 'fecha' in c ? c.fecha : d.fecha
+  let base = 'base' in c ? Math.round(num(c.base) * 100) / 100 : d.base
+  let igv = 'igv' in c ? Math.round(num(c.igv) * 100) / 100 : d.igv
+  // si cambia la base y el IGV era el 18 % de la base anterior → se recalcula (como Excel con fórmula)
+  if ('base' in c && d.igv > 0 && Math.abs(d.igv - Math.round(d.base * 18) / 100) < 0.02) igv = Math.round(base * 18) / 100
+  const total = Math.round((base + igv) * 100) / 100
+  if (!concepto) throw new Error('La glosa no puede quedar vacía')
+  if (!fecha) throw new Error('Falta la fecha')
+  if (base <= 0) throw new Error('La base imponible debe ser mayor a 0')
+  const k = numTxt.indexOf('-'), serie = k > 0 ? numTxt.slice(0, k) : null, numero = k > 0 ? numTxt.slice(k + 1) : (numTxt || null)
+  if (!await update('documentos_importacion', d.id, { serie, numero, fecha_emision: fecha, monto_sin_igv: base, igv_monto: igv, monto_total: total })) throw new Error('No se pudo actualizar el documento')
+  if (!await update('importacion_costos', d.costoIds[0], { concepto, monto_moneda: base, igv_monto: igv })) throw new Error('No se pudo actualizar la línea de costo (¿carpeta cerrada?)')
+  if (d.compra_id) {   // la compra y su CxP acompañan (la CxP solo si aún no tiene pagos)
+    await update('compras', d.compra_id, { serie, numero, referencia: numTxt || null, fecha_emision: fecha, fecha_recepcion: fecha, periodo_mes: parseInt(fecha.slice(5, 7)), periodo_ano: parseInt(fecha.slice(0, 4)),
+      precio_unitario: base, subtotal: base, igv_gravado: igv, base_imponible_gravada: igv > 0 ? base : 0, monto_exonerado: igv > 0 ? 0 : base, total })
+    const det = ((await query('detalle_compras', { compra_id: d.compra_id })) || [])[0]
+    if (det) await update('detalle_compras', det.id, { descripcion: concepto, precio_unitario: base, subtotal: base, igv_monto: igv, total_linea: total })
+    const cx = ((await query('cuentas_pagar', { compra_id: d.compra_id })) || [])[0]
+    if (cx && num(cx.monto_pagado) === 0) await update('cuentas_pagar', cx.id, { serie, numero_comprobante: numero, fecha_emision: fecha, monto_total: total })
+    else if (cx) showToast('La CxP ya tiene pagos: ajusta su monto desde Cuentas por Pagar', 'warning', 6000)
+  }
+  showToast('Celda actualizada', 'success', 1800)
+}
+
+window.laFilaEliminar = async function (i) {
+  const d = _docs[i]; if (!d) return
+  if (d.costoIds.length !== 1) { showToast('Este documento tiene varias líneas de costo: elimínalo desde el ledger', 'warning'); return }
+  try {
+    let cx = null
+    if (d.compra_id) {
+      cx = ((await query('cuentas_pagar', { compra_id: d.compra_id })) || [])[0] || null
+      if (cx && num(cx.monto_pagado) > 0) { showToast('La cuenta por pagar de esta factura ya tiene pagos: no se puede eliminar', 'warning', 6000); return }
+    }
+    const msg = `¿Eliminar la glosa «${d.titulo}» (${SIGNO(d.moneda)} ${n2(d.total)})?` + (d.compra_id ? `\n\nTambién se eliminará la compra #${d.compra_id} y su cuenta por pagar.` : '') + '\n\nEsta acción no se puede deshacer.'
+    if (!window.confirm(msg)) return
+    if (d.compra_id) {
+      await update('documentos_importacion', d.id, { compra_id: null, cxp_id: null })
+      if (cx && !await deleteRecord('cuentas_pagar', cx.id)) throw new Error('No se pudo eliminar la cuenta por pagar')
+      for (const det of ((await query('detalle_compras', { compra_id: d.compra_id })) || [])) await deleteRecord('detalle_compras', det.id)
+      if (!await deleteRecord('compras', d.compra_id)) throw new Error('No se pudo eliminar la compra #' + d.compra_id)
+    }
+    if (!await deleteRecord('importacion_costos', d.costoIds[0])) throw new Error('No se pudo eliminar la línea de costo (¿carpeta cerrada?)')
+    const otras = (await query('importacion_costos', { documento_id: d.id })) || []
+    if (!otras.length) await deleteRecord('documentos_importacion', d.id)
+    showToast('Glosa eliminada', 'success')
+    await _refrescarDocs()
+  } catch (e) { console.error('laFilaEliminar', e); showToast(e.message || 'No se pudo eliminar', 'danger') }
 }
 
 function _pintarAbonos() {
@@ -639,11 +766,20 @@ window.renderEtapa4Liquidacion = async function () {
     const chips = _liq?.numero ? `<span class="cr-chip" style="--c:#10b981;">Liquidación ${esc(_liq.numero)}</span>
       <span class="cr-chip" style="--c:#6b7280;">Facturas $ ${n2(s.USD.fact)}${s.PEN.fact ? ' + S/ ' + n2(s.PEN.fact) : ''}</span>
       <span class="cr-chip" style="--c:#6b7280;">Abonos $ ${n2(s.USD.abono)}${s.PEN.abono ? ' + S/ ' + n2(s.PEN.abono) : ''}</span>` : ''
-    host.innerHTML = `<div class="e3-lista"><div class="e3-sub">Etapa 4 · Liquidación del agente aduanero</div>
-      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:6px 0;">
-        <button type="button" class="btn btn-primary btn-small" onclick="window.abrirLiquidacionAgente()">📑 ${_liq ? 'Ver liquidación del agente' : 'Registrar liquidación del agente'}</button>${chips}</div>
-      ${avisos.length ? `<div class="e3-sub" style="margin-top:10px;">Aviso final · conclusiones y observaciones de la carpeta</div>` + avisos.map(([t, x]) => `<div class="e3-nota">${t === 'warn' ? '⚠️' : t === 'obs' ? '📝' : 'ℹ️'} ${x}</div>`).join('') : (_liq?.numero ? '<div class="e3-nota">✅ Sin observaciones pendientes en la liquidación.</div>' : '')}
+    host.innerHTML = `<div class="e3-lista">
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:2px 0;">
+        <button type="button" class="btn btn-primary btn-small" title="${_liq ? 'Ver la liquidación del agente' : 'Registrar la liquidación del agente'}" onclick="window.abrirLiquidacionAgente()">Agente aduanero</button>${chips}</div>
     </div>`
+    // Avisos / conclusiones: suben al panel «Estado de la carpeta» (arriba de la columna)
+    const av = $('hc-estado-avisos')
+    if (av) {
+      const cls = { warn: 'warn', info: 'info', obs: 'obs' }
+      av.innerHTML = avisos.length
+        ? avisos.map(([t, x]) => `<div class="hc-aviso ${cls[t] || 'info'}">${x}</div>`).join('')
+        : (_liq?.numero ? '<div class="hc-aviso ok">Sin observaciones pendientes en la liquidación.</div>' : '')
+      const dt = $('hc-liq-av'), sm = $('hc-liq-av-s')
+      if (dt && sm) { dt.hidden = !av.children.length; dt.classList.toggle('ok', !avisos.length); sm.textContent = avisos.length ? `⚠ ${avisos.length} aviso${avisos.length > 1 ? 's' : ''}` : '✓ Sin avisos'; dt.open = false }
+    }
   } catch (e) {
     console.error('renderEtapa4Liquidacion:', e)
     host.innerHTML = /importacion_liquidaciones_agente|relation|does not exist|schema cache/i.test(e.message || '') ? '<div class="e3-nota">⚠️ Corre el SQL 107 para activar la liquidación del agente.</div>' : ''

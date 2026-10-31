@@ -4,6 +4,7 @@
 // ============================================================================
 import { getCurrentUser } from '../auth-supabase.js'
 import { colStyle } from '../col-menu.js'
+import { badgeEmpresa, textoEmpresa } from '../empresa.js'
 import { getItems, getLotes, getLoteById, addLote, updateLote, deleteLote } from '../supabase-data.js'
 import { showToast } from '../helpers.js'
 
@@ -39,7 +40,7 @@ export async function renderLotes(forzar = false) {
     const lotes = busqueda
       ? _loteLista.filter(l => {
           const nombreProd = prodMap[l.item_id]?.nombre || ''
-          return `${l.numero_lote || ''} ${l.codigo_partida || ''} ${nombreProd}`.toLowerCase().includes(busqueda)
+          return `${l.numero_lote || ''} ${textoEmpresa(l.empresa_id)} ${l.codigo_partida || ''} ${nombreProd}`.toLowerCase().includes(busqueda)
         })
       : _loteLista
 
@@ -52,6 +53,7 @@ export async function renderLotes(forzar = false) {
       <table>
         <thead>
           <tr>
+            <th data-col-tabla="lotes" data-col="empresa"${colStyle('lotes','empresa')}>Empresa</th>
             <th data-col-tabla="lotes" data-col="numero_lote"${colStyle('lotes','numero_lote')}>Lote</th>
             <th data-col-tabla="lotes" data-col="partida"${colStyle('lotes','partida')}>Partida</th>
             <th data-col-tabla="lotes" data-col="codigo"${colStyle('lotes','codigo')}>Código</th>
@@ -96,6 +98,7 @@ export async function renderLotes(forzar = false) {
 
       html += `
         <tr>
+          <td data-col-tabla="lotes" data-col="empresa"${colStyle('lotes','empresa')}>${badgeEmpresa(lote.empresa_id)}</td>
           <td data-col-tabla="lotes" data-col="numero_lote"${colStyle('lotes','numero_lote')}><strong>${lote.numero_lote || '-'}</strong></td>
           <td data-col-tabla="lotes" data-col="partida"${colStyle('lotes','partida')}>${lote.codigo_partida || '-'}</td>
           <td data-col-tabla="lotes" data-col="codigo"${colStyle('lotes','codigo')}>${prod?.sku || '-'}</td>

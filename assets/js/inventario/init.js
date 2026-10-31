@@ -20,6 +20,7 @@ import { renderProductos } from './productos.js'
 import { construirReporteInv, renderReportePartidas } from './reportes.js'
 
 registrarColumnas('lotes', [
+  { key: 'empresa',        label: 'Empresa' },
   { key: 'numero_lote',    label: 'Lote' },
   { key: 'partida',        label: 'Partida' },
   { key: 'codigo',         label: 'Código' },
@@ -52,6 +53,7 @@ registrarColumnas('resumen-stock', [
 
 registrarColumnas('stock-zonas', [
   { key: 'sel',       label: 'Seleccionar' },
+  { key: 'empresa',   label: 'Empresa' },
   { key: 'codigo',    label: 'Código' },
   { key: 'producto',  label: 'Producto' },
   { key: 'categoria', label: 'Categoría' },
@@ -82,6 +84,7 @@ registrarColumnas('stock-partida', [
 ])
 
 registrarColumnas('historial-movimientos', [
+  { key: 'empresa',      label: 'Empresa' },
   { key: 'fecha',        label: 'Fecha' },
   { key: 'documento',    label: 'N° Documento' },
   { key: 'docReferencia', label: 'Doc. Referencia' },

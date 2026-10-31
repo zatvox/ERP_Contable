@@ -4,6 +4,7 @@
 // ============================================================================
 import { getItems, getLotes, getLotesByItemId, getAlmacenes, getUbicaciones, getKardexByItem, getVentas, getCompras, getContacts } from '../supabase-data.js'
 import { showToast } from '../helpers.js'
+import { badgeEmpresa, textoEmpresa, esMultiEmpresaActiva } from '../empresa.js'
 import { convertirEnBuscador } from '../buscador-select.js'
 import { _escInv } from './ajuste-inventario.js'
 
@@ -267,6 +268,7 @@ const KARDEX_COLS_KEY = 'kardexColumnasVisibles'
 function _kardexColDefs() {
   return [
     { key: 'sel',        label: 'Seleccionar' },
+    { key: 'empresa',    label: 'Empresa' },
     { key: 'id',         label: 'ID' },
     { key: 'fecha',      label: 'Fecha' },
     { key: 'tipo',       label: 'Tipo Movimiento' },
@@ -294,6 +296,9 @@ function _kardexColsVisibles() {
   try { guardado = JSON.parse(localStorage.getItem(KARDEX_COLS_KEY) || '{}') } catch { guardado = {} }
   const cols = {}
   for (const c of _kardexColDefs()) cols[c.key] = guardado[c.key] !== false // todas visibles por defecto
+  // Empresa (2026-10-31): visible sola con 2+ empresas; la elección manual se guarda por modo
+  const kEmp = `empresa@${esMultiEmpresaActiva() ? 'multi' : 'uno'}`
+  cols.empresa = (kEmp in guardado) ? guardado[kEmp] !== false : esMultiEmpresaActiva()
   return cols
 }
 
@@ -333,8 +338,12 @@ if (!window._kardexColMenuListener) {
 
 window._toggleColumnaKardex = function (key, visible) {
   const cols = _kardexColsVisibles()
-  cols[key] = visible
-  localStorage.setItem(KARDEX_COLS_KEY, JSON.stringify(cols))
+  let guardado = {}
+  try { guardado = JSON.parse(localStorage.getItem(KARDEX_COLS_KEY) || '{}') } catch { guardado = {} }
+  if (key === 'empresa') { delete cols.empresa; cols[`empresa@${esMultiEmpresaActiva() ? 'multi' : 'uno'}`] = visible }
+  else { cols[key] = visible; delete cols.empresa }
+  for (const k of Object.keys(guardado)) if (k.startsWith('empresa@') && !(k in cols)) cols[k] = guardado[k]
+  try { localStorage.setItem(KARDEX_COLS_KEY, JSON.stringify(cols)) } catch { /* modo privado */ }
   document.querySelectorAll(`#kardex-body [data-col="${key}"]`).forEach(el => {
     el.style.display = visible ? '' : 'none'
   })
@@ -525,6 +534,7 @@ window.cargarKardex = async function() {
           <thead>
             <tr>
               <th data-col="sel"${_kardexColStyle(cols, 'sel')}><input type="checkbox" id="kardexSelAll" title="Seleccionar todo" onchange="window._kardexToggleSelTodo(this.checked)"></th>
+              <th data-col="empresa"${_kardexColStyle(cols, 'empresa')}>Empresa</th>
               <th data-col="id"${_kardexColStyle(cols, 'id')}>ID</th>
               <th data-col="fecha" style="cursor:pointer; user-select:none; white-space:nowrap; min-width:110px;${cols.fecha ? '' : ' display:none;'}" onclick="window.ordenarKardexPorFecha()" title="Ordenar por fecha">Fecha ${_kardexOrdenFecha === 'asc' ? '▲' : '▼'}</th><th data-col="tipo"${_kardexColStyle(cols, 'tipo')}>Tipo Movimiento</th><th data-col="concepto"${_kardexColStyle(cols, 'concepto')}>Concepto</th>
               <th data-col="contacto"${_kardexColStyle(cols, 'contacto')}>Contacto</th>
@@ -584,6 +594,7 @@ window.cargarKardex = async function() {
 
         html += `<tr data-mov-id="${m.id}">
           <td data-col="sel"${_kardexColStyle(cols, 'sel')}><input type="checkbox" class="kardex-sel" value="${m.id}"></td>
+          <td data-col="empresa"${_kardexColStyle(cols, 'empresa')}>${badgeEmpresa(m.empresa_id)}</td>
           <td data-col="id" style="font-size:0.82rem; color:var(--text-secondary);${cols.id ? '' : ' display:none;'}">${m.id}</td>
           <td data-col="fecha" style="white-space:nowrap;${cols.fecha ? '' : ' display:none;'}">${_fechaDDMMAAAA(m.fecha)}</td>
           <td data-col="tipo"${_kardexColStyle(cols, 'tipo')}><span style="${tipoColor}; font-weight:bold;">${m.tipo_movimiento || '-'}</span></td>
@@ -615,6 +626,7 @@ window.cargarKardex = async function() {
       // texto ("A") en vez de un colspan fijo sobre las primeras N columnas.
       html += `<tr class="kardex-fila-totales" style="border-top:2px solid var(--border-color); font-weight:bold;">
         <td data-col="sel"${_kardexColStyle(cols, 'sel')}></td>
+        <td data-col="empresa"${_kardexColStyle(cols, 'empresa')}></td>
         <td data-col="id"${_kardexColStyle(cols, 'id')}></td>
         <td data-col="fecha"${_kardexColStyle(cols, 'fecha')}></td>
         <td data-col="tipo"${_kardexColStyle(cols, 'tipo')}></td>

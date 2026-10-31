@@ -13,6 +13,7 @@ import { _nombreCliente, _nombreVendedor } from './helpers.js'
 import { _ventaRevertidaPorNC, _guiaEstaVigente } from './ventas-editar.js'
 import { getSeries } from '../series.js'
 import { supabase } from '../supabase-client.js'
+import { badgeEmpresa, textoEmpresa } from '../empresa.js'
 
 // ============================================================================
 // TAB: VENTAS (Facturas / Boletas + NUBEFACT CPE)
@@ -38,6 +39,7 @@ function _flechaOrdenVentas(campo) {
 
 registrarColumnas('ventas', [
   { key: 'sel',         label: 'Seleccionar' },
+  { key: 'empresa',     label: 'Empresa' },
   { key: 'comprobante', label: 'N° Comprobante' },
   { key: 'tipo',        label: 'Tipo' },
   { key: 'cliente',     label: 'Cliente' },
@@ -62,6 +64,7 @@ function _thOrdenableVentas(label, campo) {
 
 function _valorOrdenVenta({ v, cliente, vendedor }, campo) {
   switch (campo) {
+    case 'empresa': return textoEmpresa(v.empresa_id)
     case 'comprobante': return `${v.serie || ''}-${String(v.correlativo || '').padStart(8, '0')}`
     case 'tipo':         return v.tipo_comprobante || ''
     case 'cliente':      return cliente || ''
@@ -260,6 +263,7 @@ export async function renderVentas(forzar = false) {
             <thead>
               <tr>
                 <th data-col-tabla="ventas" data-col="sel" style="width:32px;${colStyle('ventas','sel') ? 'display:none;' : ''}"><input type="checkbox" id="selAllVentas" onchange="window.toggleSeleccionTodasVentas(this.checked)" title="Seleccionar todas"></th>
+                ${_thOrdenableVentas('Empresa', 'empresa')}
                 ${_thOrdenableVentas('N° Comprobante', 'comprobante')}
                 ${_thOrdenableVentas('Tipo', 'tipo')}
                 ${_thOrdenableVentas('Cliente', 'cliente')}
@@ -391,7 +395,7 @@ function _pintarFilasVentas() {
       const comprobante = `${v.serie || ''}-${String(v.correlativo || '').padStart(8, '0')}`
       const pk = _packingPorIdCache.get(v.packing_id)?.numero || ''
       const pago = _LBL_PAGO[_estadoPagoVenta(v)?.estado] || ''
-      return `${comprobante} ${pk} ${pago} ${cliente || ''} ${vendedor || ''} ${v.moneda || ''} ${v.tipo_comprobante || ''}`
+      return `${comprobante} ${textoEmpresa(v.empresa_id)} ${pk} ${pago} ${cliente || ''} ${vendedor || ''} ${v.moneda || ''} ${v.tipo_comprobante || ''}`
         .toLowerCase().includes(busqueda)
     })
   }
@@ -404,7 +408,7 @@ function _pintarFilasVentas() {
   }
 
   if (listaFiltrada.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="16" style="text-align:center;">${busqueda ? 'Sin resultados para la búsqueda' : (modoAnul === 'anulados' ? 'No hay comprobantes anulados' : 'Sin ventas registradas')}</td></tr>`
+    tbody.innerHTML = `<tr><td colspan="17" style="text-align:center;">${busqueda ? 'Sin resultados para la búsqueda' : (modoAnul === 'anulados' ? 'No hay comprobantes anulados' : 'Sin ventas registradas')}</td></tr>`
     return
   }
 
@@ -425,6 +429,7 @@ function _pintarFilasVentas() {
       <td data-col-tabla="ventas" data-col="sel"${colStyle('ventas','sel')}>${aceptado || anulada
         ? `<input type="checkbox" disabled title="${anulada ? 'Comprobante anulado' : 'No se puede eliminar: CPE aceptado por SUNAT'}">`
         : `<input type="checkbox" class="venta-sel" value="${v.id}" onchange="window.actualizarBotonEliminarVentasSeleccionadas()">`}</td>
+      <td data-col-tabla="ventas" data-col="empresa"${colStyle('ventas','empresa')}>${badgeEmpresa(v.empresa_id)}</td>
       <td data-col-tabla="ventas" data-col="comprobante"${colStyle('ventas','comprobante')}><strong>${v.serie || ''}-${String(v.correlativo || '').padStart(8,'0')}</strong></td>
       <td data-col-tabla="ventas" data-col="tipo"${colStyle('ventas','tipo')}>${badgeTipoDocumento(v.tipo_comprobante)}${v.venta_referencia_id ? `<br><small style="color:var(--text-secondary);">ref. ${v.doc_referencia_serie || ''}-${String(v.doc_referencia_numero || '').padStart(8,'0')}</small>` : ''}${_badgeAnticipoVenta(v)}</td>
       <td data-col-tabla="ventas" data-col="cliente"${colStyle('ventas','cliente')}>${cliente}</td>

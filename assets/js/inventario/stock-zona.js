@@ -3,6 +3,7 @@
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
 import { colStyle } from '../col-menu.js'
+import { badgeEmpresa, textoEmpresa } from '../empresa.js'
 import { getItems, getLotes, getMarcas, getAlmacenes, getUbicaciones, getStockUbicaciones, getCategorias, getFamilias, getFamiliaLotes } from '../supabase-data.js'
 import { showToast, pdfTablaUnaLinea } from '../helpers.js'
 import { _fechaDDMMAAAA } from './kardex.js'
@@ -155,13 +156,15 @@ export async function renderStockZonas() {
           costosOrig: new Set(),
           tcs: new Set(),
           monedas: new Set(),
-          loteIds: []
+          loteIds: [],
+          empresaIds: new Set()
         }
       }
       const g = gruposMap[key]
       g.cantidad += parseFloat(s.cantidad) || 0
       g.unidades += parseFloat(s.cantidad_unidades) || 0
       g.loteIds.push(s.lote_id)
+      if (lote.empresa_id != null) g.empresaIds.add(lote.empresa_id)
       g.itemIds.add(lote.item_id)
       g.numerosLote.add(lote.numero_lote || '-')
       if (lote.marca_id) g.marcaIds.add(lote.marca_id)
@@ -215,6 +218,7 @@ export async function renderStockZonas() {
     //   perder el agrupamiento visual que el banner promete.
     const stOrden = window._resumenStockOrden.zona
     const extractoresZona = {
+      empresa:   g => [...g.empresaIds].map(textoEmpresa).join(' '),
       codigo:    g => txtSku(g),
       producto:  g => txtProducto(g),
       categoria: g => txtCategoria(g),
@@ -254,6 +258,7 @@ export async function renderStockZonas() {
         <thead>
           <tr>
             <th data-col-tabla="stock-zonas" data-col="sel"${colStyle('stock-zonas','sel')}><input type="checkbox" id="stockZonasSelAll" title="Seleccionar todo" onchange="window._stockZonasToggleSelTodo(this.checked)"></th>
+            ${_thOrden('zona', 'stock-zonas', 'empresa', 'Empresa')}
             ${_thOrden('zona', 'stock-zonas', 'codigo', 'Código')}
             ${_thOrden('zona', 'stock-zonas', 'producto', 'Producto')}
             ${_thOrden('zona', 'stock-zonas', 'categoria', 'Categoría')}
@@ -285,13 +290,14 @@ export async function renderStockZonas() {
       // Fila separadora por zona, solo cuando se ven todas juntas (sin
       // filtro) — puramente visual, no cambia los datos.
       if (!fZona && etiquetaZona !== zonaAnterior) {
-        html += `<tr><td colspan="17" style="background:var(--bg-secondary); font-weight:bold; padding:6px 10px;">${etiquetaZona}</td></tr>`
+        html += `<tr><td colspan="18" style="background:var(--bg-secondary); font-weight:bold; padding:6px 10px;">${etiquetaZona}</td></tr>`
         zonaAnterior = etiquetaZona
       }
 
       html += `
         <tr>
           <td data-col-tabla="stock-zonas" data-col="sel"${colStyle('stock-zonas','sel')}><input type="checkbox" class="stock-zona-sel"></td>
+          <td data-col-tabla="stock-zonas" data-col="empresa"${colStyle('stock-zonas','empresa')}>${[...g.empresaIds].map(badgeEmpresa).join(' ') || badgeEmpresa(null)}</td>
           <td data-col-tabla="stock-zonas" data-col="codigo"${colStyle('stock-zonas','codigo')}>${txtSku(g)}</td>
           <td data-col-tabla="stock-zonas" data-col="producto"${colStyle('stock-zonas','producto')}>${esFam ? '<span class="badge badge-info solo-pantalla" style="margin-right:6px;">Familia</span><strong>' + txtProducto(g) + '</strong>' : txtProducto(g)}</td>
           <td data-col-tabla="stock-zonas" data-col="categoria"${colStyle('stock-zonas','categoria')}>${txtCategoria(g)}</td>

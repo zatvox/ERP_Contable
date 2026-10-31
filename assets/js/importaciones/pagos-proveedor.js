@@ -208,14 +208,14 @@ function _asegurarModal() {
             <div class="form-group"><label>Medio de pago *</label>
               <select id="ppMedio" onchange="this.dataset.auto='0'; window.ppAplicarMedio()">${Object.entries(MEDIOS).map(([k, t]) => `<option value="${k}">${t}</option>`).join('')}</select></div>
 
-            <div class="form-group"><label>T.C. (S/ por US$) <span id="ppTCAviso" style="font-weight:400; color:var(--text-secondary); font-size:0.75rem;"></span></label>
+            <div class="form-group"><label>T.C. (S/ por US$) * <span id="ppTCAviso" style="font-weight:400; color:var(--text-secondary); font-size:0.75rem;"></span></label>
               <div style="display:flex; gap:4px;"><input type="number" step="0.001" id="ppTC" oninput="this.dataset.auto='0'; window.ppAutoMonto()">
               <button type="button" class="btn btn-secondary btn-small" onclick="window.ppTCDelDia(true)" title="Traer el T.C. del día">⟳</button></div></div>
             <div class="form-group"><label>Moneda de la cuenta</label>
               <input type="text" id="ppMoneda" readonly style="background:var(--bg-secondary,#f3f4f6); font-weight:600;"></div>
             <div class="form-group"><label>Monto pagado * <small id="ppMontoAyuda" style="font-weight:400; color:var(--text-secondary);"></small></label>
               <input type="number" step="0.01" id="ppMonto" oninput="this.dataset.auto='0'; window.ppRecalcular()"></div>
-            <div class="form-group"><label>N° operación / cheque</label>
+            <div class="form-group"><label>N° operación / cheque *</label>
               <input type="text" id="ppCodOp" maxlength="60"></div>
 
             <div class="form-group"><label>Comisión bancaria</label>
@@ -653,7 +653,15 @@ async function _sincronizarDocs() {
     const t = obs.find(o => o.doc_tipo === 'dam_tributos')
     if (t) {
       const lp = ultimo('dam_tributos', dam.id)
-      if (t.estado === 'pagado' && lp) { if (dam.estado !== 'pagado' || dam.fecha_pago !== lp.fecha) await update('dams', dam.id, { estado: 'pagado', fecha_pago: lp.fecha, tipo_cambio: num(lp.tipo_cambio) || dam.tipo_cambio }) }
+      if (t.estado === 'pagado' && lp) {
+        if (dam.estado !== 'pagado' || dam.fecha_pago !== lp.fecha) await update('dams', dam.id, { estado: 'pagado', fecha_pago: lp.fecha, tipo_cambio: num(lp.tipo_cambio) || dam.tipo_cambio })
+        // Al quedar pagados los tributos, pasan solos al costeo (no depende de adjuntar el voucher)
+        try {
+          const fresca = ((await query('dams', { id: dam.id })) || [])[0]
+          const carp = ((await query('carpetas_importacion', { id: _ctx.carpetaId })) || [])[0]
+          if (fresca && carp) await window.enviarDAMCosteo?.({ auto: true, dam: fresca, carpeta: carp })
+        } catch (e) { console.warn('auto tributos→costeo', e) }
+      }
       else if (t.estado !== 'pagado' && dam.estado === 'pagado') { await update('dams', dam.id, { estado: 'pendiente' }) }
     }
     for (const a of _ctx.ajustes) {
@@ -700,6 +708,7 @@ async function _quitarComisionesLedger(id) {
 
 window.ppGuardar = async function () {
   const btn = $('ppBtnGuardar')
+  if (window.validarRequeridos?.(['ppCuenta', 'ppFecha', 'ppMonto', 'ppTC']) === false) return
   try {
     const b = _banco()
     if (!b) throw new Error('Elige la cuenta de donde sale el pago')

@@ -4,6 +4,7 @@ import { fechaDMY } from '../helpers.js'
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
 import { S } from './state.js'
+import { badgeEmpresa, textoEmpresa } from '../empresa.js'
 import { registrarColumnas, colStyle } from '../col-menu.js'
 import { getCustomers, getLoteById, getVentas, updateVenta, getDetalleVentas, ultimoErrorDelete, getKardexByVenta, deleteKardexMovimiento, getGuiasDespachoVenta, getGuiaDespachoVentaById, deleteGuiaDespachoVenta, getDetalleGuiasDespachoVenta, getDetalleGuiasDespachoVentaByVenta, invalidateGuiasDespachoVentaCache, recalcularLoteDesdeBultos, revertirBultosDeDetalleGuiaDespacho, borrarKardexDeGuiaEstricto } from '../supabase-data.js'
 import { showToast } from '../helpers.js'
@@ -197,6 +198,7 @@ function _thOrdenableGuiasDespacho(label, campo) {
 
 function _valorOrdenGuiaDespacho(g, campo) {
   switch (campo) {
+    case 'empresa':     return textoEmpresa(g.empresa_id)
     case 'numero_guia': return g.numero_guia || ''
     case 'venta':        return g.ventaNumero || ''
     case 'cliente':      return g.clienteNombre || ''
@@ -240,7 +242,7 @@ export async function renderGuiasDespachoVenta(forzar = false) {
 
     const busqueda = (document.getElementById('buscarGuiaDespacho')?.value || '').trim().toLowerCase()
     const lista = busqueda
-      ? S._guiasDespachoLista.filter(g => `${g.numero_guia || ''} ${g.clienteNombre || ''} ${g.ventaNumero || ''}`.toLowerCase().includes(busqueda))
+      ? S._guiasDespachoLista.filter(g => `${g.numero_guia || ''} ${textoEmpresa(g.empresa_id)} ${g.clienteNombre || ''} ${g.ventaNumero || ''}`.toLowerCase().includes(busqueda))
       : [...S._guiasDespachoLista]
 
     if (_guiasDespachoSort.col) {
@@ -260,6 +262,7 @@ export async function renderGuiasDespachoVenta(forzar = false) {
         <thead>
           <tr>
             <th data-col-tabla="guias-despacho" data-col="sel" style="width:32px;${colStyle('guias-despacho','sel') ? 'display:none;' : ''}"><input type="checkbox" id="selAllGuiasDespacho" onchange="window.toggleSeleccionTodasGuiasDespacho(this.checked)" title="Seleccionar todas"></th>
+            ${_thOrdenableGuiasDespacho('Empresa', 'empresa')}
             ${_thOrdenableGuiasDespacho('N° Guía', 'numero_guia')}
             ${_thOrdenableGuiasDespacho('Venta', 'venta')}
             ${_thOrdenableGuiasDespacho('Cliente', 'cliente')}
@@ -279,6 +282,7 @@ export async function renderGuiasDespachoVenta(forzar = false) {
               <td data-col-tabla="guias-despacho" data-col="sel" style="text-decoration:none; opacity:1;${colStyle('guias-despacho','sel') ? ' display:none;' : ''}">${inactiva
                 ? `<input type="checkbox" disabled title="${anulada ? 'Guía anulada' : 'Guía revertida'}: su stock ya fue revertido">`
                 : `<input type="checkbox" class="gd-sel" value="${g.id}" onchange="window.actualizarBotonEliminarGuiasDespacho()">`}</td>
+              <td data-col-tabla="guias-despacho" data-col="empresa"${colStyle('guias-despacho','empresa')}>${badgeEmpresa(g.empresa_id)}</td>
               <td data-col-tabla="guias-despacho" data-col="numero_guia"${colStyle('guias-despacho','numero_guia')}>${g.numero_guia}</td>
               <td data-col-tabla="guias-despacho" data-col="venta"${colStyle('guias-despacho','venta')}>${g.ventaNumero}</td>
               <td data-col-tabla="guias-despacho" data-col="cliente"${colStyle('guias-despacho','cliente')}>${g.clienteNombre}</td>
@@ -312,6 +316,7 @@ window.filtrarGuiasDespacho = function () {
 
 registrarColumnas('guias-despacho', [
   { key: 'sel',           label: 'Seleccionar' },
+  { key: 'empresa',       label: 'Empresa' },
   { key: 'numero_guia',   label: 'N° Guía' },
   { key: 'venta',         label: 'Venta' },
   { key: 'cliente',       label: 'Cliente' },

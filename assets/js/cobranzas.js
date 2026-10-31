@@ -38,6 +38,7 @@ import { cacheado, invalidarVarios } from './data-cache.js'
 import { renderEstadoCuentaCliente } from './estado-cuenta.js'
 import { initCobroMasivo, htmlSeccionLote } from './cobro-masivo.js'
 import { columnasAuto } from './col-menu.js'
+import { badgeEmpresa } from './empresa.js'
 import { crearReporte, diasVencidos, tramoAntiguedad, nombreMes, mesActual, descargarCSV } from './reportes.js'
 import { convertirVarios, refrescarBuscador } from './buscador-select.js'
 import { saldoCuota, estadoCuota, repartirEntreCuotas, getTerminosConCuotas, invalidarCacheTerminos } from './cronograma.js'
@@ -404,7 +405,7 @@ window.cargarCxC = async function() {
     if (!tbody) return
 
     if (lista.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;">Sin registros para los filtros seleccionados</td></tr>'
+      tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;">Sin registros para los filtros seleccionados</td></tr>'
       if (tfoot) tfoot.innerHTML = ''
       _poblarSelectCxC([])
       calcularKPIs()
@@ -434,6 +435,7 @@ window.cargarCxC = async function() {
                   : vencida ? 'badge-danger' : 'badge-secondary'
 
       return `<tr ${anulado ? 'style="opacity:.55; text-decoration:line-through;" title="Comprobante anulado: no genera deuda"' : (vencida ? 'style="background:rgba(239,68,68,.06);"' : '')}>
+        <td>${badgeEmpresa(cxc.empresa_id)}</td>
         <td>${_esc(_nombreContacto(cxc.contact_id))}</td>
         <td>${_esc(`${cxc.tipo_comprobante || ''} ${cxc.serie || ''}-${numComp(cxc.numero_comprobante)}`)}${_htmlCuotas(cxc.id)}</td>
         <td style="white-space:nowrap;">${_esc(_pkDeCxc(cxc) || '—')}</td>
@@ -450,7 +452,7 @@ window.cargarCxC = async function() {
     }).join('')
 
     if (tfoot) tfoot.innerHTML = `
-      <td colspan="7"><strong>TOTAL (${lista.filter(c => c.estado !== 'anulado').length} documentos${lista.some(c => c.estado === 'anulado') ? ` · ${lista.filter(c => c.estado === 'anulado').length} anulado(s) sin sumar` : ''})</strong></td>
+      <td></td><td colspan="7"><strong>TOTAL (${lista.filter(c => c.estado !== 'anulado').length} documentos${lista.some(c => c.estado === 'anulado') ? ` · ${lista.filter(c => c.estado === 'anulado').length} anulado(s) sin sumar` : ''})</strong></td>
       <td style="text-align:right; white-space:nowrap;"><strong>${_fmTotales(mT)}</strong></td>
       <td style="text-align:right; white-space:nowrap;"><strong>${_fmTotales(mC)}</strong></td>
       <td style="text-align:right; white-space:nowrap;"><strong>${_fmTotales(mP)}</strong></td>
@@ -752,11 +754,12 @@ window.filtrarCobrosRecientes = function() {
   lista = lista.slice(0, 50)
 
   if (lista.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="14" style="text-align:center;">Sin cobros registrados</td></tr>'
+    tbody.innerHTML = '<tr><td colspan="15" style="text-align:center;">Sin cobros registrados</td></tr>'
     return
   }
 
   tbody.innerHTML = lista.map(c => `<tr>
+    <td>${badgeEmpresa(c.empresa_id)}</td>
     <td data-sort="${_esc(c.numero_recibo || '')}"><input type="text" class="input-recibo" value="${_esc(c.numero_recibo || '')}" placeholder="—"
         title="N° del recibo de cobranza físico — escribe y presiona Enter"
         onkeydown="if(event.key==='Enter'){this.blur()} else if(event.key==='Escape'){this.value=this.defaultValue; this.blur()}"
@@ -904,7 +907,7 @@ window.cargarCxP = async function() {
     if (!tbody) return
 
     if (lista.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;">Sin cuentas por pagar para los filtros seleccionados</td></tr>'
+      tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;">Sin cuentas por pagar para los filtros seleccionados</td></tr>'
       if (tfoot) tfoot.innerHTML = ''
       _poblarSelectCxP([])
       calcularKPIs()
@@ -929,6 +932,7 @@ window.cargarCxP = async function() {
                   : cxp.estado === 'parcial' ? 'badge-warning' : 'badge-secondary'
 
       return `<tr ${anulado ? 'style="opacity:.55; text-decoration:line-through;" title="Comprobante anulado: no genera deuda"' : ''}>
+        <td>${badgeEmpresa(cxp.empresa_id)}</td>
         <td>${_esc(_nombreContacto(cxp.contact_id))}</td>
         <td>${_esc(`${cxp.tipo_comprobante || ''} ${cxp.serie || ''}-${numComp(cxp.numero_comprobante)}`)}</td>
         <td>${fechaDMY(cxp.fecha_emision, '-')}</td>
@@ -944,7 +948,7 @@ window.cargarCxP = async function() {
     }).join('')
 
     if (tfoot) tfoot.innerHTML = `
-      <td colspan="6"><strong>TOTAL (${lista.length} documentos)</strong></td>
+      <td></td><td colspan="6"><strong>TOTAL (${lista.length} documentos)</strong></td>
       <td style="text-align:right; white-space:nowrap;"><strong>${_fmTotales(mT)}</strong></td>
       <td style="text-align:right; white-space:nowrap;"><strong>${_fmTotales(mPg)}</strong></td>
       <td style="text-align:right; white-space:nowrap;"><strong>${_fmTotales(mP)}</strong></td>
@@ -1092,11 +1096,12 @@ window.filtrarPagosRecientes = function() {
   lista = lista.slice(0, 50)
 
   if (lista.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;">Sin pagos registrados</td></tr>'
+    tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;">Sin pagos registrados</td></tr>'
     return
   }
 
   tbody.innerHTML = lista.map(p => `<tr>
+    <td>${badgeEmpresa(p.empresa_id)}</td>
     <td>${fechaDMY(p.fecha, '-')}</td>
     <td>${_esc(_nombreContacto(p.contact_id))}</td>
     ${(() => { const d = _cxpList.find(x => x.id === p.cxp_id); return `<td style="white-space:nowrap;">${_esc(d ? _descDocCP(d) : '—')}</td><td>${fechaDMY(d?.fecha_emision, '—')}</td>` })()}
@@ -1132,7 +1137,7 @@ window.cargarRetenciones = async function() {
     if (!tbody) return
 
     if (retenciones.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">Sin retenciones en el periodo</td></tr>'
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">Sin retenciones en el periodo</td></tr>'
       if (totalEl) totalEl.textContent = 'S/ 0.00'
       return
     }
@@ -1146,6 +1151,7 @@ window.cargarRetenciones = async function() {
       total += monto
       _sumaMon(mRet, c.moneda, monto)
       return `<tr>
+        <td>${badgeEmpresa(c.empresa_id)}</td>
         <td>${fechaDMY(c.fecha, '-')}</td>
         <td>${_esc(_nombreContacto(c.contact_id))}</td>
         <td>${_esc(comprobante)}</td>
@@ -2028,7 +2034,7 @@ window.cargarLetras = async function () {
     if (!tbody) return
 
     if (lista.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="14" style="text-align:center;">Sin letras registradas</td></tr>'
+      tbody.innerHTML = '<tr><td colspan="15" style="text-align:center;">Sin letras registradas</td></tr>'
       _letPintarBotonUnificar()
       return
     }
@@ -2058,6 +2064,7 @@ window.cargarLetras = async function () {
       const puedeSel = _letraAbierta(l) && saldo > 0.005
       return `<tr>
         <td style="text-align:center;">${puedeSel ? `<input type="checkbox" style="width:auto; margin:0;" ${_letSel.has(l.id) ? 'checked' : ''} title="Marcar para unificar" onchange="window._letToggleSel(${l.id}, this.checked, this)">` : ''}</td>
+        <td>${badgeEmpresa(l.empresa_id)}</td>
         <td>${_esc(l.numero_letra)}${l.refinanciacion_id ? ' <span title="Nace de una refinanciación">🔗</span>' : ''}</td>
         <td>${l.tipo === 'emitida' ? 'Por Cobrar' : 'Por Pagar'}</td>
         <td>${_esc(_nombreContacto(l.contact_id))}</td>
@@ -2101,7 +2108,7 @@ window.filtrarLetras = function () {
   let aviso = tb.querySelector('tr.let-sin-res')
   if (palabras.length && !vis && total) {
     if (!aviso) { aviso = document.createElement('tr'); aviso.className = 'let-sin-res'; tb.appendChild(aviso) }
-    aviso.innerHTML = `<td colspan="14" style="text-align:center; color:var(--text-secondary);">Ninguna letra coincide con "${_esc(q)}"</td>`
+    aviso.innerHTML = `<td colspan="15" style="text-align:center; color:var(--text-secondary);">Ninguna letra coincide con "${_esc(q)}"</td>`
   } else aviso?.remove()
 }
 
@@ -3684,7 +3691,7 @@ async function _updLetra(id, d) {
 /** Todos los recibos usados (cobros + abonos de letras emitidas). */
 async function _todosLosRecibos() {
   const [cob, ab] = await Promise.all([
-    supabase.from('cobros').select('id, numero_recibo, contact_id, fecha, monto, moneda, cxc_id, banco_id, medio_pago').not('numero_recibo', 'is', null),
+    supabase.from('cobros').select('id, empresa_id, numero_recibo, contact_id, fecha, monto, moneda, cxc_id, banco_id, medio_pago').not('numero_recibo', 'is', null),
     supabase.from('letras_abonos').select('id, numero_recibo, contact_id, fecha, monto_neto, monto_amortizado, interes, moneda, letra_id, refinanciacion_id, banco_id, medio, tipo_abono, tipo').not('numero_recibo', 'is', null)
   ])
   const out = (cob.data || []).filter(x => String(x.numero_recibo).trim()).map(x => ({ origen: 'cobro', ...x, importe: _n(x.monto) }))
@@ -5663,7 +5670,7 @@ window.cargarRecibos = async function () {
   const tbody = document.getElementById('tbody-recibos')
   const avisos = document.getElementById('recibos-avisos')
   if (!tbody) return
-  tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;">Cargando...</td></tr>'
+  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;">Cargando...</td></tr>'
   try {
     if (!_letrasCache.length) _letrasCache = await cacheado('letras_cambio', getLetrasCambio)
     if (!_cxcList.length) _cxcList = await cacheado('cuentas_cobrar', getCuentasCobrar)
@@ -5715,12 +5722,13 @@ window.cargarRecibos = async function () {
       && (!q || `${f.num} ${f.clientes.map(c => _nombreContacto(c)).join(' ')} ${f.items.map(i => desc(i).txt).join(' ')}`.toLowerCase().includes(q)))
       .sort((a, b) => (b.partes?.pref || '').localeCompare(a.partes?.pref || '') || (b.partes?.num ?? 0) - (a.partes?.num ?? 0) || b.num.localeCompare(a.num))
     document.getElementById('recibos-total').textContent = `${filas.length} recibo(s)`
-    if (!filas.length) { tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;">Sin recibos para los filtros</td></tr>'; return }
+    if (!filas.length) { tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;">Sin recibos para los filtros</td></tr>'; return }
     tbody.innerHTML = filas.map(f => {
       const malo = f.clientes.length > 1
       return f.items.map((i, k) => {
         const d = desc(i)
         return `<tr style="${k ? '' : 'border-top:2px solid var(--border-color);'}${malo ? ' color:var(--color-danger);' : ''}">
+          <td>${badgeEmpresa(i.empresa_id ?? _letrasCache.find(x => x.id === i.letra_id)?.empresa_id)}</td>
           ${k ? '<td></td>' : `<td rowspan="1" style="font-weight:700;">${_esc(f.num)}${f.items.length > 1 ? ` <small class="badge badge-info">${f.items.length}</small>` : ''}</td>`}
           <td>${fechaDMY(i.fecha)}</td>
           <td>${_esc(_nombreContacto(i.contact_id))}</td>

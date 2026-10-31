@@ -419,14 +419,17 @@ export function hacerTablaOrdenable(table) {
     if (col < 0) return
     obs.disconnect()
     const filas = [...tbody.rows].filter(r => !r.querySelector('td[colspan]'))
-    const conClave = filas.map(f => ({ f, v: _valorOrden(f.cells[col]) }))
+    // Filas «hijas» (data-famh: productos de una familia) viajan pegadas a su fila de encabezado
+    const unidades = []
+    for (const r of filas) { if (r.dataset.famh && unidades.length) unidades[unidades.length - 1].kids.push(r); else unidades.push({ f: r, kids: [] }) }
+    const conClave = unidades.map(u => ({ f: u.f, kids: u.kids, v: _valorOrden(u.f.cells[col]) }))
     conClave.sort((a, b) => {
       const va = a.v, vb = b.v
       if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir
       return coll.compare(String(va), String(vb)) * dir
     })
     const frag = document.createDocumentFragment()
-    conClave.forEach(x => frag.appendChild(x.f))
+    conClave.forEach(x => { frag.appendChild(x.f); x.kids.forEach(k => frag.appendChild(k)) })
     tbody.appendChild(frag)
     obs.takeRecords()
     obs.observe(tbody, { childList: true })
@@ -509,3 +512,26 @@ export function pdfTablaUnaLinea({ jsPDF, titulo, subtitulo = '', head, body, de
   doc.save(archivo)
   return doc
 }
+
+
+// ── Campos obligatorios: borde rojo en los vacíos al presionar «Guardar» ─────
+/** validarRequeridos(['id1','id2']) → true si todos tienen valor; si no, marca los vacíos con borde rojo y enfoca el primero. */
+export function validarRequeridos(ids) {
+  if (!document.getElementById('req-err-css')) document.head.insertAdjacentHTML('beforeend', '<style id="req-err-css">.campo-req-error{border-color:#ef4444 !important; box-shadow:0 0 0 2px rgba(239,68,68,.28) !important;}</style>')
+  let primero = null
+  for (const id of ids) {
+    const el = document.getElementById(id); if (!el) continue
+    const vacio = String(el.value ?? '').trim() === ''
+    const dianas = [el]
+    if (el.tagName === 'SELECT' && getComputedStyle(el).display === 'none' && el.nextElementSibling) dianas.push(el.nextElementSibling)   // buscador-select
+    dianas.forEach(d => d.classList.toggle('campo-req-error', vacio))
+    if (vacio) {
+      if (!primero) primero = dianas[dianas.length - 1]
+      const quitar = () => dianas.forEach(d => d.classList.remove('campo-req-error'))
+      el.addEventListener('input', quitar, { once: true }); el.addEventListener('change', quitar, { once: true })
+    }
+  }
+  if (primero) { try { (primero.querySelector?.('input') || primero).focus() } catch (e) {} ; showToast('Completa los campos obligatorios (*)', 'warning') }
+  return !primero
+}
+if (typeof window !== 'undefined') window.validarRequeridos = validarRequeridos

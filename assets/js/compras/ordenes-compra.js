@@ -1,5 +1,6 @@
 import { ultimoErrorInsert, query } from '../supabase-client.js'
 import { registrarColumnas, colStyle } from '../col-menu.js'
+import { badgeEmpresa } from '../empresa.js'
 import { menuAccionesFila } from '../main.js'
 import { fechaDMY } from '../helpers.js'
 import { validarCamposPI } from '../importaciones/pi-validaciones.js'
@@ -25,7 +26,7 @@ const OC_POR_PAGINA = 50
 let _ocPagina = 1
 
 registrarColumnas('ordenes-compra', [
-  { key: 'numero', label: 'Número' }, { key: 'pi', label: 'Proforma (PI)' }, { key: 'proveedor', label: 'Proveedor' },
+  { key: 'empresa', label: 'Empresa' }, { key: 'numero', label: 'Número' }, { key: 'pi', label: 'Proforma (PI)' }, { key: 'proveedor', label: 'Proveedor' },
   { key: 'fecha', label: 'Fecha' }, { key: 'moneda', label: 'Moneda' }, { key: 'subtotal', label: 'Subtotal' },
   { key: 'igv', label: 'IGV' }, { key: 'total', label: 'Total' }, { key: 'estado', label: 'Estado' }, { key: 'carpeta', label: 'Carpeta' }
 ])
@@ -69,6 +70,7 @@ export async function renderOrdenes() {
       <table>
         <thead>
           <tr>
+            <th data-col-tabla="ordenes-compra" data-col="empresa"${colStyle('ordenes-compra','empresa')}>Empresa</th>
             <th data-col-tabla="ordenes-compra" data-col="numero"${colStyle('ordenes-compra','numero')}>Número</th>
             <th data-col-tabla="ordenes-compra" data-col="pi"${colStyle('ordenes-compra','pi')}>Proforma (PI)</th>
             <th data-col-tabla="ordenes-compra" data-col="proveedor"${colStyle('ordenes-compra','proveedor')}>Proveedor</th>
@@ -87,6 +89,7 @@ export async function renderOrdenes() {
     ordenes.forEach(oc => {
       html += `
         <tr>
+          <td data-col-tabla="ordenes-compra" data-col="empresa"${colStyle('ordenes-compra','empresa')}>${badgeEmpresa(oc.empresa_id)}</td>
           <td data-col-tabla="ordenes-compra" data-col="numero"${colStyle('ordenes-compra','numero')}><strong>${oc.id}</strong></td>
           <td data-col-tabla="ordenes-compra" data-col="pi"${colStyle('ordenes-compra','pi')}>${oc.es_importacion
             ? `<strong>${_escCompras(oc.numero_proforma_proveedor || '—')}</strong><br><small style="color:var(--text-secondary);">${_escCompras(oc.incoterm || 'sin incoterm')}${oc.anticipo_porcentaje ? ' · anticipo ' + oc.anticipo_porcentaje + '%' : ''}</small>`

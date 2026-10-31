@@ -34,6 +34,9 @@ function _checks(d, c, lotes) {
     if (d.dam.estado !== 'pagado') bl.push('La DAM no figura pagada.')
     if (!d.dam.fecha_levante) bl.push('Aún no hay levante autorizado.')
   }
+  // El ad valorem entra al costo (NIC 2): si la DAM lo declara y el costeo (ledger) no lo tiene, el factor queda subvaluado
+  if (d.dam && num(d.dam.ad_valorem_usd) > 0 && !(d.costos || []).some(k => !k.anulado && k.concepto_codigo === 'ad_valorem' && !/adicional/i.test(k.concepto || '')))
+    bl.push(`El ad valorem de la DAM ($ ${n2(d.dam.ad_valorem_usd)}) no está en el costeo: sin él el costo contable queda subvaluado. Envíalo desde la DAM → «➡ Tributos al costeo».`)
   const pend = (d.ajustes || []).filter(a => a.estado !== 'desestimada' && (a.estado === 'pendiente' || !a.numero))
   if (pend.length) bl.push(`${pend.length} ajuste(s) de valor por liquidar/pagar.`)
   const prov = (d.costos || []).filter(k => k.es_provisional && !k.castigada)
@@ -82,7 +85,7 @@ window.renderCostosLote = async function () {
     const lotes = (await query('lotes', { carpeta_importacion_id: c0.id })) || []
     const ap = lotes.filter(l => l.costo_carpeta_id === c0.id && l.costo_real != null)
     const chips = lotes.length ? lotes.map(l => `<span class="cr-chip" style="--c:${ap.includes(l) ? '#10b981' : '#f59e0b'};">${esc(l.numero_lote)} · ${ap.includes(l) ? 'costo aplicado' : 'costo pendiente'}</span>`).join(' ') : '<span class="cr-chip" style="--c:#ef4444;">Sin lote vinculado</span>'
-    host.innerHTML = `<div class="e3-lista"><div class="e3-sub">Costo final al lote</div>
+    host.innerHTML = `<div class="e3-lista">
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:6px 0;">
         <button type="button" class="btn btn-primary btn-small" onclick="window.abrirCostosLote()">📦 Revisar y aplicar al lote</button>${chips}</div></div>`
   } catch (e) { host.innerHTML = '' }

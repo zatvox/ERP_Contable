@@ -576,3 +576,143 @@ body.ui-moderna .modal .pp-drop-link { display: inline !important; text-transfor
 /* Hoja de costeo: botón ▸/▾ de las filas de familia */
 .hc-famb { border:0; background:transparent; color:var(--text-primary); cursor:pointer; font-size:.85rem; padding:0 4px; }
 .hc-famb:hover { color:#3b82f6; }
+
+/* Liquidación del agente · tabla de gastos (edición por fila estilo Excel) */
+.la-tabla th.la-num, .la-tabla td.la-num { text-align:right; white-space:nowrap; }
+.la-tabla .la-mon { color:var(--text-secondary); margin-right:4px; font-weight:400; }
+.la-tabla .la-glosa { display:flex; flex-wrap:wrap; gap:6px 8px; align-items:center; }
+.la-tabla .la-acc { white-space:nowrap; text-align:right; width:1%; }
+.la-tabla .la-celda { width:100%; min-width:80px; padding:5px 7px; border:1px solid var(--border-color); border-radius:6px; background:var(--bg-primary); color:var(--text-primary); font-size:.85rem; }
+.la-tabla td.la-num .la-celda { width:96px; text-align:right; }
+.la-tabla .la-celda:focus { outline:2px solid #3b82f6; outline-offset:-1px; }
+.la-tabla tr.la-fila-ed td { background:color-mix(in srgb, #3b82f6 10%, transparent); vertical-align:middle; }
+.la-tabla .la-tot { font-weight:700; }
+.la-tabla .la-sub td { font-weight:600; background:var(--bg-secondary); border-top:2px solid var(--border-color); }
+.la-tabla .la-edit, .la-tabla .la-ok, .la-tabla .la-no, .la-tabla .la-mini { border:1px solid var(--border-color); background:transparent; color:var(--text-primary); border-radius:6px; cursor:pointer; padding:2px 8px; font-size:.82rem; }
+.la-tabla .la-ok { color:#22c55e; border-color:#22c55e; font-weight:700; }
+.la-tabla .la-no { color:#ef4444; border-color:#ef4444; margin-left:4px; }
+.la-tabla .la-mini { margin-left:4px; font-size:.72rem; padding:1px 5px; }
+.la-tabla .la-reg { border:1px dashed #3b82f6; background:transparent; color:#60a5fa; border-radius:999px; padding:2px 10px; font-size:.76rem; cursor:pointer; white-space:nowrap; }
+.la-tabla .la-reg:hover { background:color-mix(in srgb, #3b82f6 16%, transparent); }
+.la-tabla td:nth-child(2) { min-width:210px; }
+.la-tabla td:nth-child(3), .la-tabla td:nth-child(4) { white-space:nowrap; }
+.la-tabla tr.la-fila-ed td:nth-child(3) .la-celda { min-width:150px; }
+.la-tabla tr.la-fila-ed td:nth-child(4) .la-celda { min-width:130px; }
+.la-tabla tr.la-fila-ed td:nth-child(2) .la-celda { min-width:200px; }
+
+/* Hoja de costeo: aviso de etapa actual en el encabezado del card */
+.hc-etapa { display:inline-flex; align-items:center; gap:8px; margin-left:14px; padding:4px 12px; border-radius:999px; font-size:.82rem; border:1px solid #3b82f6; background:color-mix(in srgb, #3b82f6 14%, transparent); color:var(--text-primary); white-space:nowrap; }
+.hc-etapa.ok { border-color:#22c55e; background:color-mix(in srgb, #22c55e 14%, transparent); }
+.hc-etapa-n { font-weight:700; color:#60a5fa; text-transform:uppercase; font-size:.7rem; letter-spacing:.04em; }
+.hc-etapa.ok .hc-etapa-n { color:#4ade80; }
+.hc-etapa-p { color:var(--text-secondary); }
+@media (max-width: 760px) { .hc-etapa-p { display:none; } .hc-etapa { margin-left:0; } }
+
+/* ── Columna derecha de la hoja: estado de la carpeta + paneles por etapa (diseño corporativo) ── */
+.hc-e3 .hc-estado { margin: 0 0 12px; padding: 14px 14px 12px; border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-secondary); }
+.hc-estado-k, .hc-avisos-k { font-size: .66rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-secondary); }
+.hc-estado-t { font-size: 1.05rem; font-weight: 700; margin: 4px 0 2px; color: var(--text-primary); }
+.hc-estado-p { font-size: .78rem; color: var(--text-secondary); line-height: 1.4; }
+.hc-estado-p b { color: var(--text-primary); }
+.hc-steps { list-style: none; margin: 12px 0 10px; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; position: relative; }
+.hc-st { display: flex; flex-direction: column; align-items: center; gap: 5px; text-align: center; position: relative; }
+.hc-st:not(:last-child)::after { content: ''; position: absolute; top: 11px; left: calc(50% + 14px); width: calc(100% - 28px); height: 2px; background: var(--border-color); }
+.hc-st.ok:not(:last-child)::after { background: #22c55e; }
+.hc-st-n { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: .7rem; font-weight: 700; border: 2px solid var(--border-color); background: var(--bg-primary); color: var(--text-secondary); z-index: 1; }
+.hc-st.ok .hc-st-n { background: #22c55e; border-color: #22c55e; color: #fff; }
+.hc-st.act .hc-st-n { border-color: #3b82f6; color: #60a5fa; box-shadow: 0 0 0 3px color-mix(in srgb, #3b82f6 25%, transparent); }
+.hc-st-t { font-size: .6rem; line-height: 1.15; color: var(--text-secondary); }
+.hc-st.act .hc-st-t { color: var(--text-primary); font-weight: 700; }
+.hc-avisos-k { margin: 12px 0 6px; padding-top: 10px; border-top: 1px solid var(--border-color); }
+.hc-avisos { display: grid; gap: 6px; }
+.hc-aviso { font-size: .76rem; line-height: 1.4; padding: 7px 10px; border-radius: 6px; border-left: 3px solid #3b82f6; background: var(--bg-primary); color: var(--text-primary); }
+.hc-aviso.warn { border-left-color: #f59e0b; } .hc-aviso.ok { border-left-color: #22c55e; } .hc-aviso.obs { border-left-color: #94a3b8; }
+.hc-avisos:empty::before { content: 'Cargando…'; font-size: .74rem; color: var(--text-secondary); }
+.hc-e3 .hc-acc { margin: 0 0 10px; border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-primary); overflow: hidden; }
+.hc-acc > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px; font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-primary); background: var(--bg-secondary); }
+.hc-acc > summary::-webkit-details-marker { display: none; }
+.hc-acc > summary::before { content: '▸'; color: var(--text-secondary); margin-right: 8px; transition: transform .15s; }
+.hc-acc[open] > summary::before { transform: rotate(90deg); }
+.hc-acc-t { flex: 1; }
+.hc-acc-c { font-size: .62rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; letter-spacing: .04em; border: 1px solid var(--border-color); color: var(--text-secondary); text-transform: none; }
+.hc-acc-c.ok { color: #4ade80; border-color: #22c55e; } .hc-acc-c.act { color: #60a5fa; border-color: #3b82f6; }
+.hc-acc-b { padding: 4px 10px 10px; }
+.hc-acc-b > .cr-wrap { margin-top: 6px !important; border: 0 !important; padding: 0 !important; background: transparent !important; }
+
+/* Aviso de etapa del encabezado (reemplaza la píldora) */
+.hc-eb { display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-left:18px; flex:1; min-width:0; }
+.hc-eb-seg { list-style:none; margin:0; padding:0; display:flex; border:1px solid var(--border-color); border-radius:8px; overflow:hidden; background:var(--bg-primary); }
+.hc-eb-seg li { display:flex; align-items:center; gap:7px; padding:6px 14px; font-size:.78rem; color:var(--text-secondary); border-right:1px solid var(--border-color); white-space:nowrap; }
+.hc-eb-seg li:last-child { border-right:0; }
+.hc-eb-n { width:18px; height:18px; border-radius:50%; display:grid; place-items:center; font-size:.66rem; font-weight:700; border:1.5px solid currentColor; }
+.hc-eb-seg li.ok { color:#4ade80; }
+.hc-eb-seg li.act { background:#2563eb; color:#fff; font-weight:700; }
+.hc-eb-seg li.act .hc-eb-n { background:#fff; color:#2563eb; border-color:#fff; }
+.hc-eb-now { display:flex; flex-direction:column; line-height:1.25; min-width:0; }
+.hc-eb-k { font-size:.62rem; letter-spacing:.08em; text-transform:uppercase; color:var(--text-secondary); font-weight:700; }
+.hc-eb-now b { font-size:.9rem; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hc-eb-c { font-size:.7rem; color:var(--text-secondary); }
+@media (max-width: 1100px) { .hc-eb-t { display:none; } .hc-eb-seg li { padding:6px 10px; } }
+@media (max-width: 760px) { .hc-eb { margin-left:0; } }
+.hc-e3 .hc-solo-avisos { padding:12px 14px; }
+.hc-solo-avisos .hc-avisos-k { margin:0 0 8px; padding-top:0; border-top:0; }
+
+/* Edición por celda (doble clic, estilo Excel) */
+.la-tabla td.la-cel { cursor:cell; }
+.la-tabla td.la-cel:hover { outline:1px dashed color-mix(in srgb, #3b82f6 60%, transparent); outline-offset:-2px; }
+.la-tabla td.la-cel-ed { outline:2px solid #3b82f6; outline-offset:-2px; background:color-mix(in srgb, #3b82f6 10%, transparent); }
+.la-tabla td.la-cel-ed .la-celda { border:0; background:transparent; width:100%; min-width:90px; box-shadow:none; }
+.la-tabla td.la-num.la-cel-ed .la-celda { width:96px; }
+
+/* Aviso de etapa del header: mismo lenguaje que .llg (superficie tintada + chip con glow) */
+.hc-eb { --c:#3b82f6; gap:14px; padding:6px 14px 6px 8px; border-radius:14px; border:1px solid color-mix(in srgb, var(--c) 38%, transparent);
+  background:linear-gradient(135deg, color-mix(in srgb, var(--c) 14%, var(--bg-primary)), color-mix(in srgb, var(--c) 3%, var(--bg-primary)));
+  box-shadow:0 8px 22px -16px var(--c); flex:0 1 auto; }
+.hc-eb-seg { border:0; background:transparent; border-radius:0; overflow:visible; gap:4px; }
+.hc-eb-seg li { border:0; border-radius:999px; padding:5px 12px; }
+.hc-eb-seg li.act { background:var(--c); box-shadow:0 4px 12px -4px var(--c); }
+.hc-eb-seg li.act .hc-eb-n { color:var(--c); }
+.hc-eb-now { padding-left:14px; border-left:1px solid color-mix(in srgb, var(--c) 30%, transparent); }
+.hc-eb-now b { color:var(--c); font-weight:800; }
+
+/* Panel de liquidación arriba (reemplaza el aviso de etapa del header) */
+.hc-acc-top { margin:0 0 12px; }
+.hc-acc-top .hc-acc-b { display:flex; flex-direction:column; gap:8px; }
+.hc-acc-top .hc-avisos:empty { display:none; }
+
+/* Liquidación del agente en la franja del título de la hoja */
+.hc-liq-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-left:18px; flex:1; min-width:0; position:relative; }
+.hc-liq-head #e4-liq-host .e3-lista { margin:0; }
+.hc-liq-av > summary { list-style:none; cursor:pointer; padding:4px 12px; border-radius:999px; font-size:.76rem; font-weight:700; color:#f59e0b; border:1px solid color-mix(in srgb, #f59e0b 45%, transparent); background:color-mix(in srgb, #f59e0b 12%, transparent); white-space:nowrap; }
+.hc-liq-av.ok > summary { color:#10b981; border-color:color-mix(in srgb, #10b981 45%, transparent); background:color-mix(in srgb, #10b981 12%, transparent); }
+.hc-liq-av > summary::-webkit-details-marker { display:none; }
+.hc-liq-av[open] > .hc-avisos { position:absolute; top:calc(100% + 8px); left:0; z-index:30; width:min(560px, 90vw); padding:10px; border-radius:12px; background:var(--bg-primary); border:1px solid var(--border-color); box-shadow:0 18px 40px -18px #000; }
+.hc-liq-av[hidden] { display:none; }
+
+/* Franja del título: una sola línea; los chips de totales solo en pantallas anchas */
+.hc-liq-head { flex-wrap:nowrap; }
+.hc-liq-head #e4-liq-host .e3-lista > div { flex-wrap:nowrap !important; white-space:nowrap; }
+.hc-liq-head .cr-chip:nth-of-type(n+2) { display:none; }
+@media (min-width: 1750px) { .hc-liq-head .cr-chip:nth-of-type(n+2) { display:inline-flex; } }
+.la-tabla .la-del { margin-left:4px; color:#ef4444; border-color:color-mix(in srgb, #ef4444 45%, transparent); }
+.la-tabla .la-del:hover { background:color-mix(in srgb, #ef4444 15%, transparent); }
+.la-tabla td.la-acc { white-space:nowrap; }
+
+/* Tabla de gastos de la liquidación: más compacta para que quepan ✏️ ✕ */
+.la-tabla th, .la-tabla td { padding-left:8px; padding-right:8px; }
+.la-tabla td:nth-child(2) { min-width:170px; }
+.la-tabla td.la-acc { width:1%; min-width:74px; padding-left:4px; }
+.la-tabla .la-edit { padding:2px 6px; }
+.la-tabla .la-del { margin-left:3px; }
+
+/* Cabecera: Proforma | CI | Agente aduanero en una sola fila (el CI ya no desperdicia ancho) */
+.hcx-docs { grid-template-columns: minmax(170px, .85fr) minmax(220px, 1.15fr) minmax(190px, .9fr); }
+.hcx-doc-ag .hc-liq-head { margin:6px 0 0; flex-direction:column; align-items:flex-start; flex-wrap:wrap; gap:8px; flex:none; }
+.hcx-doc-ag .hc-liq-head #e4-liq-host .e3-lista > div { flex-wrap:wrap !important; white-space:normal; }
+.hcx-doc-ag .hc-liq-head .cr-chip:nth-of-type(n+2) { display:inline-flex; }
+.hcx-doc-ag .hc-liq-av[open] > .hc-avisos { left:auto; right:0; width:min(420px, 80vw); }
+@media (max-width: 1100px) { .hcx-docs { grid-template-columns: 1fr 1fr; } .hcx-doc-ag { grid-column: 1 / -1; } }
+.hcx-doc-ag .hc-liq-head .cr-chip:nth-of-type(n+2) { display:none; }
+.hcx-doc-ag .hc-liq-head, .hcx-doc-ag #e4-liq-host .e3-lista { width:100%; }
+.hcx-doc-ag #e4-liq-host .e3-lista > div { gap:6px !important; }
+.hcx-doc-ag .hc-liq-av[open] > .hc-avisos { background:var(--bg-secondary); }

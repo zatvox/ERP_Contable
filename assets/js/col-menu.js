@@ -27,7 +27,16 @@
 // columna del mismo nombre (ej. "fecha") se pisen entre sí al ocultar/mostrar.
 // ============================================================================
 
+import { esMultiEmpresaActiva } from './empresa.js'
+
 const _colDefsPorTabla = {}
+
+// Columna "Empresa" (2026-10-31): visible por defecto SOLO con 2+ empresas
+// seleccionadas. La elección manual del usuario se guarda aparte por modo
+// ('empresa@multi' / 'empresa@uno'), así al cambiar de 1 a 2 empresas la
+// columna aparece sola aunque antes la hubiera ocultado en modo 1 empresa.
+const _esColEmpresa = k => String(k).toLowerCase() === 'empresa'
+const _claveEmpresa = () => `empresa@${esMultiEmpresaActiva() ? 'multi' : 'uno'}`
 const _aplicadores = {}   // columnasAuto: nombre -> función que re-aplica el <style>
 
 function _esc(s) {
@@ -52,7 +61,10 @@ export function colsVisibles(nombre) {
   try { guardado = JSON.parse(localStorage.getItem(_storageKey(nombre)) || '{}') } catch { guardado = {} }
   const cols = {}
   // c.oculta = oculta por defecto (hasta que el usuario la active)
-  for (const c of defs) cols[c.key] = (c.key in guardado) ? guardado[c.key] !== false : !c.oculta
+  for (const c of defs) {
+    if (_esColEmpresa(c.key)) { const k = _claveEmpresa(); cols[c.key] = (k in guardado) ? guardado[k] !== false : esMultiEmpresaActiva(); continue }
+    cols[c.key] = (c.key in guardado) ? guardado[c.key] !== false : !c.oculta
+  }
   return cols
 }
 
@@ -92,8 +104,13 @@ window._colMenuToggle = function (nombre, menuId, dropdownId) {
 }
 
 window._colMenuSet = function (nombre, key, visible) {
-  const cols = colsVisibles(nombre)
-  cols[key] = visible
+  let guardado = {}
+  try { guardado = JSON.parse(localStorage.getItem(_storageKey(nombre)) || '{}') } catch { guardado = {} }
+  const cols = { ...guardado, ...colsVisibles(nombre) }
+  for (const k of Object.keys(cols)) if (_esColEmpresa(k)) delete cols[k]   // la de empresa se guarda por modo
+  if (_esColEmpresa(key)) cols[_claveEmpresa()] = visible
+  else cols[key] = visible
+  for (const k of Object.keys(guardado)) if (k.startsWith('empresa@') && !(k in cols)) cols[k] = guardado[k]
   try { localStorage.setItem(_storageKey(nombre), JSON.stringify(cols)) } catch (_) {}
   _aplicadores[nombre]?.()
   document.querySelectorAll(`[data-col-tabla="${nombre}"][data-col="${key}"]`).forEach(el => {
@@ -134,7 +151,10 @@ export function columnasAuto(tabla, nombre, { ocultas = [], card = null } = {}) 
   if (!style) { style = document.createElement('style'); style.id = `colauto-${tid}`; document.head.appendChild(style) }
   _aplicadores[nombre] = () => {
     const vis = colsVisibles(nombre)
-    const sel = defs.filter(d => !vis[d.key]).map(d => `#${tid} thead tr > :nth-child(${d.i + 1}), #${tid} tbody tr > :nth-child(${d.i + 1})`)
+    // La columna Empresa también oculta su celda vacía del <tfoot> (los
+    // totales reservan una celda propia para ella en la misma posición).
+    const sel = defs.filter(d => !vis[d.key]).map(d => `#${tid} thead tr > :nth-child(${d.i + 1}), #${tid} tbody tr > :nth-child(${d.i + 1})` +
+      (_esColEmpresa(d.key) ? `, #${tid} tfoot tr > :nth-child(${d.i + 1})` : ''))
     style.textContent = sel.length ? `${sel.join(',\n')} { display: none !important; }` : ''
   }
   _aplicadores[nombre]()

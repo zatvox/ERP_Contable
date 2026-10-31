@@ -503,3 +503,16 @@ function _envolverOpenModal() {
 }
 
 document.addEventListener('DOMContentLoaded', montarUIEmpresa)
+
+// ── Columna "Empresa" de las tablas (2026-10-31) ─────────────────────────────
+// Toda tabla de documentos registra la columna 'empresa' en su menú ⋮.
+// col-menu.js la muestra sola cuando hay 2+ empresas seleccionadas y la
+// oculta con 1 (el usuario puede cambiarlo; se recuerda por modo).
+/** Pill con el código de la empresa en su color (mismo estilo del cintillo). */
+export function badgeEmpresa(id) {
+  if (id == null || id === '') return '<span style="color:var(--text-secondary);">—</span>'
+  const e = empresaById(id)
+  return `<span class="emp-pill emp-pill-tabla" style="--emp:${_esc(e?.color || '#2563eb')}" title="${_esc(e?.razon_social || '')}">${_esc(nombreEmpresa(id))}</span>`
+}
+/** Texto plano (para ordenar / buscar / exportar). */
+export const textoEmpresa = id => (id == null || id === '') ? '' : nombreEmpresa(id)
