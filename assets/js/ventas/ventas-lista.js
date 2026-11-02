@@ -458,6 +458,7 @@ function _pintarFilasVentas() {
                 v.nubefact_enlace && { label: 'Ver PDF', icono: '📄', href: v.nubefact_enlace },
                 !v.asiento_id && { label: 'Generar asiento', icono: '📑', onclick: `window.generarAsientoDeVenta(${v.id})` },
                 !esNota(v.tipo_comprobante) && { label: 'Ver detalle', icono: '📋', onclick: `window.editarVenta(${v.id})` },
+                ['pendiente', 'parcial'].includes(_estadoDespachoVenta(v)) && { label: _estadoDespachoVenta(v) === 'parcial' ? 'Emitir guía (saldo pendiente)' : 'Emitir guía de despacho', icono: '🚚', onclick: `window.emitirGuiaDesdeVenta(${v.id})` },
                 { separador: true },
                 { label: 'Nota de Crédito', icono: '↩️', onclick: `window.abrirModalNotaCredito(${v.id})` },
                 { label: 'Nota de Débito', icono: '↪️', onclick: `window.abrirModalNotaDebito(${v.id})` },
@@ -470,6 +471,12 @@ function _pintarFilasVentas() {
     </tr>`
   }
   tbody.innerHTML = html
+}
+
+/** Ventas ⋮ → Emitir guía: va a la pestaña Guías y abre el modal con la venta elegida (2026-10-31). */
+window.emitirGuiaDesdeVenta = async function (ventaId) {
+  document.querySelector('.tab-btn[data-tab="guias-despacho"], .tab-btn[data-tab="guias"]')?.click()
+  await window.abrirModalNuevaGuiaDespacho?.(ventaId)
 }
 
 window.filtrarVentas = function () {

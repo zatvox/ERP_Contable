@@ -38,3 +38,4 @@ SELECT table_name, column_name FROM information_schema.columns
 
 SELECT 'docs_pendientes' AS que, count(*) FROM public.documentos_importacion WHERE regularizacion = 'pendiente'
 UNION ALL SELECT 'abonos_pendientes', count(*) FROM public.importacion_liquidacion_abonos WHERE regularizacion = 'pendiente';
+  

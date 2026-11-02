@@ -610,9 +610,29 @@ function _liqPanelHtml() {
   return `<div class="hc-liq-head"><div id="e4-liq-host"></div>
     <details class="hc-liq-av" id="hc-liq-av" hidden><summary id="hc-liq-av-s">Avisos</summary><div id="hc-estado-avisos" class="hc-avisos"></div></details></div>`
 }
+// Tile DAM de la cabecera: número (clic = ver DAM), chips de estado y menú ⋯ con las acciones de Aduanas
+function _tileDamHtml(d) {
+  const dam = d.dam
+  if (!dam) return `<div class="hcx-tile"><span class="hcx-ico">🏛️</span><div class="hcx-tb"><div class="hcx-k">DAM</div><div class="hcx-v">${dash}</div></div></div>`
+  const vivos = (d.ajustes || []).filter(a => a.estado !== 'desestimada')
+  const pend = vivos.filter(a => a.estado === 'pendiente').length
+  const chip = (t, c, tit = '') => `<span class="cr-chip" style="--c:${c};" title="${esc(tit)}">${t}</span>`
+  const chips = [
+    dam.modalidad_despacho ? `<span class="hcx-tag">${esc(dam.modalidad_despacho)}</span>` : '',
+    vivos.length ? chip(`⚖️ ${vivos.length} ajuste${vivos.length > 1 ? 's' : ''}${pend ? ' · ' + pend + ' por pagar' : ''}`, pend ? '#f59e0b' : '#10b981', 'Contingencias de Aduanas') : chip('⚖️ Sin ajustes', '#6b7280', 'No hubo duda razonable ni ajustes de valor'),
+    dam.declaracion_confirmada_at ? chip('Declaración confirmada', '#10b981') : chip('Declaración sin confirmar', '#6b7280')
+  ].join('')
+  const it = (ico, t, js) => `<button type="button" class="hcx-mi" onclick="this.closest('details').open=false; ${js}"><span>${ico}</span>${t}</button>`
+  return `<div class="hcx-tile hcx-tile-dam"><span class="hcx-ico">🏛️</span><div class="hcx-tb"><div class="hcx-k">DAM</div>
+      <div class="hcx-v"><a href="javascript:void(0)" class="ob-ref" title="Ver / editar la DAM" onclick="window.editarDAM('${dam.id}')">${esc(dam.numero_dam)}</a> · ${fechaDMY(dam.fecha_dam)}</div>
+      <div class="hcx-chips">${chips}</div></div>
+    <details class="hcx-menu"><summary title="Acciones de la DAM">⋯</summary><div class="hcx-menu-b">
+      ${it('👁', 'Ver DAM', `window.editarDAM('${dam.id}')`)}${it('⚖️', 'Ajustar valor', 'window.abrirAjusteValor()')}${it('📋', 'Declaración completa', `window.abrirDeclaracionDAM('${dam.id}')`)}${it('🧪', 'Boletín químico', 'window.abrirBoletinQuimico()')}</div></details></div>`
+}
+if (!window._hcxMenuInit) { window._hcxMenuInit = true; document.addEventListener('click', e => document.querySelectorAll('details.hcx-menu[open]').forEach(m => { if (!m.contains(e.target)) m.open = false })) }
 function _asideHtml(d) {
   const E = _etapaUlt || { n: 1, completa: false }
-  let paneles = [[3, 'Etapa 3 · Despacho en aduanas', _etapa3Html(d)], [4, 'Etapa 4 · Costo final al lote', '<div id="e4-lote-host"></div>']].filter(p => p[2])
+  let paneles = [[4, 'Etapa 4 · Costo final al lote', '<div id="e4-lote-host"></div>']].filter(p => p[2])   // la Etapa 3 vive ahora en el tile DAM + avisos de arriba
   if (E.n >= 4) paneles = [...paneles.filter(p => p[0] === 4), ...paneles.filter(p => p[0] !== 4)]
   return paneles.map((p, i) => `<details class="hc-acc"${i === 0 ? ' open' : ''}><summary><span class="hc-acc-t">${p[1]}</span>${_chipEtapa(p[0])}</summary><div class="hc-acc-b">${p[2]}</div></details>`).join('')
 }
@@ -778,7 +798,7 @@ function _html(d, r) {
         ${tile('📑', 'Términos', [ci?.terminos_delivery || pi?.incoterm, ci?.terminos_payment].filter(Boolean).map(esc).join(' · '))}
         ${tile('🚢', 'Embarque y origen', [ci?.puerto_embarque || pi?.puerto_embarque, ci?.pais_origen || pi?.pais_origen].filter(Boolean).map(esc).join(' → '))}
         ${tile('📅', 'Embarque / ETA', cr?.embFecha ? `${fechaDMY(cr.embFecha)} <small>${cr.embReal ? '(B/L)' : '(estimada)'}</small>${bls[0]?.fecha_eta ? ` · ETA <strong>${fechaDMY(bls[0].fecha_eta)}</strong>` : ''}` : '')}
-        ${tile('🏛️', 'DAM', dam ? `${esc(dam.numero_dam)} · ${fechaDMY(dam.fecha_dam)}` : '')}
+        ${_tileDamHtml(d)}
         ${tile('🔖', 'Canal y BL', [canalTxt, blTxt].filter(Boolean).join(' '))}
       </div>
     </div>`
@@ -875,7 +895,7 @@ function _html(d, r) {
     return `<span class="hc-tip" data-tip="${esc(html)}">${txt}</span>`
   }
   const HL = 'background:color-mix(in srgb, #3b82f6 16%, transparent);'
-  const th = (t, hl) => `<th style="${TH}${hl ? HL : ''}">${t}</th>`
+  const th = (t, hl) => `<th style="${TH}width:1%; white-space:normal; line-height:1.2; vertical-align:bottom; ${hl ? HL : ''}">${t}</th>`   // títulos que bajan de línea → columnas numéricas más angostas
   const td = (t, hl, first) => `<td style="${first ? TDL + 'white-space:nowrap;' : TD}${hl ? HL : ''}">${t}</td>`
   const btnFD = `<span style="display:inline-flex; gap:0; border:1px solid var(--border-color); border-radius:999px; overflow:hidden; font-size:.74rem; font-weight:600;">
       <button type="button" onclick="window.hcModoFD('contable')" title="Factor sin crédito fiscal ni conceptos que no son costo según NIC 2" style="padding:3px 12px; border:0; cursor:pointer; ${cont ? 'background:#3b82f6; color:#fff;' : 'background:transparent; color:var(--text-secondary);'}">Costo contable (NIC 2)</button>
@@ -886,7 +906,7 @@ function _html(d, r) {
       fila(['$', tip('USD', '$ ' + n2(numU)), '$ ' + n2(r.fobUsd), `<strong>${n3(fdU)}</strong>`])].join(''))}
     <div style="height:8px;"></div>
     <div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse;"><thead><tr>
-      ${th('Artículo', false).replace('text-align:right;', 'text-align:left;')}${th('Costo FOB unit. S/')}${th('Costo FOB unit. $')}${th('Costo contable S/', cont)}${th('Costo contable $', cont)}${th('Costo comercial S/', !cont)}${th('Costo comercial $', !cont)}
+      ${th('Artículo', false).replace('text-align:right;', 'text-align:left;').replace('width:1%;', 'width:auto;')}${th('Costo FOB unit. S/')}${th('Costo FOB unit. $')}${th('Costo contable S/', cont)}${th('Costo contable $', cont)}${th('Costo comercial S/', !cont)}${th('Costo comercial $', !cont)}
     </tr></thead><tbody>${artV.map(a => {
       const cols = x => `${td(x.fobPenUnit != null ? n3(x.fobPenUnit) : dash)}${td(n3(x.unit))}
       ${td(x.fobPenUnit != null && r.fdPenC != null ? `<strong>S/ ${n2(x.fobPenUnit * r.fdPenC)}</strong>` : dash, cont)}${td(`<strong>$ ${n2(x.unit * r.fdUsdC)}</strong>`, cont)}

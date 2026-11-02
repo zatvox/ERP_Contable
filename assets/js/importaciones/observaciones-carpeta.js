@@ -74,6 +74,21 @@ function _reglas(d) {
     if (dam.estado === 'pagado' && num(dam.ad_valorem_usd) > 0 && !costos.some(k => !k.anulado && k.concepto_codigo === 'ad_valorem' && !/adicional/i.test(k.concepto || '')))
       add('trib_sin_costeo', 'critica', 'Costos', 'Tributos de la DAM sin enviar al costeo',
         `El ad valorem ${rDAM(usd(dam.ad_valorem_usd))} no está en el costeo: el factor de distribución y el costo al lote quedan subvaluados. ${ref('Enviar', 'window.enviarDAMCosteoCarpeta()', 'Crear las líneas de tributos en el costeo')}`)
+    // Pagos a Aduanas: voucher faltante, ajustes por pagar y boletín químico (antes lo avisaba el panel de la Etapa 3)
+    const vc = d.vouchers || { dam: {}, aut: {}, doc: {} }
+    const sinV = []
+    if (dam.estado === 'pagado' && !vc.dam?.[dam.id]) sinV.push(['Tributos de la DAM', 'dam', dam.id])
+    for (const a of (d.ajustes || [])) if (a.estado === 'pagada' && !vc.aut?.[a.id]) sinV.push(['Ajuste de valor ' + (a.numero || ''), 'autoliquidacion', a.id])
+    for (const c of costos.filter(k => !k.anulado && k.concepto_codigo === 'boletin_quimico' && k.documento_id)) if (!vc.doc?.[c.documento_id]) sinV.push(['Boletín químico', 'documento_importacion', c.documento_id])
+    if (sinV.length) add('voucher_falta', 'alerta', 'Pagos', `Falta el voucher de ${sinV.length} pago${sinV.length > 1 ? 's' : ''} a Aduanas`,
+      sinV.map(([t, e, id]) => `${esc(t)} ${ref('Subir voucher', `window.subirVoucherPago('${e}', ${id})`, 'Adjuntar el voucher del pago')}`).join(' · '))
+    const tribAj = a => num(a.ad_valorem_usd) + num(a.ipm_usd) + num(a.igv_usd) + num(a.intereses_usd)
+    const ajPend = (d.ajustes || []).filter(a => a.estado === 'pendiente')
+    if (ajPend.length) add('ajuste_por_pagar', 'alerta', 'Aduanas', `Ajuste de valor por pagar (${ajPend.length})`,
+      ajPend.map(a => a.numero ? `Liquidación ${esc(a.numero)} · ${usd(tribAj(a))} por pagar en el banco ${ref('Ver ajuste', `window.abrirAjusteValor(${a.id})`, 'Abrir el ajuste de valor')}`
+        : `Notificación ${esc(a.numero_notificacion || '')}: falta registrar la liquidación de cobranza ${ref('Ver ajuste', `window.abrirAjusteValor(${a.id})`, 'Abrir el ajuste de valor')}`).join(' · '))
+    if (!costos.some(k => !k.anulado && k.concepto_codigo === 'boletin_quimico')) add('boletin_confirmar', 'info', 'Aduanas', '¿Aduanas solicitó boletín químico?',
+      `Confirma si te lo cobraron. Si sí: ${ref('Registrar boletín', 'window.abrirBoletinQuimico()', 'Registrar la liquidación del boletín')}. Si no, marca este aviso como revisado.`)
     if (!dam.fecha_levante) add('dam_sin_levante', 'alerta', 'Aduanas', 'Levante sin fecha',
       `Falta la fecha de levante en la ${rDAM('DAM')}. Sin ella no se aplica el costo al lote.`)
     if (!num(dam.tipo_cambio)) add('dam_sin_tc', 'alerta', 'Aduanas', 'DAM sin tipo de cambio', `Registra el T.C. SUNAT en la ${rDAM('DAM')}.`)

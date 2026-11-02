@@ -28,10 +28,12 @@ import { getCurrentUser } from './auth-supabase.js'
 
 const LS_ACTIVAS  = 'jhiro_empresas_activas'
 const LS_TRABAJO  = 'jhiro_empresa_trabajo'
+const LS_FAMILIAR = 'jhiro_ambito_familiar'
 
 let _empresas = []      // todas las que este usuario puede ver
 let _activas  = []      // ids marcados en el switch (lectura)
 let _trabajo  = null    // id de la empresa de trabajo (escritura)
+let _familiar = false   // ámbito FAMILIAR activo (filas con empresa_id NULL)
 let _listo    = false
 
 // El contexto se REGISTRA al cargar el módulo, no al terminar el init, para
@@ -42,9 +44,10 @@ let _resolverCtx
 const _ctxPromesa = new Promise(res => { _resolverCtx = res })
 
 registrarContextoEmpresa({
-  activas: () => _activas,
-  trabajo: () => _trabajo,
-  listo:   () => _listo,
+  activas:  () => _activas,
+  trabajo:  () => _trabajo,
+  familiar: () => _familiar,
+  listo:    () => _listo,
   promesa: _ctxPromesa
 })
 
@@ -68,6 +71,8 @@ export function empresasDisponibles() { return _empresas }
 export function empresasActivas()     { return _activas.slice() }
 export function empresaTrabajo()      { return _trabajo }
 export function contextoEmpresaListo(){ return _listo }
+/** true si el ámbito FAMILIAR está marcado en el switch (cajas/gastos sin empresa). */
+export function ambitoFamiliarActivo(){ return _familiar }
 export function esMultiEmpresaActiva(){ return _activas.length > 1 }
 export function empresaById(id)       { return _empresas.find(e => e.id === Number(id)) || null }
 export function nombreEmpresa(id) {
@@ -75,7 +80,7 @@ export function nombreEmpresa(id) {
   return e ? (e.codigo || e.nombre_comercial || e.razon_social) : `Empresa ${id}`
 }
 /** Clave de caché: dos selecciones distintas no pueden compartir dataset. */
-function _sufijoCache() { return 'e' + _activas.slice().sort((a, b) => a - b).join('-') + '_' }
+function _sufijoCache() { return 'e' + _activas.slice().sort((a, b) => a - b).join('-') + (_familiar ? '-fam' : '') + '_' }
 
 // ── Persistencia (por usuario, para que no se filtre entre cuentas) ─────────
 
@@ -87,14 +92,16 @@ function _guardar() {
   try {
     localStorage.setItem(_claveLS(LS_ACTIVAS), JSON.stringify(_activas))
     localStorage.setItem(_claveLS(LS_TRABAJO), String(_trabajo ?? ''))
+    localStorage.setItem(_claveLS(LS_FAMILIAR), _familiar ? '1' : '0')
   } catch { /* modo privado: el contexto vive sólo en esta pestaña */ }
 }
 function _leer() {
   try {
     const a = JSON.parse(localStorage.getItem(_claveLS(LS_ACTIVAS)) || 'null')
     const t = localStorage.getItem(_claveLS(LS_TRABAJO))
-    return { activas: Array.isArray(a) ? a.map(Number) : null, trabajo: t ? Number(t) : null }
-  } catch { return { activas: null, trabajo: null } }
+    const f = localStorage.getItem(_claveLS(LS_FAMILIAR))
+    return { activas: Array.isArray(a) ? a.map(Number) : null, trabajo: t ? Number(t) : null, familiar: f === '1' }
+  } catch { return { activas: null, trabajo: null, familiar: false } }
 }
 
 // ── Inicialización ───────────────────────────────────────────────────────────
@@ -137,6 +144,7 @@ export async function initEmpresaContexto() {
   // Restaura la última selección, descartando ids que ya no puede ver.
   const guardado = _leer()
   const idsOk = new Set(_empresas.map(e => e.id))
+  _familiar = !!guardado.familiar
   _activas = (guardado.activas || []).filter(id => idsOk.has(id))
   if (!_activas.length) _activas = [_trabajo && idsOk.has(_trabajo) ? _trabajo : _empresas[0].id]
 
@@ -148,7 +156,7 @@ export async function initEmpresaContexto() {
   setSufijoEmpresaCache(_sufijoCache())
   _abrirSemaforo()                // a partir de aquí las consultas pasan filtradas
 
-  console.log(`🏢 Multiempresa: activas [${_activas.map(nombreEmpresa).join(', ')}] · trabajo: ${nombreEmpresa(_trabajo)}`)
+  console.log(`🏢 Multiempresa: activas [${_activas.map(nombreEmpresa).join(', ')}]${_familiar ? ' + FAMILIAR' : ''} · trabajo: ${nombreEmpresa(_trabajo)}`)
 
   // El contexto se resuelve con await, así que puede terminar DESPUÉS de que
   // DOMContentLoaded ya disparó. Si esperáramos sólo a ese evento, el handler
@@ -199,6 +207,18 @@ window.empresaSetTrabajo = (id) => aplicarSeleccion(
   _activas.includes(Number(id)) ? _activas : [..._activas, Number(id)], Number(id))
 window.empresaTodas      = () => aplicarSeleccion(_empresas.map(e => e.id), _trabajo)
 
+/**
+ * Marca/desmarca el ámbito FAMILIAR (cajas y gastos con empresa_id NULL).
+ * No es una empresa: no tiene RUC ni emite comprobantes. Es un cajón aparte
+ * que sólo las tablas de Tesorería reconocen (TABLAS_CON_AMBITO).
+ */
+window.empresaToggleFamiliar = () => {
+  if (!_listo) { console.warn('[multiempresa] cambio ignorado: el contexto aún no está listo'); return }
+  _familiar = !_familiar
+  _guardar()
+  window.location.reload()
+}
+
 // ── El switch en la cabecera ──────────────────────────────────────────────────
 
 function _esc(s) {
@@ -212,7 +232,7 @@ export function montarSwitchEmpresa() {
   if (!_empresas.length) return
 
   const trab  = empresaById(_trabajo)
-  const extra = _activas.length - 1
+  const extra = (_activas.length - 1) + (_familiar ? 1 : 0)
   const etiqueta = `${_esc(nombreEmpresa(_trabajo))}${extra > 0 ? ` <span class="emp-extra">+${extra}</span>` : ''}`
 
   const cont = document.createElement('div')
@@ -234,11 +254,11 @@ export function montarSwitchEmpresa() {
   // que pintan tablas, se declara el estado UNA vez, debajo de la cabecera:
   // qué estás viendo y dónde se guarda. Una tabla combinada se lee bien si
   // sabes de antemano que es combinada.
-  if (_activas.length > 1 && !document.querySelector('.emp-barra-aviso')) {
+  if ((_activas.length > 1 || _familiar) && !document.querySelector('.emp-barra-aviso')) {
     const vistas = _activas.map(id => {
       const e = empresaById(id)
       return `<span class="emp-pill" style="--emp:${_esc(e?.color || '#2563eb')}">${_esc(nombreEmpresa(id))}</span>`
-    }).join('')
+    }).join('') + (_familiar ? `<span class="emp-pill" style="--emp:#9333ea">FAMILIAR</span>` : '')
     const barra = document.createElement('div')
     barra.className = 'emp-barra-aviso'
     barra.style.setProperty('--emp', trab?.color || '#2563eb')
@@ -282,6 +302,26 @@ window._empAbrirPanel = function (boton, ev) {
       </div>`
   }).join('')
 
+  // El ámbito FAMILIAR no es una empresa (no tiene RUC ni emite comprobantes):
+  // es el cajón de las cajas y gastos sin dueño fiscal. Va separado por una
+  // línea para que nadie lo confunda con Jhiro/Benji/Rama.
+  const filaFamiliar = `
+    <div class="acciones-separador"></div>
+    <div class="emp-fila${_familiar ? ' activa' : ''}">
+      <label class="emp-check" title="Ver/ocultar la caja y los gastos familiares">
+        <input type="checkbox" ${_familiar ? 'checked' : ''} onchange="window.empresaToggleFamiliar()">
+      </label>
+      <button type="button" class="emp-fila-nombre" onclick="window.empresaToggleFamiliar()"
+              title="Cajas y gastos sin empresa (ámbito familiar)">
+        <span class="emp-punto" style="background:#9333ea"></span>
+        <span>
+          <strong>FAMILIAR</strong>
+          <small>sin RUC · solo Tesorería</small>
+        </span>
+      </button>
+      <span class="emp-sello" style="opacity:.25" title="No se emiten documentos en el ámbito familiar">—</span>
+    </div>`
+
   const p = document.createElement('div')
   p.className = 'acciones-menu emp-panel'
   p.innerHTML = `
@@ -290,6 +330,7 @@ window._empAbrirPanel = function (boton, ev) {
       <small>✔ = la ves en reportes · ✍️ = donde se guarda</small>
     </div>
     ${filas}
+    ${filaFamiliar}
     <div class="acciones-separador"></div>
     <button type="button" class="acciones-item" onclick="window.empresaTodas()">
       <span class="acciones-icono">🌐</span><span>Ver todas las empresas</span></button>

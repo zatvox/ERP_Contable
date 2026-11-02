@@ -336,6 +336,8 @@ function aplicarFiltros(datos, filtros, estado) {
 // ============================================================================
 
 const _registro = new Map()   // id -> config viva (para re-render en eventos)
+// El Centro de estadísticas (dashboard) captura estas configs desde un iframe oculto de cada módulo
+if (typeof window !== 'undefined') window.__zvReportes = _registro
 
 /**
  * Crea un reporte dinámico completo dentro de `containerId`.
@@ -926,3 +928,33 @@ function _esc(s) {
 }
 
 export { _esc as escaparHtml }
+
+export { calcularMedidas as _calcularMedidas }
+
+// ============================================================================
+// BOTÓN 📊 «Estadísticas» en la barra de sub-pestañas de cada módulo de reportes
+// → abre el Centro de estadísticas (dashboard) con ese reporte ya elegido.
+// ============================================================================
+function _inyectarBotonStats() {
+  try {
+    const mod = (location.pathname.split('/').pop() || '').replace('.html', '')
+    if (!['compras', 'ventas', 'inventario', 'cobranzas', 'bancos', 'contabilidad'].includes(mod)) return
+    if (new URLSearchParams(location.search).get('zv') === '1') return   // iframe de captura: no hace falta
+    document.querySelectorAll('.subtab-bar[id$="subtabs-reportes"]').forEach(bar => {
+      if (bar.querySelector('.rp-stats-btn')) return
+      const b = document.createElement('button')
+      b.type = 'button'; b.className = 'rp-stats-btn'
+      b.title = 'Ver este reporte en Estadísticas: gráficos, filtros, buscador y análisis'
+      b.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>'
+      b.addEventListener('click', () => {
+        const act = bar.querySelector('.subtab.active')?.dataset.sub || ''
+        location.href = `dashboard.html?m=${mod}&r=${encodeURIComponent(act)}`
+      })
+      bar.appendChild(b)
+    })
+  } catch (e) { console.warn('boton estadísticas:', e) }
+}
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _inyectarBotonStats)
+  else _inyectarBotonStats()
+}

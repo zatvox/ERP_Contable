@@ -522,10 +522,10 @@ body.ui-moderna .modal .pp-drop-link { display: inline !important; text-transfor
 .hc-kpi-t { font-size:.64rem; } .hc-kpi-v { font-size:.98rem; } .hc-kpi-s { font-size:.68rem; }
 .hc-h { font-size:.9rem; margin:14px 0 4px; }
 .hc-prod { border-radius:8px; margin:4px 0; }
-.hc-prod > summary { display:flex; gap:12px; padding:6px 10px; font-size:.8rem; align-items:center; }
-.hc-prod > summary > span { min-width:105px; text-align:right; font-variant-numeric:tabular-nums; }
-.hc-prod > summary > .hc-p-n { flex:1 1 200px; min-width:160px; text-align:left; font-size:.82rem; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.hc-prod > summary > small { margin-left:8px; font-size:.7rem; white-space:nowrap; }
+.hc-prod > summary { display:flex; gap:12px; padding:9px 12px; font-size:.92rem; align-items:center; }
+.hc-prod > summary > span { min-width:120px; text-align:right; font-variant-numeric:tabular-nums; }
+.hc-prod > summary > .hc-p-n { flex:1 1 200px; min-width:160px; text-align:left; font-size:.96rem; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hc-prod > summary > small { margin-left:8px; font-size:.8rem; white-space:nowrap; }
 .hc-tbl { font-size:.74rem; } .hc-tbl th, .hc-tbl td { padding:3px 8px; }
 .hc-tot { font-size:.8rem; padding:6px 10px; }
 .hc-agrupar { font-size:.78rem; } .hc-agrupar select { font-size:.78rem; padding:3px 8px; }
@@ -716,3 +716,35 @@ body.ui-moderna .modal .pp-drop-link { display: inline !important; text-transfor
 .hcx-doc-ag .hc-liq-head, .hcx-doc-ag #e4-liq-host .e3-lista { width:100%; }
 .hcx-doc-ag #e4-liq-host .e3-lista > div { gap:6px !important; }
 .hcx-doc-ag .hc-liq-av[open] > .hc-avisos { background:var(--bg-secondary); }
+
+/* Tile DAM con menú ⋯ de acciones de Aduanas */
+.hcx-tile-dam { position: relative; grid-column: span 2; }
+.hcx-tile-dam .hcx-tb { padding-right: 34px; }
+.hcx-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.hcx-chips .cr-chip, .hcx-chips .hcx-tag { font-size: .68rem; }
+.hcx-menu { position: absolute; top: 6px; right: 6px; }
+.hcx-menu > summary { list-style: none; cursor: pointer; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-secondary, rgba(255,255,255,.05)); color: var(--text-primary); font-weight: 700; line-height: 1; user-select: none; }
+.hcx-menu > summary::-webkit-details-marker { display: none; }
+.hcx-menu > summary:hover, .hcx-menu[open] > summary { border-color: #3b82f6; color: #60a5fa; }
+.hcx-menu-b { position: absolute; right: 0; top: 34px; z-index: 40; min-width: 200px; padding: 5px; border-radius: 12px; background: var(--bg-secondary, #1b2230); border: 1px solid var(--border-color); box-shadow: 0 10px 28px rgba(0,0,0,.45); display: flex; flex-direction: column; gap: 2px; }
+.hcx-mi { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--text-primary); font-size: .82rem; font-weight: 600; text-align: left; cursor: pointer; }
+.hcx-mi:hover { background: rgba(59,130,246,.16); }
+
+/* Historial por carpeta: barra de orden de las filas agrupadas */
+.hc-ord { display:flex; gap:12px; align-items:center; padding:4px 13px; font-size:.72rem; text-transform:uppercase; letter-spacing:.03em; color:var(--text-secondary); }
+.hc-ord button { background:none; border:0; color:inherit; font:inherit; cursor:pointer; min-width:120px; text-align:right; padding:3px 0; white-space:nowrap; }
+.hc-ord button.hc-ord-n { flex:1 1 200px; min-width:160px; text-align:left; }
+.hc-ord button.hc-ord-l { min-width:150px; margin-left:8px; }
+.hc-ord button:hover, .hc-ord button.on { color:#60a5fa; }
+.hc-ord i { font-style:normal; opacity:.7; margin-left:2px; }
+.hc-prod:not(.hc-resumen) > summary > small { min-width:150px; text-align:right; }
+/* columnas de cifras de ancho fijo para que la barra de orden quede alineada con las filas */
+.hc-prod:not(.hc-resumen) > summary > span:not(.hc-p-n) { flex: 0 0 175px; min-width: 175px; white-space: nowrap; }
+.hc-ord button:not(.hc-ord-n):not(.hc-ord-l) { flex: 0 0 175px; min-width: 175px; }
+/* detalle del historial: encabezados que bajan de línea y cifras compactas para que la tabla no desborde */
+.hc-tbl th { white-space: normal; line-height: 1.15; vertical-align: bottom; }
+.hc-tbl th.n, .hc-tbl td.n { width: 1%; white-space: nowrap; }
+
+/* menús ⋮ de columnas a la altura de los títulos Entradas / Salidas */
+.hc-h-menu { position: relative; padding-right: 40px; }
+.hc-h-menu .col-menu.card-corner-menu { top: -4px; right: 0; }

@@ -4,6 +4,7 @@
 // ============================================================================
 import { getItems, getLotes, getLotesByItemId, getAlmacenes, getUbicaciones, getKardexByItem, getVentas, getCompras, getContacts } from '../supabase-data.js'
 import { showToast } from '../helpers.js'
+import { supabase } from '../supabase-client.js'
 import { badgeEmpresa, textoEmpresa, esMultiEmpresaActiva } from '../empresa.js'
 import { convertirEnBuscador } from '../buscador-select.js'
 import { _escInv } from './ajuste-inventario.js'
@@ -274,6 +275,7 @@ function _kardexColDefs() {
     { key: 'tipo',       label: 'Tipo Movimiento' },
     { key: 'concepto',   label: 'Concepto' },
     { key: 'contacto',   label: 'Contacto' },
+    { key: 'packing',    label: 'Packing' },
     { key: 'docref',     label: 'Doc. Referencia' },
     { key: 'lote',       label: 'Lote' },
     { key: 'desde',      label: 'Desde' },
@@ -474,6 +476,19 @@ window.cargarKardex = async function() {
     for (const v of (ventas || [])) ventaMap[v.id] = v
     const compraMap = {}
     for (const c of (compras || [])) compraMap[c.id] = c
+
+    // Packing (2026-10-31): PK asociado a la venta de cada salida (ventas.packing_id).
+    // Sin venta o sin PK → '-'.
+    const pkIdsKardex = [...new Set(movs.map(m => ventaMap[m.venta_id]?.packing_id).filter(Boolean))]
+    const pkNumMap = {}
+    for (let i = 0; i < pkIdsKardex.length; i += 200) {
+      const { data } = await supabase.from('packing').select('id, numero').in('id', pkIdsKardex.slice(i, i + 200))
+      for (const p of (data || [])) pkNumMap[p.id] = p.numero
+    }
+    const packingDeMov = (m) => {
+      const pkId = m.venta_id ? ventaMap[m.venta_id]?.packing_id : null
+      return pkId ? _escInv(pkNumMap[pkId] || `PK #${pkId}`) : '-'
+    }
     const contactMap = {}
     for (const c of (contacts || [])) contactMap[c.id] = c
     const contactoEtiqueta = (m) => {
@@ -538,7 +553,7 @@ window.cargarKardex = async function() {
               <th data-col="id"${_kardexColStyle(cols, 'id')}>ID</th>
               <th data-col="fecha" style="cursor:pointer; user-select:none; white-space:nowrap; min-width:110px;${cols.fecha ? '' : ' display:none;'}" onclick="window.ordenarKardexPorFecha()" title="Ordenar por fecha">Fecha ${_kardexOrdenFecha === 'asc' ? '▲' : '▼'}</th><th data-col="tipo"${_kardexColStyle(cols, 'tipo')}>Tipo Movimiento</th><th data-col="concepto"${_kardexColStyle(cols, 'concepto')}>Concepto</th>
               <th data-col="contacto"${_kardexColStyle(cols, 'contacto')}>Contacto</th>
-              <th data-col="docref"${_kardexColStyle(cols, 'docref')}>Doc. Ref.</th><th data-col="lote"${_kardexColStyle(cols, 'lote')}>Lote</th><th data-col="desde"${_kardexColStyle(cols, 'desde')}>Desde</th><th data-col="a"${_kardexColStyle(cols, 'a')}>A</th>
+              <th data-col="packing"${_kardexColStyle(cols, 'packing')}>Packing</th><th data-col="docref"${_kardexColStyle(cols, 'docref')}>Doc. Ref.</th><th data-col="lote"${_kardexColStyle(cols, 'lote')}>Lote</th><th data-col="desde"${_kardexColStyle(cols, 'desde')}>Desde</th><th data-col="a"${_kardexColStyle(cols, 'a')}>A</th>
               <th data-col="entrada" style="text-align:right;${cols.entrada ? '' : ' display:none;'}">Entrada</th>
               <th data-col="salida" style="text-align:right;${cols.salida ? '' : ' display:none;'}">Salida</th>
               <th data-col="unidentrada" style="text-align:right;${cols.unidentrada ? '' : ' display:none;'}">Unid. Entrada</th>
@@ -600,6 +615,7 @@ window.cargarKardex = async function() {
           <td data-col="tipo"${_kardexColStyle(cols, 'tipo')}><span style="${tipoColor}; font-weight:bold;">${m.tipo_movimiento || '-'}</span></td>
           <td data-col="concepto"${_kardexColStyle(cols, 'concepto')}>${m.concepto || '-'}</td>
           <td data-col="contacto" style="font-size:0.82rem;${cols.contacto ? '' : ' display:none;'}">${contactoEtiqueta(m)}</td>
+          <td data-col="packing" style="font-size:0.82rem; white-space:nowrap;${cols.packing ? '' : ' display:none;'}">${packingDeMov(m)}</td>
           <td data-col="docref" style="font-size:0.82rem;${cols.docref ? '' : ' display:none;'}">${m.documento_referencia || '-'}</td>
           <td data-col="lote" style="font-size:0.82rem; font-weight:600;${cols.lote ? '' : ' display:none;'}">${loteEtiqueta(m.lote_id)}</td>
           <td data-col="desde" style="font-size:0.82rem;${cols.desde ? '' : ' display:none;'}">${zonaNombre(m.ubicacion_origen_id)}</td>
@@ -632,6 +648,7 @@ window.cargarKardex = async function() {
         <td data-col="tipo"${_kardexColStyle(cols, 'tipo')}></td>
         <td data-col="concepto"${_kardexColStyle(cols, 'concepto')}></td>
         <td data-col="contacto"${_kardexColStyle(cols, 'contacto')}></td>
+        <td data-col="packing"${_kardexColStyle(cols, 'packing')}></td>
         <td data-col="docref"${_kardexColStyle(cols, 'docref')}></td>
         <td data-col="lote"${_kardexColStyle(cols, 'lote')}></td>
         <td data-col="desde"${_kardexColStyle(cols, 'desde')}></td>

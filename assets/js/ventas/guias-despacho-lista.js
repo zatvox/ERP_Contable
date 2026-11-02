@@ -6,6 +6,9 @@ import { fechaDMY } from '../helpers.js'
 import { S } from './state.js'
 import { badgeEmpresa, textoEmpresa } from '../empresa.js'
 import { registrarColumnas, colStyle } from '../col-menu.js'
+import { supabase } from '../supabase-client.js'
+import { getAlmacenes, getUbicaciones } from '../supabase-data.js'
+import { formatQty } from '../helpers.js'
 import { getCustomers, getLoteById, getVentas, updateVenta, getDetalleVentas, ultimoErrorDelete, getKardexByVenta, deleteKardexMovimiento, getGuiasDespachoVenta, getGuiaDespachoVentaById, deleteGuiaDespachoVenta, getDetalleGuiasDespachoVenta, getDetalleGuiasDespachoVentaByVenta, invalidateGuiasDespachoVentaCache, recalcularLoteDesdeBultos, revertirBultosDeDetalleGuiaDespacho, borrarKardexDeGuiaEstricto } from '../supabase-data.js'
 import { showToast } from '../helpers.js'
 import { menuAccionesFila } from '../main.js'
@@ -203,6 +206,10 @@ function _valorOrdenGuiaDespacho(g, campo) {
     case 'venta':        return g.ventaNumero || ''
     case 'cliente':      return g.clienteNombre || ''
     case 'fecha':        return g.fecha_guia || ''
+    case 'kg':           return g._kg || 0
+    case 'unidades':     return g._unid || 0
+    case 'origen':       return g._origen || ''
+    case 'destino':      return g._destino || ''
     case 'estado':       return estaAnulado(g) ? 'anulada' : 'emitida'
     default: return ''
   }
@@ -225,7 +232,25 @@ export async function renderGuiasDespachoVenta(forzar = false) {
 
     if (!S._guiasDespachoLista || forzar) {
       invalidateGuiasDespachoVentaCache()
-      const [guias, ventas, clientes] = await Promise.all([getGuiasDespachoVenta(true), getVentas(), getCustomers()])
+      const [guias, ventas, clientes, detGuias, zonas, almacenes] = await Promise.all([getGuiasDespachoVenta(true), getVentas(), getCustomers(), getDetalleGuiasDespachoVenta(), getUbicaciones(), getAlmacenes()])
+      // kg / unidades / zona origen por guía (detalle) y zona destino (kardex) — 2026-10-31
+      const almMap = {}; for (const a of (almacenes || [])) almMap[a.id] = a
+      const zonaTxt = id => { const z = (zonas || []).find(x => x.id === id); return z ? `${almMap[z.almacen_id]?.nombre ? almMap[z.almacen_id].nombre + ' — ' : ''}${z.nombre}` : `Zona #${id}` }
+      const porGuia = {}
+      for (const d of (detGuias || [])) {
+        const a = (porGuia[d.guia_id] ||= { kg: 0, unid: 0, origen: new Set() })
+        a.kg += parseFloat(d.cantidad) || 0; a.unid += parseFloat(d.cantidad_unidades) || 0
+        if (d.ubicacion_id) a.origen.add(zonaTxt(d.ubicacion_id))
+      }
+      const destinoPorGuia = {}
+      try {
+        for (let desde = 0; ; desde += 1000) {
+          const { data } = await supabase.from('kardex').select('venta_id, documento_referencia, ubicacion_destino_id')
+            .eq('tipo_movimiento', 'salida').not('venta_id', 'is', null).order('id').range(desde, desde + 999)
+          for (const k of (data || [])) if (k.ubicacion_destino_id) ((destinoPorGuia[`${k.venta_id}|${k.documento_referencia}`] ||= new Set())).add(zonaTxt(k.ubicacion_destino_id))
+          if (!data || data.length < 1000) break
+        }
+      } catch (e) { console.warn('Destino guías:', e) }
       const ventasMap = {}
       for (const v of (ventas || [])) ventasMap[v.id] = v
       const clientesMap = {}
@@ -235,7 +260,11 @@ export async function renderGuiasDespachoVenta(forzar = false) {
         return {
           ...g,
           ventaNumero: v ? `${v.serie || ''}-${String(v.correlativo || '').padStart(8,'0')}` : `Venta #${g.venta_id}`,
-          clienteNombre: v ? (clientesMap[v.contact_id]?.razon_social || clientesMap[v.contact_id]?.nombre || '-') : '-'
+          clienteNombre: v ? (clientesMap[v.contact_id]?.razon_social || clientesMap[v.contact_id]?.nombre || '-') : '-',
+          _kg: porGuia[g.id]?.kg || 0,
+          _unid: porGuia[g.id]?.unid || 0,
+          _origen: [...(porGuia[g.id]?.origen || [])].join(', '),
+          _destino: [...(destinoPorGuia[`${g.venta_id}|${g.numero_guia}`] || [])].join(', ')
         }
       }).sort((a, b) => new Date(b.fecha_guia || 0) - new Date(a.fecha_guia || 0))
     }
@@ -267,6 +296,10 @@ export async function renderGuiasDespachoVenta(forzar = false) {
             ${_thOrdenableGuiasDespacho('Venta', 'venta')}
             ${_thOrdenableGuiasDespacho('Cliente', 'cliente')}
             ${_thOrdenableGuiasDespacho('Fecha', 'fecha')}
+            ${_thOrdenableGuiasDespacho('Cantidad (kg)', 'kg')}
+            ${_thOrdenableGuiasDespacho('N° Unidades', 'unidades')}
+            ${_thOrdenableGuiasDespacho('Zona origen', 'origen')}
+            ${_thOrdenableGuiasDespacho('Zona destino', 'destino')}
             ${_thOrdenableGuiasDespacho('Estado', 'estado')}
             <th data-col-tabla="guias-despacho" data-col="observaciones"${colStyle('guias-despacho','observaciones')}>Observaciones</th>
             <th data-col-tabla="guias-despacho" data-col="acciones"${colStyle('guias-despacho','acciones')}>Acciones</th>
@@ -287,6 +320,10 @@ export async function renderGuiasDespachoVenta(forzar = false) {
               <td data-col-tabla="guias-despacho" data-col="venta"${colStyle('guias-despacho','venta')}>${g.ventaNumero}</td>
               <td data-col-tabla="guias-despacho" data-col="cliente"${colStyle('guias-despacho','cliente')}>${g.clienteNombre}</td>
               <td data-col-tabla="guias-despacho" data-col="fecha"${colStyle('guias-despacho','fecha')}>${fechaDMY(g.fecha_guia, '-')}</td>
+              <td data-col-tabla="guias-despacho" data-col="kg" style="text-align:right; white-space:nowrap;${colStyle('guias-despacho','kg') ? ' display:none;' : ''}">${g._kg ? formatQty(g._kg) : '-'}</td>
+              <td data-col-tabla="guias-despacho" data-col="unidades" style="text-align:right;${colStyle('guias-despacho','unidades') ? ' display:none;' : ''}">${g._unid ? formatQty(g._unid) : '-'}</td>
+              <td data-col-tabla="guias-despacho" data-col="origen" style="font-size:0.82rem;${colStyle('guias-despacho','origen') ? ' display:none;' : ''}">${_esc(g._origen || '-')}</td>
+              <td data-col-tabla="guias-despacho" data-col="destino" style="font-size:0.82rem;${colStyle('guias-despacho','destino') ? ' display:none;' : ''}">${_esc(g._destino || '-')}</td>
               <td data-col-tabla="guias-despacho" data-col="estado"${colStyle('guias-despacho','estado')}>${anulada ? badgeAnulado(g) : (revertida ? `<span class="badge badge-warning" title="Su mercadería reingresó por una Nota de Crédito${g.motivo_anulacion ? ' — ' + _esc(g.motivo_anulacion) : ''}">REVERTIDA</span>` : '<span class="badge badge-success">Emitida</span>')}</td>
               <td data-col-tabla="guias-despacho" data-col="observaciones"${colStyle('guias-despacho','observaciones')}>${g.observaciones ? _esc(g.observaciones) : (inactiva && g.motivo_anulacion ? `<em style="color:var(--text-secondary);">${anulada ? 'Anulado' : 'Revertida'}: ${_esc(g.motivo_anulacion)}</em>` : '-')}</td>
               <td data-col-tabla="guias-despacho" data-col="acciones" class="col-acciones" style="text-decoration:none; opacity:1;${colStyle('guias-despacho','acciones') ? ' display:none;' : ''}">
@@ -321,6 +358,10 @@ registrarColumnas('guias-despacho', [
   { key: 'venta',         label: 'Venta' },
   { key: 'cliente',       label: 'Cliente' },
   { key: 'fecha',         label: 'Fecha' },
+  { key: 'kg',            label: 'Cantidad (kg)' },
+  { key: 'unidades',      label: 'N° Unidades' },
+  { key: 'origen',        label: 'Zona origen', oculta: true },
+  { key: 'destino',       label: 'Zona destino', oculta: true },
   { key: 'estado',        label: 'Estado' },
   { key: 'observaciones', label: 'Observaciones' },
   { key: 'acciones',      label: 'Acciones' }

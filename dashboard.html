@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>JHIRO ERP - Dashboard</title>
   <link rel="stylesheet" href="assets/css/styles.css">
+  <link rel="stylesheet" href="assets/css/estadisticas.css">
 </head>
 <body>
   <div class="app-container">
@@ -18,6 +19,7 @@
         <li><a href="compras.html" data-page="compras">&#128722; Compras</a></li>
         <li><a href="ventas.html" data-page="ventas">&#128200; Ventas</a></li>
         <li><a href="cobranzas.html" data-page="cobranzas">&#128176; Cuentas x Cobrar/Pagar</a></li>
+        <li><a href="tesoreria.html" data-page="tesoreria">&#128179; Tesorería</a></li>
         <li><a href="bancos.html" data-page="bancos">&#127974; Bancos</a></li>
         <li><a href="contabilidad.html" data-page="contabilidad">&#128209; Contabilidad</a></li>
         <li><a href="costeo-importaciones.html" data-page="costeo">&#128674; Carpeta de Importaciones</a></li>
@@ -38,8 +40,9 @@
         </div>
 
         <nav class="module-nav" id="dashTabs">
-          <button type="button" class="tab-btn active" data-tab="financiero">💼 Financiero / Contable</button>
-          <button type="button" class="tab-btn" data-tab="comercial">📈 Ventas / Inventario</button>
+          <button type="button" class="tab-btn active" data-tab="financiero">💼 Resumen financiero</button>
+          <button type="button" class="tab-btn" data-tab="comercial">📈 Resumen comercial</button>
+          <button type="button" class="tab-btn" data-tab="estadisticas">📊 Estadísticas</button>
           <button type="button" class="tab-btn module-nav-config" data-tab="configuracion">⚙️ Configuración</button>
         </nav>
 
@@ -58,7 +61,7 @@
         </div>
 
         <!-- FILTROS GLOBALES -->
-        <div class="card" style="margin:16px 0 20px;">
+        <div class="card" id="dashFiltrosCard" style="margin:16px 0 20px;">
           <div class="reporte-filtros" style="border-bottom:none;">
             <div class="reporte-filtro">
               <label>Período</label>
@@ -264,6 +267,11 @@
           </div>
         </div>
 
+        <!-- TAB ESTADÍSTICAS -->
+        <div id="tab-estadisticas" class="tab-content">
+          <div id="zv-stats"></div>
+        </div>
+
         <!-- TAB CONFIGURACIÓN -->
         <div id="tab-configuracion" class="tab-content">
           <div id="dash-config-container"></div>
@@ -281,5 +289,7 @@
   <script type="module" src="assets/js/helpers.js"></script>
   <script type="module" src="assets/js/main.js"></script>
   <script type="module" src="assets/js/dashboard-init.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+  <script type="module" src="assets/js/estadisticas/centro.js"></script>
 </body>
 </html>

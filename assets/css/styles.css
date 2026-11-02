@@ -2630,3 +2630,41 @@ body.dark-mode .dt-ins.warn { color:#fcd34d; }
   background: color-mix(in srgb, var(--emp) 14%, transparent);
   color: var(--emp); font-weight: 700; font-size: 0.7rem; letter-spacing: 0.05em;
 }
+
+/* Botón 📊 «Estadísticas» de las barras de sub-pestañas de reportes */
+.subtab-bar { align-items: center; }
+.rp-stats-btn { margin-left: auto; width: 38px; height: 34px; display: inline-grid; place-items: center; border-radius: 10px; border: 1px solid var(--border-color); background: color-mix(in srgb, #3b82f6 12%, transparent); color: #60a5fa; cursor: pointer; transition: transform .12s, background .12s, border-color .12s; }
+.rp-stats-btn:hover { background: color-mix(in srgb, #3b82f6 26%, transparent); border-color: #3b82f6; transform: translateY(-1px); }
+
+/* ===========================================================================
+   BARRAS DE DESPLAZAMIENTO — 2026-11-01
+   ---------------------------------------------------------------------------
+   Las nativas de Windows son grises, anchas y rompen el tema oscuro. Se
+   estilizan en todo el ERP con los mismos tokens del sistema, y se aclaran
+   al pasar el mouse para que se note dónde se puede arrastrar.
+   Firefox usa scrollbar-width/‑color; el resto, ::-webkit-scrollbar.
+   =========================================================================== */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) transparent;
+}
+
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-corner { background: transparent; }
+
+*::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background .15s ease;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:active { background: var(--color-info); background-clip: padding-box; }
+
+/* La barra horizontal de una tabla ancha es la que más se usa: se marca un
+   poco más para que se vea que hay más columnas a la derecha. */
+.table-container::-webkit-scrollbar-thumb,
+.lc-wrap::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--text-secondary) 55%, transparent); background-clip: padding-box; }
+.lc-wrap { scrollbar-color: color-mix(in srgb, var(--text-secondary) 55%, transparent) transparent; }

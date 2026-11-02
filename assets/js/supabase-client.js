@@ -47,6 +47,8 @@ export async function esperarContextoEmpresa() {
 }
 export function empresasActivasCtx() { return _ctxEmpresa?.listo?.() ? _ctxEmpresa.activas() : null }
 export function empresaTrabajoCtx()  { return _ctxEmpresa?.listo?.() ? _ctxEmpresa.trabajo() : null }
+/** true si el usuario marcó el ámbito FAMILIAR en el switch (empresa_id IS NULL). */
+export function familiarActivoCtx()  { return _ctxEmpresa?.listo?.() ? !!_ctxEmpresa.familiar?.() : false }
 
 // Tablas y vistas DUEÑAS: tienen columna empresa_id propia y se filtran.
 // Lo que NO está aquí es catálogo compartido (items, contacts, plan_cuentas,
@@ -62,6 +64,7 @@ export const TABLAS_EMPRESA = new Set([
   // Cobranzas y tesorería
   'cuentas_cobrar', 'cuentas_pagar', 'cobros', 'cobros_lote', 'pagos', 'pagos_proveedores',
   'letras_cambio', 'letras_refinanciacion', 'bancos', 'movimientos_banco',
+  'gastos', 'entregas_a_rendir', 'reposiciones_caja',
   // Documentos y correlativos
   'series_documentos', 'secuencias_documentos',
   // Contabilidad
@@ -79,13 +82,33 @@ export const TABLAS_EMPRESA = new Set([
   'v_importacion_analisis_general', 'v_compras_importacion'
 ])
 
+// Tablas de Tesorería que admiten ÁMBITO FAMILIAR (empresa_id IS NULL).
+// Por qué existe este set: en SQL `empresa_id IN (1,2,3)` NO devuelve las filas
+// con NULL. Sin esto, la Caja Familiar sería invisible en todo el ERP — no por
+// un filtro mal escrito, sino por el interceptor global de `from()` de abajo.
+// El ámbito familiar se comporta como una empresa más en el switch, pero NO es
+// una fila de `empresa_config`: esa tabla exige RUC único y alimenta NUBEFACT,
+// series y PDT. Una "empresa" con RUC inventado ahí es un comprobante esperando
+// a emitirse mal.
+export const TABLAS_CON_AMBITO = new Set([
+  'bancos', 'movimientos_banco', 'gastos', 'entregas_a_rendir', 'reposiciones_caja',
+  'v_entregas_pendientes', 'v_libro_caja'
+])
+
 /** Aplica el filtro de empresas activas a una consulta, si corresponde. */
 export function filtrarPorEmpresa(q, table) {
-  if (!TABLAS_EMPRESA.has(table)) return q
-  const activas = empresasActivasCtx()
+  if (!TABLAS_EMPRESA.has(table) && !TABLAS_CON_AMBITO.has(table)) return q
+  const activas  = empresasActivasCtx()
+  const familiar = TABLAS_CON_AMBITO.has(table) && familiarActivoCtx()
+
   if (activas?.length) {
+    // Con el ámbito familiar marcado hay que pedir explícitamente los NULL:
+    // `in.(1,2)` los deja fuera por definición de SQL.
+    if (familiar) return q.or(`empresa_id.in.(${activas.join(',')}),empresa_id.is.null`)
     return activas.length === 1 ? q.eq('empresa_id', activas[0]) : q.in('empresa_id', activas)
   }
+  // Ámbito familiar SOLO (ninguna empresa marcada): únicamente lo que no tiene dueño.
+  if (familiar) return q.is('empresa_id', null)
   // SIN contexto todavía: se filtra a NADA, no a TODO.
   // Un filtro que "falla abierto" es peor que no tener filtro, porque enseña
   // datos de otra empresa con cara de ser los correctos. Si todavía no sabes
@@ -107,7 +130,7 @@ export function filtrarPorEmpresa(q, table) {
 const _fromOriginal = supabase.from.bind(supabase)
 supabase.from = function (table) {
   const qb = _fromOriginal(table)
-  if (!TABLAS_EMPRESA.has(table)) return qb
+  if (!TABLAS_EMPRESA.has(table) && !TABLAS_CON_AMBITO.has(table)) return qb
   const _selectOriginal = qb.select.bind(qb)
   qb.select = (...args) => filtrarPorEmpresa(_selectOriginal(...args), table)
   return qb
@@ -130,6 +153,10 @@ export function fromSinFiltro(table) { return _fromOriginal(table) }
 /** Sella un payload con la empresa de TRABAJO (una sola: el documento se firma con un solo sello). */
 export function sellarEmpresa(table, data) {
   if (!TABLAS_EMPRESA.has(table) || !data || typeof data !== 'object') return data
+  // Ámbito familiar: la fila va SIN empresa_id a propósito. El CHECK de la BD
+  // (SQL 123/124) exige que ambito='familiar' venga con empresa_id NULL, así
+  // que sellarla aquí haría que la base rechace el insert.
+  if (data.ambito === 'familiar') return { ...data, empresa_id: null }
   if (data.empresa_id != null) return data            // el modal ya la eligió explícitamente
   const emp = empresaTrabajoCtx()
   if (emp == null) return data                        // deja que la BD reclame (NOT NULL): mejor que caiga en la empresa equivocada
@@ -144,9 +171,24 @@ export function sellarEmpresa(table, data) {
 export async function getAll(table) {
   await esperarContextoEmpresa()
   try {
-    const { data, error } = await supabase.from(table).select('*')   // el filtro de empresa lo pone el wrapper de `from`
-    if (error) { console.error(`Error fetching ${table}:`, error); return [] }
-    return data || []
+    // 2026-10-31: Supabase corta en 1000 filas por consulta → se pagina por
+    // id para traer TODO (antes, tablas >1000 filas se cortaban en silencio).
+    const PAG = 1000
+    let todo = [], desde = 0
+    for (;;) {
+      const { data, error } = await supabase.from(table).select('*').order('id', { ascending: true }).range(desde, desde + PAG - 1)
+      if (error) {
+        if (desde === 0) {   // tabla/vista sin columna id: consulta simple como antes
+          const r = await supabase.from(table).select('*')   // el filtro de empresa lo pone el wrapper de `from`
+          if (r.error) { console.error(`Error fetching ${table}:`, r.error); return [] }
+          return r.data || []
+        }
+        console.error(`Error fetching ${table}:`, error); return todo
+      }
+      todo = todo.concat(data || [])
+      if (!data || data.length < PAG) return todo
+      desde += PAG
+    }
   } catch (e) { console.error('Error en getAll:', e); return [] }
 }
 

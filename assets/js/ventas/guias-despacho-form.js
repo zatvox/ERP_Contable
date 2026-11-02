@@ -199,7 +199,7 @@ function _lotesConStockZona(itemId, zonaId) {
     .sort((a, b) => new Date(S._lotesMap[a.lote_id]?.fecha_ingreso || 0) - new Date(S._lotesMap[b.lote_id]?.fecha_ingreso || 0))
 }
 
-window.abrirModalNuevaGuiaDespacho = async function () {
+window.abrirModalNuevaGuiaDespacho = async function (ventaIdPre = null) {
   try {
     S._guiaDespachoLineas = []
     S._guiaDespachoEditId = null
@@ -227,6 +227,11 @@ window.abrirModalNuevaGuiaDespacho = async function () {
         ventasPend.map(v => `<option value="${v.id}">${v.serie || ''}-${String(v.correlativo || '').padStart(8,'0')} — ${v.clienteNombre} (${v.estado_despacho})</option>`).join('')
     }
     window.openModal('modal-nueva-guia-despacho')
+    // Desde Ventas ⋮ → "Emitir guía": la venta ya viene elegida (2026-10-31)
+    if (ventaIdPre && sel && [...sel.options].some(o => o.value === String(ventaIdPre))) {
+      sel.value = String(ventaIdPre)
+      await window.onSeleccionarVentaGuiaDespacho()
+    } else if (ventaIdPre) showToast('Esa venta ya no tiene productos pendientes de despacho', 'info')
   } catch (error) {
     console.error('Error en abrirModalNuevaGuiaDespacho:', error)
     showToast('Error al abrir el formulario de guía de despacho', 'danger')
@@ -389,8 +394,9 @@ window.onCambiarZonaDespachoGuia = async function (idx, subIdx) {
     if (desp.esPesoVariable && desp.lote_id && desp.ubicacion_id) {
       desp.bultosDisponibles = await getLoteBultosDisponiblesZona(desp.lote_id, desp.ubicacion_id)
     }
-    desp.cantidad = 0
-    desp.cantidad_unidades = desp.esPesoVariable ? 0 : desp.cantidad_unidades
+    // Peso variable: la cantidad sale de los bultos → 0. Normal: se CONSERVA
+    // lo que el usuario puso (antes se borraba al elegir zona, 2026-10-31).
+    if (desp.esPesoVariable) { desp.cantidad = 0; desp.cantidad_unidades = 0 }
   }
   _renderTablaDetalleGuiaDespacho()
 }
@@ -417,6 +423,31 @@ window.onCambiarLoteDespachoGuia = async function (idx, subIdx) {
       }
     }
   }
+  _renderTablaDetalleGuiaDespacho()
+}
+
+/** N° de unidades → cantidad (kg) con el peso por unidad del lote (2026-10-31). */
+window.onCambiarUnidadesDespachoGuia = function (idx, subIdx) {
+  _sincronizarDespachosGuiaDesdeDOM()
+  const desp = S._guiaDespachoLineas[idx]?.despachos[subIdx]
+  if (!desp || desp.esPesoVariable) return
+  const lote = desp.lote_id ? S._lotesMap[desp.lote_id] : null
+  const ppu = parseFloat(lote?.peso_por_unidad) || 0
+  if (ppu > 0 && desp.cantidad_unidades > 0) desp.cantidad = parseFloat((desp.cantidad_unidades * ppu).toFixed(3))
+  _renderTablaDetalleGuiaDespacho()
+}
+
+/** Guía parcial rápida: 'todo' = todo lo pendiente en la 1ª fila; 'nada' = 0 (la línea queda pendiente para otra guía). */
+window.despacharLineaGuia = function (idx, modo) {
+  _sincronizarDespachosGuiaDesdeDOM()
+  const l = S._guiaDespachoLineas[idx]
+  if (!l) return
+  l.despachos.forEach((d, i) => {
+    d.cantidad = modo === 'todo' && i === 0 ? l.cantidad_pendiente : 0
+    const lote = d.lote_id ? S._lotesMap[d.lote_id] : null
+    const ppu = parseFloat(lote?.peso_por_unidad) || 0
+    d.cantidad_unidades = d.cantidad > 0 && ppu > 0 ? parseFloat((d.cantidad / ppu).toFixed(2)) : (d.cantidad > 0 ? d.cantidad_unidades : null)
+  })
   _renderTablaDetalleGuiaDespacho()
 }
 
@@ -495,6 +526,8 @@ export function _renderTablaDetalleGuiaDespacho() {
             Ya despachado: ${formatQty(l.cantidad_despachada_previa)} &nbsp;|&nbsp;
             Pendiente: ${formatQty(l.cantidad_pendiente)} &nbsp;|&nbsp;
             Despachando ahora: <strong style="color:${colorTotal};">${formatQty(totalDespachando)}</strong>
+            ${l.despachos.every(d => !d.esPesoVariable) ? `&nbsp;<button type="button" class="btn btn-small btn-secondary" onclick="window.despacharLineaGuia(${idx}, 'todo')" title="Despachar todo lo pendiente de esta línea">Todo</button>
+            <button type="button" class="btn btn-small btn-secondary" onclick="window.despacharLineaGuia(${idx}, 'nada')" title="No despachar esta línea en esta guía (queda pendiente para otra guía)">Nada</button>` : ''}
           </span>
         </div>
         <div style="overflow-x:auto;">
@@ -536,7 +569,7 @@ export function _renderTablaDetalleGuiaDespacho() {
           <td><input type="number" id="gd-${idx}-${subIdx}-cantidad" value="${desp.cantidad}" step="0.01" min="0" style="width:100px;" ${soloLectura ? 'readonly' : ''} onchange="window.onCambiarCantidadDespachoGuia(${idx}, ${subIdx})"></td>
           <td><input type="text" id="gd-${idx}-${subIdx}-unidadmedida" value="${l.unidad_medida || ''}" readonly size="4" style="width:auto; max-width:60px; background:var(--bg-primary); color:var(--text-secondary);"></td>
           <td><input type="text" id="gd-${idx}-${subIdx}-pesounidad" value="${pesoPorUnidad ? formatQty(pesoPorUnidad) : ''}" readonly size="6" style="width:auto; max-width:80px; background:var(--bg-primary); color:var(--text-secondary);"></td>
-          <td><input type="number" id="gd-${idx}-${subIdx}-unidades" value="${desp.cantidad_unidades ?? ''}" placeholder="Ej: 10" step="1" min="0" style="width:90px;" ${soloLectura ? 'readonly' : ''}></td>
+          <td><input type="number" id="gd-${idx}-${subIdx}-unidades" value="${desp.cantidad_unidades ?? ''}" placeholder="Ej: 10" step="1" min="0" style="width:90px;" ${soloLectura ? 'readonly' : ''} onchange="window.onCambiarUnidadesDespachoGuia(${idx}, ${subIdx})" title="Con el lote elegido, la cantidad (kg) se calcula = unidades × peso por unidad"></td>
           <td><select id="gd-${idx}-${subIdx}-zona" style="min-width:160px;" onchange="window.onCambiarZonaDespachoGuia(${idx}, ${subIdx})">
                 <option value="">-- Selecciona --</option>${zonaOptions}
               </select></td>
@@ -703,6 +736,18 @@ window.guardarGuiaDespachoVenta = async function () {
     }
 
     if (despachosValidados.length === 0) { showToast('No hay cantidades a despachar', 'warning'); return }
+    // Guía PARCIAL (2026-10-31): se avisa cuánto queda pendiente para la siguiente guía.
+    const _pendTotal = S._guiaDespachoLineas.reduce((t, l) => t + (+l.cantidad_pendiente || 0), 0)
+    const _ahora = despachosValidados.reduce((t, d) => t + (+d.cantidad || 0), 0)
+    const _queda = parseFloat((_pendTotal - _ahora).toFixed(4))
+    if (_queda > 0.0001) {
+      const detalle = S._guiaDespachoLineas.map(l => {
+        const va = despachosValidados.filter(d => d.detalle_venta_id === l.detalle_venta_id).reduce((t, d) => t + d.cantidad, 0)
+        const q = parseFloat((l.cantidad_pendiente - va).toFixed(4))
+        return q > 0.0001 ? `• ${l.nombre}: quedan ${formatQty(q)} ${l.unidad_medida || ''}` : null
+      }).filter(Boolean).join('\n')
+      if (!confirm(`Guía PARCIAL: despachas ${formatQty(_ahora)} de ${formatQty(_pendTotal)} pendientes.\n\n${detalle}\n\nLa venta quedará en estado "parcial" y podrás emitir otra guía por el saldo. ¿Continuar?`)) return
+    }
     if (!_confirmarDestinoRealGuia()) return
 
     const venta = await getVentaById(ventaId)

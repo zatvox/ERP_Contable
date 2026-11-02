@@ -10,6 +10,8 @@ import { query, supabase } from '../supabase-client.js'
 import { estaAnulado } from '../anulacion.js'
 import { signoDocumento } from '../notas.js'
 import { cacheado } from '../data-cache.js'
+import { hacerTablaOrdenable } from '../helpers.js'
+import { registrarColumnas, colMenuHtml, colStyle } from '../col-menu.js'
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 const num = v => parseFloat(v) || 0
@@ -21,6 +23,29 @@ const MES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct
 const mesTxt = ym => { const [y, m] = String(ym).split('-'); return `${MES[(+m || 1) - 1]} ${String(y).slice(2)}` }
 
 let _carpetas = [], _sel = null, _datos = null, _grupo = 'producto', _incNV = true
+// Orden de las filas agrupadas (entradas, ventas facturadas, notas de venta): k = columna, d = 1 asc / -1 desc
+const _ord = { ent: { k: 'n', d: 1 }, fact: { k: 'n', d: 1 }, nv: { k: 'n', d: 1 } }
+function _aplicarOrd(root, id) {
+  const lista = root.querySelector(`.hc-lista[data-lista="${id}"]`); if (!lista) return
+  const { k, d } = _ord[id]
+  const items = [...lista.children].filter(x => x.matches('details'))
+  // Mes ("Ago 26") → clave cronológica 2026-08, para que ordene por fecha y no alfabéticamente
+  const claveMes = t => { const [m, y] = String(t).split(' '); const i = MES.indexOf(m); return i < 0 ? String(t) : `20${y}-${String(i + 1).padStart(2, '0')}` }
+  const val = x => k === 'n' ? (_grupo === 'mes' ? claveMes(x.dataset.n) : x.dataset.n) : parseFloat(x.dataset[k]) || 0
+  items.sort((a, b) => k === 'n' ? String(val(a)).localeCompare(String(val(b)), 'es', { numeric: true }) * d : (val(a) - val(b)) * d)
+  items.forEach(x => lista.appendChild(x))
+  root.querySelectorAll(`.hc-ord[data-lista="${id}"] button`).forEach(b => { const on = b.dataset.k === k; b.classList.toggle('on', on); const i = b.querySelector('i'); if (i) i.textContent = on ? (d === 1 ? '▲' : '▼') : '⇅' })
+}
+// Columnas ocultables (menú ⋮ de la esquina). La Fecha / Lote del detalle no se ocultan: llevan la etiqueta del subtotal.
+const COLS_SAL = [['s_comprobante', 'Comprobante'], ['s_cliente', 'Cliente'], ['s_producto', 'Producto'], ['s_lote', 'Lote'], ['s_kg', 'Kg'], ['s_pu', 'P.U. US$'], ['s_puigv', 'P.U. inc. IGV US$'],
+  ['s_ing', 'Ingreso US$'], ['s_costo', 'Costo US$'], ['s_margen', 'Margen US$'], ['s_pct', 'Margen %']]
+const COLS_ENT = [['e_producto', 'Producto'], ['e_op', 'Nro operación'], ['e_fecha', 'Fecha ingreso'], ['e_kg', 'Kg ingresados'], ['e_cu', 'Costo unit. final'], ['e_costo', 'Costo total'], ['e_vend', 'Vendido'], ['e_stock', 'Stock real']]
+// Antes había un solo menú (hc_hist): se conserva lo que el usuario ya había ocultado
+try { const old = localStorage.getItem('colVisibles_hc_hist'); if (old) { for (const n of ['hc_ent', 'hc_sal']) if (!localStorage.getItem('colVisibles_' + n)) localStorage.setItem('colVisibles_' + n, old) } } catch (_) {}
+registrarColumnas('hc_sal', COLS_SAL.map(([key, label]) => ({ key, label })))
+registrarColumnas('hc_ent', COLS_ENT.map(([key, label]) => ({ key, label })))
+const C = k => { const t = k[0] === 'e' ? 'hc_ent' : 'hc_sal'; return ` data-col-tabla="${t}" data-col="${k}"${colStyle(t, k)}` }
+const pct = (m, i) => i ? f(m / i * 100, 1) + '%' : '—'
 const GRUPOS = { producto: 'Producto', operacion: 'Nro de operación (factura / guía)', lote: 'Lote', mes: 'Mes', cliente: 'Cliente (solo salidas)' }
 
 export async function construirHistorialCarpeta(panelId = 'repcm-carpeta') {
@@ -28,7 +53,7 @@ export async function construirHistorialCarpeta(panelId = 'repcm-carpeta') {
   cont.innerHTML = '<div class="card"><p class="reporte-vacio">Calculando historial…</p></div>'
   try {
     _carpetas = ((await query('carpetas_importacion', {})) || []).sort((a, b) => b.id - a.id)
-    if (!_carpetas.length) { cont.innerHTML = '<div class="card"><p class="reporte-vacio">Aún no hay carpetas de importación.</p></div>'; return }
+    if (!_carpetas.length) { cont.innerHTML = '<div class="card"><p class="reporte-vacio">No hay carpetas de importación en la(s) empresa(s) activa(s). Si esperabas ver carpetas, activa la empresa dueña (arriba, selector de empresa) — las carpetas existentes pertenecen a JHIRO.</p></div>'; return }
     const hash = new URLSearchParams(location.search).get('carpeta')
     _sel = _sel && _carpetas.some(c => c.id === _sel) ? _sel : (hash ? +hash : _carpetas[0].id)
     await _pintar(panelId)
@@ -83,9 +108,12 @@ function _calcular(D, carpeta) {
     const puOrig = det ? (num(det.cantidad) ? (num(det.subtotal) || num(det.cantidad) * num(det.precio_unitario)) / num(det.cantidad) : num(det.precio_unitario)) : 0
     const tc = num(v.tipo_cambio) || 1
     const puUsd = v.moneda === 'USD' ? puOrig : (tc > 0 ? puOrig / tc : 0)
+    // P.U. con IGV: total de la línea ÷ cantidad (las NV no llevan IGV → igual al P.U.); misma conversión a US$
+    const puIgvOrig = det ? (num(det.total_linea) && num(det.cantidad) ? num(det.total_linea) / num(det.cantidad) : puOrig * (1 + num(det.igv_porcentaje) / 100)) : 0
+    const puIgvUsd = v.moneda === 'USD' ? puIgvOrig : (tc > 0 ? puIgvOrig / tc : 0)
     const cuUsd = _cuUsd(l, D)
     salidas.push({ lote: l, loteId: l.id, item: l.item_id, fecha: v.fecha_emision || k.fecha || '', doc: v.numero || `${v.serie || ''}-${String(v.correlativo || '').padStart(8, '0')}`,
-      ventaId: v.id, cliente: D.cliMap[v.contact_id] || '(sin cliente)', devolucion: cant < 0, nv: esNV, kg: cant, ingUsd: cant * puUsd, costoUsd: cant * cuUsd, puUsd, mon: v.moneda || 'PEN', tc })
+      ventaId: v.id, cliente: D.cliMap[v.contact_id] || '(sin cliente)', devolucion: cant < 0, nv: esNV, kg: cant, ingUsd: cant * puUsd, costoUsd: cant * cuUsd, puUsd, puIgvUsd, mon: v.moneda || 'PEN', tc })
   }
   const nvPorLote = {}; salidas.filter(s => s.nv).forEach(s => { nvPorLote[s.loteId] = (nvPorLote[s.loteId] || 0) + s.kg })
   const vendidoPorLote = {}; salidas.forEach(s => { vendidoPorLote[s.loteId] = (vendidoPorLote[s.loteId] || 0) + s.kg })
@@ -111,12 +139,15 @@ function _cuUsd(l, D) {
   return num(l.costo_unitario) / tc
 }
 
-function _barras(titulo, serie, fmt, color) {
+// zoom=true: la base del eje NO es 0 sino cerca del mínimo → se notan las diferencias entre valores parecidos (p. ej. precios)
+function _barras(titulo, serie, fmt, color, zoom = false) {
   if (!serie.length) return ''
   const max = Math.max(...serie.map(s => Math.abs(s.v)), 1e-9)
+  const mn = Math.min(...serie.map(s => s.v)), rng = max - mn
+  const alto = v => zoom && rng > 1e-9 ? 18 + (v - mn) / rng * 82 : Math.max(3, Math.abs(v) / max * 100)
   return `<div class="hc-graf"><div class="hc-graf-t">${titulo}</div><div class="hc-barras">${serie.map(s => `
     <div class="hc-bar-col" title="${esc(s.k)}: ${esc(fmt(s.v))}"><div class="hc-bar-v">${esc(fmt(s.v))}</div>
-      <div class="hc-bar" style="height:${Math.max(3, Math.abs(s.v) / max * 100)}%;background:${s.v < 0 ? '#ef4444' : color}"></div><div class="hc-bar-k">${esc(s.k)}</div></div>`).join('')}</div></div>`
+      <div class="hc-bar" style="height:${alto(s.v)}%;background:${s.v < 0 ? '#ef4444' : color}"></div><div class="hc-bar-k">${esc(s.k)}</div></div>`).join('')}</div></div>`
 }
 
 async function _pintar(panelId) {
@@ -145,26 +176,26 @@ async function _pintar(panelId) {
   const keyEnt = x => ({ producto: x.prod, operacion: x.op, lote: x.l.numero_lote || 'Lote ' + x.l.id, mes: x.l.fecha_ingreso ? mesTxt(String(x.l.fecha_ingreso).slice(0, 7)) : '—', cliente: x.prod })[_grupo]
   const keySal = s => ({ producto: _datos.itemMap[s.item]?.nombre || 'Item ' + s.item, operacion: s.doc, lote: s.lote.numero_lote || 'Lote ' + s.loteId, mes: s.fecha ? mesTxt(String(s.fecha).slice(0, 7)) : '—', cliente: s.cliente })[_grupo]
   const agrupar = (arr, kf) => { const m = new Map(); arr.forEach(x => { const k = kf(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x) }); return [...m.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0]), 'es', { numeric: true })) }
-  const filaEnt = x => `<tr><td>${esc(x.l.numero_lote || 'Lote ' + x.l.id)}</td><td>${esc(x.prod)}</td><td>${esc(x.op)}</td><td>${fch(x.l.fecha_ingreso)}</td><td class="n">${f(x.kgIni, 1)}</td><td class="n">${u6(x.cu)}</td><td class="n">${usd(x.costo)}</td><td class="n">${f(x.vendido, 1)}</td><td class="n">${f(x.stockReal, 1)}</td></tr>`
+  const filaEnt = x => `<tr><td>${esc(x.l.numero_lote || 'Lote ' + x.l.id)}</td><td${C('e_producto')}>${esc(x.prod)}</td><td${C('e_op')}>${esc(x.op)}</td><td${C('e_fecha')}>${fch(x.l.fecha_ingreso)}</td><td class="n"${C('e_kg')}>${f(x.kgIni, 1)}</td><td class="n"${C('e_cu')}>${u6(x.cu)}</td><td class="n"${C('e_costo')}>${usd(x.costo)}</td><td class="n"${C('e_vend')}>${f(x.vendido, 1)}</td><td class="n"${C('e_stock')}>${f(x.stockReal, 1)}</td></tr>`
   const gruposEnt = agrupar(ents, keyEnt).map(([k, xs]) => {
     const kg = xs.reduce((a, x) => a + x.kgIni, 0), c = xs.reduce((a, x) => a + x.costo, 0)
-    return `<details class="hc-prod hc-sub2"><summary><span class="hc-p-n">${esc(k)}</span><span>${f(kg, 1)} kg</span><span>Costo prom. ${u6(kg ? c / kg : 0)}/kg</span><span class="hc-fuerte">${usd(c)}</span><small>${xs.length} lote${xs.length > 1 ? 's' : ''} · ver más ▾</small></summary>
-      <table class="hc-tbl"><thead><tr><th>Lote</th><th>Producto</th><th>Nro operación</th><th>Fecha ingreso</th><th class="n">Kg ingresados</th><th class="n">Costo unit. final</th><th class="n">Costo total</th><th class="n">Vendido</th><th class="n">Stock real</th></tr></thead><tbody>${xs.map(filaEnt).join('')}</tbody></table></details>`
+    return `<details class="hc-prod hc-sub2" data-n="${esc(k)}" data-kg="${kg}" data-pu="${kg ? c / kg : 0}" data-imp="${c}" data-ln="${xs.length}"><summary><span class="hc-p-n">${esc(k)}</span><span>${f(kg, 1)} kg</span><span>Costo prom. ${u6(kg ? c / kg : 0)}/kg</span><span class="hc-fuerte">${usd(c)}</span><small>${xs.length} lote${xs.length > 1 ? 's' : ''} · ver más ▾</small></summary>
+      <table class="hc-tbl"><thead><tr><th>Lote</th><th${C('e_producto')}>Producto</th><th${C('e_op')}>Nro operación</th><th${C('e_fecha')}>Fecha ingreso</th><th class="n"${C('e_kg')}>Kg ingresados</th><th class="n"${C('e_cu')}>Costo unit. final</th><th class="n"${C('e_costo')}>Costo total</th><th class="n"${C('e_vend')}>Vendido</th><th class="n"${C('e_stock')}>Stock real</th></tr></thead><tbody>${xs.map(filaEnt).join('')}</tbody></table></details>`
   }).join('')
+  const ordBar = (id, cols) => `<div class="hc-ord" data-lista="${id}"><button type="button" data-k="n" class="hc-ord-n">${GRUPOS[_grupo].split(' (')[0]} <i>⇅</i></button>${cols.map(([k, t]) => `<button type="button" data-k="${k}"${k === 'ln' ? ' class="hc-ord-l"' : ''}>${t} <i>⇅</i></button>`).join('')}</div>`
   const operaciones = new Set(ents.map(x => x.op))
   const entradas = `<details class="hc-prod hc-resumen"><summary><span class="hc-p-n">Ingreso total de la carpeta</span><span>${f(kgIni, 1)} kg</span><span>Costo prom. ${u6(cuProm)}/kg</span><span class="hc-fuerte">${usd(costoTot)}</span><small>${prods.length} productos · ${ents.length} lotes · ${operaciones.size} operación(es) · ver más ▾</small></summary>
-      <div style="padding:4px 10px 10px;">${gruposEnt}</div></details>`
+      <div style="padding:4px 10px 10px;">${ordBar('ent', [['kg', 'Kg'], ['pu', 'Costo prom.'], ['imp', 'Importe'], ['ln', 'Lotes']])}<div class="hc-lista" data-lista="ent">${gruposEnt}</div></div></details>`
   const gruposDe = arr => agrupar(arr, keySal).map(([k, ss]) => {
     ss = ss.slice().sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)))
     const kg = ss.reduce((a, x) => a + x.kg, 0), ing = ss.reduce((a, x) => a + x.ingUsd, 0), cs = ss.reduce((a, x) => a + x.costoUsd, 0)
-    return `<details class="hc-prod"><summary><span class="hc-p-n">${esc(k)}</span><span>${f(kg, 1)} kg vendidos</span><span>P.U. prom. ${u6(kg ? ing / kg : 0)}</span><span class="hc-fuerte">${usd(ing)}</span><span class="${ing - cs >= 0 ? 'hc-pos' : 'hc-neg'}">Margen ${usd(ing - cs)}</span><small>${ss.length} línea${ss.length > 1 ? 's' : ''} · ver más ▾</small></summary>
-      <table class="hc-tbl"><thead><tr><th>Fecha</th><th>Comprobante</th><th>Cliente</th><th>Producto</th><th>Lote</th><th class="n">Kg</th><th class="n">P.U. US$</th><th class="n">Ingreso US$</th><th class="n">Costo US$</th><th class="n">Margen US$</th></tr></thead><tbody>
-      ${ss.map(x => `<tr><td>${fch(x.fecha)}</td><td>${esc(x.doc)}${x.devolucion ? ' <small class="hc-neg">(NC / devolución)</small>' : ''}</td><td>${esc(x.cliente)}</td><td>${esc(_datos.itemMap[x.item]?.nombre || '')}</td><td>${esc(x.lote.numero_lote || '')}</td><td class="n">${f(x.kg, 1)}</td><td class="n">${f(x.puUsd, 6)}</td><td class="n">${f(x.ingUsd)}</td><td class="n">${f(x.costoUsd)}</td><td class="n ${x.ingUsd - x.costoUsd >= 0 ? 'hc-pos' : 'hc-neg'}">${f(x.ingUsd - x.costoUsd)}</td></tr>`).join('')}
-      <tr class="hc-sub"><td colspan="5">Subtotal ${esc(k)}</td><td class="n">${f(kg, 1)}</td><td class="n">${f(kg ? ing / kg : 0, 6)}</td><td class="n">${f(ing)}</td><td class="n">${f(cs)}</td><td class="n">${f(ing - cs)}</td></tr>
-      </tbody></table></details>`
+    return `<details class="hc-prod" data-n="${esc(k)}" data-kg="${kg}" data-pu="${kg ? ing / kg : 0}" data-imp="${ing}" data-mg="${ing - cs}" data-ln="${ss.length}"><summary><span class="hc-p-n">${esc(k)}</span><span>${f(kg, 1)} kg vendidos</span><span>P.U. prom. ${u6(kg ? ing / kg : 0)}</span><span class="hc-fuerte">${usd(ing)}</span><span class="${ing - cs >= 0 ? 'hc-pos' : 'hc-neg'}">Margen ${usd(ing - cs)}</span><small>${ss.length} línea${ss.length > 1 ? 's' : ''} · ver más ▾</small></summary>
+      <table class="hc-tbl"><thead><tr><th>Fecha</th><th${C('s_comprobante')}>Comprobante</th><th${C('s_cliente')}>Cliente</th><th${C('s_producto')}>Producto</th><th${C('s_lote')}>Lote</th><th class="n"${C('s_kg')}>Kg</th><th class="n"${C('s_pu')}>P.U. US$</th><th class="n"${C('s_puigv')}>P.U. inc. IGV US$</th><th class="n"${C('s_ing')}>Ingreso US$</th><th class="n"${C('s_costo')}>Costo US$</th><th class="n"${C('s_margen')}>Margen US$</th><th class="n"${C('s_pct')}>Margen %</th></tr></thead><tbody>
+      ${ss.map(x => `<tr><td>${fch(x.fecha)}</td><td${C('s_comprobante')}>${esc(x.doc)}${x.devolucion ? ' <small class="hc-neg">(NC / devolución)</small>' : ''}</td><td${C('s_cliente')}>${esc(x.cliente)}</td><td${C('s_producto')}>${esc(_datos.itemMap[x.item]?.nombre || '')}</td><td${C('s_lote')}>${esc(x.lote.numero_lote || '')}</td><td class="n"${C('s_kg')}>${f(x.kg, 1)}</td><td class="n"${C('s_pu')}>${f(x.puUsd, 6)}</td><td class="n"${C('s_puigv')}>${f(x.puIgvUsd, 6)}</td><td class="n"${C('s_ing')}>${f(x.ingUsd)}</td><td class="n"${C('s_costo')}>${f(x.costoUsd)}</td><td class="n ${x.ingUsd - x.costoUsd >= 0 ? 'hc-pos' : 'hc-neg'}"${C('s_margen')}>${f(x.ingUsd - x.costoUsd)}</td><td class="n ${x.ingUsd - x.costoUsd >= 0 ? 'hc-pos' : 'hc-neg'}"${C('s_pct')}>${pct(x.ingUsd - x.costoUsd, x.ingUsd)}</td></tr>`).join('')}
+      </tbody><tfoot><tr class="hc-sub"><td style="white-space:nowrap;">Subtotal ${esc(k)}</td><td${C('s_comprobante')}></td><td${C('s_cliente')}></td><td${C('s_producto')}></td><td${C('s_lote')}></td><td class="n"${C('s_kg')}>${f(kg, 1)}</td><td class="n"${C('s_pu')}>${f(kg ? ing / kg : 0, 6)}</td><td class="n"${C('s_puigv')}>${f(kg ? ss.reduce((a, x) => a + x.puIgvUsd * x.kg, 0) / kg : 0, 6)}</td><td class="n"${C('s_ing')}>${f(ing)}</td><td class="n"${C('s_costo')}>${f(cs)}</td><td class="n"${C('s_margen')}>${f(ing - cs)}</td><td class="n"${C('s_pct')}>${pct(ing - cs, ing)}</td></tr></tfoot></table></details>`
   }).join('')
-  const bloque = (tit, sub, arr) => { if (!arr.length) return ''; const t = tot(arr); return `<div class="hc-bl-t"><b>${tit}</b> <small>${sub}</small><span>${f(t.kg, 1)} kg · ${usd(t.ing)} · margen <b class="${t.ing - t.cs >= 0 ? 'hc-pos' : 'hc-neg'}">${usd(t.ing - t.cs)}</b></span></div>${gruposDe(arr)}` }
-  const salidasHtml = (bloque('Ventas facturadas', 'factura / boleta · kardex: salida − devoluciones', fact) + (_incNV ? bloque('Notas de venta (NV)', 'Zona A → Zona B · kardex: columna salida', nvs) : '')) || '<div class="dm-nota">Esta carpeta aún no tiene ventas.</div>'
+  const bloque = (tit, sub, arr, id) => { if (!arr.length) return ''; const t = tot(arr); return `<div class="hc-bl-t"><b>${tit}</b> <small>${sub}</small><span>${f(t.kg, 1)} kg · ${usd(t.ing)} · margen <b class="${t.ing - t.cs >= 0 ? 'hc-pos' : 'hc-neg'}">${usd(t.ing - t.cs)}</b></span></div>${ordBar(id, [['kg', 'Kg vendidos'], ['pu', 'P.U. prom.'], ['imp', 'Ingreso US$'], ['mg', 'Margen'], ['ln', 'Líneas']])}<div class="hc-lista" data-lista="${id}">${gruposDe(arr)}</div>` }
+  const salidasHtml = (bloque('Ventas facturadas', 'factura / boleta · kardex: salida − devoluciones', fact, 'fact') + (_incNV ? bloque('Notas de venta (NV)', 'Zona A → Zona B · kardex: columna salida', nvs, 'nv') : '')) || '<div class="dm-nota">Esta carpeta aún no tiene ventas.</div>'
   const tF = tot(fact), tN = tot(nvs)
 
   cont.innerHTML = `<div class="card hc-wrap">
@@ -181,9 +212,9 @@ async function _pintar(panelId) {
       ${kpi('Rentabilidad carpeta', costoTot ? `${f(margen / (costoVend || 1) * 100, 1)}%` : '—', `Proyectada con stock: ${usd(margen + proy)}`)}
     </div>
     <div class="hc-agrupar">Agrupar por: <select id="hcGrupoSel" class="form-control" style="width:auto;display:inline-block;">${Object.entries(GRUPOS).map(([k, l]) => `<option value="${k}" ${k === _grupo ? 'selected' : ''}>${l}</option>`).join('')}</select> <label class="hc-chk"><input type="checkbox" id="hcNV" ${_incNV ? 'checked' : ''}> Incluir notas de venta (NV)</label></div>
-    <h4 class="hc-h">⬇ Entradas — ingreso de la compra</h4>${entradas}
+    <h4 class="hc-h hc-h-menu">⬇ Entradas — ingreso de la compra${colMenuHtml('hc_ent', 'hcColMenuEnt', 'hcColMenuEntDd')}</h4>${entradas}
     <div class="hc-tot">Total entradas: <b>${f(kgIni, 1)} kg</b> · <b>${usd(costoTot)}</b></div>
-    <h4 class="hc-h">⬆ Salidas — ventas (agrupadas por ${GRUPOS[_grupo].split(' (')[0].toLowerCase()})</h4>${salidasHtml}
+    <h4 class="hc-h hc-h-menu">⬆ Salidas — ventas (agrupadas por ${GRUPOS[_grupo].split(' (')[0].toLowerCase()})${colMenuHtml('hc_sal', 'hcColMenuSal', 'hcColMenuSalDd')}</h4>${salidasHtml}
     <div class="hc-tot">Facturado <b>${f(tF.kg, 1)} kg</b> · ${usd(tF.ing)} &nbsp;|&nbsp; NV <b>${f(tN.kg, 1)} kg</b> · ${usd(tN.ing)} &nbsp;|&nbsp; Total salidas: <b>${f(kgVend, 1)} kg</b> · ingresos <b>${usd(ingTot)}</b> · costo <b>${usd(costoVend)}</b> · margen <b class="${margen >= 0 ? 'hc-pos' : 'hc-neg'}">${usd(margen)}</b></div>
     <h4 class="hc-h">📈 Estadísticas</h4>
     <div class="hc-kpis">
@@ -194,10 +225,61 @@ async function _pintar(panelId) {
     </div>
     <div class="hc-grafs">
       ${_barras('Kg vendidos por mes', meses.map(k => ({ k: mesTxt(k), v: mm[k].kg })), v => f(v, 0), '#3b82f6')}
-      ${_barras('Precio unitario de venta (US$/kg)', meses.map(k => ({ k: mesTxt(k), v: mm[k].kg ? mm[k].ing / mm[k].kg : 0 })), v => f(v, 3), '#10b981')}
+      ${_barras('Precio unitario de venta (US$/kg) · escala ajustada', meses.map(k => ({ k: mesTxt(k), v: mm[k].kg ? mm[k].ing / mm[k].kg : 0 })), v => f(v, 3), '#10b981', true)}
       ${_barras('Margen por mes (US$)', meses.map(k => ({ k: mesTxt(k), v: mm[k].ing - mm[k].costo })), v => f(v, 0), '#f59e0b')}
     </div></div>`
+  cont.querySelectorAll('.hc-ord button').forEach(b => b.addEventListener('click', e => {
+    e.preventDefault(); e.stopPropagation()
+    const id = b.closest('.hc-ord').dataset.lista, o = _ord[id]
+    if (o.k === b.dataset.k) o.d = -o.d; else { o.k = b.dataset.k; o.d = b.dataset.k === 'n' ? 1 : -1 }   // numéricas: primero el mayor
+    _aplicarOrd(cont, id)
+  }))
+  Object.keys(_ord).forEach(id => _aplicarOrd(cont, id))
+  cont.querySelectorAll('table.hc-tbl').forEach(hacerTablaOrdenable)
   document.getElementById('hcNV')?.addEventListener('change', async e => { _incNV = e.target.checked; await _pintar(panelId) })
   document.getElementById('hcGrupoSel')?.addEventListener('change', async e => { _grupo = e.target.value; await _pintar(panelId) })
   document.getElementById('hcCarpetaSel')?.addEventListener('change', async e => { _sel = +e.target.value; await _pintar(panelId) })
 }
+
+// ── Para el Centro de estadísticas: todas las ventas (salidas) de todas las carpetas como filas planas ──
+// Lo captura estadisticas/cosecha.js desde window.__zvConfigs (no dibuja nada en pantalla).
+async function _configEstadistica() {
+  const carpetas = ((await query('carpetas_importacion', {})) || []).sort((a, b) => b.id - a.id)
+  const filas = []
+  for (const c of carpetas) {
+    const D = await _cargarDatos(c.id)
+    const { salidas } = _calcular(D, c)
+    const nomC = `Carpeta ${c.numero_carpeta ?? c.id}`
+    for (const s of salidas) {
+      filas.push({
+        carpeta: nomC, proveedor: D.provMap[c.proveedor_id] || '—',
+        producto: D.itemMap[s.item]?.nombre || 'Item ' + s.item, lote: s.lote.numero_lote || 'Lote ' + s.loteId,
+        cliente: s.cliente, comprobante: s.doc, tipo: s.nv ? 'Nota de venta' : (s.devolucion ? 'Devolución' : 'Factura / boleta'),
+        fecha: String(s.fecha || '').slice(0, 10), kg: s.kg, ingreso: s.ingUsd, costo: s.costoUsd, margen: s.ingUsd - s.costoUsd
+      })
+    }
+  }
+  return {
+    id: 'repcm-carpeta', titulo: 'Rentabilidad por carpeta de importación', datos: filas,
+    dimensiones: [
+      { key: 'fecha_m', label: 'Fecha', tipo: 'fecha', campo: 'fecha' }, { key: 'carpeta', label: 'Carpeta' }, { key: 'producto', label: 'Producto' },
+      { key: 'cliente', label: 'Cliente' }, { key: 'lote', label: 'Lote' }, { key: 'tipo', label: 'Tipo' }, { key: 'proveedor', label: 'Proveedor' }, { key: 'comprobante', label: 'Comprobante' }
+    ],
+    medidas: [
+      { key: 'ingreso', label: 'Ingreso US$', agg: 'sum', formato: 'money' },
+      { key: 'costo', label: 'Costo US$', agg: 'sum', formato: 'money' },
+      { key: 'margen', label: 'Margen US$', agg: 'sum', formato: 'money' },
+      { key: 'margen_pct', label: 'Margen %', agg: 'ratio', formato: 'pct', num: f => f.margen, den: f => f.ingreso, escala: 100 },
+      { key: 'kg', label: 'Kg vendidos', agg: 'sum', formato: 'qty' },
+      { key: 'pu', label: 'P.U. prom. US$/kg', agg: 'ratio', formato: 'money4', num: f => f.ingreso, den: f => f.kg }
+    ],
+    kpis: f => {
+      const ing = f.reduce((a, x) => a + x.ingreso, 0), cs = f.reduce((a, x) => a + x.costo, 0), kg = f.reduce((a, x) => a + x.kg, 0)
+      return [
+        { label: 'Ingresos US$', valor: ing, formato: 'money' }, { label: 'Margen US$', valor: ing - cs, formato: 'money' },
+        { label: 'Margen %', valor: ing ? (ing - cs) / ing * 100 : 0, formato: 'pct' }, { label: 'Kg vendidos', valor: kg, formato: 'qty' }
+      ]
+    }
+  }
+}
+if (typeof window !== 'undefined') (window.__zvConfigs ||= {})['repcm-carpeta'] = _configEstadistica

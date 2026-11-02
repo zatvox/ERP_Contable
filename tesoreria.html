@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <link rel="icon" href="data:,">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JHIRO ERP - Tesorería</title>
+  <link rel="stylesheet" href="assets/css/styles.css">
+  <link rel="stylesheet" href="assets/css/libro-caja.css?v=18">
+</head>
+<body>
+  <div class="app-container">
+    <aside class="sidebar">
+      <div class="sidebar-logo">JHIRO</div>
+      <ul class="sidebar-menu">
+        <li><a href="dashboard.html" data-page="dashboard">&#128202; Dashboard</a></li>
+        <li><a href="inventario.html" data-page="inventario">&#128230; Inventario</a></li>
+        <li><a href="compras.html" data-page="compras">&#128722; Compras</a></li>
+        <li><a href="ventas.html" data-page="ventas">&#128200; Ventas</a></li>
+        <li><a href="cobranzas.html" data-page="cobranzas">&#128176; Cuentas x Cobrar/Pagar</a></li>
+        <li><a href="tesoreria.html" class="active" data-page="tesoreria">&#128179; Tesorería</a></li>
+        <li><a href="bancos.html" data-page="bancos">&#127974; Bancos</a></li>
+        <li><a href="contabilidad.html" data-page="contabilidad">&#128209; Contabilidad</a></li>
+        <li><a href="costeo-importaciones.html" data-page="costeo">&#128674; Carpeta de Importaciones</a></li>
+        <li data-solo-admin><a href="usuarios.html" data-page="usuarios">&#128100; Usuarios</a></li>
+        <li><a href="perfil.html" data-page="perfil">&#9881;&#65039; Configuración</a></li>
+      </ul>
+      <div class="sidebar-user">
+        <strong id="userDisplay">Admin</strong>
+        <button class="btn-logout" onclick="logout()">Cerrar Sesión</button>
+      </div>
+    </aside>
+
+    <div class="main-content">
+      <header class="header">
+        <div class="header-left">
+          <button class="menu-toggle" id="menuToggle">☰</button>
+          <h2 class="header-title">Tesorería</h2>
+        </div>
+
+        <nav class="module-nav" id="tesoreriaTabs">
+          <button type="button" class="tab-btn active" data-tab="inicio">🏠 Inicio</button>
+          <button type="button" class="tab-btn" data-tab="libro">📒 Libro de caja</button>
+          <div class="module-nav-group">
+            <button type="button" class="module-nav-group-toggle">Caja</button>
+            <div class="module-nav-dropdown">
+              <button class="tab-btn" data-tab="gastos">Gastos</button>
+              <button class="tab-btn" data-tab="entregas">Entregas a rendir</button>
+              <button class="tab-btn" data-tab="reposiciones">Reposiciones</button>
+            </div>
+          </div>
+          <button type="button" class="tab-btn" data-tab="cajas">Cajas</button>
+          <button type="button" class="tab-btn" data-tab="reportes">📊 Reportes</button>
+          <button type="button" class="tab-btn module-nav-config" data-tab="configuracion">⚙️ Configuración</button>
+        </nav>
+
+        <div class="header-controls">
+          <button class="btn btn-primary btn-small" id="btnGastoRapido"
+                  onclick="window.abrirModalGasto()" title="Registrar un gasto desde cualquier pantalla">+ Gasto</button>
+          <button class="theme-toggle" id="themeToggle">🌙 Oscuro</button>
+        </div>
+      </header>
+
+      <main class="content">
+
+        <!-- ══════════════════ KPIs ══════════════════ -->
+        <div class="grid grid-4" style="margin-bottom:20px;">
+          <div class="kpi-card kpi-clickable" onclick="window.irATabTes('cajas')">
+            <div class="kpi-label">Saldo en cajas (PEN)</div>
+            <div class="kpi-value" id="kpi-tes-caja-pen" style="color:var(--color-success);">S/ 0.00</div>
+            <div class="kpi-sub" id="kpi-tes-caja-pen-sub">—</div>
+          </div>
+          <div class="kpi-card kpi-clickable" onclick="window.irATabTes('gastos')">
+            <div class="kpi-label">Gastos del mes</div>
+            <div class="kpi-value" id="kpi-tes-gastos-mes">S/ 0.00</div>
+            <div class="kpi-sub" id="kpi-tes-gastos-mes-sub">—</div>
+          </div>
+          <div class="kpi-card kpi-clickable" onclick="window.irATabTes('entregas')">
+            <div class="kpi-label">Sin rendir</div>
+            <div class="kpi-value" id="kpi-tes-sin-rendir" style="color:var(--color-warning);">S/ 0.00</div>
+            <div class="kpi-sub" id="kpi-tes-sin-rendir-sub">En manos del personal</div>
+          </div>
+          <div class="kpi-card kpi-clickable" onclick="window.irATabTes('gastos')">
+            <div class="kpi-label">Sin comprobante</div>
+            <div class="kpi-value" id="kpi-tes-sin-doc" style="color:var(--color-danger);">S/ 0.00</div>
+            <div class="kpi-sub">No deducible este mes</div>
+          </div>
+        </div>
+
+        <!-- ══════════════════ TAB: INICIO ══════════════════ -->
+        <div id="tab-inicio" class="tab-content active">
+          <div class="grid grid-2" style="gap:16px; align-items:start;">
+
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">⏳ Entregas sin rendir</h3>
+                <button class="btn btn-secondary btn-small" onclick="window.irATabTes('entregas')">Ver todas →</button>
+              </div>
+              <div id="tes-bandeja-entregas" style="padding:4px 0;">Cargando...</div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">🧾 Pendientes de factura</h3>
+                <button class="btn btn-secondary btn-small" onclick="window.irATabTes('gastos')">Ver todos →</button>
+              </div>
+              <div id="tes-bandeja-facturas" style="padding:4px 0;">Cargando...</div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">💰 Estado de las cajas</h3>
+                <button class="btn btn-secondary btn-small" onclick="window.irATabTes('reposiciones')">Reponer →</button>
+              </div>
+              <div id="tes-bandeja-cajas" style="padding:4px 0;">Cargando...</div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">📅 Últimos gastos</h3>
+                <button class="btn btn-primary btn-small" onclick="window.abrirModalGasto()">+ Gasto</button>
+              </div>
+              <div id="tes-bandeja-ultimos" style="padding:4px 0;">Cargando...</div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ══════════════════ TAB: LIBRO DE CAJA (grilla estilo Excel) ══════════════════ -->
+        <div id="tab-libro" class="tab-content">Cargando...</div>
+
+        <!-- ══════════════════ TAB: GASTOS ══════════════════ -->
+        <div id="tab-gastos" class="tab-content">
+          <div class="card">
+            <div class="card-header" style="flex-direction:column; align-items:stretch; gap:10px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; padding-right:34px;">
+                <h3 class="card-titulo-tab">Gastos</h3>
+                <div class="card-acciones">
+                  <button class="btn btn-primary btn-small" onclick="window.abrirModalGasto()">+ Nuevo Gasto</button>
+                  <button class="btn btn-secondary btn-small" onclick="window.exportarGastosCSV()">⬇ CSV</button>
+                </div>
+              </div>
+
+              <div class="kardex-filtros-grid">
+                <div class="kardex-filtros-fila">
+                  <div class="bsq-caja">
+                    <input type="text" id="gasBuscar" class="bsq-input" placeholder="Buscar en todas las columnas…"
+                           oninput="window.cargarGastos()">
+                    <button type="button" class="bsq-limpiar" onclick="window.limpiarBusquedaGastos()">✕</button>
+                  </div>
+                  <select id="gasFiltroCaja" onchange="window.cargarGastos()">
+                    <option value="">-- Todas las cajas --</option>
+                  </select>
+                  <select id="gasFiltroAmbito" onchange="window.cargarGastos()">
+                    <option value="">Todos los ámbitos</option>
+                    <option value="empresa">Empresa</option>
+                    <option value="familiar">Familiar</option>
+                  </select>
+                </div>
+                <div class="kardex-filtros-fila">
+                  <select id="gasFiltroCategoria" onchange="window.cargarGastos()">
+                    <option value="">Todas las categorías</option>
+                  </select>
+                  <select id="gasFiltroSustento" onchange="window.cargarGastos()">
+                    <option value="">Todo el sustento</option>
+                    <option value="pendiente">⚠ Pendiente de factura</option>
+                    <option value="con_doc">Con comprobante</option>
+                    <option value="sin_documento">Sin documento</option>
+                  </select>
+                  <input type="month" id="gasFiltroMes" onchange="window.cargarGastos()">
+                </div>
+              </div>
+            </div>
+
+            <div class="col-menu card-corner-menu" id="gastosColMenu">
+              <button type="button" class="card-menu-btn" onclick="window.toggleMenuColumnasGastos(event)"
+                      title="Elegir columnas">⋮</button>
+              <div class="col-menu-dropdown" id="gastosColMenuDropdown"></div>
+            </div>
+
+            <div id="gastos-tabla-cont" class="table-container">Cargando...</div>
+          </div>
+        </div>
+
+        <!-- ══════════════════ TAB: ENTREGAS A RENDIR ══════════════════ -->
+        <div id="tab-entregas" class="tab-content">
+          <div class="card">
+            <div class="card-header" style="flex-direction:column; align-items:stretch; gap:10px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; padding-right:34px;">
+                <h3 class="card-titulo-tab">Entregas a rendir</h3>
+                <div class="card-acciones">
+                  <button class="btn btn-primary btn-small" onclick="window.abrirModalEntrega()">+ Nueva Entrega</button>
+                </div>
+              </div>
+              <small style="color:var(--text-secondary); line-height:1.5;">
+                El efectivo o Yape que se entrega a una persona para comprar. <strong>No es gasto</strong> hasta que
+                trae el comprobante — por eso el vuelto no distorsiona el saldo de la caja.
+              </small>
+              <div class="kardex-filtros-grid">
+                <div class="kardex-filtros-fila">
+                  <div class="bsq-caja">
+                    <input type="text" id="entBuscar" class="bsq-input" placeholder="Buscar persona o concepto…"
+                           oninput="window.cargarEntregas()">
+                    <button type="button" class="bsq-limpiar" onclick="window.limpiarBusquedaEntregas()">✕</button>
+                  </div>
+                  <select id="entFiltroEstado" onchange="window.cargarEntregas()">
+                    <option value="pendientes">Pendientes (abiertas y parciales)</option>
+                    <option value="">Todas</option>
+                    <option value="rendida">Rendidas</option>
+                    <option value="anulada">Anuladas</option>
+                  </select>
+                  <select id="entFiltroCaja" onchange="window.cargarEntregas()">
+                    <option value="">-- Todas las cajas --</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div id="entregas-tabla-cont" class="table-container">Cargando...</div>
+          </div>
+        </div>
+
+        <!-- ══════════════════ TAB: REPOSICIONES ══════════════════ -->
+        <div id="tab-reposiciones" class="tab-content">
+          <div class="card">
+            <div class="card-header" style="flex-direction:column; align-items:stretch; gap:10px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; padding-right:34px;">
+                <h3 class="card-titulo-tab">Reposiciones de caja</h3>
+                <div class="card-acciones">
+                  <button class="btn btn-primary btn-small" onclick="window.abrirModalReposicion()">+ Nueva Reposición</button>
+                </div>
+              </div>
+              <small style="color:var(--text-secondary); line-height:1.5;">
+                Cierra el periodo de una caja: cuánto se gastó, cuánto hay <strong>realmente</strong> en el cajón
+                (arqueo) y cuánto reponer hasta el fondo fijo.
+              </small>
+            </div>
+            <div id="reposiciones-tabla-cont" class="table-container">Cargando...</div>
+          </div>
+        </div>
+
+        <!-- ══════════════════ TAB: CAJAS ══════════════════ -->
+        <div id="tab-cajas" class="tab-content">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-titulo-tab">Cajas y cuentas</h3>
+              <div class="card-acciones">
+                <button class="btn btn-secondary btn-small" onclick="window.irAPagina('bancos.html','cuentas-banco')">
+                  Administrar en Bancos →</button>
+              </div>
+            </div>
+            <div id="cajas-tabla-cont" class="table-container">Cargando...</div>
+          </div>
+        </div>
+
+        <!-- ══════════════════ TAB: REPORTES ══════════════════ -->
+        <div id="tab-reportes" class="tab-content">
+          <div class="reporte-tabs" style="margin-bottom:14px;">
+            <button class="btn btn-secondary btn-small" onclick="window.reporteTes('categoria')">Por categoría</button>
+            <button class="btn btn-secondary btn-small" onclick="window.reporteTes('responsable')">Por responsable</button>
+            <button class="btn btn-secondary btn-small" onclick="window.reporteTes('ambito')">Empresa vs. Familiar</button>
+            <button class="btn btn-secondary btn-small" onclick="window.reporteTes('deducible')">Deducible vs. no deducible</button>
+            <button class="btn btn-secondary btn-small" onclick="window.reporteTes('fijo_variable')">Costo fijo vs. variable</button>
+          </div>
+          <div id="tes-reporte-cont" class="card">Elige un reporte arriba.</div>
+        </div>
+
+        <!-- ══════════════════ TAB: CONFIGURACIÓN ══════════════════ -->
+        <div id="tab-configuracion" class="tab-content">
+          <div class="card" style="margin-bottom:16px;">
+            <div class="card-header">
+              <h3 class="card-title">Categorías de gasto</h3>
+              <button class="btn btn-primary btn-small" onclick="window.abrirModalCategoria()">+ Nueva Categoría</button>
+            </div>
+            <div id="categorias-tabla-cont" class="table-container">Cargando...</div>
+          </div>
+          <div id="tes-config-container" class="card">Cargando...</div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       MODAL: GASTO  (patrón Nueva Venta — ver project_estandar_diseno_modales)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <div id="modal-gasto" class="modal">
+    <div class="modal-content" style="width:min(96vw, 1080px); max-width:min(96vw, 1080px); max-height:calc(100vh - 48px); overflow-y:auto;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="gasModalTitulo">Nuevo Gasto</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-gasto')">&times;</button>
+      </div>
+
+      <div style="padding:16px 20px 0;">
+
+        <!-- Aviso de solo lectura -->
+        <div id="gasAvisoLectura" style="display:none; padding:10px 12px; margin-bottom:14px; background:var(--bg-secondary);
+             border-left:3px solid var(--color-warning); border-radius:var(--radius-md); font-size:0.86rem;">
+          Gasto ya registrado. Pulsa <strong>✏️ Editar</strong> para modificarlo.
+        </div>
+
+        <strong style="display:block; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em; margin-bottom:10px;">
+          Datos del gasto</strong>
+
+        <!-- Fila 1: caja | recibo (candado) | fecha | moneda | monto -->
+        <div style="display:grid; grid-template-columns:1.4fr 1fr 1fr 0.8fr 1fr; gap:12px;">
+          <div class="form-group">
+            <label>Caja / cuenta *</label>
+            <select id="gasCaja" onchange="window.onCambiarCajaGasto()"><option value="">-- Seleccione --</option></select>
+            <small id="gasCajaHint" style="color:var(--text-secondary); font-size:0.72rem;"></small>
+          </div>
+          <div class="form-group">
+            <label>N° de recibo *</label>
+            <div class="input-con-candado">
+              <input type="text" id="gasNumeroRecibo" readonly>
+              <button type="button" class="btn-candado" id="gasNumeroReciboBtn"
+                      onclick="window.toggleCandado('gasNumeroRecibo','gasNumeroReciboBtn','gasNumeroReciboAviso')">🔒</button>
+            </div>
+            <small class="campo-editable-aviso" id="gasNumeroReciboAviso" style="display:none;">
+              Número manual: verifica que no se repita.</small>
+          </div>
+          <div class="form-group">
+            <label>Fecha *</label>
+            <input type="date" id="gasFecha">
+          </div>
+          <div class="form-group">
+            <label>Moneda</label>
+            <select id="gasMoneda" onchange="window.onCambiarMonedaGasto()">
+              <option value="PEN">PEN</option>
+              <option value="USD">USD</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Monto *</label>
+            <input type="number" id="gasMonto" step="0.01" min="0.01" placeholder="0.00">
+          </div>
+        </div>
+
+        <!-- Fila 2: ámbito | empresa | categoría | responsable -->
+        <div style="display:grid; grid-template-columns:1fr 1.2fr 1.4fr 1.4fr; gap:12px;">
+          <div class="form-group">
+            <label>Ámbito *</label>
+            <select id="gasAmbito" onchange="window.onCambiarAmbitoGasto()">
+              <option value="empresa">Empresa</option>
+              <option value="familiar">Familiar</option>
+            </select>
+          </div>
+          <div class="form-group" id="gasGrupoEmpresa">
+            <label>Empresa *</label>
+            <select id="gasEmpresa"><option value="">-- Seleccione --</option></select>
+          </div>
+          <div class="form-group">
+            <label>Categoría *</label>
+            <select id="gasCategoria" onchange="window.onCambiarCategoriaGasto()"><option value="">-- Seleccione --</option></select>
+          </div>
+          <div class="form-group">
+            <label>Responsable</label>
+            <select id="gasResponsable"><option value="">-- Sin responsable --</option></select>
+            <small style="color:var(--text-secondary); font-size:0.72rem;">Quién hizo el gasto o para quién fue.</small>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Detalle *</label>
+          <input type="text" id="gasDetalle" placeholder="Ej: 68 bolsas spun del 2do piso / CL Angelo">
+        </div>
+
+        <div style="border-top:1px solid var(--border-color); margin:14px 0 12px;"></div>
+        <strong style="display:block; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em; margin-bottom:10px;">
+          Tratamiento y sustento</strong>
+
+        <!-- Fila 3: destino de costo | sustento | deducible -->
+        <div style="display:grid; grid-template-columns:1.4fr 1.2fr 1fr; gap:12px;">
+          <div class="form-group">
+            <label>Destino del costo *</label>
+            <select id="gasDestino" onchange="window.onCambiarDestinoGasto()">
+              <option value="gasto_operativo">Gasto operativo</option>
+              <option value="costo_venta">Costo de venta (despacho)</option>
+              <option value="viatico_reembolsable">Viático reembolsable</option>
+              <option value="gasto_personal">Gasto de personal</option>
+              <option value="no_deducible">No deducible</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Tipo de sustento *</label>
+            <select id="gasSustento" onchange="window.onCambiarSustentoGasto()">
+              <option value="sin_documento">Sin documento</option>
+              <option value="factura">Factura</option>
+              <option value="boleta">Boleta</option>
+              <option value="recibo_honorarios">Recibo por honorarios</option>
+              <option value="vale">Vale</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>&nbsp;</label>
+            <label style="display:flex; align-items:center; gap:8px; font-weight:normal;">
+              <input type="checkbox" id="gasDeducible" style="width:auto; margin:0;">
+              <span>Deducible</span>
+            </label>
+            <small id="gasDeducibleHint" style="color:var(--text-secondary); font-size:0.72rem;"></small>
+          </div>
+        </div>
+
+        <!-- Guía de despacho: solo si destino = costo de venta -->
+        <div class="form-group" id="gasGrupoGuia" style="display:none;">
+          <label>Guía de despacho</label>
+          <select id="gasGuiaDespacho"><option value="">-- Sin asignar --</option></select>
+          <small style="color:var(--text-secondary); font-size:0.72rem;">
+            Suma este gasto al costo real de ese despacho. Se liga a la <strong>guía</strong>, no a la venta,
+            porque una guía puede cubrir varias ventas.</small>
+        </div>
+
+        <!-- Aviso de factura pendiente -->
+        <div id="gasAvisoFactura" style="display:none; padding:10px 12px; margin-bottom:12px; background:var(--bg-secondary);
+             border-left:3px solid var(--color-info); border-radius:var(--radius-md); font-size:0.85rem; line-height:1.5;">
+          <div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">Comprobante</div>
+          <label style="display:flex; align-items:center; gap:8px; font-weight:normal; margin-top:4px;">
+            <input type="checkbox" id="gasFacturaPendiente" style="width:auto; margin:0;">
+            <span>Todavía no tengo el comprobante en mano</span>
+          </label>
+          <small style="color:var(--text-secondary);">Queda en la bandeja <strong>“Pendientes de factura”</strong> hasta que lo cargues.</small>
+        </div>
+
+        <!-- Entrega a rendir vinculada -->
+        <div class="form-group" id="gasGrupoEntrega">
+          <label>Descontar de una entrega a rendir</label>
+          <select id="gasEntrega"><option value="">-- No aplica --</option></select>
+          <small style="color:var(--text-secondary); font-size:0.72rem;">
+            Si el dinero ya salió de caja como entrega, el gasto NO genera un egreso nuevo: se descuenta de ahí.</small>
+        </div>
+
+        <div style="border-top:1px solid var(--border-color); margin:14px 0 12px;"></div>
+        <strong style="display:block; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em; margin-bottom:6px;">
+          Adjuntos</strong>
+        <small style="display:block; margin-bottom:10px; color:var(--text-secondary); line-height:1.4;">
+          Foto o PDF del comprobante. Máximo <strong>5 archivos</strong> de <strong>10 MB</strong> cada uno.</small>
+        <div id="gasAdjuntosCont"></div>
+
+        <div class="form-group">
+          <label>Observaciones</label>
+          <textarea id="gasObservaciones" rows="2" placeholder="Opcional"></textarea>
+        </div>
+
+        <!-- Resumen -->
+        <div style="background:var(--bg-secondary); border-radius:var(--radius-md); padding:12px 14px; margin:6px 0 14px;">
+          <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:10px; font-size:0.85rem;">
+            <div><div style="color:var(--text-secondary); font-size:0.72rem;">SALE DE</div>
+                 <div id="gasResumenCaja" style="font-weight:600;">—</div></div>
+            <div><div style="color:var(--text-secondary); font-size:0.72rem;">ÁMBITO</div>
+                 <div id="gasResumenAmbito" style="font-weight:600;">—</div></div>
+            <div><div style="color:var(--text-secondary); font-size:0.72rem;">TRATAMIENTO</div>
+                 <div id="gasResumenTrato" style="font-weight:600;">—</div></div>
+            <div><div style="color:var(--text-secondary); font-size:0.72rem;">MONTO</div>
+                 <div id="gasResumenMonto" style="font-weight:600; color:var(--color-success);">—</div></div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn" onclick="window.closeModal('modal-gasto')">Cancelar</button>
+        <button class="btn btn-secondary" id="gasBtnEditar" style="display:none;" onclick="window.habilitarEdicionGasto()">✏️ Editar</button>
+        <button class="btn btn-primary" id="gasBtnGuardar" onclick="window.conCarga(this, window.guardarGasto)">💾 Guardar Gasto</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════ MODAL: ENTREGA A RENDIR ══════════════════ -->
+  <div id="modal-entrega" class="modal">
+    <div class="modal-content" style="width:min(94vw, 640px); max-width:min(94vw, 640px);">
+      <div class="modal-header">
+        <h3 class="modal-title">Nueva entrega a rendir</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-entrega')">&times;</button>
+      </div>
+      <div style="padding:20px; display:flex; flex-direction:column; gap:12px;">
+        <div class="form-group">
+          <label>Caja / cuenta *</label>
+          <select id="entCaja"><option value="">-- Seleccione --</option></select>
+        </div>
+        <div class="form-group">
+          <label>Persona *</label>
+          <select id="entContacto"><option value="">-- Seleccione --</option></select>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;">
+          <div class="form-group">
+            <label>Fecha *</label>
+            <input type="date" id="entFecha">
+          </div>
+          <div class="form-group">
+            <label>Moneda</label>
+            <select id="entMoneda"><option value="PEN">PEN</option><option value="USD">USD</option></select>
+          </div>
+          <div class="form-group">
+            <label>Monto entregado *</label>
+            <input type="number" id="entMonto" step="0.01" min="0.01" placeholder="0.00">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Concepto</label>
+          <input type="text" id="entConcepto" placeholder="Ej: compras de oficina">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="window.closeModal('modal-entrega')">Cancelar</button>
+        <button class="btn btn-primary" onclick="window.conCarga(this, window.guardarEntrega)">💾 Registrar Entrega</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════ MODAL: RENDIR / CERRAR ENTREGA ══════════════════ -->
+  <div id="modal-rendir" class="modal">
+    <div class="modal-content" style="width:min(94vw, 720px); max-width:min(94vw, 720px); max-height:90vh; overflow-y:auto;">
+      <div class="modal-header">
+        <h3 class="modal-title">Rendir entrega</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-rendir')">&times;</button>
+      </div>
+      <div style="padding:20px;">
+        <div id="renInfo" style="padding:12px 14px; background:var(--bg-secondary); border-radius:var(--radius-md);
+             border-left:3px solid var(--color-info); font-size:0.88rem; line-height:1.6; margin-bottom:14px;"></div>
+
+        <strong style="display:block; margin-bottom:4px; font-size:0.9rem;">🧾 Gastos rendidos</strong>
+        <small style="display:block; margin-bottom:10px; color:var(--text-secondary); line-height:1.4;">
+          Los gastos que ya registraste contra esta entrega.</small>
+        <div id="renGastos" style="border:1px solid var(--border-color); border-radius:var(--radius-md); overflow:hidden; margin-bottom:14px;"></div>
+
+        <div style="background:var(--bg-secondary); border-radius:var(--radius-md); padding:12px 14px;">
+          <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px; font-size:0.9rem;">
+            <div><div style="color:var(--text-secondary); font-size:0.72rem;">ENTREGADO</div>
+                 <div id="renEntregado" style="font-weight:600;">—</div></div>
+            <div><div style="color:var(--text-secondary); font-size:0.72rem;">RENDIDO</div>
+                 <div id="renRendido" style="font-weight:600;">—</div></div>
+            <div><div style="color:var(--text-secondary); font-size:0.72rem;">VUELTO A DEVOLVER</div>
+                 <div id="renVuelto" style="font-weight:700; color:var(--color-success);">—</div></div>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-top:14px;">
+          <label>Vuelto que devuelve a caja</label>
+          <input type="number" id="renMontoDevuelto" step="0.01" min="0" placeholder="0.00">
+          <small style="color:var(--text-secondary); font-size:0.72rem;">
+            Reingresa a la caja. Si devuelve menos de lo que sobra, la diferencia queda pendiente.</small>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="window.closeModal('modal-rendir')">Cancelar</button>
+        <button class="btn btn-primary" onclick="window.conCarga(this, window.cerrarRendicion)">✔ Cerrar rendición</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════ MODAL: REPOSICIÓN / ARQUEO ══════════════════ -->
+  <div id="modal-reposicion" class="modal">
+    <div class="modal-content" style="width:min(96vw, 860px); max-width:min(96vw, 860px); max-height:90vh; overflow-y:auto;">
+      <div class="modal-header">
+        <h3 class="modal-title">Reposición de caja</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-reposicion')">&times;</button>
+      </div>
+      <div style="padding:20px;">
+        <div style="display:grid; grid-template-columns:1.4fr 1fr 1fr; gap:12px;">
+          <div class="form-group">
+            <label>Caja *</label>
+            <select id="repCaja" onchange="window.calcularReposicion()"><option value="">-- Seleccione --</option></select>
+          </div>
+          <div class="form-group">
+            <label>Desde *</label>
+            <input type="date" id="repDesde" onchange="window.calcularReposicion()">
+          </div>
+          <div class="form-group">
+            <label>Hasta *</label>
+            <input type="date" id="repHasta" onchange="window.calcularReposicion()">
+          </div>
+        </div>
+
+        <div id="repResumen" style="background:var(--bg-secondary); border-radius:var(--radius-md); padding:14px; margin:6px 0 14px;">
+          Elige una caja y un periodo.
+        </div>
+
+        <strong style="display:block; margin-bottom:4px; font-size:0.9rem;">🔢 Arqueo</strong>
+        <small style="display:block; margin-bottom:10px; color:var(--text-secondary); line-height:1.4;">
+          Cuenta el efectivo que hay físicamente. Si no cuadra con el sistema, aquí sale el faltante o sobrante.</small>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div class="form-group">
+            <label>Saldo físico contado</label>
+            <input type="number" id="repFisico" step="0.01" placeholder="0.00" oninput="window.calcularReposicion()">
+          </div>
+          <div class="form-group">
+            <label>Diferencia</label>
+            <input type="text" id="repDiferencia" readonly style="background:var(--bg-tertiary);">
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1.4fr 1fr; gap:12px;">
+          <div class="form-group">
+            <label>Origen de la reposición</label>
+            <select id="repOrigen"><option value="">-- Sin registrar movimiento --</option></select>
+            <small style="color:var(--text-secondary); font-size:0.72rem;">De dónde sale la plata para reponer.</small>
+          </div>
+          <div class="form-group">
+            <label>Monto a reponer</label>
+            <input type="number" id="repMonto" step="0.01" min="0" placeholder="0.00">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Observaciones</label>
+          <textarea id="repObservaciones" rows="2" placeholder="Opcional"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="window.closeModal('modal-reposicion')">Cancelar</button>
+        <button class="btn btn-secondary" onclick="window.descargarRendicionPDF()">📄 PDF de rendición</button>
+        <button class="btn btn-primary" onclick="window.conCarga(this, window.guardarReposicion)">💾 Cerrar Reposición</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════ MODAL: CATEGORÍA DE GASTO ══════════════════ -->
+  <div id="modal-categoria-gasto" class="modal">
+    <div class="modal-content" style="width:min(94vw, 620px); max-width:min(94vw, 620px);">
+      <div class="modal-header">
+        <h3 class="modal-title" id="catModalTitulo">Nueva categoría de gasto</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-categoria-gasto')">&times;</button>
+      </div>
+      <div style="padding:20px; display:flex; flex-direction:column; gap:12px;">
+        <div style="display:grid; grid-template-columns:1fr 2fr; gap:12px;">
+          <div class="form-group">
+            <label>Código *</label>
+            <input type="text" id="catCodigo" placeholder="OFICINA">
+          </div>
+          <div class="form-group">
+            <label>Nombre *</label>
+            <input type="text" id="catNombre" placeholder="Oficina y útiles">
+          </div>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div class="form-group">
+            <label>Ámbito sugerido</label>
+            <select id="catAmbito">
+              <option value="">Ambos</option>
+              <option value="empresa">Empresa</option>
+              <option value="familiar">Familiar</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Destino sugerido</label>
+            <select id="catDestino">
+              <option value="">-- Preguntar siempre --</option>
+              <option value="gasto_operativo">Gasto operativo</option>
+              <option value="costo_venta">Costo de venta</option>
+              <option value="viatico_reembolsable">Viático reembolsable</option>
+              <option value="gasto_personal">Gasto de personal</option>
+              <option value="no_deducible">No deducible</option>
+            </select>
+          </div>
+        </div>
+        <label style="display:flex; align-items:center; gap:8px; font-weight:normal;">
+          <input type="checkbox" id="catDeducible" style="width:auto; margin:0;" checked>
+          <span>Deducible por defecto</span>
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="window.closeModal('modal-categoria-gasto')">Cancelar</button>
+        <button class="btn btn-primary" onclick="window.conCarga(this, window.guardarCategoriaGasto)">💾 Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="assets/js/config.js"></script>
+  <script type="module" src="assets/js/supabase-client.js"></script>
+  <script type="module" src="assets/js/auth-supabase.js"></script>
+  <script type="module" src="assets/js/auth-init.js"></script>
+  <script type="module" src="assets/js/supabase-data.js"></script>
+  <script type="module" src="assets/js/helpers.js"></script>
+  <script type="module" src="assets/js/main.js"></script>
+  <script type="module" src="assets/js/tesoreria.js?v=19"></script>
+</body>
+</html>
