@@ -111,6 +111,7 @@ function _asegurarModal() {
 }
 
 let _gSel = null   // id de guía de ingreso en edición de traslado
+let _gNueva = null // id de la guía recién registrada desde este modal (se marca y se preselecciona)
 
 function _pintarCompra() {
   const c = _compra
@@ -136,16 +137,21 @@ function _validar(item) {
 function _pintarGuias() {
   const c = carpeta()
   if (!_compra) { $('gcGuias').innerHTML = '<div class="dm-nota">Primero necesito la compra del CI.</div>'; return }
-  if (!_guias.length) { $('gcGuias').innerHTML = '<div class="dm-nota">Esa compra aún no tiene guía de ingreso. Regístrala en Compras → Guías de ingreso y vuelve aquí a vincularla.</div>'; return }
+  if (!_guias.length) {
+    $('gcGuias').innerHTML = `<div class="dm-cruce warn" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <span class="dm-cruce-ico">⚠</span><div style="flex:1; min-width:220px;">Esa compra aún no tiene guía de ingreso. Regístrala aquí mismo (es el mismo formulario de Compras) y quedará lista para vincular.</div>
+      <button type="button" class="btn btn-primary" onclick="window.gcRegistrarGuia()">➕ Registrar guía de ingreso</button></div>`
+    return
+  }
   $('gcGuias').innerHTML = _guias.map(item => {
     const { g, det, remision } = item
     const vinc = g.carpeta_importacion_id === c?.id
     const otra = g.carpeta_importacion_id && !vinc
     const av = _validar(item)
     const err = av.some(a => a[0] === 'err')
-    return `<div class="dm-cruce ${vinc ? 'ok' : 'warn'}" style="display:block; margin-bottom:8px;">
+    return `<div class="dm-cruce ${vinc ? 'ok' : 'warn'}" data-g="${g.id}" style="display:block; margin-bottom:8px;${g.id === _gSel ? ' outline:2px solid #3b82f6; outline-offset:2px;' : ''}">
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-        <b>${esc(g.numero_guia)}</b> · ${fechaDMY(g.fecha_guia)} <span class="cr-chip" style="--c:${vinc ? '#10b981' : otra ? '#ef4444' : '#f59e0b'};">${vinc ? 'Vinculada a esta carpeta' : otra ? 'Vinculada a otra carpeta' : 'Sin vincular'}</span>
+        <b>${esc(g.numero_guia)}</b> · ${fechaDMY(g.fecha_guia)} ${g.id === _gNueva ? '<span class="cr-chip" style="--c:#8b5cf6;">✨ Recién registrada</span>' : ''}<span class="cr-chip" style="--c:${vinc ? '#10b981' : otra ? '#ef4444' : '#f59e0b'};">${vinc ? 'Vinculada a esta carpeta' : otra ? 'Vinculada a otra carpeta' : 'Sin vincular'}</span>
         ${remision ? '<span class="cr-chip" style="--c:#3b82f6;">Con datos de traslado</span>' : ''}
         <span style="flex:1"></span>
         <button type="button" class="btn btn-secondary btn-small" onclick="window.gcTraslado(${g.id})">🚚 Datos de traslado</button>
@@ -178,11 +184,45 @@ window.abrirGuiaCarpeta = async function () {
     $('gcBuscar').value = _ci?.invoice_number || ''
     const selC = document.getElementById('costeoSelector')
     $('gcCarpeta').innerHTML = `<option>${esc(selC?.selectedOptions?.[0]?.text || c.numero_carpeta || '')}</option>`
-    $('gcRem').style.display = 'none'; $('gcGuardar').style.display = 'none'; $('gcRemTit').style.display = ''; _gSel = null
+    $('gcRem').style.display = 'none'; $('gcGuardar').style.display = 'none'; $('gcRemTit').style.display = ''; _gSel = null; _gNueva = null
     declararEmpresaModal('modal-guia-carpeta', c.empresa_id)
     await _cargarCompra(); await _cargarGuias(); _pintarCompra(); _pintarGuias()
     window.openModal('modal-guia-carpeta')
   } catch (e) { console.error('abrirGuiaCarpeta:', e); showToast('No se pudo abrir la guía de la carpeta', 'danger') }
+}
+
+// ── registrar guía (mismo modal de Compras, en un iframe) ───────────────────────
+window.gcRegistrarGuia = function () {
+  if (!_compra) { showToast('Primero necesito la compra del CI', 'warning'); return }
+  if (carpeta()?.estado === 'cerrada') { showToast('La carpeta está cerrada', 'warning'); return }
+  if ($('gcEmbedGuia')) return
+  const previas = new Set(_guias.map(x => x.g.id))
+  const ov = document.createElement('div')
+  ov.id = 'gcEmbedGuia'; ov.style.cssText = 'position:fixed; inset:0; z-index:100000;'
+  ov.innerHTML = `<iframe title="Nueva guía de ingreso" src="compras.html?embed=guia&compra=${_compra.id}" allowtransparency="true" style="width:100%; height:100%; border:0; background:transparent;"></iframe>`
+  document.body.appendChild(ov)
+  const fr = ov.querySelector('iframe')
+  let guardada = false
+  const cerrar = () => { window.removeEventListener('message', onMsg); ov.remove() }
+  const onMsg = async ev => {
+    if (ev.origin !== location.origin || ev.source !== fr.contentWindow) return
+    const z = ev.data?.zv
+    if (z === 'guia-error') { cerrar(); showToast(ev.data.motivo || 'No se pudo abrir el formulario de guía', 'warning'); return }
+    if (z === 'guia-guardada') { guardada = true; return }
+    if (z !== 'guia-cerrada') return
+    cerrar()
+    if (!guardada) return
+    try {
+      await _cargarGuias()
+      const nueva = _guias.filter(x => !previas.has(x.g.id)).pop() || _guias[_guias.length - 1]
+      _gNueva = nueva?.g.id || null
+      _pintarGuias()
+      if (nueva) { window.gcTraslado(nueva.g.id); $('gcGuias').querySelector(`[data-g="${nueva.g.id}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }
+      window.renderGuiasCarpeta?.()
+      showToast('Guía registrada y seleccionada: ya puedes vincularla a la carpeta', 'success')
+    } catch (e) { console.error('gcRegistrarGuia:', e); showToast('La guía se guardó, pero no pude refrescar la lista. Reabre el modal.', 'warning') }
+  }
+  window.addEventListener('message', onMsg)
 }
 
 // ── vincular / desvincular ───────────────────────────────────────────────────
@@ -216,6 +256,7 @@ window.gcTraslado = function (guiaId) {
   const item = _guias.find(x => x.g.id === guiaId); if (!item) return
   _gSel = guiaId
   const r = item.remision || {}
+  _pintarGuias()   // resalta la guía elegida
   $('gcRemTit').style.display = 'none'; $('gcRem').style.display = ''; $('gcGuardar').style.display = ''
   $('gcTipo').value = r.tipo_guia || 'remitente'
   $('gcNumero').value = r.numero_guia || item.g.numero_guia || ''

@@ -85,6 +85,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     // tenga la lista completa desde el primer foco.
     _activarBuscadoresCompras()
 
+    // Modo embebido desde Importaciones: abre el modal «Nueva guía» con la compra ya elegida
+    const qp = new URLSearchParams(location.search)
+    if (qp.get('embed') === 'guia' && qp.get('compra')) window.__zvAbrirGuiaEmbebida?.(+qp.get('compra'))
+    // Modo embebido desde Tesorería: «Cargar factura» de un gasto pagado con caja → modal de compra de servicio
+    if (qp.get('embed') === 'gasto') window.__zvAbrirCompraGastoEmbebida?.({
+      fecha: qp.get('fecha'), monto: parseFloat(qp.get('monto') || 0), detalle: qp.get('detalle') || '', moneda: qp.get('moneda') || 'PEN'
+    })
+
     // Botón "Consultar" en el modal Nuevo Proveedor (RUC o DNI, según Tipo Documento)
     // Consultar RUC/DNI: ahora vive en el modal único (shared/contacto-modal.js)
   } catch (error) {

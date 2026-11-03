@@ -26,7 +26,8 @@ import { renderConfiguracionTab } from './config-modulo.js'
 import { crearReporte, descargarCSV } from './reportes.js'
 import { empresasDisponibles, empresasActivas, empresaTrabajo, ambitoFamiliarActivo } from './empresa.js'
 import { abrirVisor } from './shared/adj-preview.js'
-import { montarLibroCaja } from './tesoreria/libro-caja.js?v=19'
+import { montarLibroCaja } from './tesoreria/libro-caja.js?v=20'
+import { bancosAlEntrar } from './bancos.js'
 
 const MODULO = 'tesoreria'
 
@@ -73,6 +74,8 @@ function _hoyISO() { return new Date().toLocaleDateString('en-CA', { timeZone: '
 function _simbolo(m) { return m === 'USD' ? '$' : 'S/' }
 function _money(v, m = 'PEN') { return `${_simbolo(m)} ${formatNumber(v || 0)}` }
 function _cajaById(id) { return _cajas.find(c => c.id === Number(id)) || null }
+// Apertura de caja y vales NO son gasto: no suman en KPIs ni reportes (SQL 131).
+function _esGasto(g) { return _catById(g.categoria_gasto_id)?.es_gasto !== false }
 function _catById(id) { return _categorias.find(c => c.id === Number(id)) || null }
 function _contactoById(id) { return _contactos.find(c => c.id === Number(id)) || null }
 
@@ -134,6 +137,7 @@ function _alEntrarTab(tab) {
   if (tab === 'entregas')      window.cargarEntregas()
   if (tab === 'reposiciones')  window.cargarReposiciones()
   if (tab === 'cajas')         _pintarCajas()
+  if (['cuentas-banco', 'transferencias', 'conciliacion', 'reportes-banco'].includes(tab)) bancosAlEntrar(tab)
   if (tab === 'configuracion') { _pintarCategorias(); renderConfiguracionTab(MODULO, 'tes-config-container') }
 }
 
@@ -219,7 +223,7 @@ async function _cargarInicio() {
   if (sub1) sub1.textContent = `${_cajas.filter(c => c.tipo_cuenta === 'caja').length} cajas`
 
   // ── KPI: gastos del mes
-  const gm = (gastosMes.data || [])
+  const gm = (gastosMes.data || []).filter(_esGasto)
   const totalMes = gm.reduce((s, g) => s + Number(g.monto || 0), 0)
   const el2 = document.getElementById('kpi-tes-gastos-mes')
   if (el2) el2.textContent = _money(totalMes)
@@ -288,7 +292,7 @@ async function _pintarBandejaFacturas() {
       <td>${fechaDMY(g.fecha)}</td>
       <td>${_esc(g.detalle)}</td>
       <td>${_money(g.monto, g.moneda)}</td>
-      <td><button class="btn btn-secondary btn-small" onclick="window.abrirModalGasto(${g.id})">Cargar factura</button></td>
+      <td><button class="btn btn-secondary btn-small" onclick="window.cargarFacturaGasto(${g.id})">Cargar factura</button></td>
     </tr>`).join('')}</tbody></table></div>`
 }
 
@@ -1417,7 +1421,7 @@ window.reporteTes = async function (tipo) {
   const { data, error } = await supabase.from('gastos').select('*').eq('anulado', false)
   if (error) { cont.innerHTML = _vacio(error.message); return }
 
-  const filas = (data || []).map(g => ({
+  const filas = (data || []).filter(_esGasto).map(g => ({
     fecha: g.fecha,
     caja: _cajaById(g.caja_id)?.nombre || '\u2014',
     ambito: _etiquetaAmbito(g),
@@ -1486,6 +1490,7 @@ window.reporteTes = async function (tipo) {
 // ============================================================================
 async function init() {
   await esperarContextoEmpresa()
+  window.addEventListener('bancos-cambio', async () => { await _cargarCatalogos(); _pintarCajas(); _cargarInicio() })
   initModuleNavDropdowns('#tesoreriaTabs')
 
   document.querySelectorAll('#tesoreriaTabs .tab-btn').forEach(btn => {
@@ -1514,3 +1519,84 @@ async function init() {
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init)
 else init()
+
+
+// ============================================================================
+// CARGAR FACTURA de un gasto ya pagado con caja → modal de Compras (iframe) → compra + CxP
+// Mismo patrón que Importaciones→guía: el formulario es el de Compras, Tesorería solo lo invoca
+// y luego vincula. NO crea otro egreso: la plata ya salió de la caja (movimiento del gasto).
+// ============================================================================
+window.cargarFacturaGasto = async function (gastoId) {
+  const { data: g } = await supabase.from('gastos').select('*').eq('id', gastoId).maybeSingle()
+  if (!g) { showToast('No encontré el gasto', 'danger'); return }
+  if (g.compra_id) { showToast('Este gasto ya tiene su factura vinculada', 'info'); return }
+  if (document.getElementById('tesEmbedCompra')) return
+  // La compra nace con la empresa de trabajo de la cabecera: debe ser la dueña del gasto.
+  if (g.empresa_id && empresaTrabajo() !== g.empresa_id) {
+    showToast('Este gasto es de otra empresa. Cambia la empresa de trabajo en la cabecera (la que dice "se guarda en…") y reintenta.', 'warning', 8000)
+    return
+  }
+
+  const qs = new URLSearchParams({ embed: 'gasto', fecha: g.fecha, monto: String(g.monto), detalle: g.detalle || '', moneda: g.moneda || 'PEN' })
+  const ov = document.createElement('div')
+  ov.id = 'tesEmbedCompra'; ov.style.cssText = 'position:fixed; inset:0; z-index:100000;'
+  ov.innerHTML = `<iframe title="Registrar factura" src="compras.html?${qs}" allowtransparency="true" style="width:100%; height:100%; border:0; background:transparent;"></iframe>`
+  document.body.appendChild(ov)
+  const fr = ov.querySelector('iframe')
+  let guardada = null
+  const cerrar = () => { window.removeEventListener('message', onMsg); ov.remove() }
+  const onMsg = async ev => {
+    if (ev.origin !== location.origin || ev.source !== fr.contentWindow) return
+    const z = ev.data?.zv
+    if (z === 'compra-error') { cerrar(); showToast(ev.data.motivo || 'No se pudo abrir el formulario de compra', 'warning'); return }
+    if (z === 'compra-guardada') { guardada = ev.data; return }
+    if (z !== 'compra-cerrada') return
+    cerrar()
+    if (!guardada) return
+    try {
+      await _vincularFacturaAGasto(g, guardada.compraId, guardada.cxpId)
+      showToast('Factura registrada: compra + cuenta por pagar saldada con la caja ✔', 'success', 6000)
+    } catch (e) {
+      console.error('cargarFacturaGasto:', e)
+      showToast('La compra se guardó, pero no pude vincularla al gasto: ' + e.message, 'warning', 9000)
+    }
+    await _cargarInicio?.(); await window.cargarGastos?.(); await window.lcRecargar?.()
+  }
+  window.addEventListener('message', onMsg)
+}
+
+async function _vincularFacturaAGasto(g, compraId, cxpId) {
+  const { data: compra } = await supabase.from('compras').select('*').eq('id', compraId).maybeSingle()
+  if (!compra) throw new Error('compra no encontrada')
+  if (Math.abs(Number(compra.total) - Number(g.monto)) > 0.05)
+    showToast(`Aviso: el total de la factura (${_money(compra.total)}) difiere del gasto (${_money(g.monto)}). Revisa.`, 'warning', 8000)
+
+  // 1) Pago a proveedor con la caja + vínculo al movimiento YA existente (sin egreso duplicado)
+  if (cxpId) {
+    const caja = _cajaById(g.caja_id)
+    const pago = await insert('pagos_proveedores', {
+      cxp_id: cxpId, compra_id: compraId, contact_id: compra.contact_id,
+      fecha: g.fecha, monto: Number(compra.total), moneda: compra.currency || 'PEN',
+      tipo_cambio: Number(compra.tipo_cambio) || 1, medio_pago: 'efectivo',
+      referencia: g.numero_recibo, banco_id: g.caja_id, empresa_id: g.empresa_id
+    })
+    if (!pago) throw new Error('no se pudo crear el pago a proveedor')
+    if (g.movimiento_id) await update('movimientos_banco', g.movimiento_id, { pago_proveedor_id: pago.id })
+    await update('cuentas_pagar', cxpId, { monto_pagado: Number(compra.total), estado: 'pagado' })
+    await update('compras', compraId, { estado_pago: 'pagado' })
+    // CONTABILIDAD (gancho comentado, decisión 2026-10): generarAsientoPagoProveedor({ pagoId: pago.id, ... caja })
+  }
+
+  // 2) El gasto pasa a tener comprobante real
+  const { data: tipos } = await supabase.from('tipos_documento_gasto').select('*')
+  const tFactura = (tipos || []).find(t => t.sustento_base === 'factura' && /^factura$/i.test((t.nombre || '').trim()))
+                || (tipos || []).find(t => t.sustento_base === 'factura')
+  const cat = _catById(g.categoria_gasto_id)
+  const deducible = g.ambito === 'empresa' && g.destino_costo !== 'no_deducible' && cat?.deducible_defecto === true
+  const ok = await update('gastos', g.id, {
+    compra_id: compraId, cxp_id: cxpId || null,
+    tipo_documento_id: tFactura?.id || g.tipo_documento_id || null,
+    tipo_sustento: 'factura', estado_sustento: null, deducible
+  })
+  if (!ok) throw new Error('no se pudo actualizar el gasto')
+}

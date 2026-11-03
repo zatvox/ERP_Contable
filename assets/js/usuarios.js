@@ -160,7 +160,7 @@ window.crearUsuario = async function () {
     document.getElementById('nuevoNombre').value    = ''
     document.getElementById('nuevoEmail').value     = ''
     document.getElementById('nuevoPassword').value  = ''
-    document.getElementById('nuevoRole').value      = 'user'
+    document.getElementById('nuevoRole').value      = 'oficina'
 
     // Recargar lista
     await window.cargarUsuarios()
@@ -243,11 +243,11 @@ function _esc(str) {
 }
 
 function _badgeRole(role) {
-  const map = { admin: 'primary', contador: 'info', user: 'secondary' }
+  const map = { admin: 'primary', oficina: 'info', vendedor: 'success', contador: 'info', almacen: 'warning', user: 'secondary' }
   return map[role] || 'secondary'
 }
 
 function _labelRole(role) {
-  const map = { admin: 'Admin', contador: 'Contador', user: 'Usuario' }
+  const map = { admin: 'Administrador', oficina: 'Oficina', vendedor: 'Vendedor', contador: 'Contador', almacen: 'Almacén', user: 'Usuario' }
   return map[role] || role || 'Usuario'
 }

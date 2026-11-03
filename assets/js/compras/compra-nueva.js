@@ -609,3 +609,31 @@ window.guardarCompraMercaderia = async function () {
     if (btn) { btn.disabled = false; btn.textContent = 'Guardar Compra' }
   }
 }
+
+
+// ============================================================================
+// MODO EMBEBIDO — lo usa Tesorería (gasto pagado con caja → «Cargar factura»)
+// Abre este MISMO modal (tipo Servicio/Gasto) en un iframe: compras.html?embed=gasto&fecha=&monto=&detalle=&moneda=
+// Avisa al padre con postMessage: compra-guardada {compraId, cxpId} · compra-cerrada · compra-error.
+// El gasto ya está pagado desde la caja: Tesorería vincula la compra y salda la CxP sin crear otro egreso.
+// ============================================================================
+window.__zvAbrirCompraGastoEmbebida = function (p = {}) {
+  const avisar = (zv, extra = {}) => { try { window.parent.postMessage({ zv, ...extra }, location.origin) } catch { /* sin padre */ } }
+  try {
+    document.body.classList.add('zv-embed')
+    window.abrirModalNuevaCompra()
+    window.cambiarTipoCompra('servicio')
+    const set = (id, v) => { const el = document.getElementById(id); if (el && v != null && v !== '') el.value = v }
+    set('nqFecha', p.fecha)
+    set('nqMoneda', p.moneda || 'PEN')
+    window.onCambiarMonedaCompra?.()
+    set('csDescripcion', p.detalle)
+    // El monto del gasto es lo que salió de caja = total del comprobante (IGV incluido)
+    set('csIGV', '18')
+    if (p.monto > 0) set('csSubtotal', (p.monto / 1.18).toFixed(2))
+    window.calcularCompraServicio()
+    window.addEventListener('zv-compra-guardada', ev => avisar('compra-guardada', ev.detail))
+    const m = document.getElementById('modal-nueva-compra-mercaderia')
+    new MutationObserver(() => { if (!m.classList.contains('show')) avisar('compra-cerrada') }).observe(m, { attributes: true, attributeFilter: ['class'] })
+  } catch (e) { console.error('compra embebida:', e); avisar('compra-error', { motivo: e.message }) }
+}

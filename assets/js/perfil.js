@@ -26,8 +26,8 @@ const MODULOS_DISPONIBLES = [
   { href: 'inventario.html',   icono: '📦', label: 'Inventario' },
   { href: 'compras.html',      icono: '🛒', label: 'Compras' },
   { href: 'ventas.html',       icono: '📈', label: 'Ventas' },
-  { href: 'cobranzas.html',    icono: '💰', label: 'Cuentas x Cobrar/Pagar' },
-  { href: 'bancos.html',       icono: '🏦', label: 'Bancos' },
+  { href: 'cobranzas.html',    icono: '💰', label: 'Cobranza y pagos' },
+  { href: 'tesoreria.html',     icono: '🏦', label: 'Tesorería y Bancos' },
   { href: 'contabilidad.html', icono: '📑', label: 'Contabilidad' },
   { href: 'usuarios.html',     icono: '👤', label: 'Usuarios', soloAdmin: true }
 ]

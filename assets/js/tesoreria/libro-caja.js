@@ -901,7 +901,14 @@ async function _intentarCrearFilaNueva() {
       tipo_documento_id: n.tipo_documento_id || null,
       // tipo_sustento lo deriva el trigger del SQL 125 desde el catálogo
       tipo_sustento: tipoDoc?.sustento_base || 'sin_documento',
-      deducible: false,
+      // Deducible solo si es de empresa, con factura (sustento real, no
+      // pendiente) y la categoría lo permite. Familiar/sin doc → nunca.
+      deducible: (() => {
+        const amb = ambito
+        const dest = n.destino_costo || cat?.destino_sugerido
+        return amb === 'empresa' && dest !== 'no_deducible' && cat?.deducible_defecto === true &&
+               tipoDoc?.sustento_base === 'factura' && !/pendiente/i.test(tipoDoc?.nombre || '')
+      })(),
       nota: n.nota || null,
       movimiento_id: mov.id,
       ...base

@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Detalle de Producto — JHIRO</title>
+  <meta name="description" content="Información técnica, especificaciones y cotización del producto.">
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="manifest" href="site.webmanifest">
+  <link rel="stylesheet" href="assets/css/styles.css">
+  <link rel="stylesheet" href="assets/css/producto.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <link rel="stylesheet" href="assets/css/crm-emp.css">
+</head>
+<body>
+
+<!-- ─── Navegación ─────────────────────────────────────── -->
+<nav class="nav" role="navigation" aria-label="Navegación principal">
+  <div class="container nav__inner">
+    <a href="index.html" class="nav__logo" aria-label="Inicio JHIRO">
+      <img src="assets/images/logo.png" alt="Logo JHIRO" width="280" height="136">
+    </a>
+    <ul class="nav__links" id="nav-links" role="list">
+      <li><a href="index.html" class="nav__link">Inicio</a></li>
+      <li><a href="about.html" class="nav__link">Nosotros</a></li>
+      <li><a href="contact.html" class="nav__link">Contacto</a></li>
+    </ul>
+    <div class="nav__actions">
+      <button class="btn-theme" id="theme-toggle" aria-label="Cambiar tema claro/oscuro"></button>
+      <a href="cotizar.html" class="btn btn-primary">
+        <i class="fas fa-shopping-cart" style="margin-right: 8px;"></i>
+        Ver Cotización
+        <span class="nav-carrito-badge" id="carrito-count" style="display:none">
+          <span id="carrito-count-number">0</span>
+        </span>
+      </a>
+      <button class="nav__hamburger" id="nav-hamburger" aria-label="Abrir menú" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<!-- ─── Breadcrumb ────────────────────────────────────────── -->
+<div class="breadcrumb-wrap">
+  <div class="container">
+    <nav class="breadcrumb" aria-label="Breadcrumb">
+      <a href="index.html">Inicio</a>
+      <span>›</span>
+      <a href="index.html#products">Productos</a>
+      <span>›</span>
+      <span id="breadcrumb-nombre">Cargando...</span>
+    </nav>
+  </div>
+</div>
+
+<!-- ─── Detalle principal ─────────────────────────────────── -->
+<main class="section" id="producto-main">
+  <div class="container">
+
+    <!-- Estado de carga -->
+    <div class="pd-loading" id="pd-loading">
+      <div class="loading-spinner"></div>
+      <p>Cargando producto...</p>
+    </div>
+
+    <!-- Error -->
+    <div class="pd-error" id="pd-error" style="display:none">
+      <h2>Producto no encontrado</h2>
+      <p>El producto que buscas no existe o fue eliminado.</p>
+      <a href="index.html#products" class="btn btn-outline" style="margin-top:1.5rem">← Volver al catálogo</a>
+    </div>
+
+    <!-- Layout detalle -->
+    <div class="pd-layout" id="pd-layout" style="display:none">
+
+      <!-- ── Imagen e Info ── -->
+      <div class="pd-gallery">
+        <div class="pd-img-wrap">
+          <img id="pd-img" src="" alt="" loading="eager">
+          <span class="pd-badge" id="pd-badge"></span>
+          <button class="pd-img-arrow pd-img-arrow--prev" id="pd-img-prev" aria-label="Imagen anterior" style="display:none">‹</button>
+          <button class="pd-img-arrow pd-img-arrow--next" id="pd-img-next" aria-label="Imagen siguiente" style="display:none">›</button>
+        </div>
+        <div class="pd-gallery-thumbs" id="pd-gallery-thumbs" style="display:none"></div>
+                <!-- Precio -->
+        <div class="pd-price-wrap">
+          <div class="grid grid-2">
+            <div class="form-group"> 
+              <div class="pd-price" id="pd-price">Consultar precio</div>
+              <span class="pd-price-note">Precio referencial por kg inc IGV</span>
+            </div>
+            <div class="form-group"> 
+              <div class="pd-specs" id="pd-specs"><!-- Renderizado por JS --></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Info ── -->
+      <div class="pd-info">
+
+        <span class="pd-category" id="pd-category"></span>
+        <h1 class="pd-name" id="pd-name"></h1>
+
+        <!-- Color y swatch -->
+        <div class="pd-color-row" id="pd-color-row">
+          <span class="pd-color-swatch" id="pd-color-swatch"></span>
+          <span class="pd-color-label" id="pd-color-label"></span>
+        </div>
+
+        <!-- Acción: agregar a cotización -->
+        <div class="pd-actions">
+          <div class="grid grid-2">
+            <div class="form-group">  
+              <!-- Cantidad kg -->
+              <label for="pd-cantidad-kg" class="pd-qty-label">Cantidad (kg)</label>
+              <div class="pd-qty-row">
+                <button class="pd-qty-btn" id="pd-qty-kg-menos" aria-label="Reducir cantidad">−</button>
+                <input
+                  type="number" id="pd-cantidad-kg" class="pd-qty-input"
+                  value="500" min="1" step="100" aria-label="Cantidad en kg">
+                <button class="pd-qty-btn" id="pd-qty-kg-mas" aria-label="Aumentar cantidad">+</button>
+              </div>
+              <span class="pd-qty-hint" id="pd-qty-kg-hint">MOQ: —</span>
+            </div>
+            <!-- Cantidad unidades -->
+            <div class="form-group">
+              <label for="pd-cantidad-unidades" class="pd-qty-label">Cantidad (unidades)</label>
+              <div class="pd-qty-row">
+                <button class="pd-qty-btn" id="pd-qty-unidades-menos" aria-label="Reducir cantidad">−</button>
+                <input
+                  type="number" id="pd-cantidad-unidades" class="pd-qty-input"
+                  value="500" min="1" step="100" aria-label="Cantidad en unidades">
+                <button class="pd-qty-btn" id="pd-qty-unidades-mas" aria-label="Aumentar cantidad">+</button>
+              </div>
+            </div>
+          </div>
+
+          <button class="btn btn-primary pd-btn-cot" id="pd-btn-agregar">
+            Agregar a Cotización
+          </button>
+          <a href="index.html#products" class="btn btn-outline pd-btn-back">
+            ← Volver al catálogo
+          </a>
+        </div>
+
+                <!-- Descripción -->
+        <div class="pd-desc-section">
+          <h3 class="pd-section-title">Descripción</h3>
+          <p class="pd-desc" id="pd-desc"></p>
+        </div>
+
+        <!-- Aplicaciones -->
+        <div class="pd-aplic-section" id="pd-aplic-section">
+          <h3 class="pd-section-title">Aplicaciones</h3>
+          <p class="pd-aplic" id="pd-aplic"></p>
+        </div>
+
+        <!-- Toast de confirmación -->
+        <div class="pd-toast" id="pd-toast" aria-live="polite"></div>
+
+      </div><!-- /pd-info -->
+    </div><!-- /pd-layout -->
+  </div>
+</main>
+
+<!-- ─── Pie de página ────────────────────────────────────────── -->
+<footer class="footer" role="contentinfo">
+  <div class="container">
+    <div class="footer__grid">
+      <div class="footer__brand">
+        <img src="assets/images/logo.png" alt="Logo JHIRO" width="160" height="32">
+        <p>Importador premium de materia prima textil. Hilos de poliéster, spandex, algodón, nailon y reciclados entregados a fabricantes en todo el mundo.</p>
+      </div>
+      <div>
+        <p class="footer__heading">Navegación</p>
+        <ul class="footer__links">
+          <li><a href="index.html">Inicio</a></li>
+          <li><a href="about.html">Nosotros</a></li>
+          <li><a href="contact.html">Contacto</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="footer__heading">Productos</p>
+        <ul class="footer__links">
+          <li><a href="index.html#products">Hilo de Poliéster</a></li>
+          <li><a href="index.html#products">Spandex / Elastano</a></li>
+          <li><a href="index.html#products">Hilo de Algodón</a></li>
+          <li><a href="index.html#products">Hilo de Nailon</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="footer__heading">Compañía</p>
+        <ul class="footer__links">
+          <li><a href="about.html">Nuestra Misión</a></li>
+          <li><a href="about.html#certifications">Certificaciones</a></li>
+          <li><a href="contact.html#faq">Preguntas Frecuentes</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer__bottom">
+      <p class="footer__copy">© 2025 JHIRO. Todos los derechos reservados.</p>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/js/main.js"></script>
+<script type="module" src="assets/js/producto-web.js"></script>
+<script type="module" src="assets/js/crm-chrome.js"></script>
+</body>
+</html>

@@ -1,18 +1,21 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <link rel="icon" href="data:,">
+  <link rel="icon" type="image/png" href="assets/img/genko-geco.png">
+  <link rel="apple-touch-icon" href="assets/img/genko-geco.png">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>JHIRO ERP - Login</title>
+  <title>Genko · Ingresar</title>
   <link rel="stylesheet" href="assets/css/styles.css">
 </head>
 <body class="login-page">
   <div class="login-container">
     <div class="login-card">
       <div class="login-header">
-        <h1>JHIRO ERP</h1>
-        <p>Sistema Contable para Importadoras</p>
+        <img class="login-logo" src="assets/img/genko-geco.png" alt="Genko">
+        <h1>Genko</h1>
+        <span class="login-marca">by ZatVox</span>
+        <p>Sistema de gestión multiempresa</p>
       </div>
 
       <!-- ── PANEL LOGIN ── -->
@@ -110,6 +113,15 @@
             </div>
           </div>
 
+          <div class="form-group">
+            <label>Tu rol</label>
+            <div class="login-rol">
+              <label><input type="radio" name="reg-rol" value="oficina" checked>
+                <span>Oficina<small>Administración y apoyo</small></span></label>
+              <label><input type="radio" name="reg-rol" value="vendedor">
+                <span>Vendedor<small>Ventas y clientes</small></span></label>
+            </div>
+          </div>
           <button type="submit" class="btn btn-login">Crear cuenta</button>
         </form>
 
@@ -199,7 +211,7 @@
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: { data: { nombre, role: 'user' } }
+          options: { data: { nombre, role: (document.querySelector('input[name="reg-rol"]:checked') || {}).value || 'oficina' } }
         })
 
         if (error) throw error

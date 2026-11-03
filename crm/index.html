@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JHIRO — Importador de Materia Prima Textil Premium</title>
+  <meta name="description" content="JHIRO importa y distribuye materias primas textiles de alta calidad en todo el mundo: poliéster, spandex, algodón, nailon e hilos reciclados para aplicaciones industriales y de moda.">
+  <meta property="og:title" content="JHIRO — Importador de Materia Prima Textil Premium">
+  <meta property="og:description" content="Poliéster de grado industrial, spandex, algodón, nailon e hilos reciclados. Abastecimiento global, MOQ competitivo, soporte técnico.">
+  <meta property="og:image" content="assets/images/og-image.png">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="JHIRO — Importador de Materia Prima Textil">
+  <meta name="twitter:description" content="Hilos y fibras premium de origen global para fabricantes.">
+  <meta name="twitter:image" content="assets/images/og-image.png">
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/images/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="assets/images/favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/images/apple-touch-icon.png">
+  <link rel="manifest" href="site.webmanifest">
+  <link rel="stylesheet" href="assets/css/styles.css">
+  <link rel="stylesheet" href="assets/css/products-section.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <link rel="stylesheet" href="assets/css/crm-emp.css">
+</head>
+<body>
+
+<!-- ─── Navegación ─────────────────────────────────────── -->
+<nav class="nav" role="navigation" aria-label="Navegación principal">
+  <div class="container nav__inner">
+    <a href="index.html" class="nav__logo" aria-label="Inicio JHIRO">
+      <img src="assets/images/logo.png" alt="Logo JHIRO" width="280" height="136">
+    </a>
+    <ul class="nav__links" id="nav-links" role="list">
+      <li><a href="index.html" class="nav__link">Inicio</a></li>
+      <li><a href="about.html" class="nav__link">Nosotros</a></li>
+      <li><a href="contact.html" class="nav__link">Contacto</a></li>
+    </ul>
+    <div class="nav__actions">
+      <button class="btn-carrito" id="theme-toggl" aria-label="Ir a carrito"></button>
+      <button class="btn-theme" id="theme-toggle" aria-label="Cambiar tema claro/oscuro"></button>
+      <a href="cotizar.html" class="btn btn-primary">
+        <i class="fas fa-shopping-cart" style="margin-right: 8px;"></i>
+        Ver Cotización
+        <span class="nav-carrito-badge" id="carrito-count" style="display:none">
+          <span id="carrito-count-number">0</span>
+        </span>
+      </a>
+      <button class="nav__hamburger" id="nav-hamburger" aria-label="Abrir menú" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<!-- ─── Hero ────────────────────────────────────────────── 
+<section class="hero" aria-labelledby="hero-title">
+  <div class="hero__bg"></div>
+  <div class="hero__grid-lines" aria-hidden="true"></div>
+  <div class="container" style="width:100%">
+    <div class="hero__content">
+      <div class="hero__eyebrow">
+        <span class="label">Suministro Textil Global</span>
+      </div>
+      <h1 class="hero__title" id="hero-title">
+        Importador Premium de <em>Hilos y Fibras</em>
+      </h1>
+      <p class="hero__desc">
+        JHIRO abastece y distribuye hilos industriales de poliéster, spandex, algodón, nailon
+        y reciclados a fabricantes de todo el mundo — precios competitivos, MOQ bajo,
+        soporte técnico completo.
+      </p>
+      <div class="hero__ctas">
+        <a href="#products" class="btn btn-primary">Ver Productos</a>
+        <a href="contact.html" class="btn btn-outline">Obtener Cotización</a>
+      </div>
+    </div>
+  </div>
+  <div class="hero__stats" aria-hidden="true">
+    <div class="hero__stat">
+      <div class="hero__stat-num">10+</div>
+      <div class="hero__stat-label">Categorías de Hilo</div>
+    </div>
+    <div class="hero__stat">
+      <div class="hero__stat-num">30+</div>
+      <div class="hero__stat-label">Países de Abastecimiento</div>
+    </div>
+    <div class="hero__stat">
+      <div class="hero__stat-num">200<span style="font-size:1.5rem">kg</span></div>
+      <div class="hero__stat-label">Cantidad Mín. Pedido</div>
+    </div>
+  </div>
+</section>-->
+
+<!-- ─── Productos ─────────────────────────────────────────── -->
+<section class="section" id="products" aria-labelledby="products-title">
+  <div class="container">
+    <header class="section-header fade-in">
+      <span class="label">Nuestro Catálogo</span>
+      <div class="section-divider"></div>
+      <h2 id="products-title">Productos Disponibles</h2>
+      <p>Hilos y fibras de grado industrial provenientes de fábricas certificadas. Todos los artículos en stock salvo indicación.</p>
+    </header>
+
+    <!-- Layout: sidebar + área de productos -->
+    <div class="products-layout">
+
+      <!-- ── Sidebar categorías ── -->
+      <aside class="products-sidebar" id="products-sidebar" aria-label="Categorías de productos">
+        <div class="sidebar-section">
+          <div class="sidebar-heading">
+            Categorías
+            <button class="sidebar-toggle-mobile" id="sidebar-toggle-mobile" aria-label="Cerrar filtros">✕</button>
+          </div>
+          <ul class="sidebar-cat-list" id="sidebar-categories" role="list">
+            <!-- Renderizado por products-web.js -->
+          </ul>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-heading">Disponibilidad</div>
+          <ul class="sidebar-avail-list" role="list">
+            <li><button class="sidebar-avail-btn active" data-avail="all">Todos</button></li>
+            <li><button class="sidebar-avail-btn" data-avail="stock">En existencia</button></li>
+            <li><button class="sidebar-avail-btn" data-avail="limited">Stock limitado</button></li>
+          </ul>
+        </div>
+      </aside>
+
+      <!-- ── Área de productos ── -->
+      <div class="products-main">
+
+        <!-- Topbar: filtros mobile + buscador -->
+        <div class="products-topbar">
+          <div class="products-count-wrap">
+            <button class="btn-show-filters" id="btn-show-filters" aria-label="Mostrar Categorias">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="4" y1="6" x2="20" y2="6"/>
+                <line x1="8" y1="12" x2="16" y2="12"/>
+                <line x1="11" y1="18" x2="13" y2="18"/>
+              </svg>
+              Categorias
+            </button>
+            <span class="products-count" id="products-count"></span>
+          </div>
+          <div class="search-wrap" role="search">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+              <circle cx="6.5" cy="6.5" r="4.5"/><path d="M11 11l3 3"/>
+            </svg>
+            <input
+              type="search"
+              id="product-search"
+              placeholder="Buscar productos…"
+              aria-label="Buscar productos"
+              autocomplete="off">
+          </div>
+        </div>
+
+        <!-- Spinner de carga -->
+        <div class="products-loading" id="products-loading">
+          <div class="loading-spinner"></div>
+          <p>Cargando productos...</p>
+        </div>
+
+        <!-- Grilla de productos — ID que busca products-web.js -->
+        <div class="products-grid" id="products-list" aria-live="polite" aria-atomic="false">
+          <!-- Renderizado por products-web.js -->
+        </div>
+
+      </div><!-- /products-main -->
+    </div><!-- /products-layout -->
+  </div>
+</section>
+
+<!-- ─── Por qué elegirnos ───────────────────────────────────── -->
+<section class="why-us section-sm" aria-labelledby="why-title">
+  <div class="container">
+    <header class="section-header fade-in">
+      <span class="label">Por qué JHIRO</span>
+      <div class="section-divider"></div>
+      <h2 id="why-title">Diseñados para Fabricantes</h2>
+      <p>Entendemos las exigencias de la producción. Nuestra cadena de suministro está pensada para sus plazos y especificaciones técnicas.</p>
+    </header>
+    <div class="why-grid">
+      <div class="why-card fade-in">
+        <svg class="why-icon" viewBox="0 0 44 44" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <path d="M22 4l3.5 10.5L36 14l-8 8 2 11-8-5-8 5 2-11-8-8 10.5-1.5z"/>
+        </svg>
+        <h4>Calidad Verificada</h4>
+        <p>Cada lote se prueba contra especificaciones. Trabajamos solo con fábricas certificadas ISO, Oeko-Tex y GRS.</p>
+      </div>
+      <div class="why-card fade-in" style="transition-delay:0.08s">
+        <svg class="why-icon" viewBox="0 0 44 44" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <circle cx="22" cy="22" r="16"/>
+          <path d="M22 10v12l7 4"/>
+        </svg>
+        <h4>Plazos Rápidos</h4>
+        <p>Productos en stock se envían en 5 días hábiles. Mezclas especiales y acabados personalizados en 20–30 días.</p>
+      </div>
+      <div class="why-card fade-in" style="transition-delay:0.16s">
+        <svg class="why-icon" viewBox="0 0 44 44" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <rect x="8" y="14" width="28" height="22" rx="2"/>
+          <path d="M15 14V10a7 7 0 0114 0v4"/>
+          <path d="M22 24v4"/>
+        </svg>
+        <h4>MOQ Bajo</h4>
+        <p>Desde 200 kg por SKU. Ideal para probar nuevas líneas sin comprometer contenedores completos.</p>
+      </div>
+      <div class="why-card fade-in" style="transition-delay:0.24s">
+        <svg class="why-icon" viewBox="0 0 44 44" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <path d="M8 36l8-8 6 6 12-14"/>
+          <circle cx="36" cy="12" r="4"/>
+        </svg>
+        <h4>Logística Global</h4>
+        <p>Expertos en flete marítimo, aéreo y términos DDP. Gestionamos documentación aduanera y cumplimiento.</p>
+      </div>
+      <div class="why-card fade-in" style="transition-delay:0.32s">
+        <svg class="why-icon" viewBox="0 0 44 44" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <circle cx="22" cy="16" r="7"/>
+          <path d="M6 38c0-8.837 7.163-12 16-12s16 3.163 16 12"/>
+        </svg>
+        <h4>Soporte Técnico</h4>
+        <p>Nuestro equipo incluye ingenieros textiles disponibles para ayudar con títulos, mezclas y compatibilidad de maquinaria.</p>
+      </div>
+      <div class="why-card fade-in" style="transition-delay:0.4s">
+        <svg class="why-icon" viewBox="0 0 44 44" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <path d="M36 20c0 11-14 20-14 20S8 31 8 20a14 14 0 1128 0z"/>
+          <circle cx="22" cy="20" r="4"/>
+        </svg>
+        <h4>Opciones Sostenibles</h4>
+        <p>Poliéster reciclado con certificación GRS y algodón Oeko-Tex disponibles para cumplir sus metas de sostenibilidad.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Pie de página ────────────────────────────────────────────── -->
+<footer class="footer" role="contentinfo">
+  <div class="container">
+    <div class="footer__grid">
+      <div class="footer__brand">
+        <img src="assets/images/logo.png" alt="Logo JHIRO" width="160" height="32">
+        <p>Importador premium de materia prima textil. Hilos de poliéster, spandex, algodón, nailon y reciclados entregados a fabricantes en todo el mundo.</p>
+      </div>
+      <div>
+        <p class="footer__heading">Navegación</p>
+        <ul class="footer__links">
+          <li><a href="index.html">Inicio</a></li>
+          <li><a href="about.html">Nosotros</a></li>
+          <li><a href="contact.html">Contacto</a></li>
+          <li><a href="contact.html">Solicitar Cotización</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="footer__heading">Productos</p>
+        <ul class="footer__links">
+          <li><a href="index.html#products">Hilo de Poliéster</a></li>
+          <li><a href="index.html#products">Spandex / Elastano</a></li>
+          <li><a href="index.html#products">Hilo de Algodón</a></li>
+          <li><a href="index.html#products">Hilo de Nailon</a></li>
+          <li><a href="index.html#products">Fibra Reciclada</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="footer__heading">Compañía</p>
+        <ul class="footer__links">
+          <li><a href="about.html">Nuestra Misión</a></li>
+          <li><a href="about.html#certifications">Certificaciones</a></li>
+          <li><a href="contact.html#faq">Preguntas Frecuentes</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer__bottom">
+      <p class="footer__copy">© 2025 JHIRO. Todos los derechos reservados.</p>
+      <div class="footer__social">
+        <a href="https://www.facebook.com/profile.php?id=61550727688934" target="_blank" rel="noopener noreferrer" class="social-link" aria-label="Facebook">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z"/></svg>
+        </a>
+        <a href="#" class="social-link" aria-label="LinkedIn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 8a6 6 0 016 6v7h-4v-7a2 2 0 00-2-2 2 2 0 00-2 2v7h-4v-7a6 6 0 016-6zM2 9h4v12H2z"/><circle cx="4" cy="4" r="2"/></svg>
+        </a>
+        <a href="mailto:info@jhiro.com" class="social-link" aria-label="Correo electrónico">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        </a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/js/main.js"></script>
+<script type="module" src="assets/js/products-web.js"></script>
+
+<script type="module" src="assets/js/crm-chrome.js"></script>
+</body>
+</html>

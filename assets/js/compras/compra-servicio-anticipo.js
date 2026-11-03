@@ -140,6 +140,8 @@ window.guardarCompraServicio = async function () {
     }
 
     showToast('Compra de servicio registrada exitosamente', 'success')
+    // Modo embebido (Tesorería): avisa qué compra y CxP nacieron para vincularlas al gasto
+    window.dispatchEvent(new CustomEvent('zv-compra-guardada', { detail: { compraId: compra.id, cxpId: cxpServicio?.id || null } }))
     window.closeModal('modal-nueva-compra-mercaderia')
     const form = document.getElementById('formNewCompraMercaderia')
     if (form) form.reset()

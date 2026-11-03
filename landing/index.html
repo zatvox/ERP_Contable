@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Genko — El ERP que no se olvida de nada · ZatVox</title>
+<meta name="description" content="Sistema de gestión multiempresa adaptado a cómo se trabaja en Perú. Stock, cobranzas, caja, compras e importaciones en tiempo real. Hecho y usado todos los días por un contador.">
+<link rel="icon" href="../assets/img/genko-favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="../assets/img/genko-favicon.png">
+<link rel="stylesheet" href="assets/genko.css">
+</head>
+<body>
+
+<div class="progreso" aria-hidden="true"><div class="progreso__b" id="barra"></div></div>
+<div class="caminante" id="caminante" aria-hidden="true"><div class="caminante__g"></div></div>
+
+<!-- NAV -->
+<nav class="nav">
+  <div class="wrap nav__in">
+    <a class="marca" href="#top">
+      <span class="glifo" aria-hidden="true"></span>
+      <span>Genko <small>by ZatVox</small></span>
+    </a>
+    <div class="nav__links">
+      <a href="#dolor">El problema</a>
+      <a href="#modulos">Módulos</a>
+      <a href="#porque">Por qué Genko</a>
+      <a class="btn btn--o" id="btn-login" href="../login.html">Ingresar</a>
+      <a class="btn btn--l" href="#contacto" data-wsp><span class="solo-pc">Hablar con un asesor</span><span class="solo-movil">Contactar</span></a>
+    </div>
+  </div>
+</nav>
+
+<!-- HERO -->
+<header class="hero" id="top">
+  <div class="wrap hero__grid">
+    <div>
+      <span class="cejilla">ERP multiempresa · Perú</span>
+      <h1>No se te vuelve a pasar una letra, una cobranza ni una declaración.</h1>
+      <p class="hero__sub">
+        Genko es el sistema de gestión que te dice cómo está tu empresa <em>ahorita</em>:
+        stock, cuentas por cobrar, caja y compras en una sola pantalla. Sin depender de
+        que alguien se acuerde.
+      </p>
+      <div class="hero__cta">
+        <a class="btn btn--l btn--lg" href="#contacto" data-wsp>Pedir una demo por WhatsApp</a>
+        <a class="btn btn--o btn--lg" href="#modulos">Ver qué incluye</a>
+      </div>
+      <p class="hero__nota">Multiempresa, cualquier rubro. Hecho en Perú.</p>
+    </div>
+
+    <!-- Ventana de la app -->
+    <div class="app rv">
+      <div class="app__bar">
+        <span class="app__dot"></span><span class="app__dot"></span><span class="app__dot"></span>
+        <span class="app__emp">
+          <span class="app__chip" style="background:#2F6FB5">E1</span> Empresa 1 de 3
+        </span>
+      </div>
+      <div class="app__body">
+        <div class="kpis">
+          <div class="kpi"><div class="kpi__l">Por cobrar</div><div class="kpi__v">S/ 184,320</div><div class="kpi__d">12 vencen esta semana</div></div>
+          <div class="kpi"><div class="kpi__l">Caja proyectada</div><div class="kpi__v">S/ 61,870</div><div class="kpi__d">a 30 días</div></div>
+          <div class="kpi"><div class="kpi__l">Stock valorizado</div><div class="kpi__v">S/ 412,090</div><div class="kpi__d">3 almacenes</div></div>
+          <div class="kpi"><div class="kpi__l">Por pagar</div><div class="kpi__v">S/ 97,450</div><div class="kpi__d">4 letras en cartera</div></div>
+        </div>
+        <div class="alertas">
+          <div class="alerta"><span class="pt pt--r"></span><b>Letra 0042</b> vence mañana — Textiles del Sur<time>1 día</time></div>
+          <div class="alerta"><span class="pt pt--a"></span><b>Declaración mensual</b> — PDT por presentar<time>6 días</time></div>
+          <div class="alerta"><span class="pt pt--a"></span><b>Lote 118-A</b> bajo stock mínimo<time>hoy</time></div>
+          <div class="alerta"><span class="pt pt--v"></span><b>DAM 987654</b> costeada y prorrateada<time>ayer</time></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- DOLOR -->
+<section class="sec sec--alt" id="dolor">
+  <div class="wrap wrap--ancho golpe">
+
+    <div class="golpe__izq rv">
+      <h2 class="golpe__t">El problema nunca fue que te falte un sistema.</h2>
+      <p class="golpe__s">Es que siempre te enteras tarde. Y cuando te enteras, ya costó plata.</p>
+      <div class="golpe__linea"></div>
+    </div>
+
+    <div class="golpe__der">
+      <div class="fila rv">
+        <span class="fila__n">01</span>
+        <div>
+          <p class="fila__t">Te enteras <em>por el banco</em> que venció una letra.</p>
+          <p class="fila__p">No por tu sistema. Y ya corrió el interés.</p>
+        </div>
+        <span class="fila__q">Mora</span>
+      </div>
+
+      <div class="fila rv">
+        <span class="fila__n">02</span>
+        <div>
+          <p class="fila__t">Te enteras <em>por el contador</em>, un domingo, que había que declarar.</p>
+          <p class="fila__p">Mañana es la fecha y falta medio registro de compras.</p>
+        </div>
+        <span class="fila__q">Multa</span>
+      </div>
+
+      <div class="fila rv">
+        <span class="fila__n">03</span>
+        <div>
+          <p class="fila__t">Te enteras <em>por el cliente</em> que le vendiste stock que ya no tenías.</p>
+          <p class="fila__p">El Excel decía una cosa y el almacén otra.</p>
+        </div>
+        <span class="fila__q">Cliente perdido</span>
+      </div>
+
+      <div class="fila rv">
+        <span class="fila__n">04</span>
+        <div>
+          <p class="fila__t">Te enteras <em>a fin de mes</em> de que la importación costó más de lo que pensabas.</p>
+          <p class="fila__p">Vendiste tres meses con un margen que no era.</p>
+        </div>
+        <span class="fila__q">Margen comido</span>
+      </div>
+
+      <p class="remate rv">Nada de esto pasa porque trabajes mal.<br>Pasa porque la información <span>llega después del problema</span>.</p>
+    </div>
+
+  </div>
+</section>
+
+<!-- CITA -->
+<section class="sec">
+  <div class="wrap">
+    <figure class="cita rv">
+      <blockquote>“Lo hice para no depender de que el contador o la asistente se acuerde o se olvide de algo.”</blockquote>
+      <figcaption>— Por eso existe Genko, dicho por quien lo construyó.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- MÓDULOS -->
+<section class="sec sec--alt" id="modulos">
+  <div class="wrap">
+    <div class="head rv">
+      <h2>Todo lo que ya está funcionando</h2>
+      <p>Cada módulo se activa cuando lo necesitas. Pagas por lo que usas.</p>
+    </div>
+    <div class="mods rv">
+      <div class="mod"><div class="mod__ic">📦</div><h3>Inventario y Kardex</h3><p>Stock por almacén, valorización y lotes de peso variable.</p></div>
+      <div class="mod"><div class="mod__ic">🧾</div><h3>Ventas</h3><p>Cotización, orden de venta, packing y guía de remisión.</p></div>
+      <div class="mod"><div class="mod__ic">🛒</div><h3>Compras</h3><p>Orden de compra y registro alineado al Formato 8.1 de SUNAT.</p></div>
+      <div class="mod"><div class="mod__ic">💰</div><h3>Cobranzas</h3><p>CxC por vencer, letras de cambio, refinanciación y cobro masivo.</p></div>
+      <div class="mod"><div class="mod__ic">🏦</div><h3>Bancos y Tesorería</h3><p>Movimientos, caja chica, entregas a rendir y proyección de caja.</p></div>
+      <div class="mod"><div class="mod__ic">🚢</div><h3>Costeo de importaciones</h3><p>DAM, flete, gastos locales y prorrateo automático al costo.</p></div>
+      <div class="mod"><div class="mod__ic">🤝</div><h3>CRM y catálogo web</h3><p>Tus clientes ven stock y precios reales desde su celular. Tus vendedores también.</p><a class="mod__tag" href="../crm/index.html">Ver el catálogo</a></div>
+      <div class="mod"><div class="mod__ic">📊</div><h3>Reportes en tiempo real</h3><p>EERR, antigüedad de saldos, libro mayor y balance de comprobación.</p></div>
+      <div class="mod"><div class="mod__ic">👥</div><h3>Usuarios y permisos</h3><p>Roles por módulo y aislamiento entre empresas.</p></div>
+      <div class="mod"><div class="mod__ic">🏗️</div><h3>Inmuebles</h3><p>Alquileres, inquilinos y cobranza recurrente de renta y servicios.</p><span class="mod__tag">Módulo contratable</span></div>
+      <div class="mod"><div class="mod__ic">✅</div><h3>Tareas y proyectos</h3><p>Pendientes del día agrupados por área, con responsables.</p><span class="mod__tag">Módulo contratable</span></div>
+      <div class="mod"><div class="mod__ic">👔</div><h3>RRHH</h3><p>Control de personal y asistencias, activos e inactivos, y sus pendientes.</p><span class="mod__tag">Módulo contratable</span></div>
+      <div class="mod"><div class="mod__ic">📚</div><h3>Contabilidad</h3><p>Plan de cuentas, asientos automáticos y periodos bloqueables.</p><span class="mod__tag">En desarrollo</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- POR QUÉ -->
+<section class="sec" id="porque">
+  <div class="wrap">
+    <div class="head rv">
+      <h2>Por qué este y no otro</h2>
+      <p>Odoo te lo tiene que adaptar un partner, y eso cuesta miles de soles y meses de espera. Genko ya viene adaptado.</p>
+    </div>
+    <div class="difs rv">
+      <div class="dif"><span class="dif__n">01</span><div>
+        <h3>Multiempresa de verdad</h3>
+        <p>Una sola base, aislamiento real entre empresas y reportes consolidados. Cambias de empresa sin cerrar sesión, y cada una tiene su propio color en pantalla para que nunca cargues en la que no era.</p></div></div>
+      <div class="dif"><span class="dif__n">02</span><div>
+        <h3>Costeo de importación incluido</h3>
+        <p>DAM, flete, seguro y gastos locales prorrateados al costo unitario de cada ítem. En la mayoría de sistemas eso se paga aparte o se hace en Excel.</p></div></div>
+      <div class="dif"><span class="dif__n">03</span><div>
+        <h3>Lotes de peso variable</h3>
+        <p>Donde los ERP genéricos se caen: textil, alimentos y químicos. Aquí el lote pesa lo que pesa, y el kardex cuadra igual.</p></div></div>
+      <div class="dif"><span class="dif__n">04</span><div>
+        <h3>Importadores masivos con simulación</h3>
+        <p>Cargas tu Excel, ves qué va a pasar antes de confirmar. Ya atrapó recepciones duplicadas, IGV cargado dos veces y sobreventa de lotes en operación real.</p></div></div>
+      <div class="dif"><span class="dif__n">05</span><div>
+        <h3>Lo usa quien lo hizo</h3>
+        <p>Está construido por una persona que además lo usa todos los días como contador y operador de sus propias empresas. Lo que estorba se arregla la misma semana.</p></div></div>
+      <div class="dif"><span class="dif__n">06</span><div>
+        <h3>Pensado para el flujo peruano</h3>
+        <p>Letras de cambio, detracciones, Formato 8.1, tipo de cambio diario y doble moneda. No es un sistema extranjero traducido.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- HONESTIDAD -->
+<section class="sec sec--alt">
+  <div class="wrap">
+    <div class="nota rv">
+      <h3>Lo que Genko no hace</h3>
+      <p>
+        <strong>No reemplaza a tu contador.</strong> Somos el soporte de la empresa: aceleramos tu gestión
+        y te hacemos la vida empresarial más fácil, pero tu contador sigue llevando tus libros y
+        firmando tus declaraciones. Genko se encarga de que llegue a tiempo y con la información completa.
+        El módulo de contabilidad está en desarrollo y no lo vendemos como terminado.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section class="sec">
+  <div class="wrap">
+    <div class="head rv"><h2>Preguntas frecuentes</h2></div>
+    <div class="faq rv">
+      <details><summary>¿Sirve para mi rubro?</summary>
+        <p>Genko es administrativo, no está atado a un rubro. Hoy corre en importación y distribución, pero ventas, compras, stock, cobranzas y caja son los mismos en una ferretería, una distribuidora o un taller. Si tu rubro necesita algo puntual, se agrega como módulo.</p></details>
+      <details><summary>¿Tengo que migrar todo de golpe?</summary>
+        <p>No. Se arranca con los módulos que más te duelen — normalmente inventario y cobranzas — y el resto entra después. Tus saldos iniciales se cargan por Excel con simulación previa.</p></details>
+      <details><summary>¿Cuánto cuesta?</summary>
+        <p>Depende de cuántas empresas manejas, cuántos usuarios y qué módulos activas. Por eso no hay un precio de lista: escríbenos y te damos el número de tu caso en la misma conversación.</p></details>
+      <details><summary>¿Necesito instalar algo?</summary>
+        <p>No. Es 100% web. Entras desde cualquier computadora o celular con internet. Las actualizaciones no se cobran aparte.</p></details>
+      <details><summary>¿Qué pasa con mis datos?</summary>
+        <p>Cada empresa está aislada de las demás. Puedes exportar tu información cuando quieras — no se queda secuestrada dentro del sistema.</p></details>
+      <details><summary>¿Y si ya uso Excel para todo?</summary>
+        <p>La mayoría de clientes llega así. Los importadores masivos existen justamente para eso: subes tus Excel actuales y el sistema te muestra qué va a pasar antes de confirmar nada.</p></details>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="sec" id="contacto">
+  <div class="wrap">
+    <div class="cta rv">
+      <h2>Conversemos sobre tu empresa</h2>
+      <p>Cuéntanos cómo trabajas hoy y te mostramos Genko funcionando con un caso parecido al tuyo. Sin compromiso.</p>
+      <a class="btn btn--l btn--lg" href="#" data-wsp>Escribir por WhatsApp</a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="pie">
+  <div class="wrap">
+    <div class="pie__g">
+      <div>
+        <div class="marca" style="margin-bottom:10px">
+          <span class="glifo" aria-hidden="true"></span>
+          <span>Genko <small>by ZatVox</small></span>
+        </div>
+        <p style="font-size:.86rem;color:var(--texto-sec);max-width:32ch;margin:0">
+          Sistemas de gestión hechos en Lima, Perú.
+        </p>
+      </div>
+      <div><h4>Producto</h4><ul>
+        <li><a href="#modulos">Módulos</a></li>
+        <li><a href="#porque">Por qué Genko</a></li>
+        <li><a href="#contacto" data-wsp>Pedir demo</a></li>
+        <li><a href="../login.html">Ingresar al sistema</a></li>
+      </ul></div>
+      <div><h4>ZatVox</h4><ul>
+        <li><a href="#modulos">Módulos</a></li>
+        <li><a href="../crm/index.html">Catálogo CRM</a></li>
+        <li><a href="#contacto" data-wsp>Contacto</a></li>
+      </ul></div>
+    </div>
+    <p class="pie__legal">© <span id="anio"></span> ZatVox · Lima, Perú</p>
+  </div>
+</footer>
+
+<script src="assets/genko.js"></script>
+</body>
+</html>

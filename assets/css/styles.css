@@ -2668,3 +2668,103 @@ body.dark-mode .dt-ins.warn { color:#fcd34d; }
 .table-container::-webkit-scrollbar-thumb,
 .lc-wrap::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--text-secondary) 55%, transparent); background-clip: padding-box; }
 .lc-wrap { scrollbar-color: color-mix(in srgb, var(--text-secondary) 55%, transparent) transparent; }
+
+/* Modo embebido (iframe desde otro módulo): solo se ve el modal, sobre fondo transparente */
+html:has(body.zv-embed), body.zv-embed { background: transparent !important; }
+body.zv-embed .app-container { display: none !important; }
+
+
+/* ============================================================================
+   PALETA GENKO (2026-11-03) — latón + neutros claro/oscuro
+   Misma paleta que el landing (landing/assets/genko.css).
+   Es OPCIONAL: solo aplica si el usuario elige "Latón" en Configuración →
+   Apariencia (eso añade body.paleta-laton). La PREDETERMINADA es la clásica,
+   el azul marino de arriba, que es la identidad del ERP.
+
+   Nota: el landing de marca de Genko usa latón, pero el ERP no tiene por qué
+   vestirse igual que su página de venta. Son dos públicos distintos.
+
+   Regla de marca: el sistema es NEUTRO y el color lo pone la empresa.
+   · Latón  = marca (botones, enlaces, acento).
+   · Color de empresa = de quién es la pantalla (cintillo, monograma, bordes).
+   · Colores de ESTADO fijos: éxito / advertencia / error / info. El color de
+     una empresa nunca pinta un estado.
+   ============================================================================ */
+body.paleta-laton {
+  --color-primary:       #8F6621;   /* latón sombra: AA con texto blanco */
+  --color-primary-light: #6F4F18;
+  --color-secondary:     #F3E8D2;   /* crema: fondos de realce */
+  --color-accent:        #B4802B;   /* latón */
+  --color-accent-soft:   #C8A96E;   /* latón claro: sobre fondos oscuros */
+
+  --color-success: #1A7F46;
+  --color-warning: #B45309;
+  --color-danger:  #C0392B;
+  --color-info:    #2563EB;
+
+  --bg-primary:   #FFFFFF;
+  --bg-secondary: #F7F8FA;
+  --bg-tertiary:  #EEF0F3;
+  --text-primary:   #0F1115;
+  --text-secondary: #6B7280;
+  --border-color:   #E3E6EA;
+
+  --color-link:       #8F6621;
+  --color-link-hover: #6F4F18;
+}
+body.paleta-laton.dark-mode {
+  --color-primary:       #B4802B;
+  --color-primary-light: #8F6621;
+  --color-secondary:     #2A2F38;
+  --color-success: #2FA866;
+  --color-warning: #D97B1F;
+  --color-danger:  #E5594A;
+  --color-info:    #5B8DEF;
+
+  --bg-primary:   #171A20;
+  --bg-secondary: #0F1115;
+  --bg-tertiary:  #1F232B;
+  --text-primary:   #F2F4F7;
+  --text-secondary: #9BA3AF;
+  --border-color:   #2A2F38;
+
+  --color-link:       #C8A96E;
+  --color-link-hover: #E0C98A;
+}
+
+/* Sidebar: tinta con filete latón; el realce activo es latón claro */
+body.paleta-laton .sidebar {
+  background: linear-gradient(180deg, #171A20 0%, #0F1115 100%);
+  border-right: 1px solid rgba(200, 169, 110, 0.18);
+}
+body.paleta-laton .sidebar-menu a.active {
+  background-color: var(--color-accent-soft);
+  color: #0F1115;
+}
+body.paleta-laton .sidebar-menu a:hover:not(.active) {
+  background-color: rgba(200, 169, 110, 0.12);
+  color: #fff;
+}
+body.paleta-laton .btn-secondary { color: var(--text-primary); }
+body.dark-mode.paleta-laton .btn-secondary { color: var(--text-primary); background-color: var(--bg-tertiary); }
+
+.login-header .login-logo { height: 72px; width: auto; margin-bottom: 8px; }
+
+/* Login: fondo tinta; la tarjeta mantiene el tema */
+body.login-page.paleta-laton {
+  background: radial-gradient(1200px 600px at 50% -10%, #1F232B 0%, #0F1115 70%);
+}
+body.paleta-laton .login-form input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(180, 128, 43, 0.20);
+}
+.login-header .login-marca { display: block; font-size: 0.74rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-secondary); margin-top: 2px; }
+.login-rol { display: flex; gap: 10px; }
+.login-rol label {
+  flex: 1; display: flex; align-items: center; gap: 8px; cursor: pointer;
+  padding: 10px 12px; border: 1px solid var(--border-color); border-radius: var(--radius-md);
+  font-weight: 600; font-size: var(--font-size-sm); color: var(--text-primary);
+}
+.login-rol input { accent-color: var(--color-accent, var(--color-primary)); width: auto; padding: 0; }
+.login-rol label:has(input:checked) { border-color: var(--color-accent, var(--color-primary)); background: color-mix(in srgb, var(--color-accent, var(--color-primary)) 10%, transparent); }
+.login-rol small { display:block; font-weight: 400; color: var(--text-secondary); font-size: 0.74rem; }

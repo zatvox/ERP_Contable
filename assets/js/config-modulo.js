@@ -18,6 +18,7 @@ import { ESTILOS_CARGA, estiloActual, estiloPorId } from './animaciones/index.js
 const DEFAULTS = {
   apariencia: {
     tema:              'auto',      // 'auto' | 'claro' | 'oscuro'
+    paleta:            'clasica',   // 'clasica' (azul marino, predeterminada) | 'genko' (latón + neutros)
     densidad:          'normal',    // 'compacta' | 'normal' | 'comoda'
     tamanoFuente:      100,         // %
     colorAcento:       '#14213d',
@@ -177,7 +178,16 @@ export function aplicarApariencia() {
 
   const root = document.documentElement
   root.style.setProperty('--font-scale', `${(a.tamanoFuente || 100) / 100}`)
-  if (a.colorAcento) {
+  // La paleta clásica (azul marino) es la PREDETERMINADA del ERP.
+  // El latón es un tema opcional que el usuario elige a propósito.
+  const laton = a.paleta === 'genko'
+  const clasica = !laton
+  b.classList.toggle('paleta-laton', laton)
+  if (!clasica) {
+    root.style.removeProperty('--color-primary')
+    root.style.removeProperty('--color-primary-light')
+  }
+  if (clasica && a.colorAcento) {
     root.style.setProperty('--color-primary', a.colorAcento)
     root.style.setProperty('--color-primary-light', _oscurecer(a.colorAcento, 0.25))
   }
@@ -210,9 +220,10 @@ const SEP = (titulo) => ({ tipo: 'separador', label: titulo })
 const CAMPOS_APARIENCIA = [
   SEP('Tema y densidad'),
   { key: 'tema',         label: 'Tema de color', tipo: 'select', opciones: [{ value: 'auto', label: 'Automático (usa el botón 🌙/☀️)' }, { value: 'claro', label: 'Siempre claro' }, { value: 'oscuro', label: 'Siempre oscuro' }] },
+  { key: 'paleta',       label: 'Paleta de colores', tipo: 'select', opciones: [{ value: 'clasica', label: 'Clásica — azul marino' }, { value: 'genko', label: 'Genko — latón + neutros (la del landing)' }], hint: 'La clásica es la predeterminada. El color de cada empresa sigue pintando cintillo y monograma.' },
   { key: 'densidad',     label: 'Densidad de las tablas', tipo: 'select', opciones: [{ value: 'compacta', label: 'Compacta' }, { value: 'normal', label: 'Normal' }, { value: 'comoda', label: 'Cómoda' }] },
   { key: 'tamanoFuente', label: 'Tamaño de letra (%)', tipo: 'range', min: 85, max: 125, step: 5 },
-  { key: 'colorAcento',  label: 'Color de acento', tipo: 'color', hint: 'Afecta sidebar, botones primarios y encabezados.' },
+  { key: 'colorAcento',  label: 'Color de acento', tipo: 'color', hint: 'Solo aplica con la paleta Clásica.' },
   SEP('Tablas'),
   { key: 'rayado',       label: 'Filas alternas (zebra)', tipo: 'checkbox' },
   { key: 'bordesTabla',  label: 'Mostrar bordes de tabla', tipo: 'checkbox' },
@@ -335,7 +346,7 @@ const CAMPOS_POR_MODULO = {
     { key: 'paginaInicio',   label: 'Página de inicio al entrar', tipo: 'select', opciones: [
       { value: 'dashboard.html', label: 'Dashboard' }, { value: 'inventario.html', label: 'Inventario' },
       { value: 'compras.html', label: 'Compras' }, { value: 'ventas.html', label: 'Ventas' },
-      { value: 'cobranzas.html', label: 'Cuentas x Cobrar/Pagar' }, { value: 'bancos.html', label: 'Bancos' },
+      { value: 'cobranzas.html', label: 'Cobranza y pagos' }, 
       { value: 'contabilidad.html', label: 'Contabilidad' } ] },
     { key: 'notificaciones', label: 'Mostrar avisos emergentes (toasts)', tipo: 'checkbox' }
   ]
@@ -431,6 +442,19 @@ export function renderConfiguracionTab(modulo, containerId, opciones = {}) {
           </div>
         </div>
       </div>` : ''}
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-header"><h3 class="card-title">🤝 CRM y catálogo web</h3></div>
+      <div class="cfg-body">
+        <div class="cfg-fila">
+          <div class="cfg-fila-texto">
+            <label>Configuración del CRM</label>
+            <div class="cfg-hint">WhatsApp, precios públicos, IGV, semáforo de stock, cuentas bancarias y qué artículos se publican. El CRM es una página aparte que lee el stock real del ERP.</div>
+          </div>
+          <a class="btn btn-secondary btn-small" href="crm/panel.html#config" target="_blank" rel="noopener">Abrir configuración</a>
+        </div>
+      </div>
     </div>
 
     <div class="card" style="margin-top:16px;">
@@ -551,7 +575,7 @@ function _bindConfig(modulo, campos, onGuardar) {
 
 function _titulo(m) {
   return ({ apariencia: 'Apariencia', inventario: 'Inventario', compras: 'Compras', ventas: 'Ventas',
-            cobranzas: 'Cuentas x Cobrar/Pagar', bancos: 'Bancos', contabilidad: 'Contabilidad',
+            cobranzas: 'Cobranza y pagos', bancos: 'Bancos', contabilidad: 'Contabilidad',
             dashboard: 'Dashboard', perfil: 'Perfil' })[m] || m
 }
 

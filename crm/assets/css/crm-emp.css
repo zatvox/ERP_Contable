@@ -1,0 +1,19 @@
+/* Capa CRM sobre el diseño JHIRO: el color de cada empresa (--emp) marca líneas, bordes y detalles */
+:root { --emp: #C9A96E; }
+.nav { position: sticky; }
+.nav::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--emp); }
+.section-divider { background: var(--emp) !important; }
+.pcard:hover, .why-card:hover { border-color: var(--emp) !important; }
+.sidebar-cat-btn.active { box-shadow: inset 3px 0 0 var(--emp); }
+.pd-color-swatch--active { outline: 2px solid var(--emp); outline-offset: 2px; }
+
+/* agotado */
+.pcard__badge--out, .pd-badge--out { background: rgba(220, 70, 70, .14); color: #e05252; border: 1px solid rgba(220, 70, 70, .4); }
+
+/* selector de empresa */
+.emp-pills { display: flex; gap: 6px; margin-right: 6px; }
+.emp-pill { background: none; border: 1px solid var(--border, rgba(128,128,128,.35)); color: inherit; padding: 5px 11px; border-radius: 999px; font: inherit; font-size: .72rem; letter-spacing: .08em; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.emp-pill::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+.emp-pill[aria-pressed="true"] { border-color: var(--c); box-shadow: 0 0 0 1px var(--c); }
+.nav__link--int { opacity: .75; }
+@media (max-width: 900px) { .emp-pills { display: none; } }

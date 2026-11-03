@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <link rel="icon" href="data:,">
+  <link rel="icon" type="image/png" href="assets/img/genko-geco.png">
+  <link rel="apple-touch-icon" href="assets/img/genko-geco.png">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>JHIRO ERP - Tesorería</title>
@@ -17,11 +18,12 @@
         <li><a href="inventario.html" data-page="inventario">&#128230; Inventario</a></li>
         <li><a href="compras.html" data-page="compras">&#128722; Compras</a></li>
         <li><a href="ventas.html" data-page="ventas">&#128200; Ventas</a></li>
-        <li><a href="cobranzas.html" data-page="cobranzas">&#128176; Cuentas x Cobrar/Pagar</a></li>
+        <li><a href="cobranzas.html" data-page="cobranzas">&#128176; Cobranza y pagos</a></li>
         <li><a href="tesoreria.html" class="active" data-page="tesoreria">&#128179; Tesorería</a></li>
-        <li><a href="bancos.html" data-page="bancos">&#127974; Bancos</a></li>
         <li><a href="contabilidad.html" data-page="contabilidad">&#128209; Contabilidad</a></li>
         <li><a href="costeo-importaciones.html" data-page="costeo">&#128674; Carpeta de Importaciones</a></li>
+        <li><a href="crm/panel.html" target="_blank" rel="noopener" data-page="crm" title="Panel CRM: cotizaciones, clientes, stock y catálogo (otra pestaña)">&#129309; Panel CRM</a></li>
+        <li><a href="crm/index.html" target="_blank" rel="noopener" data-page="catalogo-web" title="Catálogo web público (otra pestaña)">&#128717; Catálogo web</a></li>
         <li data-solo-admin><a href="usuarios.html" data-page="usuarios">&#128100; Usuarios</a></li>
         <li><a href="perfil.html" data-page="perfil">&#9881;&#65039; Configuración</a></li>
       </ul>
@@ -50,6 +52,15 @@
             </div>
           </div>
           <button type="button" class="tab-btn" data-tab="cajas">Cajas</button>
+          <div class="module-nav-group">
+            <button type="button" class="module-nav-group-toggle">Bancos</button>
+            <div class="module-nav-dropdown">
+              <button class="tab-btn" data-tab="cuentas-banco">Cuentas bancarias</button>
+              <button class="tab-btn" data-tab="transferencias">Transferencias entre cuentas</button>
+              <button class="tab-btn" data-tab="conciliacion">Conciliación</button>
+              <button class="tab-btn" data-tab="reportes-banco">Reportes bancarios</button>
+            </div>
+          </div>
           <button type="button" class="tab-btn" data-tab="reportes">📊 Reportes</button>
           <button type="button" class="tab-btn module-nav-config" data-tab="configuracion">⚙️ Configuración</button>
         </nav>
@@ -244,12 +255,109 @@
             <div class="card-header">
               <h3 class="card-titulo-tab">Cajas y cuentas</h3>
               <div class="card-acciones">
-                <button class="btn btn-secondary btn-small" onclick="window.irAPagina('bancos.html','cuentas-banco')">
-                  Administrar en Bancos →</button>
+                <button class="btn btn-secondary btn-small" onclick="window.irATabTes('cuentas-banco')">
+                  Administrar cuentas →</button>
               </div>
             </div>
             <div id="cajas-tabla-cont" class="table-container">Cargando...</div>
           </div>
+        </div>
+
+
+        <!-- ══════════ BANCOS (fusionado 2026-11-03; viene de bancos.html) ══════════ -->
+        <!-- TAB: Cuentas Bancarias -->
+        <div id="tab-cuentas-banco" class="tab-content">
+          <div id="content-cuentas-banco" class="card">Cargando...</div>
+        </div>
+
+
+        <!-- TAB: Transferencias entre cuentas -->
+        <div id="tab-transferencias" class="tab-content">
+          <div class="card" style="max-width:640px;">
+            <div class="card-header"><h3 class="card-title">Transferencia entre cuentas propias</h3></div>
+            <div style="padding:20px; display:flex; flex-direction:column; gap:12px;">
+              <p style="color:var(--text-secondary); font-size:0.85rem; margin:0;">
+                Registra el egreso en la cuenta origen y el ingreso en la cuenta destino en una sola operación,
+                actualizando ambos saldos. Útil para traslados entre bancos, o de la cuenta corriente a la de detracciones.
+              </p>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <div class="form-group">
+                  <label>Cuenta origen *</label>
+                  <select id="trfOrigen" onchange="window.onCambiarCuentaTransferencia()"><option value="">-- Seleccione --</option></select>
+                  <small id="trf-origen-info" style="color:var(--text-secondary);"></small>
+                </div>
+                <div class="form-group">
+                  <label>Cuenta destino *</label>
+                  <select id="trfDestino" onchange="window.onCambiarCuentaTransferencia()"><option value="">-- Seleccione --</option></select>
+                  <small id="trf-destino-info" style="color:var(--text-secondary);"></small>
+                </div>
+              </div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <div class="form-group">
+                  <label>Fecha *</label>
+                  <input type="date" id="trfFecha">
+                </div>
+                <div class="form-group">
+                  <label>Monto *</label>
+                  <input type="number" id="trfMonto" step="0.01" min="0.01" placeholder="0.00">
+                </div>
+              </div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <div class="form-group">
+                  <label>Concepto</label>
+                  <input type="text" id="trfConcepto" placeholder="Ej: Traslado a cuenta de detracciones">
+                </div>
+                <div class="form-group">
+                  <label>Referencia / N° operación</label>
+                  <input type="text" id="trfReferencia" placeholder="Opcional">
+                </div>
+              </div>
+              <div id="trf-aviso" style="display:none; padding:10px 12px; border-radius:var(--radius-md); background:rgba(245,158,11,.12); color:var(--color-warning); font-size:0.85rem;"></div>
+              <button class="btn btn-primary" onclick="window.registrarTransferencia()" style="width:100%;">🔄 Registrar Transferencia</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB: Conciliación -->
+        <div id="tab-conciliacion" class="tab-content">
+          <div class="card" style="margin-bottom:15px;">
+            <div class="reporte-filtros">
+              <div class="reporte-filtro">
+                <label>Cuenta</label>
+                <select id="concBancoSelect" onchange="window.cargarConciliacion()">
+                  <option value="">-- Seleccione cuenta --</option>
+                </select>
+              </div>
+              <div class="reporte-filtro">
+                <label>Mes</label>
+                <input type="month" id="concFiltroMes" onchange="window.cargarConciliacion()">
+              </div>
+              <div class="reporte-filtro">
+                <label>Saldo según estado de cuenta</label>
+                <input type="number" id="concSaldoBanco" placeholder="0.00" step="0.01" oninput="window.cargarConciliacion()">
+              </div>
+              <div class="reporte-filtro">
+                <label>&nbsp;</label>
+                <button class="btn btn-warning btn-small" onclick="window.cargarConciliacion()">Ver diferencia</button>
+              </div>
+            </div>
+          </div>
+          <div id="content-conciliacion" class="card">Selecciona una cuenta para conciliar.</div>
+        </div>
+
+
+        <!-- TAB: REPORTES -->
+        <div id="tab-reportes-banco" class="tab-content">
+          <div class="subtab-bar" id="banco-subtabs-reportes">
+            <button class="subtab active" data-sub="repb-flujo">Flujo por mes</button>
+            <button class="subtab" data-sub="repb-categorias">Por categoría</button>
+            <button class="subtab" data-sub="repb-cuentas">Por cuenta</button>
+            <button class="subtab" data-sub="repb-posicion">Posición de tesorería</button>
+          </div>
+          <div id="repb-flujo"      class="subtab-panel active"></div>
+          <div id="repb-categorias" class="subtab-panel"></div>
+          <div id="repb-cuentas"    class="subtab-panel"></div>
+          <div id="repb-posicion"   class="subtab-panel"></div>
         </div>
 
         <!-- ══════════════════ TAB: REPORTES ══════════════════ -->
@@ -664,6 +772,93 @@
     </div>
   </div>
 
+
+  <!-- MODAL: Nueva / Editar Cuenta Bancaria o Caja (2026-10-07) — antes era
+       un tab aparte; ahora flota sobre "Cuentas Bancarias" (estándar §3.2) y
+       hereda la confirmación al cerrar con cambios (modal-guardia.js). -->
+  <div id="modal-cuenta-banco" class="modal">
+    <div class="modal-content" style="width:min(94vw, 720px); max-width:min(94vw, 720px); max-height:calc(100vh - 48px); overflow-y:auto;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="nc-titulo">Nueva Cuenta Bancaria</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-cuenta-banco')">✕</button>
+      </div>
+      <input type="hidden" id="ncId">
+      <div id="ncAvisoMovs" style="display:none; padding:8px 12px; border-left:3px solid var(--color-warning, #f59e0b); background:var(--bg-secondary); border-radius:var(--radius-md); font-size:0.85rem; margin-bottom:12px;"></div>
+
+      <strong style="display:block; font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em; color:var(--text-secondary); margin-bottom:8px;">Datos de la cuenta</strong>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <div class="form-group">
+          <label>Tipo de Cuenta *</label>
+          <select id="ncTipoCuenta" onchange="window._onCambiarTipoCuentaBanco()">
+            <option value="caja">💵 Caja (efectivo)</option>
+            <option value="corriente" selected>Cuenta Corriente</option>
+            <option value="ahorro">Cuenta de Ahorro</option>
+            <option value="detracciones">Cuenta de Detracciones</option>
+            <option value="cuentas_recaudacion">Cuenta de Recaudación</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Moneda *</label>
+          <select id="ncMoneda">
+            <option value="PEN">PEN - Soles</option>
+            <option value="USD">USD - Dólares</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <div class="form-group">
+          <label>Nombre / Alias *</label>
+          <input type="text" id="ncNombre" placeholder="Ej: BCP Principal PEN">
+        </div>
+        <div class="form-group" id="ncGrupoBanco">
+          <label>Banco *</label>
+          <input type="text" id="ncBanco" list="listaBancosPeru" placeholder="Escribe o elige de la lista..." autocomplete="off">
+          <datalist id="listaBancosPeru"></datalist>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;" id="ncGrupoNumeros">
+        <div class="form-group">
+          <label>Número de Cuenta *</label>
+          <input type="text" id="ncNumeroCuenta" placeholder="000-0000000-0-00">
+        </div>
+        <div class="form-group">
+          <label>CCI (20 dígitos)</label>
+          <input type="text" id="ncCCI" placeholder="00200000000000000000" maxlength="20" inputmode="numeric">
+        </div>
+      </div>
+
+      <div style="border-top:1px solid var(--border-color); margin:14px 0 10px;"></div>
+      <strong style="display:block; font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em; color:var(--text-secondary); margin-bottom:8px;">Saldo inicial</strong>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <div class="form-group">
+          <label>Saldo Inicial</label>
+          <input type="number" id="ncSaldoInicial" step="0.01" placeholder="0.00" value="0">
+        </div>
+        <div class="form-group">
+          <label>Fecha del Saldo Inicial</label>
+          <input type="date" id="ncSaldoInicialFecha">
+          <small style="color:var(--text-secondary); font-size:0.72rem;">La fecha de corte del saldo (ej. la de tu asiento de apertura), NO la de hoy.</small>
+        </div>
+      </div>
+
+      <div style="border-top:1px solid var(--border-color); margin:14px 0 10px;"></div>
+      <strong style="display:block; font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em; color:var(--text-secondary); margin-bottom:8px;">Contabilidad</strong>
+      <div class="form-group">
+        <label>Cuenta Contable (plan de cuentas)</label>
+        <select id="ncCuentaContable">
+          <option value="">-- Sin asignar --</option>
+        </select>
+        <small id="ncHintCuentaContable" style="color:var(--text-secondary); font-size:0.72rem;">
+          Debe ser la subcuenta específica de ESTE banco (ej. 1041120 para BCP CC MN), no el código genérico del grupo (104).
+        </small>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn" onclick="window.closeModal('modal-cuenta-banco')">Cancelar</button>
+        <button class="btn btn-primary" id="ncBtnGuardar" onclick="window.conCarga(this, window.guardarNuevaCuenta)">💾 Guardar Cuenta</button>
+      </div>
+    </div>
+
   <script type="module" src="assets/js/config.js"></script>
   <script type="module" src="assets/js/supabase-client.js"></script>
   <script type="module" src="assets/js/auth-supabase.js"></script>
@@ -671,6 +866,6 @@
   <script type="module" src="assets/js/supabase-data.js"></script>
   <script type="module" src="assets/js/helpers.js"></script>
   <script type="module" src="assets/js/main.js"></script>
-  <script type="module" src="assets/js/tesoreria.js?v=19"></script>
+  <script type="module" src="assets/js/tesoreria.js?v=22"></script>
 </body>
 </html>

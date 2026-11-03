@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mi Cotización — JHIRO</title>
+  <meta name="description" content="Revisa tu cotización, regístrate con tu RUC y realiza el pago para confirmar tu pedido.">
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="manifest" href="site.webmanifest">
+  <link rel="stylesheet" href="assets/css/styles.css">
+  <link rel="stylesheet" href="assets/css/cotizar.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="assets/css/crm-emp.css">
+</head>
+<body>
+
+<!-- ─── Navegación ─────────────────────────────────────── -->
+<nav class="nav" role="navigation" aria-label="Navegación principal">
+  <div class="container nav__inner">
+    <a href="index.html" class="nav__logo" aria-label="Inicio JHIRO">
+      <img src="assets/images/logo.png" alt="Logo JHIRO" width="280" height="136">
+    </a>
+    <ul class="nav__links" id="nav-links" role="list">
+      <li><a href="index.html" class="nav__link">Inicio</a></li>
+      <li><a href="about.html" class="nav__link">Nosotros</a></li>
+      <li><a href="contact.html" class="nav__link">Contacto</a></li>
+    </ul>
+    <div class="nav__actions">
+      <button class="btn-theme" id="theme-toggle" aria-label="Cambiar tema claro/oscuro"></button>
+      <a href="index.html#products" class="btn btn-outline">← Seguir comprando</a>
+      <button class="nav__hamburger" id="nav-hamburger" aria-label="Abrir menú" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<!-- ─── Encabezado ────────────────────────────────────────── -->
+<div class="cot-header">
+  <div class="container">
+    <span class="label">Proceso de Pedido</span>
+    <div class="section-divider"></div>
+    <h1>Mi <em>Cotización</em></h1>
+
+    <!-- Pasos del proceso -->
+    <div class="cot-steps" id="cot-steps">
+      <div class="cot-step active" data-step="1">
+        <span class="cot-step__num">1</span>
+        <span class="cot-step__label">Carrito</span>
+      </div>
+      <div class="cot-step-line"></div>
+      <div class="cot-step" data-step="2">
+        <span class="cot-step__num">2</span>
+        <span class="cot-step__label">Mis Datos</span>
+      </div>
+      <div class="cot-step-line"></div>
+      <div class="cot-step" data-step="3">
+        <span class="cot-step__num">3</span>
+        <span class="cot-step__label">Confirmación</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<main class="container cot-main">
+
+  <!-- ══════════════════════════════════════════════════════
+       PASO 1: CARRITO
+  ══════════════════════════════════════════════════════ -->
+  <div class="cot-panel" id="panel-1">
+
+    <!-- Carrito vacío -->
+    <div class="cot-empty" id="cot-empty" style="display:none">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+        <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
+        <path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 001.95-1.57l1.65-8.42H6"/>
+      </svg>
+      <h3>Tu cotización está vacía</h3>
+      <p>Agrega productos desde el catálogo para comenzar.</p>
+      <a href="index.html#products" class="btn btn-primary" style="margin-top:1.5rem">Ver Catálogo</a>
+    </div>
+
+    <!-- Tabla de carrito -->
+    <div id="cot-tabla-wrap">
+      <table class="cot-tabla" id="cot-tabla" aria-label="Productos en cotización">
+        <thead>
+          <tr>
+            <th>Producto</th>
+            <th>Color</th>
+            <th class="text-right">Peso / Caja (kg)</th>
+            <th class="text-right">Cantidad (kg)</th>
+            <th class="text-right">Unidades</th>
+            <th class="text-right">Precio / kg</th>
+            <th class="text-right">Subtotal</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="cot-tbody">
+          <!-- Renderizado por cotizar-web.js -->
+        </tbody>
+      </table>
+
+      <!-- Totales -->
+      <div class="cot-totales" id="cot-totales">
+        <div class="cot-total-row">
+          <span>Subtotal</span>
+          <span id="tot-subtotal">S/. 0.00</span>
+        </div>
+        <div class="cot-total-row">
+          <span>IGV (18%)</span>
+          <span id="tot-igv">S/. 0.00</span>
+        </div>
+        <div class="cot-total-row cot-total-row--main">
+          <span>Total estimado</span>
+          <span id="tot-total">S/. 0.00</span>
+        </div>
+        <p class="cot-total-note">
+          * Precio referencial. El precio final se confirma al aprobar la cotización.<br>
+          * Costos de envío se calculan según tu dirección de entrega.
+        </p>
+      </div>
+
+      <div class="cot-step1-actions">
+        <a href="index.html#products" class="btn btn-outline">← Seguir agregando</a>
+        <button class="btn btn-primary" id="btn-ir-paso2">
+          Continuar con mis datos →
+        </button>
+      </div>
+    </div>
+  </div><!-- /panel-1 -->
+
+  <!-- ══════════════════════════════════════════════════════
+       PASO 2: DATOS DEL CLIENTE
+  ══════════════════════════════════════════════════════ -->
+  <div class="cot-panel" id="panel-2" style="display:none">
+
+    <div class="cot-form-layout">
+
+      <!-- Formulario de datos -->
+      <div class="cot-form-col">
+        <h2 class="cot-col-title">Datos del Comprador</h2>
+
+        <div class="form-row">
+          <label for="f-ruc">RUC *</label>
+          <div class="ruc-row">
+            <input type="text" id="f-ruc" name="ruc"
+              placeholder="20XXXXXXXXX" maxlength="11" inputmode="numeric"
+              required autocomplete="off">
+            <button class="btn btn-outline btn-sm" id="btn-buscar-ruc" type="button">Buscar</button>
+          </div>
+          <span class="field-hint">11 dígitos · persona natural o jurídica</span>
+        </div>
+
+        <div class="form-2col">
+          <div class="form-row">
+            <label for="f-razon">Razón Social / Nombre *</label>
+            <input type="text" id="f-razon" name="razon_social"
+              placeholder="Empresa S.A.C." required autocomplete="organization">
+          </div>
+          <div class="form-row">
+            <label for="f-contacto">Nombre de Contacto *</label>
+            <input type="text" id="f-contacto" name="nombre_contacto"
+              placeholder="Juan Pérez" required autocomplete="name">
+          </div>
+        </div>
+
+        <div class="form-2col">
+          <div class="form-row">
+            <label for="f-email">Email *</label>
+            <input type="email" id="f-email" name="email"
+              placeholder="juan@empresa.com" required autocomplete="email">
+          </div>
+          <div class="form-row">
+            <label for="f-tel">Teléfono / WhatsApp</label>
+            <input type="tel" id="f-tel" name="telefono"
+              placeholder="+51 999 999 999" autocomplete="tel">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label for="f-dir-fiscal">Dirección Fiscal</label>
+          <input type="text" id="f-dir-fiscal" name="direccion_fiscal"
+            placeholder="Av. Industrial 123, Lima" autocomplete="street-address">
+        </div>
+
+        <h2 class="cot-col-title" style="margin-top:2rem">Dirección de Entrega</h2>
+
+        <div class="form-row">
+          <label for="f-dir-entrega">Dirección de entrega *</label>
+          <input type="text" id="f-dir-entrega" name="dir_entrega"
+            placeholder="Calle Los Alamos 456, Ate" required>
+        </div>
+
+        <div class="form-2col">
+          <div class="form-row">
+            <label for="f-distrito">Distrito *</label>
+            <input type="text" id="f-distrito" name="distrito_entrega"
+              placeholder="Ate" required>
+          </div>
+          <div class="form-row">
+            <label for="f-referencia">Referencia</label>
+            <input type="text" id="f-referencia" name="referencia_entrega"
+              placeholder="Cerca al parque">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label for="f-notas">Notas adicionales</label>
+          <textarea id="f-notas" name="notas" rows="3"
+            placeholder="Horario de entrega, instrucciones especiales, etc."></textarea>
+        </div>
+      </div>
+
+      <!-- Resumen lateral -->
+      <aside class="cot-resumen">
+        <h3 class="cot-col-title">Resumen</h3>
+        <div class="cot-resumen-items" id="cot-resumen-items">
+          <!-- Renderizado por JS -->
+        </div>
+        <div class="cot-resumen-totales">
+          <div class="cot-total-row"><span>Subtotal</span><span id="res-subtotal">S/. 0.00</span></div>
+          <div class="cot-total-row"><span>IGV 18%</span><span id="res-igv">S/. 0.00</span></div>
+          <div class="cot-total-row cot-total-row--main"><span>Total</span><span id="res-total">S/. 0.00</span></div>
+        </div>
+      </aside>
+
+    </div><!-- /cot-form-layout -->
+
+    <div class="cot-step-actions">
+      <button class="btn btn-outline" id="btn-volver-paso1">← Volver</button>
+      <button class="btn btn-primary" id="btn-confirmar">
+        Confirmar Cotización →
+      </button>
+    </div>
+
+    <!-- Error de formulario -->
+    <div class="cot-msg error" id="cot-msg-error" style="display:none"></div>
+
+  </div><!-- /panel-2 -->
+
+  <!-- ══════════════════════════════════════════════════════
+       PASO 3: CONFIRMACIÓN Y PAGO
+  ══════════════════════════════════════════════════════ -->
+  <div class="cot-panel" id="panel-3" style="display:none">
+
+    <!-- Éxito -->
+    <div class="cot-confirmado" id="cot-confirmado">
+      <div class="cot-check">✓</div>
+      <h2>¡Cotización Registrada!</h2>
+      <p id="conf-numero" class="cot-conf-num"></p>
+      <p class="cot-conf-msg">
+        Nos comunicaremos contigo dentro de 1 día hábil para confirmar precios y coordinar el despacho.
+      </p>
+    </div>
+
+    <!-- Pasarela de pago -->
+    <div class="cot-pago">
+      <h3 class="cot-col-title">Realizar Pago Parcial o Total</h3>
+      <p class="cot-pago-desc">
+        Puedes adelantar el pago para agilizar la confirmación de tu pedido.
+        Transfiere a cualquiera de las cuentas indicadas y sube la constancia.
+      </p>
+
+      <!-- Cuentas bancarias -->
+      <div class="cot-cuentas">
+        <div class="cot-cuenta">
+          <div class="cot-cuenta__banco">BCP</div>
+          <div class="cot-cuenta__tipo">Cuenta Corriente Soles</div>
+          <div class="cot-cuenta__num" id="cuenta-bcp">191-XXXXXXXX-0-XX</div>
+          <button class="btn-copy" data-target="cuenta-bcp" aria-label="Copiar número de cuenta BCP">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+            </svg>
+            Copiar
+          </button>
+        </div>
+        <div class="cot-cuenta">
+          <div class="cot-cuenta__banco">Interbank</div>
+          <div class="cot-cuenta__tipo">Cuenta Corriente Soles</div>
+          <div class="cot-cuenta__num" id="cuenta-ibk">200-XXXXXXXXXX-XX</div>
+          <button class="btn-copy" data-target="cuenta-ibk" aria-label="Copiar número de cuenta Interbank">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+            </svg>
+            Copiar
+          </button>
+        </div>
+        <div class="cot-cuenta">
+          <div class="cot-cuenta__banco">Yape / Plin</div>
+          <div class="cot-cuenta__tipo">Transferencia móvil</div>
+          <div class="cot-cuenta__num" id="cuenta-yape">+51 XXX XXX XXX</div>
+          <button class="btn-copy" data-target="cuenta-yape" aria-label="Copiar número Yape">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+            </svg>
+            Copiar
+          </button>
+        </div>
+      </div>
+
+      <!-- Upload comprobante -->
+      <div class="cot-upload">
+        <label class="cot-upload__label" for="comprobante-file">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <span id="upload-label-text">Subir constancia de pago</span>
+          <span class="cot-upload__hint">JPG, PNG o PDF · máx. 5 MB</span>
+        </label>
+        <input type="file" id="comprobante-file" accept="image/*,.pdf" style="display:none">
+        <button class="btn btn-outline" id="btn-subir-comprobante" style="display:none">
+          Confirmar envío de comprobante
+        </button>
+        <div class="cot-msg success" id="cot-upload-ok" style="display:none">
+          ✓ Comprobante enviado. Te confirmaremos el pago pronto.
+        </div>
+      </div>
+    </div><!-- /cot-pago -->
+
+    <div class="cot-step-actions" style="justify-content:center">
+      <a href="index.html" class="btn btn-outline">← Volver al inicio</a>
+    </div>
+
+  </div><!-- /panel-3 -->
+
+</main>
+
+<!-- ─── Pie de página ────────────────────────────────────────── -->
+<footer class="footer" role="contentinfo">
+  <div class="container">
+    <div class="footer__grid">
+      <div class="footer__brand">
+        <img src="assets/images/logo.png" alt="Logo JHIRO" width="160" height="32">
+        <p>Importador premium de materia prima textil.</p>
+      </div>
+      <div>
+        <p class="footer__heading">Navegación</p>
+        <ul class="footer__links">
+          <li><a href="index.html">Inicio</a></li>
+          <li><a href="about.html">Nosotros</a></li>
+          <li><a href="contact.html">Contacto</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer__bottom">
+      <p class="footer__copy">© 2025 JHIRO. Todos los derechos reservados.</p>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/js/main.js"></script>
+<script type="module" src="assets/js/cotizar-web.js"></script>
+<script type="module" src="assets/js/crm-chrome.js"></script>
+</body>
+</html>

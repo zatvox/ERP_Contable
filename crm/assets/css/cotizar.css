@@ -1,0 +1,515 @@
+/* ============================================================
+   cotizar.css — Página de cotización JHIRO (3 pasos)
+   Ruta: assets/css/cotizar.css
+   Requiere: styles.css cargado antes
+   ============================================================ */
+
+/* ─── Encabezado de la página ────────────────────────────── */
+.cot-header {
+  padding: calc(var(--nav-height) + var(--space-xl)) 0 var(--space-xl);
+  background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(200,169,110,0.05) 0%, transparent 70%);
+  border-bottom: 1px solid var(--color-border-2);
+}
+.cot-header h1 {
+  font-family: var(--font-display);
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+  font-weight: 300;
+  margin-bottom: var(--space-xl);
+}
+.cot-header h1 em { color: var(--color-gold); font-style: italic; }
+
+/* ─── Indicador de pasos ─────────────────────────────────── */
+.cot-steps {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  max-width: 480px;
+}
+.cot-step {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+.cot-step__num {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-label);
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-2);
+  color: var(--color-text-dim);
+  transition: all var(--transition);
+}
+.cot-step__label {
+  font-family: var(--font-label);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  transition: color var(--transition);
+}
+.cot-step.active .cot-step__num {
+  background: var(--color-gold);
+  border-color: var(--color-gold);
+  color: var(--color-bg);
+}
+.cot-step.active .cot-step__label { color: var(--color-gold); }
+.cot-step.done .cot-step__num {
+  background: rgba(74,222,128,0.15);
+  border-color: rgba(74,222,128,0.3);
+  color: #4ade80;
+}
+.cot-step-line {
+  flex: 1;
+  height: 1px;
+  background: var(--color-border-2);
+  margin: 0 0.75rem;
+}
+
+/* ─── Panel principal ────────────────────────────────────── */
+.cot-main {
+  padding-top: var(--space-xl);
+  padding-bottom: var(--space-3xl);
+}
+.cot-panel { animation: fadeUp 0.3s ease both; }
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Carrito vacío ──────────────────────────────────────── */
+.cot-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 5rem 0;
+  text-align: center;
+  color: var(--color-text-muted);
+  gap: var(--space-md);
+}
+.cot-empty svg { color: var(--color-text-dim); }
+.cot-empty h3 { font-family: var(--font-display); font-weight: 300; font-size: 1.5rem; }
+.cot-empty p  { font-size: 0.9rem; }
+
+/* ─── Tabla de carrito ───────────────────────────────────── */
+.cot-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 1.2rem;
+  margin-bottom: var(--space-xl);
+}
+.cot-tabla th {
+  font-family: var(--font-label);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  text-align: left;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--color-border-2);
+}
+.cot-tabla td {
+  font-family: var(--font-label);
+  padding: 1rem;
+  border-bottom: 1px solid var(--color-border-2);
+  color: var(--color-text);
+  vertical-align: middle;
+}
+.cot-tabla tr:last-child td { border-bottom: none; }
+.cot-tabla .text-right { text-align: right; }
+
+/* Celda de producto */
+.ct-prod-nombre {
+  font-family: var(--font-display);
+  font-weight: 300;
+  font-size: 0.95rem;
+  color: var(--color-text);
+  display: block;
+}
+.ct-prod-cat {
+  font-family: var(--font-label);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+}
+
+/* Input de cantidad en tabla */
+.ct-qty-input {
+  width: 80px;
+  padding: 0.4rem 0.5rem;
+  text-align: center;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-2);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 1.25rem;
+  outline: none;
+  transition: border-color var(--transition);
+}
+.ct-qty-input:focus { border-color: var(--color-gold-dim); }
+.ct-qty-input::-webkit-inner-spin-button { -webkit-appearance: none; }
+.ct-qty-input[type=number] { -moz-appearance: textfield; }
+
+/* Botón eliminar fila */
+.ct-btn-del {
+  background: none;
+  border: none;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition);
+}
+.ct-btn-del:hover { color: #f87171; }
+
+/* ─── Totales ────────────────────────────────────────────── */
+.cot-totales {
+  max-width: 360px;
+  margin-left: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-2);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  margin-bottom: var(--space-xl);
+}
+.cot-total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.4rem 0;
+  font-family: var(--font-label);
+  font-size: 1.1rem;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border-2);
+}
+.cot-total-row:last-of-type { border-bottom: none; }
+.cot-total-row--main {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--color-gold);
+  padding-top: 0.75rem;
+  margin-top: 0.25rem;
+}
+.cot-total-note {
+  font-size: 0.68rem;
+  color: var(--color-text-dim);
+  line-height: 1.6;
+  margin-top: var(--space-sm);
+}
+
+/* ─── Acciones paso 1 ────────────────────────────────────── */
+.cot-step1-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-lg);
+  flex-wrap: wrap;
+}
+.cot-step-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-lg);
+  margin-top: var(--space-xl);
+  flex-wrap: wrap;
+}
+
+/* ─── Paso 2: layout formulario ─────────────────────────── */
+.cot-form-layout {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: var(--space-xl);
+  align-items: start;
+}
+.cot-form-col { min-width: 0; }
+.cot-col-title {
+  font-family: var(--font-label);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-lg);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--color-border-2);
+}
+
+/* Campos del formulario (reutiliza variables de styles.css) */
+.form-row { margin-bottom: var(--space-lg); }
+.form-row label {
+  display: block;
+  font-family: var(--font-label);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: 0.4rem;
+}
+.form-row input,
+.form-row textarea,
+.form-row select {
+  width: 100%;
+  padding: 0.65rem 0.875rem;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-2);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 0.88rem;
+  outline: none;
+  transition: border-color var(--transition);
+}
+.form-row input::placeholder,
+.form-row textarea::placeholder { color: var(--color-text-dim); }
+.form-row input:focus,
+.form-row textarea:focus { border-color: var(--color-gold-dim); }
+.form-row textarea { resize: vertical; min-height: 80px; }
+.form-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-lg);
+}
+.field-hint {
+  font-size: 0.68rem;
+  color: var(--color-text-dim);
+  display: block;
+  margin-top: 0.3rem;
+}
+
+/* Fila RUC con botón buscar */
+.ruc-row {
+  display: flex;
+  gap: var(--space-sm);
+}
+.ruc-row input { flex: 1; }
+.btn-sm {
+  padding: 0.65rem 1rem;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ─── Resumen lateral ────────────────────────────────────── */
+.cot-resumen {
+  position: sticky;
+  top: calc(var(--nav-height) + var(--space-lg));
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-2);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+}
+.cot-resumen-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  margin-bottom: var(--space-lg);
+}
+.cot-resumen-item {
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  line-height: 1.4;
+}
+.cot-resumen-item span:first-child {
+  flex: 1;
+  color: var(--color-text);
+  font-family: var(--font-display);
+  font-weight: 300;
+}
+.cot-resumen-totales {
+  border-top: 1px solid var(--color-border-2);
+  padding-top: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+/* ─── Paso 3: Confirmación ───────────────────────────────── */
+.cot-confirmado {
+  text-align: center;
+  padding: var(--space-2xl) 0 var(--space-xl);
+}
+.cot-check {
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  background: rgba(74,222,128,0.12);
+  border: 2px solid rgba(74,222,128,0.3);
+  color: #4ade80;
+  font-size: 1.8rem;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto var(--space-lg);
+}
+.cot-confirmado h2 {
+  font-family: var(--font-display);
+  font-weight: 300;
+  font-size: 2rem;
+  margin-bottom: var(--space-sm);
+}
+.cot-conf-num {
+  font-family: var(--font-label);
+  font-size: 0.8rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-gold);
+  margin-bottom: var(--space-md);
+}
+.cot-conf-msg {
+  color: var(--color-text-muted);
+  font-size: 0.92rem;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+/* ─── Cuentas bancarias ──────────────────────────────────── */
+.cot-pago {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-2);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xl);
+  margin-top: var(--space-xl);
+}
+.cot-pago-desc {
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+  margin-bottom: var(--space-xl);
+  line-height: 1.6;
+}
+.cot-cuentas {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-md);
+  margin-bottom: var(--space-xl);
+}
+.cot-cuenta {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-2);
+  border-radius: var(--radius-md);
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.cot-cuenta__banco {
+  font-family: var(--font-label);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-gold);
+}
+.cot-cuenta__tipo {
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
+}
+.cot-cuenta__num {
+  font-family: var(--font-label);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--color-text);
+  margin: 0.25rem 0;
+}
+.btn-copy {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: var(--font-label);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  background: none;
+  border: 1px solid var(--color-border-2);
+  border-radius: var(--radius-sm);
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  margin-top: 0.25rem;
+  width: fit-content;
+  transition: all var(--transition);
+}
+.btn-copy:hover  { color: var(--color-gold); border-color: var(--color-gold-dim); }
+.btn-copy.copied { color: #4ade80; border-color: rgba(74,222,128,0.3); }
+
+/* ─── Upload comprobante ─────────────────────────────────── */
+.cot-upload {
+  border: 2px dashed var(--color-border-2);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xl);
+  text-align: center;
+  transition: border-color var(--transition);
+  cursor: pointer;
+}
+.cot-upload:hover { border-color: var(--color-gold-dim); }
+.cot-upload__label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sm);
+  cursor: pointer;
+  color: var(--color-text-muted);
+}
+.cot-upload__label svg { color: var(--color-gold); }
+.cot-upload__label span:nth-child(2) {
+  font-family: var(--font-label);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text);
+}
+.cot-upload__hint {
+  font-size: 0.72rem;
+  color: var(--color-text-dim);
+}
+
+/* ─── Mensajes ───────────────────────────────────────────── */
+.cot-msg {
+  padding: 0.875rem 1rem;
+  border-radius: var(--radius-md);
+  font-size: 0.88rem;
+  margin-top: var(--space-md);
+}
+.cot-msg.error {
+  background: rgba(239,68,68,0.08);
+  border: 1px solid rgba(239,68,68,0.2);
+  color: #f87171;
+}
+.cot-msg.success {
+  background: rgba(74,222,128,0.08);
+  border: 1px solid rgba(74,222,128,0.2);
+  color: #4ade80;
+}
+
+/* ─── Responsive ─────────────────────────────────────────── */
+@media (max-width: 1000px) {
+  .cot-form-layout { grid-template-columns: 1fr; }
+  .cot-resumen { position: static; }
+  .cot-cuentas { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 700px) {
+  .cot-tabla th:nth-child(4),
+  .cot-tabla td:nth-child(4)  { display: none; } /* Ocultar precio/kg */
+  .cot-cuentas                { grid-template-columns: 1fr; }
+  .form-2col                  { grid-template-columns: 1fr; }
+  .cot-step1-actions,
+  .cot-step-actions           { flex-direction: column; }
+  .cot-step1-actions .btn,
+  .cot-step-actions .btn      { width: 100%; justify-content: center; }
+}
+@media (max-width: 480px) {
+  .cot-tabla th:nth-child(2),
+  .cot-tabla td:nth-child(2)  { display: none; } /* Ocultar color */
+}

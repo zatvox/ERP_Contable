@@ -1,0 +1,555 @@
+/* ============================================================
+   products-section.css — Sección de productos JHIRO
+   Corregido: imagen, grilla 3x3, badge, contenedor
+   ============================================================ */
+
+/* ─── Layout principal: sidebar 220px + área flex ─────────── */
+.products-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: var(--space-xl);
+  align-items: start;
+}
+
+/* ─── Sidebar ────────────────────────────────────────────── */
+.products-sidebar {
+  position: sticky;
+  top: calc(var(--nav-height) + var(--space-lg));
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-2);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.sidebar-section {
+  padding: var(--space-lg);
+  border-bottom: 1px solid var(--color-border-2);
+}
+.sidebar-section:last-child { border-bottom: none; }
+
+.sidebar-heading {
+  font-family: var(--font-label);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text);
+  margin-bottom: var(--space-md);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar-cat-list,
+.sidebar-avail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0;
+  margin: 0;
+}
+
+.sidebar-cat-list li,
+.sidebar-avail-list li { list-style: none; }
+
+.sidebar-cat-list li button,
+.sidebar-avail-list li button,
+.sidebar-avail-btn {
+  width: 100%;
+  text-align: left;
+  padding: 0.45rem 0.75rem;
+  border-radius: var(--radius-md);
+  font-family: var(--font-body);
+  font-size: 0.88rem;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+.sidebar-cat-list li button:hover,
+.sidebar-avail-list li button:hover,
+.sidebar-avail-btn:hover {
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+.sidebar-cat-btn.active,
+.sidebar-avail-btn.active {
+  color: var(--color-gold);
+  background: rgba(200,169,110,0.08);
+  font-weight: 600;
+}
+
+.sidebar-cat-count {
+  font-family: var(--font-label);
+  font-size: 0.68rem;
+  color: var(--color-text-dim);
+  background: var(--color-surface-2);
+  padding: 1px 7px;
+  border-radius: 100px;
+  min-width: 24px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.sidebar-toggle-mobile {
+  display: none;
+  background: none;
+  border: none;
+  font-size: 1rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+/* ─── Área principal ─────────────────────────────────────── */
+.products-main {
+  min-width: 0;  /* Evita que el grid desborde */
+}
+
+.products-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  margin-bottom: var(--space-xl);
+  flex-wrap: wrap;
+}
+
+.products-count-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.products-count {
+  font-family: var(--font-label);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  letter-spacing: 0.06em;
+}
+
+.btn-show-filters {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 0.4rem 0.9rem;
+  font-family: var(--font-label);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-2);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.btn-show-filters:hover {
+  border-color: var(--color-gold-dim);
+  color: var(--color-gold);
+}
+
+/* ─── Buscador ───────────────────────────────────────────── */
+.search-wrap {
+  position: relative;
+  width: 260px;
+  flex-shrink: 0;
+}
+.search-wrap svg {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-muted);
+  pointer-events: none;
+  width: 14px;
+  height: 14px;
+}
+#product-search {
+  width: 100%;
+  padding: 0.6rem 1rem 0.6rem 2.4rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-2);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 0.88rem;
+  outline: none;
+  transition: border-color var(--transition);
+}
+#product-search::placeholder { color: var(--color-text-dim); }
+#product-search:focus { border-color: var(--color-gold-dim); }
+
+/* ─── Loading ────────────────────────────────────────────── */
+.products-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 0;
+  gap: 1rem;
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 2px solid var(--color-border-2);
+  border-top-color: var(--color-gold);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ─── Grilla 3 columnas ──────────────────────────────────── */
+.products-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.25rem;
+  width: 100%;
+  /* Oculto por defecto, JS lo pone en display:grid cuando carga */
+}
+
+/* ─── Tarjeta ────────────────────────────────────────────── */
+.pcard {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-2);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;       /* Crítico para grids: evita desborde */
+  transition: border-color var(--transition),
+              box-shadow var(--transition),
+              transform var(--transition);
+}
+.pcard:hover {
+  border-color: var(--color-gold-dim);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  transform: translateY(-3px);
+}
+
+/* ── Imagen: cuadrado exacto, sin desborde ───────────────── */
+/*
+  FIX F12:
+  - position: relative  → para que el badge sea absolute encima
+  - width: 100%         → ocupa el ancho de la tarjeta
+  - aspect-ratio: 1/1   → siempre cuadrado
+  - overflow: hidden    → recorta el zoom del hover
+  - flex-shrink: 0      → no se comprime en el flex column
+*/
+.pcard__thumb {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  background: var(--color-bg);
+  flex-shrink: 0;
+}
+
+/*
+  FIX F12:
+  - width/height 100%   → llena el contenedor
+  - object-fit: contain → no distorsiona, muestra todo el hilo
+  - padding: 1rem       → respiro visual dentro del cuadrado
+  - max-width: none     → anula el max-width:100% global de styles.css
+                          que estiraba la imagen al 100% del viewport
+*/
+.pcard__thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;          /* anula img { max-width:100% } de styles.css */
+  object-fit: contain;
+  object-position: center;
+  padding: 1rem;
+  transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.pcard:hover .pcard__thumb img {
+  transform: scale(1.08);
+}
+
+/* Badge — position:absolute encima de la imagen */
+.pcard__badge {
+  position: absolute;       /* FIX F12: era static → ahora encima */
+  top: 8px;
+  left: 8px;
+  z-index: 1;
+  padding: 3px 10px;
+  border-radius: 100px;
+  font-family: var(--font-label);
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.pcard__badge--stock {
+  background: rgba(74,222,128,0.15);
+  color: #4ade80;
+  border: 1px solid rgba(74,222,128,0.25);
+}
+.pcard__badge--limited {
+  background: rgba(251,191,36,0.12);
+  color: #fbbf24;
+  border: 1px solid rgba(251,191,36,0.25);
+}
+
+/* ── Carrusel de imágenes en pcard ──────────────────────── */
+.pcard__carousel {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+.pcard__carousel-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  object-fit: contain;
+  object-position: center;
+  padding: 1rem;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+.pcard__carousel-img.active {
+  opacity: 1;
+  position: relative;
+}
+.pcard__carousel-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.45);
+  color: #fff;
+  font-size: 1.1rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s ease, background 0.2s ease;
+}
+.pcard__carousel:hover .pcard__carousel-arrow {
+  opacity: 1;
+}
+.pcard__carousel-arrow:hover {
+  background: rgba(0,0,0,0.7);
+}
+.pcard__carousel-arrow--prev { left: 8px; }
+.pcard__carousel-arrow--next { right: 8px; }
+.pcard__carousel-dots {
+  position: absolute;
+  bottom: 8px;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  gap: 5px;
+}
+.pcard__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.4);
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+.pcard__dot.active {
+  background: #fff;
+  transform: scale(1.2);
+}
+
+/* ── Cuerpo de la tarjeta ────────────────────────────────── */
+.pcard__body {
+  padding: 0.875rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  flex: 1;
+}
+
+.pcard__category {
+  font-family: var(--font-label);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-gold);
+}
+
+.pcard__name {
+  font-family: var(--font-title);
+  font-size: 120%;
+  font-weight: 300;
+  line-height: 1.25;
+  color: var(--color-text);
+  margin: 0;
+}
+
+.pcard__moq {
+  font-family: var(--font-label);
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+}
+.pcard__moq strong {
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+/* Swatch de color */
+.pcard__colors {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 0.25rem;
+}
+.pcard__color-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.15);
+  flex-shrink: 0;
+}
+.pcard__color-label {
+  font-family: var(--font-label);
+  font-size: 0.9rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+}
+
+/* Footer de la tarjeta */
+.pcard__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
+  padding-top: 0.625rem;
+  border-top: 1px solid var(--color-border-2);
+}
+
+.pcard__price {
+  font-family: var(--font-display);
+  font-size: 120%;
+  font-weight: 600;
+  color: var(--color-gold);
+}
+.pcard__price-label {
+  display: block;
+  font-family: var(--font-label);
+  font-size: 0.58rem;
+  color: var(--color-text-dim);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.pcard__price--consult {
+  font-family: var(--font-label);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+}
+
+.pcard__cta {
+  font-family: var(--font-label);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-gold);
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity var(--transition), transform var(--transition);
+  white-space: nowrap;
+}
+.pcard:hover .pcard__cta {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* Sin resultados */
+.no-results {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 4rem 0;
+  color: var(--color-text-muted);
+}
+.no-results h3 {
+  font-family: var(--font-display);
+  font-weight: 300;
+  margin-bottom: 0.5rem;
+}
+
+/* ─── Responsive ─────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .products-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 900px) {
+  .products-layout {
+    grid-template-columns: 1fr;
+  }
+  .products-sidebar {
+    position: static;
+    display: none;
+  }
+  .products-sidebar.sidebar-open {
+    display: block;
+    margin-bottom: 1.5rem;
+  }
+  .btn-show-filters {
+    display: flex;
+  }
+  .sidebar-toggle-mobile {
+    display: block;
+  }
+  .products-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .search-wrap {
+    width: 100%;
+    flex: 1;
+  }
+}
+
+@media (max-width: 480px) {
+  .pcard-name { font-size: 1.1rem; }
+  .products-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.625rem;
+  }
+  .pcard__body {
+    padding: 0.625rem;
+  }
+}
+
+@media (max-width: 340px) {
+  .products-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,133 @@
+/* ============================================================
+   about.css — Estilos exclusivos de about.html
+   Ruta: assets/css/about.css
+   Requiere: styles.css cargado antes
+   ============================================================ */
+
+/* ─── Hero de página (compartido con contact) ─────────────── */
+.page-hero {
+  padding: calc(var(--nav-height) + var(--space-3xl)) 0 var(--space-3xl);
+  position: relative;
+  overflow: hidden;
+}
+.page-hero__bg {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(200,169,110,0.06) 0%, transparent 70%);
+}
+.page-hero__bg .grid-lines {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(200,169,110,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(200,169,110,0.04) 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+
+/* ─── Intro: texto + categorías ──────────────────────────── */
+.about-intro {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3xl);
+  align-items: start;
+}
+.about-intro__text h2 { margin-bottom: var(--space-lg); }
+.about-intro__text p  { color: var(--color-text-muted); margin-bottom: var(--space-md); }
+
+/* ─── Grid de categorías de producto ─────────────────────── */
+.categories-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-md);
+}
+.cat-item {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-2);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  transition: border-color var(--transition);
+}
+.cat-item:hover { border-color: var(--color-gold-dim); }
+.cat-item__icon { font-size: 1.5rem; margin-bottom: var(--space-sm); }
+.cat-item h4 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 1.1rem;
+  margin-bottom: var(--space-xs);
+  color: var(--color-text);
+}
+.cat-item p { font-size: 0.8rem; color: var(--color-text-muted); }
+
+/* ─── Línea de tiempo ────────────────────────────────────── */
+.timeline { position: relative; padding-left: var(--space-xl); }
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 1px;
+  background: var(--color-border);
+}
+.timeline-item {
+  position: relative;
+  margin-bottom: var(--space-xl);
+}
+.timeline-item::before {
+  content: '';
+  position: absolute;
+  left: calc(-1 * var(--space-xl) - 4px);
+  top: 6px;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--color-gold);
+  border: 2px solid var(--color-bg);
+}
+.timeline-year {
+  font-family: var(--font-label);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--color-gold);
+  text-transform: uppercase;
+  margin-bottom: var(--space-xs);
+}
+.timeline-item h4 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 1.1rem;
+  margin-bottom: var(--space-xs);
+  color: var(--color-text);
+}
+.timeline-item p { font-size: 0.88rem; color: var(--color-text-muted); }
+
+/* ─── Certificaciones ────────────────────────────────────── */
+.certs-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-md);
+}
+.cert-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-2);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+}
+.cert-card .label { margin-bottom: var(--space-xs); display: block; }
+.cert-card p { font-size: 0.85rem; color: var(--color-text-muted); }
+
+/* ─── Responsive ─────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .about-intro          { grid-template-columns: 1fr; }
+  .categories-grid      { grid-template-columns: repeat(2, 1fr); }
+  .certs-grid           { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 600px) {
+  .categories-grid      { grid-template-columns: 1fr 1fr; }
+  .certs-grid           { grid-template-columns: 1fr; }
+  /* timeline en 2 col → 1 col */
+  .about-intro > div:last-child > div[style] {
+    grid-template-columns: 1fr !important;
+  }
+}
+@media (max-width: 420px) {
+  .categories-grid      { grid-template-columns: 1fr; }
+}

@@ -91,70 +91,51 @@ let _planCuentas = []
 // INIT
 // ============================================================================
 
-document.addEventListener('DOMContentLoaded', async () => {
+// ============================================================================
+// FUSIÓN CON TESORERÍA (2026-11-03): este archivo ya no es una página; lo monta
+// tesoreria.js. Tabs que vienen aquí: Cuentas bancarias · Transferencias ·
+// Conciliación · Reportes bancarios. "Movimientos" lo reemplaza el Libro de caja.
+// ============================================================================
+let _montadoBancos = false
+export async function montarBancos() {
+  if (_montadoBancos) return
+  _montadoBancos = true
   try {
-    aplicarPreferenciasVista(MODULO)
     _cfg = getModuloConfig(MODULO)
 
-    const user = getCurrentUser()
-    const userDisplay = document.getElementById('userDisplay')
-    if (userDisplay && user) userDisplay.textContent = user.nombre || user.email
-
-    initTabs()
-    initModuleNavDropdowns('#bancosTabs')
     initSubtabs('#banco-subtabs-reportes', (panel) => construirReporte(panel))
     convertirVarios([
-      { id: 'movBancoSelect',    placeholder: 'Todas las cuentas — escribe para filtrar...', sinResultados: 'Sin cuentas' },
       { id: 'concBancoSelect',   placeholder: 'Escribe el banco o N° de cuenta...',          sinResultados: 'Sin cuentas' },
-      { id: 'movBancoId',        placeholder: 'Escribe el banco o N° de cuenta...',          sinResultados: 'Sin cuentas' },
       { id: 'trfOrigen',         placeholder: 'Cuenta de origen...',                         sinResultados: 'Sin cuentas' },
       { id: 'trfDestino',        placeholder: 'Cuenta de destino...',                        sinResultados: 'Sin cuentas' },
       { id: 'ncCuentaContable',  placeholder: 'Escribe el código o nombre de la cuenta...',  sinResultados: 'Sin cuentas contables' }
-    ])
+    ].filter(x => document.getElementById(x.id)))
     await _cargarPlanCuentasParaBanco()
     _poblarListaBancosPeru()
 
     const hoy    = new Date().toISOString().split('T')[0]
-    const hoyMes = hoy.slice(0, 7)
-    _valor('movFecha', hoy)
     _valor('trfFecha', hoy)
-    _valor('movFiltroMes', hoyMes)
-    _valor('concFiltroMes', hoyMes)
-
-    renderConfiguracionTab(MODULO, 'banco-config-container', {
-      onGuardar: () => { _cfg = getModuloConfig(MODULO); showToast('Configuración guardada ✅', 'success') }
-    })
+    _valor('concFiltroMes', hoy.slice(0, 7))
 
     await cargarCuentasBancarias()
     await cargarTodosLosMovimientos()
-    window.cargarMovimientos()
     calcularKPIs()
   } catch (e) {
-    console.error('bancos DOMContentLoaded:', e)
-    showToast('Error al cargar módulo de bancos: ' + e.message, 'danger')
+    _montadoBancos = false
+    console.error('montarBancos:', e)
+    showToast('Error al cargar Bancos: ' + e.message, 'danger')
   }
-})
-
-function initTabs() {
-  const btns     = document.querySelectorAll('#bancosTabs .tab-btn')
-  const contents = document.querySelectorAll('.tab-content')
-  btns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      btns.forEach(b => b.classList.remove('active'))
-      contents.forEach(c => c.classList.remove('active'))
-      btn.classList.add('active')
-      const nombre = btn.getAttribute('data-tab')
-      document.getElementById(`tab-${nombre}`)?.classList.add('active')
-      if (nombre === 'reportes') {
-        const activo = document.querySelector('#banco-subtabs-reportes .subtab.active')?.getAttribute('data-sub') || 'repb-flujo'
-        construirReporte(activo)
-      }
-    })
-  })
 }
 
-window.irATabBanco = function(nombre) {
-  document.querySelector(`#bancosTabs .tab-btn[data-tab="${nombre}"]`)?.click()
+/** Lo llama tesoreria.js al entrar a un tab bancario. */
+export async function bancosAlEntrar(tab) {
+  await montarBancos()
+  if (tab === 'cuentas-banco') await cargarCuentasBancarias()
+  if (tab === 'conciliacion')  window.cargarConciliacion?.()
+  if (tab === 'reportes-banco') {
+    const activo = document.querySelector('#banco-subtabs-reportes .subtab.active')?.getAttribute('data-sub') || 'repb-flujo'
+    construirReporte(activo)
+  }
 }
 
 function _valor(id, v) { const el = document.getElementById(id); if (el) el.value = v }
@@ -443,10 +424,10 @@ async function cargarTodosLosMovimientos() {
   _html('lista-categorias-banco', cats.map(c => `<option value="${_esc(c)}">`).join(''))
 }
 
-window.verMovimientosBanco = function(bancoId) {
-  window.irATabBanco('movimientos')
-  const sel = document.getElementById('movBancoSelect')
-  if (sel) { sel.value = bancoId; window.cargarMovimientos() }
+// "Ver movimientos" de una cuenta → Libro de caja de Tesorería, con esa cuenta elegida
+window.verMovimientosBanco = async function(bancoId) {
+  window.irATabTes?.('libro')
+  setTimeout(() => window.lcCambiarCaja?.(String(bancoId)), 600)
 }
 
 window.cargarMovimientos = function() {
@@ -620,8 +601,9 @@ async function _recargarDatos() {
   _reportesListos = {}
   await cargarCuentasBancarias()
   await cargarTodosLosMovimientos()
-  window.cargarMovimientos()
   calcularKPIs()
+  // Tesorería (cajas, libro) debe ver la cuenta nueva/editada
+  window.dispatchEvent(new CustomEvent('bancos-cambio'))
 }
 
 // ============================================================================

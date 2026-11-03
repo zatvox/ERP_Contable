@@ -1015,6 +1015,7 @@ window.guardarGuiaIngresoCompra = async function () {
     // Cierre directo (no cerrarModalNuevaGuia): la guía ya se guardó, así
     // que preguntar "¿vas a perder los datos?" aquí sería un falso aviso
     // sobre datos que ya están en la base.
+    try { if (window.parent !== window) window.parent.postMessage({ zv: 'guia-guardada', compraId }, location.origin) } catch { /* sin padre */ }
     window.closeModal('modal-nueva-guia')
     S._guiaLineas = []
     // Lotes, stock y kardex cambiaron: sin esto los reportes y el kardex
@@ -1111,4 +1112,23 @@ function _avisarLoteExistente(idx, subIdx, linea, recepcion) {
   el.innerHTML = mismoCosto
     ? `↪ Ya existe: ${(parseFloat(existente.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} ${existente.unidad_medida || 'KG'}${zona ? ' en ' + _escCompras(zona) : ''}. <strong>Se sumará a ese lote.</strong>`
     : `⚠ Ya existe con costo distinto (S/ ${costoExistente.toFixed(6)} vs S/ ${costoNuevo.toFixed(6)}). Se preguntará al guardar.`
+}
+
+// ============================================================================
+// MODO EMBEBIDO — lo usa Importaciones (guía de ingreso de la carpeta → «Registrar guía»)
+// Se abre este MISMO modal dentro de un iframe (compras.html?embed=guia&compra=ID) con la compra
+// ya elegida. Avisa al padre con postMessage: guia-guardada · guia-cerrada · guia-error.
+// ============================================================================
+window.__zvAbrirGuiaEmbebida = async function (compraId) {
+  const avisar = (zv, extra = {}) => { try { window.parent.postMessage({ zv, compraId, ...extra }, location.origin) } catch { /* sin padre */ } }
+  try {
+    document.body.classList.add('zv-embed')
+    await window.abrirModalNuevaGuia()
+    const sel = document.getElementById('ngCompra')
+    if (!sel || ![...sel.options].some(o => o.value === String(compraId))) { avisar('guia-error', { motivo: 'Esa compra no tiene líneas pendientes de recibir (¿ya se registró la guía?)' }); return }
+    sel.value = String(compraId); refrescarBuscador(sel)
+    await window.onSeleccionarCompraGuia()
+    const m = document.getElementById('modal-nueva-guia')
+    new MutationObserver(() => { if (!m.classList.contains('show')) avisar('guia-cerrada') }).observe(m, { attributes: true, attributeFilter: ['class'] })
+  } catch (e) { console.error('guia embebida:', e); avisar('guia-error', { motivo: e.message }) }
 }
