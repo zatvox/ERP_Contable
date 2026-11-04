@@ -15,6 +15,8 @@ import { _invalidarCacheCompras } from './anulacion.js'
 import { _escCompras } from './buscadores.js'
 import { _compararValoresOrden, _thOrdenable, renderCompras } from './compras-lista.js'
 import { renderDevolucionesPendientes } from './devolucion-proveedor.js'
+import { conteoAdjuntosGuias, alCambiarAdjuntosGuia } from './adjuntos-guia.js'
+import { eliminarAdjuntosDe } from '../supabase-data.js'
 
 // ============================================================================
 // GUÍA DE REMISIÓN (recepción de mercadería de una compra ya registrada)
@@ -46,6 +48,8 @@ export async function _cargarComprasConGuia(forzar = false) {
   return _guiaComprasConGuiaSet
 }
 
+let _adjGuias = {}   // { guia_id: n° adjuntos } (2026-11-03)
+alCambiarAdjuntosGuia(async () => { _adjGuias = await conteoAdjuntosGuias(); renderGuias(false) })
 let _guiasListaEnriquecida = null // cache: [{g, compra, detalles, productosLote, marcasTexto, zonasTexto}]
 let _guiaSort = { col: null, dir: 'asc' } // orden por columna, tab Guías
 
@@ -80,6 +84,7 @@ export async function renderGuias(forzar = false) {
     if (!container) return
 
     if (!_guiasListaEnriquecida || forzar) {
+      _adjGuias = await conteoAdjuntosGuias()
       const guias = await getGuiasIngresoCompra()
       if (!guias || guias.length === 0) {
         _guiasListaEnriquecida = []
@@ -193,7 +198,7 @@ export async function renderGuias(forzar = false) {
             ? `<input type="checkbox" disabled title="Guía anulada: su stock ya fue retirado">`
             : `<input type="checkbox" class="gi-sel" value="${g.id}" onchange="window.actualizarBotonEliminarGuias()">`}</td>
           <td data-col-tabla="guias-ingreso" data-col="empresa"${colStyle('guias-ingreso','empresa')}>${badgeEmpresa(g.empresa_id)}</td>
-          <td data-col-tabla="guias-ingreso" data-col="numero_guia"${colStyle('guias-ingreso','numero_guia')}><strong>${g.numero_guia}</strong></td>
+          <td data-col-tabla="guias-ingreso" data-col="numero_guia"${colStyle('guias-ingreso','numero_guia')}><strong>${g.numero_guia}</strong>${_adjGuias[g.id] ? ` <span title="${_adjGuias[g.id]} documento(s) adjunto(s)" style="cursor:pointer;" onclick="window.verAdjuntosGuia(${g.id})">📎${_adjGuias[g.id] > 1 ? _adjGuias[g.id] : ''}</span>` : ''}</td>
           <td data-col-tabla="guias-ingreso" data-col="fecha"${colStyle('guias-ingreso','fecha')}>${fechaDMY(g.fecha_guia, '-')}</td>
           <td data-col-tabla="guias-ingreso" data-col="referencia"${colStyle('guias-ingreso','referencia')}>${compra?.referencia || `Compra #${g.compra_id}`}</td>
           <td data-col-tabla="guias-ingreso" data-col="proveedor"${colStyle('guias-ingreso','proveedor')}>${compra?.proveedor_nombre || '-'}</td>
@@ -209,6 +214,7 @@ export async function renderGuias(forzar = false) {
               : [
                   { label: 'Ver detalle', icono: '📋', onclick: `window.verDetalleGuiaIngreso(${g.id})` },
                   { label: 'Editar cabecera', icono: '✏️', onclick: `window.editarGuia(${g.id})` },
+                  { label: _adjGuias[g.id] ? 'Ver/Agregar documentos' : 'Adjuntar documento', icono: '📎', onclick: `window.abrirModalAdjuntoGuia(${g.id}, '${String(g.numero_guia || '').replace(/'/g, '')}')` },
                   { separador: true },
                   { label: 'Anular guía', icono: '🚫', onclick: `window.anularGuiaIngreso(${g.id})`, peligro: true },
                   { label: 'Eliminar', icono: '🗑️', onclick: `window.eliminarGuia(${g.id})`, peligro: true }
@@ -521,6 +527,8 @@ async function _eliminarGuiaIngresoCore(id, pedirConfirmacion = true) {
     const motivo = ultimoErrorDelete()
     throw new Error(motivo?.mensaje || 'no se pudo eliminar')
   }
+  // Documentos adjuntos de la guía (2026-11-03): no dejar archivos huérfanos
+  try { await eliminarAdjuntosDe('guia_remision', id) } catch (e) { console.warn('Adjuntos guía:', e.message) }
 
   const idsLotesABorrarCompleto = [...plan.lotesABorrar, ...plan.lotesConBultosCompletos.map(l => l.lote.id)]
   for (const loteId of idsLotesABorrarCompleto) {

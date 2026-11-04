@@ -632,7 +632,7 @@ const _numMB = id => `MB-${String(id).padStart(6, '0')}`
 // ============================================================================
 
 window.registrarCobro = async function() {
-  const btnTexto = '✅ Registrar Cobro y Generar Asiento'
+  const btnTexto = '✅ Registrar Cobro'
   try {
     const cxcId      = parseInt(document.getElementById('cobroSelectCxC')?.value || 0)
     const fecha      = document.getElementById('cobroFecha')?.value
@@ -2806,6 +2806,16 @@ const _descDocCP = d => `${d?.tipo_comprobante || ''} ${d?.serie || ''}-${numCom
 
 // ── Aplicar efectos ─────────────────────────────────────────────────────────
 
+// ============================================================================
+// ⏸ ASIENTOS CONTABLES DE COBRANZAS — DESACTIVADOS (2026-11-03, pedido de Luis)
+// Cobros, pagos a proveedor, canje/abono/renovación de letras y cobro masivo
+// ya NO generan asiento (ni avisos de "Asiento no generado"). Todo lo demás
+// sigue igual: CxC/CxP, cuotas, movimiento bancario, adjuntos.
+// Revertir/eliminar sigue borrando asientos que ya existían.
+// Para reactivar: poner true.
+// ============================================================================
+const ASIENTOS_COBRANZAS = false
+
 async function _aplicarEfectosCobro(cobro, cxc, opts = {}) {
   const user     = getCurrentUser()
   const monto    = _r2(cobro.monto)
@@ -2814,7 +2824,7 @@ async function _aplicarEfectosCobro(cobro, cxc, opts = {}) {
   const descripcion = `Cobro ${_descDocCP(cxc)}`
 
   let asientoId = null
-  try {
+  if (ASIENTOS_COBRANZAS) try {
     const asiento = await generarAsientoCobroCliente({
       cobroId: cobro.id, monto, cxcId: cxc.id, bancoId,
       medioPago: cobro.medio_pago, fecha: cobro.fecha, descripcion, userId: user?.db_id,
@@ -2858,7 +2868,7 @@ async function _aplicarEfectosPago(pago, cxp) {
   const descripcion = `Pago proveedor ${_descDocCP(cxp)}`
 
   let asientoId = null
-  try {
+  if (ASIENTOS_COBRANZAS) try {
     const asiento = await generarAsientoPagoProveedor({
       pagoId: pago.id, monto, compraId: cxp.compra_id, bancoId,
       moneda: cxp.moneda || pago.moneda || 'PEN', fecha: pago.fecha, descripcion, userId: user?.db_id,
@@ -3190,7 +3200,7 @@ window.verDetalleCP = async function(tipo, id) {
           <div class="dt-nom">${_esc(_nombreContacto(reg.contact_id))}</div>
           <div class="dt-sub">${fechaDMY(reg.fecha)} · ${_esc(reg.medio_pago || '—')} · ${_esc(_bancosMap[reg.banco_id]?.nombre || 'sin cuenta')}${reg.referencia || reg.numero_operacion ? ` · Op. ${_esc(reg.referencia || reg.numero_operacion)}` : ''}</div>
           <div class="dt-ins-fila">
-            ${dtInsignia(asiento?.id ? `Asiento ${_esc(asiento.numero_asiento || '')}` : 'Sin asiento', !!asiento?.id, 'Asiento')}
+            ${asiento?.id ? dtInsignia(`Asiento ${_esc(asiento.numero_asiento || '')}`, true, 'Asiento') : (ASIENTOS_COBRANZAS ? dtInsignia('Sin asiento', false, 'Asiento') : '')}
             ${dtInsignia(mov ? `Banco ${_numMB(mov.id)}` : 'Sin mov. bancario', !!mov || !reg.banco_id, 'Banco')}
             ${adjuntos.length ? '' : dtInsignia('Sin archivos', false)}
             ${doc ? dtInsignia(`Saldo doc. ${_monCod(doc.moneda)} ${formatNumber(Math.max(0, saldoDoc))}`, saldoDoc <= 0.01, 'Documento') : ''}
@@ -3583,7 +3593,9 @@ async function _aplicarCanjeDoc(tipoLetra, docId, delta) {
 }
 
 /** Asiento de una letra. etapa: 'canje' | 'cancelacion'. Nunca lanza: avisa y devuelve null. */
+// (desactivado junto con el resto de asientos de Cobranzas: ver ASIENTOS_COBRANZAS)
 async function _asientoLetra(etapa, letra, bancoId, fecha = null, tcCancel = null) {
+  if (!ASIENTOS_COBRANZAS) return null
   try {
     const user = getCurrentUser()
     const m = _r2(letra.monto)
@@ -3742,6 +3754,7 @@ async function _reciboLibreGlobal(numero, contactId, excluir = {}) {
  * El banco va por el NETO; la diferencia de T.C. la cuadra 776/676.
  */
 async function _asientoLetras({ ref, tipoMov, descripcion, fecha, l, origenes = [], nuevas = [], tcNueva = null, intRef = 0, abono = null, renov = false }) {
+  if (!ASIENTOS_COBRANZAS) return null
   try {
     const user = getCurrentUser()
     const emitida = l.tipo === 'emitida'
