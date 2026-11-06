@@ -2,6 +2,7 @@
 // compras/compra-nueva.js — parte de compras.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
+import { validarPerfilContacto } from '../shared/perfil-contacto.js'
 import { vincularTCEnVivo } from '../tc-en-vivo.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { getCompraById, addCompra, addCompraDetalle, getSuppliers, getContactById, generarAsientoCompra, subirAdjuntoCompra, getUrlAdjuntoCompra, eliminarAdjuntoCompra } from '../supabase-data.js'
@@ -468,6 +469,7 @@ window.guardarCompraMercaderia = async function () {
     const tipoCambio = parseFloat(document.getElementById('nqTipoCambio')?.value || 0) || 1
 
     if (!contactId) { showToast('Selecciona un proveedor', 'warning'); return }
+    if (!(await validarPerfilContacto(contactId, { rol: 'proveedor' }))) return
     // Un T.C. de 1 en una compra en dólares dejaría el costo del lote en
     // soles igual al valor en USD, y ese costo es el que después valoriza el
     // inventario y el costo de venta. Se bloquea antes de guardar.

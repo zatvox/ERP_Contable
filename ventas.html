@@ -17,13 +17,12 @@
         <li><a href="inventario.html" data-page="inventario">&#128230; Inventario</a></li>
         <li><a href="compras.html" data-page="compras">&#128722; Compras</a></li>
         <li><a href="ventas.html" class="active" data-page="ventas">&#128200; Ventas</a></li>
+        <li><a href="crm.html" data-page="crm">&#129309; CRM</a></li>
         <li><a href="cobranzas.html" data-page="cobranzas">&#128176; Cobranza y pagos</a></li>
         <li><a href="tesoreria.html" data-page="tesoreria">&#128179; Tesorería</a></li>
+        <li data-solo-admin><a href="rrhh.html" data-page="rrhh">&#128101; RRHH</a></li>
+        <li><a href="costeo-importaciones.html" data-page="costeo">&#128674; Carpetas Importación</a></li>
         <li><a href="contabilidad.html" data-page="contabilidad">&#128209; Contabilidad</a></li>
-        <li><a href="costeo-importaciones.html" data-page="costeo">&#128674; Carpeta de Importaciones</a></li>
-        <li><a href="crm/panel.html" target="_blank" rel="noopener" data-page="crm" title="Panel CRM: cotizaciones, clientes, stock y catálogo (otra pestaña)">&#129309; Panel CRM</a></li>
-        <li><a href="crm/index.html" target="_blank" rel="noopener" data-page="catalogo-web" title="Catálogo web público (otra pestaña)">&#128717; Catálogo web</a></li>
-        <li data-solo-admin><a href="usuarios.html" data-page="usuarios">&#128100; Usuarios</a></li>
         <li><a href="perfil.html" data-page="perfil">&#9881;&#65039; Configuración</a></li>
       </ul>
       <div class="sidebar-user">
@@ -283,6 +282,21 @@
               <label>Observaciones</label>
               <input type="text" id="gdObservaciones" placeholder="Opcional">
             </div>
+          </div>
+
+          <!-- Punto de llegada (SUNAT RCP art. 19.2: dirección donde llega la mercadería; puede ser distinta del domicilio fiscal) -->
+          <div style="margin-top:12px; padding:12px 14px; border:1px solid var(--border-color); border-radius:var(--radius-md); background:var(--bg-secondary);">
+            <strong style="display:block; margin-bottom:8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">📍 Dirección de entrega (punto de llegada) *</strong>
+            <div style="display:grid; grid-template-columns:2fr 1fr 1.4fr; gap:12px;">
+              <div class="form-group" style="margin:0;"><label>Dirección *</label><input type="text" id="gdLlegadaDir" placeholder="Calle, número, referencia"></div>
+              <div class="form-group" style="margin:0;"><label>Distrito</label><input type="text" id="gdLlegadaDistrito" placeholder="Ej.: Ate"></div>
+              <div class="form-group" style="margin:0;"><label>Link de Google Maps</label><input type="url" id="gdLlegadaMaps" placeholder="https://maps.app.goo.gl/…"></div>
+            </div>
+            <div style="display:grid; grid-template-columns:1.4fr 1fr; gap:12px; margin-top:10px;">
+              <div class="form-group" style="margin:0;"><label>Coordenadas (para el mapa)</label><input type="text" id="gdLlegadaCoord" placeholder="-12.0464, -77.0428 (se toman del link largo de Maps)"></div>
+              <div class="form-group" style="margin:0;"><label>Hora de salida del camión</label><input type="datetime-local" id="gdHoraSalida" title="Opcional: con ella el mapa anima el viaje del camión"></div>
+            </div>
+            <small id="gdLlegadaNota" style="display:block; margin-top:6px; color:var(--text-secondary);"></small>
           </div>
         </div>
 

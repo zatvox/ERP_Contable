@@ -2,6 +2,7 @@
 // ventas/venta-nueva.js — parte de ventas.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
+import { validarPerfilContacto } from '../shared/perfil-contacto.js'
 import { S } from './state.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { getContactById, updateContact, tiposDeContacto, getLotes, addVenta, getVentas, addDetalleVenta, addCuentaCobrar, addCuotaCobrar, getCuotasCobrarByCxC, getCuentasCobrar, generarNumeroVenta, asegurarPeriodoAbierto, getStockUbicaciones } from '../supabase-data.js'
@@ -415,6 +416,7 @@ window.guardarNuevaVenta = async function() {
     const observaciones = document.getElementById('ventaObservaciones')?.value?.trim() || null
 
     if (!contactId)           { showToast('Selecciona un cliente', 'warning'); return }
+    if (tipoComp === '01' && !(await validarPerfilContacto(contactId, { rol: 'cliente' }))) return   // solo facturas (boleta = DNI)
 
     // ── Facturando un PK: precio distinto al pactado → aviso (editable) ──
     if (S._packingOrigen?.id) {

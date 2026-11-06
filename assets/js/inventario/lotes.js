@@ -67,6 +67,7 @@ export async function renderLotes(forzar = false) {
             <th data-col-tabla="lotes" data-col="costo_cif"${colStyle('lotes','costo_cif')} title="Costo de la factura de compra (sin IGV), en la moneda del lote">Costo CIF</th>
             <th data-col-tabla="lotes" data-col="costo_real"${colStyle('lotes','costo_real')} title="Costo CONTABLE final (NIC 2) por kg, en USD. Solo lectura: lo calcula la carpeta de importación y se aplica desde Importaciones → «Aplicar al lote».">Costo real 🔒</th>
             <th data-col-tabla="lotes" data-col="costo_comercial"${colStyle('lotes','costo_comercial')} title="Costo COMERCIAL (gestión) final por kg, en USD, desde la carpeta de importación.">Costo comercial</th>
+            <th data-col-tabla="lotes" data-col="pv_lista"${colStyle('lotes','pv_lista')} title="Precio de venta de lista por kg, con IGV. Lo calcula y aplica CRM → Precios. Sirve de referencia en el PK/cotización.">PV lista inc. IGV</th>
             <th data-col-tabla="lotes" data-col="vencimiento"${colStyle('lotes','vencimiento')}>Vencimiento</th>
             <th data-col-tabla="lotes" data-col="dias_restantes"${colStyle('lotes','dias_restantes')}>Días Restantes</th>
           </tr>
@@ -112,6 +113,7 @@ export async function renderLotes(forzar = false) {
           <td data-col-tabla="lotes" data-col="costo_cif" style="white-space:nowrap;${colStyle('lotes','costo_cif') ? ' display:none;' : ''}">${_celdaCostoCIF(lote)}</td>
           <td data-col-tabla="lotes" data-col="costo_real" style="white-space:nowrap;${colStyle('lotes','costo_real') ? ' display:none;' : ''}">${_celdaCostoReal(lote)}</td>
           <td data-col-tabla="lotes" data-col="costo_comercial" style="white-space:nowrap;${colStyle('lotes','costo_comercial') ? ' display:none;' : ''}">${_celdaCostoComercial(lote)}</td>
+          <td data-col-tabla="lotes" data-col="pv_lista" style="white-space:nowrap;${colStyle('lotes','pv_lista') ? ' display:none;' : ''}">${_celdaPVLista(lote)}</td>
           <td data-col-tabla="lotes" data-col="vencimiento"${colStyle('lotes','vencimiento')}>${vencCell}</td>
           <td data-col-tabla="lotes" data-col="dias_restantes"${colStyle('lotes','dias_restantes')}>${diasCell}</td>
         </tr>
@@ -152,6 +154,15 @@ function _celdaCostoComercial(lote) {
   if (v == null) return `<span style="color:var(--text-secondary);">${lote.carpeta_importacion_id ? 'Pendiente' : '—'}</span>`
   const cif = _cifDe(lote), pct = cif ? (v / cif - 1) * 100 : null
   return `${_simMoneda(lote.moneda)} ${v.toFixed(4)}${pct != null ? `<small style="display:block; color:var(--text-secondary); font-size:0.72rem;">${pct >= 0 ? '+' : ''}${pct.toFixed(1)}% sobre CIF</small>` : ''}`
+}
+
+// PV de lista (SQL 133): precio sugerido por kg con IGV, aplicado desde CRM → Precios
+function _celdaPVLista(lote) {
+  const v = lote.precio_lista != null ? parseFloat(lote.precio_lista) : null
+  if (!(v > 0)) return '<span style="color:var(--text-secondary);" title="Se define en CRM → Precios">—</span>'
+  const fecha = lote.precio_lista_at ? new Date(lote.precio_lista_at).toLocaleDateString('es-PE') : ''
+  const mg = lote.margen_lista_pct != null ? `margen ${parseFloat(lote.margen_lista_pct).toFixed(1)}%` : ''
+  return `<span title="${[mg, fecha && 'aplicado ' + fecha].filter(Boolean).join(' · ')}">${_simMoneda(lote.precio_lista_moneda || 'PEN')} ${v.toFixed(2)}</span>${mg ? `<small style="display:block; color:var(--text-secondary); font-size:0.72rem;">${mg}</small>` : ''}`
 }
 
 window.filtrarLotes = async function () {

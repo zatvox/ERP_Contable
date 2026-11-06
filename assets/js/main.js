@@ -135,6 +135,30 @@ function _reestructurarLinksSidebar(sidebar) {
   }
 }
 
+// Confirmación al cerrar sesión: avisa si hay ventanas abiertas con cambios sin guardar.
+function confirmarCerrarSesion() {
+  if (document.getElementById('modal-cerrar-sesion')) return;
+  const abiertas = document.querySelectorAll('.modal.show').length;
+  const m = document.createElement('div');
+  m.id = 'modal-cerrar-sesion';
+  m.className = 'modal show';
+  m.style.zIndex = 4000;
+  m.innerHTML = `<div class="modal-content" style="max-width:420px; width:min(92vw,420px); padding:20px;">
+    <h3 style="margin:0 0 8px;">¿Cerrar sesión?</h3>
+    <p style="margin:0 0 12px; color:var(--text-secondary); font-size:0.92rem; line-height:1.45;">
+      ${abiertas ? `<strong style="color:var(--color-warning);">Tienes ${abiertas} ventana(s) abierta(s).</strong> ` : ''}¿Guardaste lo que tenías abierto? Lo que no esté guardado se perderá al salir.</p>
+    <div style="display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
+      <button class="btn btn-secondary btn-small" id="cs-no">Volver y guardar</button>
+      <button class="btn btn-danger btn-small" id="cs-si">Cerrar sesión</button>
+    </div></div>`;
+  document.body.appendChild(m);
+  const cerrar = () => m.remove();
+  m.querySelector('#cs-no').onclick = cerrar;
+  m.querySelector('#cs-si').onclick = () => { cerrar(); (window.logout || (() => { window.location.href = 'login.html'; }))(); };
+  m.addEventListener('click', e => { if (e.target === m) cerrar(); });
+}
+window.confirmarCerrarSesion = confirmarCerrarSesion;
+
 function initSidebarCollapse(sidebar) {
   if (!sidebar || document.getElementById('sidebarCollapseBtn')) return;
 
@@ -147,6 +171,16 @@ function initSidebarCollapse(sidebar) {
   btn.title = 'Colapsar menú';
   btn.textContent = '«';
   sidebar.insertBefore(btn, sidebar.firstChild);
+
+  // Cerrar sesión: botón en la esquina superior izquierda, con confirmación.
+  const out = document.createElement('button');
+  out.id = 'sidebarLogoutBtn';
+  out.className = 'sidebar-logout-top';
+  out.type = 'button';
+  out.title = 'Cerrar sesión';
+  out.textContent = '⏻';
+  out.addEventListener('click', confirmarCerrarSesion);
+  sidebar.insertBefore(out, sidebar.firstChild);
 
   function aplicarEstado(colapsado) {
     document.body.classList.toggle('sidebar-collapsed', colapsado);
@@ -453,8 +487,27 @@ if (document.readyState === 'loading') {
 // handler que ya tiene cada módulo (no hace falta cablear nada extra allí).
 // El pequeño retardo da tiempo a que el módulo registre sus listeners.
 
+/** ?q=cliente → escribe el texto en el buscador del tab abierto (avisos de la campanita). */
+function aplicarBusquedaDeUrl(q) {
+  let intentos = 0
+  const poner = () => {
+    const activo = document.querySelector('.tab-content.active') || document
+    const inp = activo.querySelector('input[type="search"], input[id^="buscar"]')
+    if (inp && !inp.disabled) {
+      inp.value = q
+      inp.dispatchEvent(new Event('input', { bubbles: true }))
+      inp.dispatchEvent(new Event('keyup', { bubbles: true }))
+      return
+    }
+    if (++intentos < 30) setTimeout(poner, 200)
+  }
+  setTimeout(poner, 500)
+}
+
 function abrirTabDeUrl() {
-  const tab = new URLSearchParams(window.location.search).get('tab')
+  const params = new URLSearchParams(window.location.search)
+  const tab = params.get('tab')
+  const q = params.get('q')
   if (!tab) return
 
   let intentos = 0
@@ -467,7 +520,9 @@ function abrirTabDeUrl() {
       // Limpia el parámetro para que un F5 no reabra siempre el mismo tab.
       const url = new URL(window.location.href)
       url.searchParams.delete('tab')
+      url.searchParams.delete('q')
       window.history.replaceState({}, '', url)
+      if (q) aplicarBusquedaDeUrl(q)
       return
     }
     if (++intentos < 25) setTimeout(intentar, 150)
@@ -479,6 +534,46 @@ if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', abrirTabDeUrl)
 } else {
   abrirTabDeUrl()
+}
+
+// ============================================================================
+// 🔔 Campanita de avisos en la cabecera (SQL 136) — se oculta sola si no hay datos/permiso
+// ============================================================================
+function iniciarCampanita() {
+  let intentos = 0
+  const revisar = () => {
+    if (getCurrentUser()) {
+      import('./shared/campanita.js').then(m => m.initCampanita()).catch(() => {})
+      return
+    }
+    if (++intentos < 30) setTimeout(revisar, 150)
+  }
+  revisar()
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', iniciarCampanita)
+} else {
+  iniciarCampanita()
+}
+
+// ============================================================================
+// RRHH · R1 — Botón Ingreso/Salida en la cabecera (solo si el usuario es empleado)
+// ============================================================================
+function iniciarBotonAsistencia() {
+  let intentos = 0
+  const revisar = () => {
+    if (getCurrentUser()) {
+      import('./shared/asistencia-boton.js').then(m => m.initBotonAsistencia()).catch(() => {})
+      return
+    }
+    if (++intentos < 30) setTimeout(revisar, 150)
+  }
+  revisar()
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', iniciarBotonAsistencia)
+} else {
+  iniciarBotonAsistencia()
 }
 
 // ============================================================================

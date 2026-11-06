@@ -11,6 +11,7 @@ import { _renderTablaDetalleGuiaDespacho, _numGuiaDespacho, _prepararDestinoGuia
 import { _refrescarStockLoteEnVivo } from './helpers.js'
 import { _esc, _zonas } from './init.js'
 import { _guiaEstaVigente, _setEv, _valEv } from './ventas-editar.js'
+import { prefillLlegada } from './guia-llegada.js'   // dirección de entrega (SQL 136)
 
 /**
  * Abre el mismo modal de "Nueva Guía de Despacho" pero precargado con los
@@ -150,6 +151,7 @@ window.editarGuiaDespachoVenta = async function (id) {
     ])
 
     const cliente = S._clientes.find(c => c.id === venta?.contact_id)
+    await prefillLlegada(venta, cliente, guia)
     const infoDiv = document.getElementById('gdInfoVenta')
     if (infoDiv) {
       infoDiv.style.display = 'block'

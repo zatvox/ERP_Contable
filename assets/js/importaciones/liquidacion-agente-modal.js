@@ -16,7 +16,7 @@ import { showToast, formatNumber, fechaDMY } from '../helpers.js'
 import { aplicarModoVerEditar } from '../shared/ver-editar.js'
 import { declararEmpresaModal } from '../empresa.js'
 import { getTipoCambioDia } from '../sunat-api.js'
-import { subirAdjuntos, getAdjuntos, getContacts } from '../supabase-data.js'
+import { subirAdjuntos, getAdjuntos, getContacts, eliminarAdjunto } from '../supabase-data.js'
 import { convertirEnBuscador, refrescarBuscador } from '../buscador-select.js'
 import { abrirModalContacto } from '../shared/contacto-modal.js'
 import { CONCEPTOS_COSTO, crearLineaCosto } from './costos-ledger.js'
@@ -131,7 +131,8 @@ function _asegurarModal() {
           <div id="laResProf" style="margin-bottom:8px;"></div>
           <div class="e3-sub">Abonos de la proforma <button type="button" class="btn btn-secondary btn-small" data-solo-edicion onclick="window.laAddAbono('proforma')">+ Abono</button></div>
           <div id="laAbonosProf"></div>
-          <div class="dm-nota">📎 Voucher / constancia del abono: <button type="button" class="btn btn-secondary btn-small" onclick="window.laAdjuntar('voucher')">Subir</button> <span class="laAdjVoucher"></span></div>
+          <div class="dm-nota">📎 Voucher / constancia del abono: <button type="button" class="btn btn-secondary btn-small" onclick="window.laAdjuntar('voucher','proforma')">Subir</button> <span class="laAdjVoucher" data-etapa="proforma"></span></div>
+          <div class="la-vouchers" data-etapa="proforma"></div>
         </section>
 
         <section class="la-panel" data-p="3">
@@ -155,7 +156,8 @@ function _asegurarModal() {
           <div id="laResLiq" style="margin-bottom:8px;"></div>
           <div class="e3-sub">Abonos de la liquidación <button type="button" class="btn btn-secondary btn-small" data-solo-edicion onclick="window.laAddAbono('liquidacion')">+ Abono</button></div>
           <div id="laAbonosLiq"></div>
-          <div class="dm-nota">📎 Voucher / constancia del abono: <button type="button" class="btn btn-secondary btn-small" onclick="window.laAdjuntar('voucher')">Subir</button> <span class="laAdjVoucher"></span></div>
+          <div class="dm-nota">📎 Voucher / constancia del abono: <button type="button" class="btn btn-secondary btn-small" onclick="window.laAdjuntar('voucher','liquidacion')">Subir</button> <span class="laAdjVoucher" data-etapa="liquidacion"></span></div>
+          <div class="la-vouchers" data-etapa="liquidacion"></div>
         </section>
 
         <section class="la-panel" data-p="5">
@@ -319,7 +321,8 @@ function _pintarAbonos() {
   const bancos = sel => `<option value="">—</option>` + _bancos.map(b => `<option value="${b.id}" ${String(sel) === String(b.id) ? 'selected' : ''}>${esc(b.nombre)}</option>`).join('')
   const lista = etapa => {
     const filas = _abonos.map((a, i) => [a, i]).filter(([a]) => (a.concepto === 'proforma' ? 'proforma' : 'liquidacion') === etapa)
-    return filas.length ? filas.map(([a, i]) => `<div class="la-abono">
+    const cab = `<div class="la-abono la-abono-h"><span>Fecha</span><span>Moneda</span><span>T.C.</span><span>Monto</span><span>N° operación</span><span>Comisión banc.</span><span>Cuenta</span><span></span></div>`
+    return filas.length ? cab + filas.map(([a, i]) => `<div class="la-abono">
       <input type="date" value="${a.fecha || ''}" ${dis} onchange="window.laSetAbono(${i},'fecha',this.value)">
       <select ${dis} onchange="window.laSetAbono(${i},'moneda',this.value)"><option ${a.moneda === 'USD' ? 'selected' : ''}>USD</option><option ${a.moneda === 'PEN' ? 'selected' : ''}>PEN</option></select>
       <input type="number" step="0.001" placeholder="T.C." value="${a.tipo_cambio || ''}" ${dis} onchange="window.laSetAbono(${i},'tipo_cambio',this.value)">
@@ -600,8 +603,8 @@ function _volcar() {
   $('laPfNumero').value = _prof.numero; $('laPfFecha').value = _prof.fecha || ''; $('laPfTC').value = _prof.tc || ''
   _pintarProforma(); _pintarDocs(); _pintarAbonos(); window.laRecalcular(); window.laAuditar()
   window.laIr(!_prof.numero ? 1 : !_abonos.some(a => a.concepto === 'proforma') ? 2 : !_liq?.numero ? 3 : !_abonos.some(a => a.concepto !== 'proforma') ? 4 : 5)
-  _pend = []; _adjGuardados = []
-  if (_liq) getAdjuntos('liquidacion_agente', _liq.id).then(a => { _adjGuardados = a || []; _pintarAdj() }).catch(() => {})
+  _pend = []; _adjGuardados = []; _vouch = { proforma: [], liquidacion: [] }
+  _recargarAdj().catch(() => {})
   _pintarAdj()
 }
 
@@ -629,35 +632,59 @@ window.laCancelar = () => { if (_liq) window.abrirLiquidacionAgente(); else wind
 window.cerrarLiqAgente = () => { window.closeModal('modal-liq-agente'); window.renderHojaCosteo?.() }
 
 let _pend = [], _adjGuardados = []   // archivos en cola (aún sin liquidación guardada) y ya guardados
+// Vouchers por ETAPA (2026-11-06): se guardan con entidad liq_abono_proforma / liq_abono_liquidacion (SQL 138) y se ven en miniatura
+const ENT_VOUCH = { proforma: 'liq_abono_proforma', liquidacion: 'liq_abono_liquidacion' }
+let _vouch = { proforma: [], liquidacion: [] }
+async function _recargarAdj() {
+  if (!_liq) { _pintarAdj(); return }
+  const [a, p, l] = await Promise.all([getAdjuntos('liquidacion_agente', _liq.id), getAdjuntos(ENT_VOUCH.proforma, _liq.id), getAdjuntos(ENT_VOUCH.liquidacion, _liq.id)])
+  _adjGuardados = a || []; _vouch = { proforma: p || [], liquidacion: l || [] }; _pintarAdj()
+}
+window.laQuitarAdj = async id => { if (!confirm('¿Quitar este voucher? Se borra el archivo.')) return; await eliminarAdjunto(id); await _recargarAdj() }
 function _pintarAdj() {
   const cuenta = c => _adjGuardados.filter(a => a.concepto === c).length + _pend.filter(a => a.concepto === c).length
   const txt = c => { const n = cuenta(c), p = _pend.filter(a => a.concepto === c).length; return n ? `(${n} archivo${n > 1 ? 's' : ''}${p ? ' · ' + p + ' por guardar' : ''})` : '' }
   if ($('laAdjProforma')) $('laAdjProforma').textContent = txt('proforma')
   if ($('laAdjN')) $('laAdjN').textContent = txt('liquidacion')
-  document.querySelectorAll('#modal-liq-agente .laAdjVoucher').forEach(e => { e.textContent = txt('voucher') })
+  const lect = $('modal-liq-agente')?.dataset.modo === 'lectura'
+  document.querySelectorAll('#modal-liq-agente .laAdjVoucher').forEach(e => {
+    const et = e.dataset.etapa, n = (_vouch[et] || []).length + _pend.filter(a => a.entidad === ENT_VOUCH[et]).length
+    e.textContent = n ? `(${n} archivo${n > 1 ? 's' : ''})` : ''
+  })
+  document.querySelectorAll('#modal-liq-agente .la-vouchers').forEach(box => {
+    const et = box.dataset.etapa
+    const guardados = [...(_vouch[et] || []), ...(et === 'proforma' ? _adjGuardados.filter(a => a.concepto === 'voucher') : [])]
+    const item = (a, ant) => `<div class="la-vch"><span class="adj-thumb" data-adj-path="${esc(a.path)}" data-adj-nombre="${esc(a.nombre)}">…</span>
+      <div><div class="la-vch-n" title="${esc(a.nombre)}">${esc(a.nombre)}</div><div class="la-vch-s">${ant ? 'subido antes (sin etapa)' : fechaDMY((a.created_at || '').slice(0, 10))}</div></div>
+      ${lect ? '' : `<button type="button" class="btn btn-secondary btn-small" title="Quitar" onclick="window.laQuitarAdj(${a.id})">✕</button>`}</div>`
+    const cola = _pend.filter(a => a.entidad === ENT_VOUCH[et]).map(a => `<div class="la-vch"><div><div class="la-vch-n">⏳ ${esc(a.file.name)}</div><div class="la-vch-s">por guardar</div></div></div>`)
+    box.innerHTML = guardados.map(a => item(a, a.entidad === 'liquidacion_agente')).join('') + cola.join('')
+  })
 }
 async function _subirPend(id) {
   if (!_pend.length) return
   const user = await getCurrentUser()
   const por = {}
-  for (const x of _pend) (por[x.concepto] = por[x.concepto] || []).push({ file: x.file, concepto: x.concepto })
-  for (const arr of Object.values(por)) {
-    const res = await subirAdjuntos('liquidacion_agente', id, arr, user?.db_id)
+  for (const x of _pend) { const e = x.entidad || 'liquidacion_agente'; (por[e] = por[e] || []).push({ file: x.file, concepto: x.concepto }) }
+  for (const [ent, arr] of Object.entries(por)) {
+    const res = await subirAdjuntos(ent, id, arr, user?.db_id)
     if (res.errores?.length) showToast(res.errores.join(' · '), 'danger')
   }
   _pend = []
 }
-window.laAdjuntar = function (concepto = 'liquidacion') {
+window.laAdjuntar = function (concepto = 'liquidacion', etapa = null) {
+  const ent = etapa ? ENT_VOUCH[etapa] : 'liquidacion_agente'
   const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'application/pdf,image/*'; inp.multiple = true
   inp.onchange = async () => {
     const files = [...inp.files]; if (!files.length) return
     if (_liq) {
       const user = await getCurrentUser()
-      const res = await subirAdjuntos('liquidacion_agente', _liq.id, files.map(file => ({ file, concepto })), user?.db_id)
-      showToast(res.errores?.length ? res.errores.join(' · ') : 'Adjunto guardado', res.errores?.length ? 'danger' : 'success')
-      _adjGuardados = (await getAdjuntos('liquidacion_agente', _liq.id)) || []
+      const res = await subirAdjuntos(ent, _liq.id, files.map(file => ({ file, concepto })), user?.db_id)
+      const falta = res.errores?.some(e => /check|violat|constraint/i.test(e))
+      showToast(res.errores?.length ? (falta ? 'Falta correr el SQL 138 (vouchers por etapa)' : res.errores.join(' · ')) : 'Adjunto guardado', res.errores?.length ? 'danger' : 'success')
+      await _recargarAdj(); return
     } else {
-      _pend.push(...files.map(file => ({ file, concepto })))
+      _pend.push(...files.map(file => ({ file, concepto, entidad: ent })))
       showToast('Archivo en cola: se sube al guardar', 'info')
     }
     _pintarAdj()
@@ -666,8 +693,16 @@ window.laAdjuntar = function (concepto = 'liquidacion') {
 }
 
 window.guardarLiqAgente = async function () {
+  // Anti-duplicado (2026-11-06): doble clic / guardados seguidos creaban varias liquidaciones borrador de la misma carpeta
+  // (carpeta 9: ids 6,7,8) cada una con sus abonos y comisiones. Candado + reutiliza la liquidación existente.
+  if (window._guardandoLiqAgente) return
+  window._guardandoLiqAgente = true
   try {
     const c = carpeta(); if (!c) throw new Error('Sin carpeta')
+    if (!_liq?.id) {
+      const ya = ((await query('importacion_liquidaciones_agente', { carpeta_importacion_id: c.id })) || []).sort((a, b) => a.id - b.id)[0]
+      if (ya) _liq = ya
+    }
     const numero = v('laNumero')
     if (!numero && !_prof.numero) throw new Error('Registra al menos la proforma (N°) o la liquidación (N°)')
     const marcados = _docs.filter(d => d.marcado)
@@ -736,6 +771,7 @@ window.guardarLiqAgente = async function () {
     await window.abrirLiquidacionAgente()
     window.renderHojaCosteo?.()
   } catch (e) { console.error('guardarLiqAgente:', e); showToast(e.message || 'No se pudo guardar', 'danger') }
+  finally { window._guardandoLiqAgente = false }
 }
 
 // ── Bloque de la Etapa 4 en la hoja: resumen + aviso final ────────────────────

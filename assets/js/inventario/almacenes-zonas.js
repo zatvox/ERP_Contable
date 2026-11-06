@@ -4,6 +4,7 @@
 // ============================================================================
 import { getAlmacenes, getAlmacenById, addAlmacen, updateAlmacen, deleteAlmacen, getUbicaciones, getUbicacionesByAlmacen, getUbicacionById, addUbicacion, updateUbicacion, deleteUbicacion, getStockUbicacionesByUbicacion } from '../supabase-data.js'
 import { showToast } from '../helpers.js'
+import '../shared/almacen-ubicacion.js'
 
 // ============================================================================
 // ALMACENES Y ZONAS

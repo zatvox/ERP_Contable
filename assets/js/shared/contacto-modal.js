@@ -19,7 +19,8 @@ import { showToast } from '../helpers.js'
 export const ROLES_CONTACTO = [
   { key: 'cliente',   label: 'Cliente',   plural: 'Clientes',    icono: '🛒' },
   { key: 'proveedor', label: 'Proveedor', plural: 'Proveedores', icono: '📦' },
-  { key: 'vendedor',  label: 'Vendedor',  plural: 'Vendedores',  icono: '🧑‍💼' }
+  { key: 'vendedor',  label: 'Vendedor',  plural: 'Vendedores',  icono: '🧑‍💼' },
+  { key: 'empleado',  label: 'Empleado',  plural: 'Empleados',   icono: '👷' }
 ]
 
 let _editId = null

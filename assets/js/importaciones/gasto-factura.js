@@ -12,6 +12,7 @@
 //   5. abonos de la liquidación del agente → 'pendiente' de regularizar
 // Uso: window.abrirGastoFactura(costoId)  ·  API sin pantalla: registrarGastoFactura({...})
 // ============================================================================
+import '../shared/perfil-contacto.js'
 import { query, update, esperarContextoEmpresa } from '../supabase-client.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { showToast, formatNumber } from '../helpers.js'
@@ -335,6 +336,7 @@ window.abrirGastoFactura = async function (costoId) {
 window.guardarGastoFactura = async function () {
   const btn = $('gfGuardar'); if (!_ctx) return
   if (window.validarRequeridos?.(['gfProveedor', 'gfSerie', 'gfNumero', 'gfFecha', 'gfGlosa', 'gfCuenta', 'gfBase']) === false) return
+  if (!(await window.validarPerfilContacto?.(parseInt($('gfProveedor').value) || 0, { rol: 'proveedor' }) ?? true)) return
   try {
     btn.disabled = true; btn.textContent = _ctx.editar ? 'Guardando…' : 'Registrando…'
     const r = await (_ctx.editar ? actualizarGastoFactura : registrarGastoFactura)({

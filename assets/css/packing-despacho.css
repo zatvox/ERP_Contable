@@ -1,0 +1,64 @@
+/* ============================================================================
+   packing-despacho.css — Sección "Despacho" del PK/cotización + panel HUD de margen
+   2026-11-05 · Se carga sola desde ventas/packing-despacho.js
+   HUD = efecto sutil tipo "cabina de nave": un barrido de luz y un borde que late.
+   Más bajo el margen → más visible. Con "reducir movimiento" queda estático.
+   ============================================================================ */
+
+/* ── Sección despacho ───────────────────────────────────────────────────── */
+.pk-desp { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--border-color); border-radius: var(--radius-md, 8px); background: var(--bg-secondary); }
+.pk-desp-cab { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.pk-desp-cab .form-group { margin: 0; min-width: 220px; }
+.pk-desp-chip { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border-color); color: var(--text-secondary); }
+.pk-desp-chip.ok   { color: var(--color-success); border-color: var(--color-success); }
+.pk-desp-chip.warn { color: var(--color-warning); border-color: var(--color-warning); }
+.pk-desp-cuerpo { margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.pk-desp-cuerpo .full { grid-column: 1 / -1; }
+.pk-desp-chk { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px dashed var(--border-color); border-radius: 8px; cursor: pointer; font-size: .9rem; }
+.pk-desp-chk input { width: 18px; height: 18px; }
+.pk-desp-dir { font-size: .85rem; color: var(--text-secondary); padding: 6px 2px 0; }
+.pk-desp-maps { display: flex; gap: 8px; }
+.pk-desp-maps input { flex: 1; }
+.pk-desp-flete { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 10px 12px; border-radius: 8px; background: var(--bg-primary); border: 1px solid var(--border-color); }
+.pk-desp-flete b { font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) { .pk-desp-cuerpo { grid-template-columns: 1fr; } }
+
+/* ── PV de lista en el modal de línea ──────────────────────────────────── */
+.pk-pv-hint { margin-top: 10px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-secondary); font-size: .85rem; display: none; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pk-pv-hint.on { display: flex; }
+.pk-pv-hint.bajo { border-color: var(--color-warning); background: rgba(245, 158, 11, .08); }
+.pk-pv-hint button { margin-left: auto; }
+
+/* ── Panel de ganancia con efecto HUD ──────────────────────────────────── */
+.pk-gan-panel { position: relative; overflow: hidden; border-radius: 10px; padding: 6px 8px; transition: box-shadow .4s, border-color .4s; border: 1px solid transparent; }
+.pk-gan-etq { display: none; margin-top: 4px; font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; }
+.pk-gan-flete { display: block; font-size: .72rem; color: var(--text-secondary); margin-top: 2px; }
+
+/* Nivel 1 — bajo el objetivo (ámbar) */
+.pk-gan-panel[data-nivel="1"] { border-color: rgba(245, 158, 11, .55); box-shadow: 0 0 0 1px rgba(245, 158, 11, .15), 0 0 14px rgba(245, 158, 11, .18); }
+.pk-gan-panel[data-nivel="1"] .pk-gan-etq { display: block; color: var(--color-warning); }
+/* Nivel 2 — bajo el mínimo (rojo) */
+.pk-gan-panel[data-nivel="2"] { border-color: rgba(239, 68, 68, .7); box-shadow: 0 0 0 1px rgba(239, 68, 68, .2), 0 0 18px rgba(239, 68, 68, .28); animation: pkLatido 2.6s ease-in-out infinite; }
+.pk-gan-panel[data-nivel="2"] .pk-gan-etq { display: block; color: var(--color-danger); }
+/* Nivel 3 — pérdida (rojo, latido algo más vivo) */
+.pk-gan-panel[data-nivel="3"] { border-color: rgba(239, 68, 68, .9); box-shadow: 0 0 0 1px rgba(239, 68, 68, .3), 0 0 24px rgba(239, 68, 68, .4); animation: pkLatido 1.8s ease-in-out infinite; }
+.pk-gan-panel[data-nivel="3"] .pk-gan-etq { display: block; color: var(--color-danger); }
+
+/* Barrido de luz (radar) para niveles 1-3 */
+.pk-gan-panel[data-nivel="1"]::after, .pk-gan-panel[data-nivel="2"]::after, .pk-gan-panel[data-nivel="3"]::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(105deg, transparent 38%, rgba(255, 255, 255, .13) 50%, transparent 62%);
+  transform: translateX(-120%); animation: pkBarrido 4.2s ease-in-out infinite;
+}
+.pk-gan-panel[data-nivel="2"]::after { background: linear-gradient(105deg, transparent 38%, rgba(255, 120, 120, .2) 50%, transparent 62%); animation-duration: 3.4s; }
+.pk-gan-panel[data-nivel="3"]::after { background: linear-gradient(105deg, transparent 38%, rgba(255, 90, 90, .28) 50%, transparent 62%); animation-duration: 2.6s; }
+
+@keyframes pkBarrido { 0% { transform: translateX(-120%); } 55%, 100% { transform: translateX(120%); } }
+@keyframes pkLatido  { 0%, 100% { box-shadow: 0 0 0 1px rgba(239, 68, 68, .2), 0 0 10px rgba(239, 68, 68, .18); } 50% { box-shadow: 0 0 0 1px rgba(239, 68, 68, .45), 0 0 26px rgba(239, 68, 68, .45); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .pk-gan-panel, .pk-gan-panel::after { animation: none !important; }
+  .pk-gan-panel::after { display: none; }
+}
+
+.pk-desp [hidden] { display: none !important; }

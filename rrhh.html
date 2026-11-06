@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <link rel="icon" type="image/png" href="assets/img/genko-geco.png">
+  <link rel="apple-touch-icon" href="assets/img/genko-geco.png">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JHIRO ERP - RRHH</title>
+  <link rel="stylesheet" href="assets/css/styles.css">
+  <link rel="stylesheet" href="assets/css/modal-moderno.css">
+  <link rel="stylesheet" href="assets/css/rrhh.css?v=3">
+</head>
+<body class="ui-moderna">
+  <div class="app-container">
+    <aside class="sidebar">
+      <div class="sidebar-logo">JHIRO</div>
+      <ul class="sidebar-menu">
+        <li><a href="dashboard.html" data-page="dashboard">&#128202; Dashboard</a></li>
+        <li><a href="inventario.html" data-page="inventario">&#128230; Inventario</a></li>
+        <li><a href="compras.html" data-page="compras">&#128722; Compras</a></li>
+        <li><a href="ventas.html" data-page="ventas">&#128200; Ventas</a></li>
+        <li><a href="crm.html" data-page="crm">&#129309; CRM</a></li>
+        <li><a href="cobranzas.html" data-page="cobranzas">&#128176; Cobranza y pagos</a></li>
+        <li><a href="tesoreria.html" data-page="tesoreria">&#128179; Tesorería</a></li>
+        <li data-solo-admin><a href="rrhh.html" class="active" data-page="rrhh">&#128101; RRHH</a></li>
+        <li><a href="costeo-importaciones.html" data-page="costeo">&#128674; Carpetas Importación</a></li>
+        <li><a href="contabilidad.html" data-page="contabilidad">&#128209; Contabilidad</a></li>
+        <li><a href="perfil.html" data-page="perfil">&#9881;&#65039; Configuración</a></li>
+      </ul>
+      <div class="sidebar-user">
+        <strong id="userDisplay">Admin</strong>
+        <button class="btn-logout" onclick="logout()">Cerrar Sesión</button>
+      </div>
+    </aside>
+
+    <div class="main-content">
+      <header class="header">
+        <div class="header-left">
+          <button class="menu-toggle" id="menuToggle">☰</button>
+          <h2 class="header-title">RRHH</h2>
+        </div>
+
+        <nav class="module-nav" id="rrhhTabs">
+          <button type="button" class="tab-btn active" data-tab="empleados" data-rol="admin">👥 Empleados</button>
+          <button type="button" class="tab-btn" data-tab="asistencia" data-rol="admin">🕐 Asistencia</button>
+          <button type="button" class="tab-btn" data-tab="regimen" data-rol="admin">⚖️ Régimen y parámetros</button>
+          <button type="button" class="tab-btn" data-tab="usuarios" data-rol="admin">🔐 Usuarios y accesos</button>
+        </nav>
+
+        <div class="header-controls">
+          <button class="theme-toggle" id="themeToggle">🌙 Oscuro</button>
+        </div>
+      </header>
+
+      <main class="content">
+
+        <!-- ══════════ TAB: EMPLEADOS (equipo = personas con ficha + usuarios por completar) ══════════ -->
+        <div id="tab-empleados" class="tab-content active">
+          <div id="emp-kpis" class="rr-kpis"></div>
+          <div class="card" id="card-emp"></div>
+        </div>
+
+        <!-- ══════════ TAB: ASISTENCIA ══════════ -->
+        <div id="tab-asistencia" class="tab-content">
+          <div class="card" id="card-asis" style="margin-bottom:16px;"></div>
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-titulo-tab">🕐 Prueba de hora (Lima)</h3>
+              <div class="card-acciones"><button class="btn btn-primary btn-small" onclick="window.verificarHoraLima()">Verificar ahora</button></div>
+            </div>
+            <p class="rr-nota">Compara la hora que guardará el sistema con la hora real de tu equipo. Debe coincidir (diferencia de segundos).</p>
+            <div id="asis-prueba-res" style="padding:4px 16px 14px;"></div>
+          </div>
+        </div>
+
+        <!-- ══════════ TAB: RÉGIMEN Y PARÁMETROS ══════════ -->
+        <div id="tab-regimen" class="tab-content">
+          <div class="card" id="card-reg-emp" style="margin-bottom:16px;"></div>
+          <div class="card" id="card-reg-par" style="margin-bottom:16px;"></div>
+          <div class="card" id="card-reg-afp"></div>
+        </div>
+
+        <!-- ══════════ TAB: USUARIOS Y ACCESOS (solo admin) ══════════ -->
+        <div id="tab-usuarios" class="tab-content">
+          <div class="card" id="card-usu"></div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- MODAL: Nuevo / Editar empleado -->
+  <div id="modal-empleado" class="modal">
+    <div class="modal-content ui-moderna" style="width:min(96vw, 1040px); max-width:min(96vw, 1040px); max-height:calc(100vh - 48px); overflow-y:auto;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="empModalTitulo">Nuevo empleado</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-empleado')">&times;</button>
+      </div>
+      <input type="hidden" id="empId">
+      <div id="empAviso" class="rr-aviso" style="display:none;"></div>
+      <div class="rr-modal-grid">
+        <div class="rr-col-form">
+
+          <strong class="rr-sec">1 · Persona y empresa</strong>
+          <div class="rr-fila" style="grid-template-columns:2fr 1fr;">
+            <div class="form-group"><label>Persona (contacto) *</label>
+              <select id="empContacto" onchange="window.empAlElegirPersona()"><option value="">— Elige una persona —</option></select></div>
+            <div class="form-group"><label>Empresa *</label><select id="empEmpresa" onchange="window.empAlCambiarEmpresa()"></select></div>
+          </div>
+          <div id="empPersonaInfo" class="rr-chip-info"></div>
+
+          <strong class="rr-sec">2 · Contrato</strong>
+          <div class="rr-fila" style="grid-template-columns:repeat(3,1fr);">
+            <div class="form-group"><label>Vínculo *</label>
+              <select id="empVinculo" onchange="window.empAlCambiarVinculo()">
+                <option value="planilla">En planilla</option>
+                <option value="rh_prestador">Prestador (Recibo por Honorarios)</option>
+              </select></div>
+            <div class="form-group"><label>Cargo(s)</label><input type="text" id="empCargo"></div>
+            <div class="form-group"><label>Fecha de ingreso</label><input type="date" id="empIngreso"></div>
+            <div class="form-group"><label id="empSueldoLbl">Sueldo mensual *</label><input type="number" id="empSueldo" step="0.01" min="0" placeholder="0.00" oninput="window.empResumen()"></div>
+            <div class="form-group"><label>Sede</label><select id="empSede"><option value="">—</option></select></div>
+            <div class="form-group"><label>Acceso al sistema</label><select id="empUsuario" onchange="window.empResumen()"><option value="">Sin cuenta</option></select></div>
+          </div>
+          <small class="rr-nota" style="padding:0;">Una persona puede trabajar en varias empresas: se registra <strong>una ficha por empresa</strong> (cada una con su cargo, sueldo y horario). Elige uno o varios cargos por área (puedes escribir uno nuevo en el buscador).</small>
+
+          <div id="empBloquePlanilla">
+            <strong class="rr-sec">3 · Pensión y planilla</strong>
+            <div class="rr-fila" style="grid-template-columns:repeat(4,1fr);">
+              <div class="form-group"><label>Sistema de pensiones</label>
+                <select id="empPension" onchange="window.empAlCambiarPension()">
+                  <option value="onp">ONP</option><option value="afp">AFP</option><option value="sin_aporte">Sin aporte</option>
+                </select></div>
+              <div class="form-group emp-afp"><label>AFP</label><select id="empAfp" onchange="window.empResumen()"><option value="">—</option></select></div>
+              <div class="form-group emp-afp"><label>Comisión</label>
+                <select id="empComision" onchange="window.empResumen()"><option value="flujo">Sobre flujo</option><option value="mixta">Mixta</option></select></div>
+              <div class="form-group emp-afp"><label>CUSPP</label><input type="text" id="empCuspp" placeholder="Opcional"></div>
+              <div class="form-group"><label>Asignación familiar</label>
+                <select id="empAsigFam" onchange="window.empResumen()"><option value="0">No</option><option value="1">Sí (hijos menores)</option></select></div>
+            </div>
+          </div>
+
+          <strong class="rr-sec">4 · Horario (alimenta la asistencia)</strong>
+          <div class="rr-fila" style="grid-template-columns:repeat(4,1fr);">
+            <div class="form-group"><label>Entrada</label><input type="time" id="empHoraEntrada" value="08:30"></div>
+            <div class="form-group"><label>Salida</label><input type="time" id="empHoraSalida" value="18:00"></div>
+            <div class="form-group"><label>Jornada (h)</label><input type="number" id="empJornada" value="8" step="0.5" min="1" max="12"></div>
+            <div class="form-group"><label>Tolerancia (min)</label><input type="number" id="empTolerancia" value="10" min="0" max="60"></div>
+          </div>
+          <div class="form-group"><label>Notas</label><input type="text" id="empNotas" placeholder="Opcional"></div>
+        </div>
+
+        <aside class="rr-col-resumen">
+          <div class="info-card rr-resumen" id="empResumen"></div>
+        </aside>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-empleado')">Cancelar</button>
+        <button class="btn btn-primary" id="empBtnGuardar" onclick="window.guardarEmpleado()">💾 Guardar empleado</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Nuevo / Editar usuario -->
+  <div id="modal-usuario" class="modal">
+    <div class="modal-content ui-moderna" style="width:min(96vw, 560px); max-width:min(96vw, 560px);">
+      <div class="modal-header">
+        <h3 class="modal-title" id="usuModalTitulo">Nuevo usuario</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-usuario')">&times;</button>
+      </div>
+      <input type="hidden" id="usuId">
+      <div style="padding:8px 4px; display:flex; flex-direction:column; gap:12px;">
+        <div class="form-group"><label>Nombre completo *</label><input type="text" id="nuevoNombre" placeholder="Ej: María García López"></div>
+        <div class="form-group"><label>Correo electrónico *</label><input type="email" id="nuevoEmail" placeholder="usuario@correo.com"></div>
+        <div class="form-group" id="usuGrpPass"><label>Contraseña inicial *</label>
+          <div style="position:relative;"><input type="password" id="nuevoPassword" placeholder="Mínimo 8 caracteres" style="padding-right:40px;">
+            <button type="button" onclick="window.togglePassword()" style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; cursor:pointer; color:var(--text-secondary);">👁</button></div>
+          <small class="rr-nota" style="padding:0;">Se envía un correo de confirmación (si está activo en Supabase).</small></div>
+        <div class="form-group"><label>Rol</label>
+          <select id="nuevoRole">
+            <option value="oficina">Oficina (administración y CRM)</option>
+            <option value="vendedor">Vendedor (CRM: sus clientes y cotizaciones)</option>
+            <option value="admin" disabled>Administrador (solo desde la base de datos)</option>
+          </select></div>
+        <div id="crear-usuario-error" class="rr-aviso" style="display:none; background:rgba(220,53,69,.1); color:var(--color-danger);"></div>
+        <div id="crear-usuario-ok" class="rr-aviso" style="display:none;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-usuario')">Cancelar</button>
+        <button class="btn btn-primary" id="btnCrearUsuario" onclick="window.guardarUsuario()">💾 Guardar usuario</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Editar / registrar marcación -->
+  <div id="modal-asistencia" class="modal">
+    <div class="modal-content ui-moderna" style="width:min(96vw, 480px); max-width:min(96vw, 480px);">
+      <div class="modal-header"><h3 class="modal-title" id="asisTitulo">Editar marcación</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-asistencia')">&times;</button></div>
+      <input type="hidden" id="asisEmpId"><input type="hidden" id="asisFechaVal">
+      <div style="padding:8px 4px; display:flex; flex-direction:column; gap:12px;">
+        <div id="asisQuien" style="font-size:0.92rem;"></div>
+        <div class="rr-fila" style="grid-template-columns:1fr 1fr;">
+          <div class="form-group"><label>Ingreso *</label><input type="time" id="asisEntrada"></div>
+          <div class="form-group"><label>Salida</label><input type="time" id="asisSalida"></div>
+        </div>
+        <div class="form-group"><label>Motivo del cambio *</label><input type="text" id="asisMotivo" placeholder="Ej: olvidó marcar / se registró tarde / corrección"></div>
+        <div id="asisAyuda" class="rr-aviso"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-asistencia')">Cancelar</button>
+        <button class="btn btn-primary" id="asisBtnGuardar" onclick="window.asisGuardar()">💾 Guardar marcación</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Cambiar mi contraseña -->
+  <div id="modal-password" class="modal">
+    <div class="modal-content ui-moderna" style="width:min(96vw, 420px); max-width:min(96vw, 420px);">
+      <div class="modal-header"><h3 class="modal-title">Cambiar mi contraseña</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-password')">&times;</button></div>
+      <div style="padding:8px 4px; display:flex; flex-direction:column; gap:12px;">
+        <div class="form-group"><label>Nueva contraseña</label><input type="password" id="nuevaPasswordPropia" placeholder="Mínimo 8 caracteres"></div>
+        <div class="form-group"><label>Confirmar contraseña</label><input type="password" id="confirmarPasswordPropia" placeholder="Repite la contraseña"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-password')">Cancelar</button>
+        <button class="btn btn-warning" onclick="window.cambiarPasswordPropia()">🔒 Actualizar</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="assets/js/config.js"></script>
+  <script type="module" src="assets/js/supabase-client.js"></script>
+  <script type="module" src="assets/js/auth-supabase.js"></script>
+  <script type="module" src="assets/js/auth-init.js"></script>
+  <script type="module" src="assets/js/supabase-data.js"></script>
+  <script type="module" src="assets/js/helpers.js"></script>
+  <script type="module" src="assets/js/main.js"></script>
+  <script type="module" src="assets/js/rrhh.js?v=8"></script>
+</body>
+</html>

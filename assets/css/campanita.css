@@ -1,0 +1,23 @@
+/* campanita.css — 🔔 avisos en la cabecera (2026-11-05) */
+.campanita-btn { position: relative; background: transparent; border: 1px solid var(--border-color); border-radius: 999px; width: 38px; height: 38px; cursor: pointer; font-size: 1.1rem; display: inline-flex; align-items: center; justify-content: center; margin-right: 8px; color: var(--text-primary); }
+.campanita-btn:hover { background: var(--bg-secondary); }
+.campanita-btn.con-avisos .campanita-ico { animation: campMece 6s ease-in-out infinite; transform-origin: 50% 10%; }
+.campanita-badge { position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--color-danger, #ef4444); color: #fff; font-size: .68rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.camp-panel { position: fixed; z-index: 9000; width: min(400px, calc(100vw - 16px)); max-height: 70vh; overflow: auto; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 12px; box-shadow: 0 12px 36px rgba(0, 0, 0, .28); }
+.camp-panel[hidden] { display: none; }
+.camp-cab { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border-color); position: sticky; top: 0; background: var(--bg-primary); }
+.camp-leer { background: none; border: none; color: var(--color-info, #3b82f6); cursor: pointer; font-size: .8rem; }
+.camp-grupo { padding: 8px 14px 4px; font-size: .68rem; letter-spacing: .06em; text-transform: uppercase; color: var(--text-secondary); }
+.camp-item { display: flex; gap: 10px; padding: 9px 14px; text-decoration: none; color: inherit; border-left: 3px solid transparent; }
+.camp-item:hover { background: var(--bg-secondary); }
+.camp-item.alerta { border-left-color: var(--color-danger, #ef4444); }
+.camp-item.aviso { border-left-color: var(--color-warning, #f59e0b); }
+.camp-item.recordatorio { border-left-color: var(--color-info, #3b82f6); }
+.camp-txt { display: flex; flex-direction: column; gap: 2px; font-size: .86rem; min-width: 0; }
+.camp-txt small { color: var(--text-secondary); }
+.camp-txt em { font-style: normal; color: var(--text-secondary); font-size: .72rem; }
+.camp-vacio { padding: 26px 14px; text-align: center; color: var(--text-secondary); }
+@keyframes campMece { 0%, 90%, 100% { transform: rotate(0); } 93% { transform: rotate(14deg); } 96% { transform: rotate(-12deg); } 98% { transform: rotate(6deg); } }
+@media (prefers-reduced-motion: reduce) { .campanita-btn.con-avisos .campanita-ico { animation: none; } }
+
+.campanita-btn[hidden], .campanita-badge[hidden], .camp-leer[hidden] { display: none !important; }

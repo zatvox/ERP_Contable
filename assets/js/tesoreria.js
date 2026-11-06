@@ -74,7 +74,7 @@ function _hoyISO() { return new Date().toLocaleDateString('en-CA', { timeZone: '
 function _simbolo(m) { return m === 'USD' ? '$' : 'S/' }
 function _money(v, m = 'PEN') { return `${_simbolo(m)} ${formatNumber(v || 0)}` }
 function _cajaById(id) { return _cajas.find(c => c.id === Number(id)) || null }
-// Apertura de caja y vales NO son gasto: no suman en KPIs ni reportes (SQL 131).
+// Apertura de caja y vales NO son gasto: no suman en KPIs ni reportes (SQL 132).
 function _esGasto(g) { return _catById(g.categoria_gasto_id)?.es_gasto !== false }
 function _catById(id) { return _categorias.find(c => c.id === Number(id)) || null }
 function _contactoById(id) { return _contactos.find(c => c.id === Number(id)) || null }
@@ -1372,6 +1372,7 @@ window.abrirModalCategoria = function (id = null) {
   _v('catCodigo', c?.codigo || ''); _v('catNombre', c?.nombre || '')
   _v('catAmbito', c?.ambito_sugerido || ''); _v('catDestino', c?.destino_sugerido || '')
   _setChk('catDeducible', c ? c.deducible_defecto : true)
+  _setChk('catCostoDespacho', c ? !!c.es_costo_despacho : false)
   const cod = document.getElementById('catCodigo')
   if (cod) cod.disabled = !!c
   window.openModal('modal-categoria-gasto')
@@ -1387,7 +1388,8 @@ window.guardarCategoriaGasto = async function () {
     codigo, nombre,
     ambito_sugerido: _g('catAmbito') || null,
     destino_sugerido: _g('catDestino') || null,
-    deducible_defecto: _chk('catDeducible')
+    deducible_defecto: _chk('catDeducible'),
+    es_costo_despacho: _chk('catCostoDespacho')
   }
 
   const ok = _editCatId

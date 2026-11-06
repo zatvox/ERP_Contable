@@ -1,0 +1,8 @@
+{
+  "_nota": "Estimación propia (no oficial) de velocidad media de un camión en Lima urbana, km/h, por hora de salida (0-23). Ajustable: afina con los tiempos reales de tus guías (hora_salida → hora_llegada).",
+  "origen": { "nombre": "Almacén San Juan de Lurigancho", "lat": -11.9985, "lng": -77.0000 },
+  "factor_ruta": 1.35,
+  "laborable": [32, 34, 34, 34, 32, 28, 22, 15, 12, 14, 18, 20, 20, 20, 19, 18, 15, 12, 11, 13, 17, 22, 26, 30],
+  "sabado":    [32, 34, 34, 34, 32, 30, 28, 24, 22, 20, 19, 18, 18, 18, 18, 18, 17, 16, 16, 18, 21, 24, 27, 30],
+  "domingo":   [34, 35, 35, 35, 34, 32, 30, 28, 26, 24, 22, 22, 22, 22, 22, 22, 21, 20, 20, 22, 24, 26, 29, 32]
+}

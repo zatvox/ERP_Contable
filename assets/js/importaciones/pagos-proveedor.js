@@ -45,12 +45,12 @@ export const TIPOS_PAGO = {
 }
 const DOC_TIPOS = {
   oc_anticipo: 'Anticipo (PI)', ci_saldo: 'Saldo (CI)', dam_tributos: 'Tributos DAM', dam_percepcion: 'Percepción',
-  ajuste_valor: 'Ajuste de valor', agente: 'Agente', otro: 'Otro'
+  ajuste_valor: 'Ajuste de valor', agente: 'Agente', flete: 'Flete internacional', seguro: 'Seguro', otro: 'Otro'
 }
-const TIPO_POR_DOC = { oc_anticipo: 'anticipo', ci_saldo: 'saldo', dam_tributos: 'tributos', dam_percepcion: 'percepcion', ajuste_valor: 'ajuste_valor', agente: 'agente', otro: 'otro' }
+const TIPO_POR_DOC = { oc_anticipo: 'anticipo', ci_saldo: 'saldo', dam_tributos: 'tributos', dam_percepcion: 'percepcion', ajuste_valor: 'ajuste_valor', agente: 'agente', flete: 'otro', seguro: 'otro', otro: 'otro' }
 const MEDIOS = { transferencia_exterior: 'Transferencia al exterior (SWIFT)', transferencia: 'Transferencia nacional / interbancaria', deposito: 'Depósito', cheque: 'Cheque', vep: 'Pago virtual SUNAT (VEP)', efectivo: 'Efectivo', otro: 'Otro' }
 /** A quién se le paga según el documento: define medio habitual, campos y validaciones. */
-const GRUPO_DOC = { oc_anticipo: 'proveedor', ci_saldo: 'proveedor', dam_tributos: 'sunat', dam_percepcion: 'sunat', ajuste_valor: 'sunat', agente: 'agente', otro: 'otro' }
+const GRUPO_DOC = { oc_anticipo: 'proveedor', ci_saldo: 'proveedor', dam_tributos: 'sunat', dam_percepcion: 'sunat', ajuste_valor: 'sunat', agente: 'agente', flete: 'proveedor', seguro: 'proveedor', otro: 'otro' }
 const GRUPOS = {
   proveedor: { nombre: 'Proveedor del exterior', medio: 'transferencia_exterior', exigeOp: true,
     nota: 'Pago al proveedor del exterior: se hace por transferencia al exterior (SWIFT). Guarda el voucher y el mensaje SWIFT.' },
@@ -100,6 +100,16 @@ async function _cargar() {
   _ctx.dams = dams || []
   _ctx.dam = _ctx.dams.find(x => x.importacion_id === _ctx.ci?.id) || _ctx.dams[0] || null
   _ctx.apps = apps || []
+  // Ledger de la carpeta (flete/seguro facturados aparte con FOB/CFR) y pagos al agente aduanero (abonos + vouchers)
+  try { _ctx.costos = ((await query('v_importacion_costos', { carpeta_importacion_id: carpetaId })) || []).filter(k => !k.anulado) } catch { _ctx.costos = [] }
+  try {
+    const liq = ((await query('importacion_liquidaciones_agente', { carpeta_importacion_id: carpetaId })) || []).sort((a, b) => a.id - b.id)[0] || null
+    const [ab, vp, vl, vo] = liq ? await Promise.all([
+      query('importacion_liquidacion_abonos', { liquidacion_agente_id: liq.id }),
+      getAdjuntos('liq_abono_proforma', liq.id), getAdjuntos('liq_abono_liquidacion', liq.id), getAdjuntos('liquidacion_agente', liq.id)
+    ]) : [[], [], [], []]
+    _ctx.agente = { liq, abonos: (ab || []).sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)) || a.id - b.id), vouch: { proforma: vp || [], liquidacion: vl || [] }, legacy: (vo || []).filter(a => a.concepto === 'voucher') }
+  } catch { _ctx.agente = null }
   _ctx.ajustes = _ctx.dams.length ? (await Promise.all(_ctx.dams.map(x => query('dam_autoliquidaciones', { dam_id: x.id })))).flat().filter(a => a && a.estado !== 'desestimada') : []
   // Si la tabla no existe, query() devuelve [] sin avisar: lo detectamos con una lectura directa
   try {
@@ -116,6 +126,7 @@ function _pagadoDe(doc_tipo, doc_id) {
   return _ctx.apps.filter(a => a.doc_tipo === doc_tipo && (a.doc_id ?? null) == (doc_id ?? null) && vivos.has(a.pago_id))
     .reduce((t, a) => t + num(a.monto_doc), 0)
 }
+const INC_CON_FLETE = ['CIF', 'CFR', 'CIP', 'CPT', 'DAP', 'DDP']
 const MARCA_CIERRA = '[cierra'
 function _anticipoCerrado(docId, ctx = _ctx) {
   const vivos = new Set((ctx.pagos || []).filter(valido).map(p => p.id))
@@ -162,6 +173,15 @@ export function obligacionesCarpeta(ctx = _ctx) {
       if (t > 0) out.push({ doc_tipo: 'ajuste_valor', doc_id: a.id, titulo: `Ajuste de valor ${a.numero || ''}`, moneda: 'USD', total: t })
     }
   }
+  // Flete y seguro: con FOB/EXW/FCA/FAS los factura el proveedor externo aparte (se pagan por su cuenta);
+  // con CFR/CPT solo el seguro; con CIF/CIP/DAP/DDP ya vienen en el CI y NO se muestran.
+  const inc = String(ctx.oc?.incoterm || ctx.carpeta?.incoterm || ctx.ci?.terminos_delivery || '').toUpperCase().trim()
+  const fleteAparte = !!inc && !INC_CON_FLETE.includes(inc), seguroAparte = !!inc && (fleteAparte || ['CFR', 'CPT'].includes(inc))
+  for (const k of (ctx.costos || []).filter(k => !k.es_provisional && ['flete', 'seguro'].includes(k.concepto_codigo))) {
+    if (!(k.concepto_codigo === 'flete' ? fleteAparte : seguroAparte)) continue
+    const tot = num(k.monto_moneda) + num(k.igv_monto)
+    if (tot > 0) out.push({ doc_tipo: k.concepto_codigo, doc_id: k.id, titulo: `${DOC_TIPOS[k.concepto_codigo]} · ${k.proveedor_nombre || k.documento_numero || 'proveedor'}`, moneda: k.moneda || 'USD', total: tot })
+  }
   return out.map(o => {
     const pagado = _pagadoDe(o.doc_tipo, o.doc_id)
     // Anticipo cerrado con ajuste: se pagó menos que la PI y la diferencia pasa al saldo del CI
@@ -191,6 +211,7 @@ function _asegurarModal() {
 
         <strong class="mod-sec">Pagos registrados</strong>
         <div id="ppLista" class="table-container"></div>
+        <div id="ppAgente"></div>
 
         <div id="ppFormWrap" style="display:none;">
           <hr style="border:none; border-top:1px solid var(--border-color); margin:16px 0;">
@@ -289,7 +310,14 @@ function _pintarResumen() {
   }
   const cab = _ctx.oc ? `<div style="margin-bottom:8px; font-size:0.9rem;">Proforma <strong>${_esc(_ctx.oc.numero_proforma_proveedor || _ctx.oc.numero)}</strong>
       · ${_esc(_ctx.proveedor?.nombre || 'Proveedor')} · Incoterm ${_esc(_ctx.oc.incoterm || '—')}</div>` : ''
-  $('ppResumen').innerHTML = cab + `<strong class="mod-sec">Documentos por pagar</strong>
+  const inc = String(_ctx.oc?.incoterm || _ctx.carpeta?.incoterm || _ctx.ci?.terminos_delivery || '').toUpperCase().trim()
+  const hay = t => obs.some(o => o.doc_tipo === t)
+  const fAp = !!inc && !INC_CON_FLETE.includes(inc), sAp = !!inc && (fAp || ['CFR', 'CPT'].includes(inc))
+  const faltan = [fAp && !hay('flete') ? 'flete' : '', sAp && !hay('seguro') ? 'seguro' : ''].filter(Boolean)
+  const avInc = !inc ? '' : faltan.length
+    ? `<div class="hc-aviso warn" style="margin:6px 0;">Incoterm <b>${_esc(inc)}</b>: el proveedor factura el <b>${faltan.join(' y ')}</b> aparte. Registra ${faltan.length > 1 ? 'esas facturas' : 'esa factura'} en Costos (grupo CIF) para que aparezca${faltan.length > 1 ? 'n' : ''} aquí como documento por pagar.</div>`
+    : (!fAp ? `<div class="hc-aviso info" style="margin:6px 0;">Incoterm <b>${_esc(inc)}</b>: ${sAp ? 'el flete ya viene en el CI; el seguro se paga aparte.' : 'flete y seguro ya vienen incluidos en el CI (no se pagan aparte).'}</div>` : '')
+  $('ppResumen').innerHTML = cab + avInc + `<strong class="mod-sec">Documentos por pagar</strong>
     <table class="data-table"><thead><tr><th>Documento</th><th class="text-right">Total</th><th class="text-right">Pagado</th><th class="text-right">Por pagar</th><th>Estado</th><th></th></tr></thead><tbody>${obs.map(o => `<tr>
       <td>${_esc(o.titulo)}</td><td class="text-right">${SIM[o.moneda] || o.moneda} ${n2(o.total)}</td><td class="text-right">${n2(o.pagado)}</td>
       <td class="text-right"><strong>${n2(o.pendiente)}</strong></td><td>${chipE(o.estado)}</td>
@@ -332,7 +360,30 @@ function _pintarLista() {
       }).join('')}</tbody></table><div id="ppAdjuntosVista" style="font-size:0.85rem; margin-top:6px;"></div>`
 }
 
-async function _repintar() { _pintarAvisoSQL(); _pintarResumen(); _pintarLista() }
+function _pintarAgente() {
+  const box = $('ppAgente'); if (!box) return
+  const g = _ctx.agente
+  if (!g?.liq) { box.innerHTML = ''; return }
+  const SIMB = m => (m === 'PEN' ? 'S/' : '$')
+  const banco = id => _ctx.bancos.find(b => b.id === id)
+  const filas = g.abonos
+  const tot = {}
+  filas.forEach(a => { const m = a.moneda === 'PEN' ? 'PEN' : 'USD'; tot[m] = (tot[m] || 0) + num(a.monto) })
+  const thumbs = arr => arr.map(a => `<div class="pp-guardado"><span class="adj-thumb" data-adj-path="${_esc(a.path)}" data-adj-nombre="${_esc(a.nombre)}">…</span>
+      <div><div class="pp-doc-nombre" title="${_esc(a.nombre)}">${_esc(a.nombre)}</div><div class="pp-doc-peso">${fechaDMY((a.created_at || '').slice(0, 10))}</div></div></div>`).join('')
+  const bloqueV = (tit, arr) => arr.length ? `<div style="margin-top:6px;"><small style="color:var(--text-secondary);">${tit}</small><div class="pp-guardados">${thumbs(arr)}</div></div>` : ''
+  box.innerHTML = `<strong class="mod-sec" style="display:block; margin-top:18px;">Agente aduanero · ${_esc(g.liq.agente_nombre || '')}
+      <small style="font-weight:400; color:var(--text-secondary);">proforma ${_esc(g.liq.proforma_numero || '—')} · liquidación ${_esc(g.liq.numero || '—')}</small></strong>
+    ${filas.length ? `<div class="table-container"><table class="data-table"><thead><tr><th>Etapa</th><th>Fecha</th><th class="text-right">Abono</th><th class="text-right">T.C.</th><th>Operación</th><th class="text-right">Comisión</th><th>Cuenta</th></tr></thead><tbody>${filas.map(a => `<tr>
+        <td>${a.concepto === 'proforma' ? 'Proforma' : 'Liquidación'}</td><td>${fechaDMY(a.fecha)}</td>
+        <td class="text-right"><strong>${SIMB(a.moneda)} ${n2(a.monto)}</strong></td><td class="text-right">${num(a.tipo_cambio).toFixed(3)}</td>
+        <td>${_esc(a.operacion || '—')}</td><td class="text-right">${num(a.comision) > 0 ? n2(a.comision) : '—'}</td><td>${_esc(banco(a.banco_id)?.nombre || '—')}</td></tr>`).join('')}
+        <tr><td colspan="2"><strong>Total abonado</strong></td><td class="text-right"><strong>${Object.entries(tot).map(([m, t]) => `${SIMB(m)} ${n2(t)}`).join(' + ')}</strong></td><td colspan="4"></td></tr></tbody></table></div>`
+      : '<p style="color:var(--text-secondary); padding:8px 0;">El agente aún no tiene abonos registrados.</p>'}
+    ${bloqueV('Vouchers · abonos de la proforma', [...g.vouch.proforma, ...g.legacy])}${bloqueV('Vouchers · abonos de la liquidación', g.vouch.liquidacion)}
+    <div style="margin-top:8px;"><button class="btn btn-secondary btn-small" onclick="window.abrirLiquidacionAgente()">Abrir liquidación del agente</button></div>`
+}
+async function _repintar() { _pintarAvisoSQL(); _pintarResumen(); _pintarLista(); _pintarAgente() }
 
 // ─── Apertura ────────────────────────────────────────────────────────────────
 window.abrirPagosProveedor = async function () {

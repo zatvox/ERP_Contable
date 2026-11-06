@@ -19,7 +19,7 @@ const POR_PAGINA = 50
 const _inst = {}   // instId → { opts, f: filtros, sort, pagina, lista }
 const _esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 const GUION = '<span style="color:var(--text-secondary);">—</span>'
-const ROL_COLOR = { cliente: 'info', proveedor: 'warning', vendedor: 'success' }
+const ROL_COLOR = { cliente: 'info', proveedor: 'warning', vendedor: 'success', empleado: 'primary' }
 
 const COLS = [
   { key: 'nombre',    label: 'Nombre / Razón social' },

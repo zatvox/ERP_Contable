@@ -26,6 +26,9 @@ import { getTCVenta, textoAvisoTC } from '../sunat-api.js'
 import { vincularTCEnVivo } from '../tc-en-vivo.js'
 import { estaAnulado } from '../anulacion.js'
 import { descargarPDFDesdeHTML as _descargarPDFDesdeHTML } from '../shared/pdf-documento.js'   // PDF A4 con saltos de página limpios
+// Despacho + PV de lista + efecto de margen (SQL 136) y campanita de avisos (2026-11-05)
+import { htmlDespacho, ATR_PANEL_GAN, HTML_GAN_EXTRA, HTML_PV_HINT, iniciarDespacho, validarDespacho, leerDespacho, alCambiarLineas, pintarPistaPV, lineasBajoPV, pintarGanancia } from './packing-despacho.js'
+import { crearAviso, resolverAviso, urlConBusqueda } from '../shared/campanita.js'
 
 // Datos del emisor para el PDF (mismos del PDF de Odoo). Logo: assets/img/logo-jhiro.png
 const EMPRESA = {
@@ -169,6 +172,7 @@ export async function recalcularEstadoPacking(packingId) {
   if (document.getElementById('tabla-packing-body')) await renderPacking(true)
 }
 window.recalcularEstadoPacking = recalcularEstadoPacking
+window.renderPacking = (...a) => renderPacking(...a)   // lo usa anulacion.js tras anular PK + factura
 
 // MULTIEMPRESA: Jhiro y Benji comparten los nombres de serie (FFFI, T001…).
 // El siguiente número NO puede salir de las empresas ACTIVAS del switch: con
@@ -576,6 +580,7 @@ function _asegurarModal() {
           </div>
         </div>
       </div>
+      ${htmlDespacho()}
     </div>
 
     <hr style="margin:12px 20px; border-color:var(--border-color);">
@@ -603,9 +608,10 @@ function _asegurarModal() {
 
     <div style="margin:15px 20px; padding:15px; background-color:var(--bg-secondary); border-radius:var(--radius-md); display:grid; grid-template-columns:repeat(5, 1fr); gap:15px;">
       ${_TOT('Cantidad Total', 'pkTotCant')}${_TOT('Base Imponible', 'pkTotBase')}${_TOT('IGV 18%', 'pkTotIGV')}${_TOT('Total', 'pkTotTotal', 'var(--color-success)')}
-      <div style="text-align:center;" title="Base imponible − costo estimado (FIFO del stock actual). Uso interno: no sale en el PDF.">
+      <div ${ATR_PANEL_GAN} style="text-align:center;" title="Base imponible − costo estimado (FIFO del stock actual) − flete interno si hay despacho incluido. Uso interno: no sale en el PDF.">
         <div style="font-size:12px; color:var(--text-secondary);">Ganancia (estim.)</div>
         <div style="font-size:18px; font-weight:600;"><span id="pkTotGan">—</span> <span id="pkTotGanPct" style="font-size:13px; font-weight:600;"></span></div>
+        ${HTML_GAN_EXTRA}
       </div>
     </div>
 
@@ -684,6 +690,7 @@ function _asegurarModal() {
         <div style="flex:0.9 1 120px;"><label style="font-size:0.8rem;">IGV</label><input type="text" id="pkPrevIGV" readonly value="0.00" style="background:var(--bg-primary); color:var(--text-secondary);"></div>
         <div style="flex:0.9 1 120px;"><label style="font-size:0.8rem;">Total</label><input type="text" id="pkPrevTot" readonly value="0.00" style="background:var(--bg-primary); color:var(--text-secondary); font-weight:bold;"></div>
       </div>
+      ${HTML_PV_HINT}
       <div id="pkDesglosePanel" style="margin-top:12px; padding:10px 12px; border:1px solid var(--border-color); border-radius:6px; background:var(--bg-secondary);">
         <small id="pkStockAviso" style="display:block; color:var(--text-secondary); font-size:0.8rem;">Selecciona un producto para ver su stock disponible.</small>
         <div id="pkDesgloseLotes" style="margin-top:6px; font-size:0.78rem; color:var(--text-secondary);"></div>
@@ -845,6 +852,7 @@ function _calcLinea(cant, precio, igvTipo) { return calcLineaIGV(cant, precio, i
 
 window._pkPreviewLinea = function () {
   _pkAvisoStock()
+  pintarPistaPV()
   pintarPanelStock({ pfx: 'pk', avisoId: 'pkStockAviso', panelId: 'pkDesgloseLotes',
     itemId: parseInt(document.getElementById('pkItem')?.value || 0), cantidad: parseFloat(document.getElementById('pkCant')?.value) || 0 })
   const cant = parseFloat(document.getElementById('pkCant').value) || 0
@@ -970,20 +978,12 @@ window._pkPintarLineas = function () {
   document.getElementById('pkTotBase').textContent = `${mon} ${formatNumber(t.b)}`
   document.getElementById('pkTotIGV').textContent = `${mon} ${formatNumber(t.i)}`
   document.getElementById('pkTotTotal').textContent = `${mon} ${formatNumber(t.t)}`
-  // Ganancia total: solo si TODAS las líneas tienen costo (si no, sería engañosa)
-  const elG = document.getElementById('pkTotGan'), elP = document.getElementById('pkTotGanPct')
-  if (elG && elP) {
-    const completas = gans.length && gans.every(Boolean)
-    if (!completas) {
-      elG.textContent = '—'; elG.style.color = 'var(--text-secondary)'
-      elP.textContent = gans.length ? '(falta costo o T.C.)' : ''
-    } else {
-      const g = gans.reduce((a, x) => a + x.gan, 0)
-      elG.textContent = `${mon} ${formatNumber(g)}`; elG.style.color = _colorGan(g)
-      elP.textContent = t.b ? `${(g / t.b * 100).toFixed(1)}%` : ''; elP.style.color = _colorGan(g)
-    }
-  }
+  // Ganancia total (− flete interno si hay despacho) + efecto HUD: ver packing-despacho.js
+  const _usd = document.getElementById('pkMoneda')?.value === 'USD'
+  pintarGanancia({ gans, base: t.b, mon, usd: _usd, tc: parseFloat(document.getElementById('pkTC')?.value) || 0, lineas: _pkLineas })
+  alCambiarLineas(_pkLineas.map(l => l.item_id))
 }
+window._pkLineasActuales = () => _pkLineas
 
 let _pkSerieActual = null
 let _pkFactPorLinea = {}
@@ -995,6 +995,7 @@ window._pkGuardarYFacturar = async function (btn) {
 let _pkCorrSugerido = null
 
 let _pkModoCot = false   // true = cotización (sin N° de PK)
+let _pkCotHeredado = null // N° de COT de origen (al duplicar un PK se conserva para el seguimiento)
 
 window.abrirModalPacking = async function (id = null, opts = {}) {
   try {
@@ -1050,6 +1051,8 @@ window.abrirModalPacking = async function (id = null, opts = {}) {
     aviso.style.display = abierto ? 'none' : 'block'
     if (abierto && pk?.estado === 'parcial') { aviso.style.display = 'block'; aviso.textContent = 'PK facturado parcialmente: puedes editarlo, pero no bajar una línea por debajo de lo ya facturado.' }
     else aviso.textContent = abierto ? '' : (pk.estado === 'facturado' ? `Facturado en ${_pkVentasMap.get(pk.venta_id) || 'la venta #' + pk.venta_id} — solo lectura.` : 'PK anulado — solo lectura.')
+    _pkCotHeredado = pk?.cot_numero || null
+    await iniciarDespacho(pk, { empresaId: pk?.empresa_id ?? null })
     window._pkOnMoneda()
     // El modal dice de qué empresa es ESTE documento, no la del switch.
     declararEmpresaModal('modal-packing', pk?.empresa_id)
@@ -1084,6 +1087,9 @@ window.duplicarPacking = async function (id) {
       document.getElementById('pkMoneda')?.dispatchEvent(new Event('change'))
     }
     _setOpcional('grupo-pk-obs', 'chkPkObs', 'pkObs', origen.observaciones)
+    // El seguimiento es el N° de COT: la copia de un PK lo conserva (caso típico: se anuló la factura y se vuelve a facturar)
+    _pkCotHeredado = _pkModoCot ? null : (origen.cot_numero || (origen.estado === 'cotizacion' ? origen.numero : null))
+    await iniciarDespacho(origen, { empresaId: origen.empresa_id ?? null })
     _pkLineas = lineas
     _pkFactPorLinea = {}
     window._pkOnMoneda?.()
@@ -1156,6 +1162,10 @@ window.guardarPacking = async function () {
     if (!contactId) { showToast('Selecciona el cliente', 'warning'); return }
     if (!fecha) { showToast('Ingresa la fecha de emisión', 'warning'); return }
     if (!_pkLineas.length) { showToast('Agrega al menos un producto', 'warning'); return }
+    const errDesp = validarDespacho()
+    if (errDesp) { showToast(errDesp, 'warning', 6000); document.getElementById('pkDespSec')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); return }
+    // PV de lista: NO bloquea; se guarda con alerta y va a la campanita
+    const bajoPV = lineasBajoPV(_pkLineas, document.getElementById('pkMoneda').value, parseFloat(document.getElementById('pkTC').value) || 0)
     const corr = _pkModoCot ? { manual: false } : await _pkCorrelativoElegido()
     if (!corr) return
     const t = _pkLineas.reduce((a, l) => ({ b: a.b + (+l.subtotal), i: a.i + (+l.igv_monto), t: a.t + (+l.total_linea) }), { b: 0, i: 0, t: 0 })
@@ -1169,6 +1179,7 @@ window.guardarPacking = async function () {
       orden_compra_cliente: document.getElementById('pkOC').value.trim() || null,
       observaciones: document.getElementById('pkObs').value.trim() || null,
       subtotal: +t.b.toFixed(2), igv: +t.i.toFixed(2), total: +t.t.toFixed(2),
+      ...leerDespacho(bajoPV.length > 0),
       updated_at: new Date().toISOString()
     }
     // PK con facturas: ninguna línea facturada puede quitarse ni bajar de lo facturado
@@ -1203,7 +1214,7 @@ window.guardarPacking = async function () {
       const base = (await _maxCotPK()) + 1
       for (let intento = 0; intento < 5 && !pk; intento++) {
         const n = base + intento
-        pk = await insert('packing', { ...cab, tipo: 'venta', serie: serie.serie, correlativo: null, cot_correlativo: n, numero: _numeroCot(n), estado: 'cotizacion', created_by: user?.db_id || null })
+        pk = await insert('packing', { ...cab, tipo: 'venta', serie: serie.serie, correlativo: null, cot_correlativo: n, numero: _numeroCot(n), cot_numero: _numeroCot(n), estado: 'cotizacion', created_by: user?.db_id || null })
       }
       if (!pk) throw new Error('No se pudo crear la cotización (¿corriste assets/sql/115_packing_cotizaciones.sql?)')
     } else {
@@ -1214,7 +1225,7 @@ window.guardarPacking = async function () {
       const base = corr.manual ? corr.n : siguienteCorrelativo(serie, await _maxCorrelativoPK(serie.serie))
       for (let intento = 0; intento < (corr.manual ? 1 : 5) && !pk; intento++) {
         const n = base + intento
-        pk = await insert('packing', { ...cab, tipo: 'venta', serie: serie.serie, correlativo: n, numero: formatearNumero(serie, n), estado: 'borrador', created_by: user?.db_id || null })
+        pk = await insert('packing', { ...cab, tipo: 'venta', serie: serie.serie, correlativo: n, numero: formatearNumero(serie, n), cot_numero: _pkCotHeredado, estado: 'borrador', created_by: user?.db_id || null })
       }
       if (!pk) throw new Error('No se pudo crear el PK')
       await registrarUsoSerie('PK', pk.serie, pk.correlativo)
@@ -1231,6 +1242,18 @@ window.guardarPacking = async function () {
       if (!r) throw new Error(`No se pudo guardar la línea ${i + 1} (${l.descripcion})`)
     }
     showToast(`${pk.numero} guardado ✅`, 'success')
+    // Aviso (campanita) si algún precio quedó bajo el PV de lista; si ya no aplica, se resuelve
+    try {
+      const nomCli = (S._clientes || []).find(c => c.id === contactId)
+      const cliente = nomCli?.nombre || nomCli?.razon_social || ''
+      if (bajoPV.length) {
+        const det = bajoPV.slice(0, 3).map(b => `${b.descripcion}: ${b.sim} ${b.precio.toFixed(2)} vs lista ${b.sim} ${b.lista.toFixed(2)} (sin IGV)`).join(' · ')
+        showToast(`⚠ ${bajoPV.length} línea(s) por debajo del PV de lista. Se guardó con aviso.`, 'warning', 6500)
+        await crearAviso({ tipo: 'cot_bajo_pv_lista', severidad: 'aviso', empresa_id: pk.empresa_id,
+          titulo: `Se generó ${_pkModoCot ? 'una cotización' : 'un PK'} por debajo del PV de lista · ${pk.numero}`,
+          detalle: `${cliente} — ${det}`, url: urlConBusqueda('ventas.html', 'packing', cliente), ref_tabla: 'packing', ref_id: pk.id })
+      } else if (_pkEditId) await resolverAviso('cot_bajo_pv_lista', 'packing', pk.id)
+    } catch (e) { console.warn('aviso PV lista:', e.message) }
     window.closeModal('modal-packing')
     if (_pkEditId && Object.keys(_prevFact).length) await recalcularEstadoPacking(pk.id)
     await renderPacking(true)
@@ -1247,6 +1270,7 @@ window.anularPacking = async function (id) {
   }
   if (!confirm(`¿Anular ${pk.numero}? Queda registrado (no se borra) y ya no se podrá facturar.`)) return
   const r = await update('packing', id, { estado: 'anulado', updated_at: new Date().toISOString() })
+  if (r) resolverAviso('cot_bajo_pv_lista', 'packing', id)
   showToast(r ? `${pk.numero} anulado` : 'No se pudo anular', r ? 'success' : 'danger')
   await renderPacking(true)
 }

@@ -29,7 +29,7 @@ const MODULOS_DISPONIBLES = [
   { href: 'cobranzas.html',    icono: '💰', label: 'Cobranza y pagos' },
   { href: 'tesoreria.html',     icono: '🏦', label: 'Tesorería y Bancos' },
   { href: 'contabilidad.html', icono: '📑', label: 'Contabilidad' },
-  { href: 'usuarios.html',     icono: '👤', label: 'Usuarios', soloAdmin: true }
+  { href: 'rrhh.html',          icono: '👥', label: 'RRHH', soloAdmin: true }
 ]
 
 let _user = null

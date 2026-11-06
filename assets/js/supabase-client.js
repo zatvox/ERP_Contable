@@ -65,6 +65,10 @@ export const TABLAS_EMPRESA = new Set([
   'cuentas_cobrar', 'cuentas_pagar', 'cobros', 'cobros_lote', 'pagos', 'pagos_proveedores',
   'letras_cambio', 'letras_refinanciacion', 'bancos', 'movimientos_banco',
   'gastos', 'entregas_a_rendir', 'reposiciones_caja',
+  // Campanita de avisos (SQL 136)
+  'notificaciones',
+  // RRHH (R0, 2026-11-05): cada empresa tiene su propia planilla
+  'empleados', 'asistencias',
   // Documentos y correlativos
   'series_documentos', 'secuencias_documentos',
   // Contabilidad

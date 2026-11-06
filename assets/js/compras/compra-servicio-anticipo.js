@@ -2,6 +2,7 @@
 // compras/compra-servicio-anticipo.js — parte de compras.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
+import { validarPerfilContacto } from '../shared/perfil-contacto.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { getCompras, addCompra, addCompraDetalle, getContactById, updateCuentaPagar, getTodosComprasAnticiposAplicados, addCompraAnticipoAplicado, subirAdjuntoCompra } from '../supabase-data.js'
 import { showToast } from '../helpers.js'
@@ -51,6 +52,7 @@ window.guardarCompraServicio = async function () {
     const subtotal     = parseFloat(document.getElementById('csSubtotal')?.value || 0)
 
     if (!contactId)    { showToast('Selecciona un proveedor', 'warning'); return }
+    if (!(await validarPerfilContacto(contactId, { rol: 'proveedor' }))) return
     if (!fecha)        { showToast('Ingresa la fecha', 'warning'); return }
     if (moneda === 'USD' && tipoCambioServicio <= 1) {
       showToast('Ingresa el Tipo de Cambio para una compra en dólares (usa "↻ Auto" para traer el de la SBS)', 'warning')
@@ -198,6 +200,7 @@ window.guardarCompraAnticipo = async function () {
     const subtotal = parseFloat(document.getElementById('atSubtotal')?.value || 0)
 
     if (!contactId) { showToast('Selecciona un proveedor', 'warning'); return }
+    if (!(await validarPerfilContacto(contactId, { rol: 'proveedor' }))) return
     if (!fecha)     { showToast('Ingresa la fecha', 'warning'); return }
     if (moneda === 'USD' && tipoCambio <= 1) {
       showToast('Ingresa el Tipo de Cambio para un anticipo en dólares (usa "↻ Auto" para traer el de la SBS)', 'warning')

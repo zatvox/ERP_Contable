@@ -14,6 +14,7 @@ import { showToast } from '../helpers.js'
 import { menuAccionesFila } from '../main.js'
 import { estaAnulado, badgeAnulado, ESTILO_FILA_ANULADA } from '../anulacion.js'
 import { _invalidarCacheVentas } from './anulacion.js'
+import '../shared/despacho-viaje.js'
 import { _esc } from './init.js'
 import { _guiaEstaVigente } from './ventas-editar.js'
 import { _compararValoresOrdenVentas, _devolverAUnaZona, renderVentas } from './ventas-lista.js'
@@ -331,6 +332,7 @@ export async function renderGuiasDespachoVenta(forzar = false) {
                   ? [{ label: anulada ? 'Ver motivo de anulación' : 'Ver detalle de reversión', icono: 'ℹ️', onclick: `window.verMotivoAnulacion('guia', ${g.id})` }]
                   : [
                       { label: 'Ver detalle', icono: '📋', onclick: `window.verDetalleGuiaDespachoVenta(${g.id})` },
+                      ...(g.hora_salida ? (g.hora_llegada ? [] : [{ label: 'Confirmar llegada', icono: '✅', onclick: `window.entregarGuia(${g.id})` }]) : [{ label: 'Despachar (inicia viaje)', icono: '🚚', onclick: `window.despacharGuia(${g.id})` }]),
                       { label: 'Editar guía', icono: '✏️', onclick: `window.editarGuiaDespachoVenta(${g.id})` },
                       { label: 'Anular guía', icono: '🚫', onclick: `window.anularGuiaDespachoVenta(${g.id})`, peligro: true },
                       { label: 'Eliminar', icono: '🗑️', onclick: `window.eliminarGuiaDespachoVenta(${g.id})`, peligro: true }

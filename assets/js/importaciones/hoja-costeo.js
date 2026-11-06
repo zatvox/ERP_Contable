@@ -162,7 +162,7 @@ async function _cargar() {
   const [ajustesR, abonosR, adjLiqR] = await Promise.all([
     damRow ? query('dam_autoliquidaciones', { dam_id: damRow.id }) : [],
     liq ? query('importacion_liquidacion_abonos', { liquidacion_agente_id: liq.id }) : [],
-    liq ? getAdjuntos('liquidacion_agente', liq.id) : []
+    liq ? Promise.all([getAdjuntos('liquidacion_agente', liq.id), getAdjuntos('liq_abono_proforma', liq.id), getAdjuntos('liq_abono_liquidacion', liq.id)]).then(r => r.flat()) : []
   ])
   const ajustes = ajustesR || [], abonosAg = abonosR || [], adjLiq = adjLiqR || []
   // T.C. (soles por USD): SOLO el de la DAM (T.C. venta SUNAT de la fecha de pago de tributos).
@@ -569,7 +569,7 @@ function _slotsDocs(d) {
       sub: dam ? `${esc(dam.numero_dam)} · ${fechaDMY(dam.fecha_dam)}` : (ci ? 'Sin registrar' : 'Requiere el CI'),
       reg: dam ? _btnReg('👁 Registro', `window.editarDAM('${dam.id}')`) : (ci ? _btnReg('+ Registrar', 'window.abrirNuevaDAM()') : '') },
     { ico: '⚗️', tit: 'Boletín químico', sube: 'boletin', opcional: true, abrir: bolP.length ? `window.abrirBoletinQuimico(${bolP[0].id})` : 'window.abrirBoletinQuimico()', pago: bolP.length ? { txt: `Pagado · S/ ${n2(bolP.reduce((t, k) => t + num(k.monto_pen), 0))}`, fn: `window.abrirBoletinQuimico(${bolP[0].id})` } : null, match: car('boletin') },
-    { ico: '🏦', tit: 'Constancias de pago', sube: 'voucher', abrir: 'window.abrirPagosProveedor()', match: a => ['voucher', 'swift', 'correo'].includes(a.concepto) && a.entidad === 'carpeta_importacion' },
+    { ico: '🏦', tit: 'Constancias de pago', sube: 'voucher', abrir: 'window.abrirPagosProveedor()', match: a => (['voucher', 'swift', 'correo'].includes(a.concepto) && a.entidad === 'carpeta_importacion') || String(a.entidad || '').startsWith('liq_abono_') },
     { ico: '🚚', tit: 'Guía de ingreso', sube: 'guia', ok: gs.length > 0, abrir: 'window.abrirGuiaCarpeta()', match: car('guia'), sub: gs.length ? gs.map(g => esc(g.numero_guia)).join(', ') : 'Sin vincular', reg: _btnReg(gs.length ? '👁 Registro' : '🔗 Vincular', 'window.abrirGuiaCarpeta()') },
     { ico: '⏱️', tit: 'Constancia de estadía', sube: 'estadia', opcional: true, abrir: 'window.abrirEstadia()', ok: !!d.estadia, match: car('estadia'), sub: d.estadia ? 'Días libres registrados' : '', reg: _btnReg(d.estadia ? '👁 Registro' : '+ Registrar', 'window.abrirEstadia()') },
     { ico: '📝', tit: 'Proforma del agente', subeFn: 'window.abrirLiquidacionAgente()', abrir: 'window.abrirLiquidacionAgente()', ok: !!d.liq?.proforma_numero, match: a => a.entidad === 'liquidacion_agente' && a.concepto === 'proforma', sub: d.liq?.proforma_numero ? `N° ${esc(d.liq.proforma_numero)}` : '', reg: _btnReg('👁 Registro', 'window.abrirLiquidacionAgente()') },

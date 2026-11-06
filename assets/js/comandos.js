@@ -27,7 +27,7 @@ const PAGINAS = [
   'cobranzas.html',
   'bancos.html',
   'contabilidad.html',
-  'usuarios.html',
+  'rrhh.html',
   'perfil.html',
   'costeo-importaciones.html'
 ]

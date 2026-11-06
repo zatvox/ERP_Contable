@@ -16,6 +16,7 @@ import { _refrescarStockLoteEnVivo } from './helpers.js'
 import { _almacenes, _zonas } from './init.js'
 import { _guiaEstaVigente, _setEv } from './ventas-editar.js'
 import { renderVentas } from './ventas-lista.js'
+import { prefillLlegada, leerLlegada, validarLlegada } from './guia-llegada.js'   // dirección de entrega (SQL 136)
 import { serieGuiaDeComprobante, serieDeNumeroGuia, registrarUsoGuia, montarNumeroConSerie } from '../series.js'
 export { _numGuiaDespacho }
 
@@ -281,6 +282,7 @@ window.onSeleccionarVentaGuiaDespacho = async function () {
       <strong>Estado despacho:</strong> ${venta?.estado_despacho || 'pendiente'}
     `
     await _sugerirNumeroGuia(venta)
+    await prefillLlegada(venta, cliente)   // dirección de entrega: del PK si difiere, si no la del cliente
 
     const almacenesMap = {}
     for (const a of (almacenes || [])) almacenesMap[a.id] = a
@@ -662,6 +664,7 @@ window.guardarGuiaDespachoVenta = async function () {
     const observaciones  = document.getElementById('gdObservaciones')?.value?.trim() || null
 
     if (!ventaId)     { showToast('Selecciona la venta que estás despachando', 'warning'); return }
+    { const eLl = validarLlegada(); if (eLl) { showToast(eLl, 'warning', 6000); document.getElementById('gdLlegadaDir')?.focus(); return } }
     if (!numeroGuia)  { showToast('Ingresa el N° de Guía', 'warning'); return }
     if (!fechaGuia)   { showToast('Ingresa la fecha de la guía', 'warning'); return }
     if (!S._guiaDespachoLineas || S._guiaDespachoLineas.length === 0) { showToast('Esta venta no tiene productos pendientes', 'warning'); return }
@@ -766,6 +769,7 @@ window.guardarGuiaDespachoVenta = async function () {
       numero_guia:   numeroGuia,
       fecha_guia:    fechaGuia,
       observaciones,
+      ...leerLlegada(),
       created_by:    user.db_id
     })
 
@@ -938,6 +942,7 @@ window.guardarEdicionGuiaDespachoVenta = async function () {
     const observaciones  = document.getElementById('gdObservaciones')?.value?.trim() || null
 
     if (!ventaId)    { showToast('Venta inválida', 'danger'); return }
+    { const eLl = validarLlegada(); if (eLl) { showToast(eLl, 'warning', 6000); document.getElementById('gdLlegadaDir')?.focus(); return } }
     if (!numeroGuia) { showToast('Ingresa el N° de Guía', 'warning'); return }
     if (!fechaGuia)  { showToast('Ingresa la fecha de la guía', 'warning'); return }
     if (!S._guiaDespachoLineas || S._guiaDespachoLineas.length === 0) { showToast('No hay productos en esta guía', 'warning'); return }
@@ -1014,7 +1019,7 @@ window.guardarEdicionGuiaDespachoVenta = async function () {
     for (const dv of (detallesViejos || [])) await deleteDetalleGuiaDespachoVenta(dv.id)
 
     // ── 2) Cabecera de la guía (mismo id, mismo N° salvo que se haya editado) ─
-    await updateGuiaDespachoVenta(guiaId, { numero_guia: numeroGuia, fecha_guia: fechaGuia, observaciones })
+    await updateGuiaDespachoVenta(guiaId, { numero_guia: numeroGuia, fecha_guia: fechaGuia, observaciones, ...leerLlegada() })
 
     // ── 3) Aplicar los despachos nuevos sobre la MISMA guía — idéntico al
     //       loop de guardarGuiaDespachoVenta, salvo que no vuelve a crear la

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <link rel="icon" type="image/png" href="assets/img/genko-geco.png">
+  <link rel="apple-touch-icon" href="assets/img/genko-geco.png">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JHIRO ERP - CRM</title>
+  <link rel="stylesheet" href="assets/css/styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <aside class="sidebar">
+      <div class="sidebar-logo">JHIRO</div>
+      <ul class="sidebar-menu">
+        <li><a href="dashboard.html" data-page="dashboard">&#128202; Dashboard</a></li>
+        <li><a href="inventario.html" data-page="inventario">&#128230; Inventario</a></li>
+        <li><a href="compras.html" data-page="compras">&#128722; Compras</a></li>
+        <li><a href="ventas.html" data-page="ventas">&#128200; Ventas</a></li>
+        <li><a href="crm.html" class="active" data-page="crm">&#129309; CRM</a></li>
+        <li><a href="cobranzas.html" data-page="cobranzas">&#128176; Cobranza y pagos</a></li>
+        <li><a href="tesoreria.html" data-page="tesoreria">&#128179; Tesorería</a></li>
+        <li data-solo-admin><a href="rrhh.html" data-page="rrhh">&#128101; RRHH</a></li>
+        <li><a href="costeo-importaciones.html" data-page="costeo">&#128674; Carpetas Importación</a></li>
+        <li><a href="contabilidad.html" data-page="contabilidad">&#128209; Contabilidad</a></li>
+        <li><a href="perfil.html" data-page="perfil">&#9881;&#65039; Configuración</a></li>
+      </ul>
+      <div class="sidebar-user">
+        <strong id="userDisplay">Admin</strong>
+        <button class="btn-logout" onclick="logout()">Cerrar Sesión</button>
+      </div>
+    </aside>
+
+    <div class="main-content">
+      <header class="header">
+        <div class="header-left">
+          <button class="menu-toggle" id="menuToggle">☰</button>
+          <h2 class="header-title">CRM</h2>
+        </div>
+
+        <nav class="module-nav" id="crmTabs">
+          <button type="button" class="tab-btn active" data-tab="cot">Cotizaciones</button>
+          <button type="button" class="tab-btn" data-tab="cli">Clientes</button>
+          <button type="button" class="tab-btn" data-tab="stk">Stock y lotes</button>
+          <button type="button" class="tab-btn" data-tab="pre" data-gestor>💲 Precios</button>
+          <button type="button" class="tab-btn" data-tab="cat" data-gestor>Catálogo web</button>
+          <button type="button" class="tab-btn" data-tab="web" data-gestor>⚙️ Web y flete</button>
+          <button type="button" class="tab-btn" data-tab="map">🗺 Mapa</button>
+        </nav>
+
+        <div class="header-controls">
+          <a class="btn btn-small" href="crm/index.html" target="_blank" rel="noopener" title="Abrir el catálogo público">🛍 Catálogo web ↗</a>
+          <button class="theme-toggle" id="themeToggle">🌙 Oscuro</button>
+        </div>
+      </header>
+
+      <main class="content" id="crm-root">
+        <div id="tab-cot" class="tab-content active"><div id="crm-cot"></div></div>
+        <div id="tab-cli" class="tab-content"><div id="crm-cli"></div></div>
+        <div id="tab-stk" class="tab-content"><div id="crm-stk"></div></div>
+        <div id="tab-pre" class="tab-content"><div id="crm-pre"></div></div>
+        <div id="tab-cat" class="tab-content"><div id="crm-cat"></div></div>
+        <div id="tab-web" class="tab-content"><div id="crm-web"></div></div>
+        <div id="tab-map" class="tab-content"><div id="crm-map"></div></div>
+      </main>
+    </div>
+  </div>
+
+  <div id="modal-crm-det" class="modal"><div class="modal-content" style="max-width:860px;" id="crm-det-body"></div></div>
+  <div id="modal-crm-cat" class="modal"><div class="modal-content" style="max-width:760px;" id="crm-cat-body"></div></div>
+
+  <script type="module" src="assets/js/config.js"></script>
+  <script type="module" src="assets/js/supabase-client.js"></script>
+  <script type="module" src="assets/js/auth-supabase.js"></script>
+  <script type="module" src="assets/js/auth-init.js"></script>
+  <script type="module" src="assets/js/supabase-data.js"></script>
+  <script type="module" src="assets/js/helpers.js"></script>
+  <script type="module" src="assets/js/main.js"></script>
+  <script type="module" src="assets/js/crm.js"></script>
+</body>
+</html>

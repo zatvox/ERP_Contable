@@ -22,7 +22,7 @@ if (actions && empresas.length > 1) {
 const links = document.getElementById('nav-links')
 if (links && staff) {
   links.insertAdjacentHTML('beforeend',
-    `<li><a href="panel.html?emp=${emp?.id ?? ''}" class="nav__link nav__link--int">Panel CRM</a></li><li><a href="../dashboard.html" class="nav__link nav__link--int">ERP</a></li>`)
+    `<li><a href="../crm.html" class="nav__link nav__link--int">Panel CRM</a></li><li><a href="../dashboard.html" class="nav__link nav__link--int">ERP</a></li>`)
 }
 
 // textos configurables (Panel → Configuración)

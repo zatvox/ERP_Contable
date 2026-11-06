@@ -2768,3 +2768,15 @@ body.paleta-laton .login-form input:focus {
 .login-rol input { accent-color: var(--color-accent, var(--color-primary)); width: auto; padding: 0; }
 .login-rol label:has(input:checked) { border-color: var(--color-accent, var(--color-primary)); background: color-mix(in srgb, var(--color-accent, var(--color-primary)) 10%, transparent); }
 .login-rol small { display:block; font-weight: 400; color: var(--text-secondary); font-size: 0.74rem; }
+
+
+/* Cerrar sesión: esquina superior izquierda del sidebar (2026-11-05) */
+.sidebar-logout-top {
+  position: absolute; top: 10px; left: 10px; width: 26px; height: 26px;
+  border: none; border-radius: var(--radius-md); background: rgba(255, 255, 255, 0.15);
+  color: white; cursor: pointer; font-size: 14px; line-height: 1;
+  display: flex; align-items: center; justify-content: center; transition: background 0.2s;
+}
+.sidebar-logout-top:hover { background: var(--color-danger); }
+.sidebar-user .btn-logout { display: none !important; }
+body.sidebar-collapsed .sidebar-logout-top { position: static; margin: 0 auto 8px; }

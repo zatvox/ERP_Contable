@@ -11,6 +11,34 @@ import { _recalcularEstadoDespachoVenta, renderGuiasDespachoVenta } from './guia
 import { _repVentasListos } from './reportes.js'
 import { _guiaEstaVigente } from './ventas-editar.js'
 import { _devolverAUnaZona, renderVentas } from './ventas-lista.js'
+import { supabase } from '../supabase-client.js'
+import { resolverAviso } from '../shared/campanita.js'
+
+// ─── PK de origen de una factura/boleta (2026-11-05) ─────────────────────────
+// Regla de Luis: si la factura cubre TODO el PK (1 PK = 1 factura), al anularla el PK también
+// se anula (no queda "colgado" en el seguimiento de despacho) y se avisa que puede DUPLICAR el PK
+// para volver a facturar. Si es parcial (hay otras facturas, o esta cubría solo una parte), el PK sigue
+// vigente y lo que cubría esta factura vuelve a quedar pendiente.
+//   Casos:  1) 1 PK ↔ 1 factura completa      → se anula también el PK.
+//           2) PK con otras facturas vigentes  → PK sigue vigente, estado se recalcula (parcial).
+//           3) Factura parcial de un PK        → PK sigue vigente, cantidad vuelve a pendiente.
+//           4) Con cobros o guías activas      → bloqueado (ya existía): primero revertir cobro / anular guía.
+//           5) Nota de crédito/débito          → no toca el PK (solo el recálculo de estado de siempre).
+async function _evaluarPkDeFactura(venta) {
+  if (!venta.packing_id || !['01', '03'].includes(String(venta.tipo_comprobante))) return null
+  const { data: pk } = await supabase.from('packing').select('id, numero, estado, cot_numero').eq('id', venta.packing_id).maybeSingle()
+  if (!pk || pk.estado === 'anulado' || pk.estado === 'cotizacion') return null
+  const [{ data: lin }, { data: vs }, { data: dv }] = await Promise.all([
+    supabase.from('detalle_packing').select('id, cantidad').eq('packing_id', pk.id),
+    supabase.from('ventas').select('id, tipo_comprobante, estado, comprobante_anulado, estado_comprobante').eq('packing_id', pk.id),
+    supabase.from('detalle_ventas').select('detalle_packing_id, cantidad').eq('venta_id', venta.id)
+  ])
+  const otras = (vs || []).filter(v => v.id !== venta.id && ['01', '03'].includes(String(v.tipo_comprobante)) && !estaAnulado(v))
+  const fact = {}
+  for (const d of (dv || [])) if (d.detalle_packing_id) fact[d.detalle_packing_id] = (fact[d.detalle_packing_id] || 0) + (+d.cantidad || 0)
+  const cubreTodo = (lin || []).length > 0 && lin.every(l => (fact[l.id] || 0) >= (+l.cantidad) - 0.001)
+  return { pk, otras: otras.length, anularPk: otras.length === 0 && cubreTodo }
+}
 
 // ============================================================================
 // ANULACIÓN DE FACTURAS DE VENTA
@@ -90,6 +118,14 @@ window.anularVenta = async function (id) {
       bloqueos.push(`Tiene ${guias.length} guía(s) de despacho activa(s) (${guias.map(g => g.numero_guia).join(', ')}). Anúlalas primero — son las que devuelven el stock a Inventario.`)
     }
 
+    // --- PK de origen: ¿se anula también?
+    const evalPk = await _evaluarPkDeFactura(venta)
+    if (evalPk?.anularPk) {
+      efectos.push(`📦 Esta factura cubre TODO el ${evalPk.pk.numero} (1 PK = 1 factura): el PK también se ANULARÁ y dejará de aparecer en el seguimiento de despacho. Si necesitas facturar de nuevo este pedido, usa «Duplicar» sobre el ${evalPk.pk.numero}${evalPk.pk.cot_numero ? ` (conserva el seguimiento de ${evalPk.pk.cot_numero})` : ''}.`)
+    } else if (evalPk) {
+      efectos.push(`📦 El ${evalPk.pk.numero} sigue vigente: lo que cubría esta factura vuelve a quedar pendiente de facturar${evalPk.otras ? ` (tiene otras ${evalPk.otras} factura(s) vigente(s))` : ''}.`)
+    }
+
     // --- Asiento contable
     if (venta.asiento_id) {
       efectos.push('Se generará un asiento de reversión (el asiento original no se borra).')
@@ -114,8 +150,17 @@ window.anularVenta = async function (id) {
           estado: 'anulada'
         })
 
-        // 1b. Si vino de un PK, su cantidad vuelve a "pendiente" (estado del PK se recalcula)
-        if (venta.packing_id) { try { await window.recalcularEstadoPacking?.(venta.packing_id) } catch (e) { console.warn('PK no recalculado:', e) } }
+        // 1b. Si vino de un PK: o se anula con la factura (cubría todo) o su cantidad vuelve a "pendiente"
+        if (venta.packing_id) {
+          try {
+            if (evalPk?.anularPk) {
+              await supabase.from('packing').update({ estado: 'anulado', venta_id: null, updated_at: new Date().toISOString() }).eq('id', evalPk.pk.id)
+              resolverAviso('cot_bajo_pv_lista', 'packing', evalPk.pk.id)
+              showToast(`${evalPk.pk.numero} anulado junto con la factura. Para volver a facturar: Duplicar ${evalPk.pk.numero}.`, 'info', 9000)
+              if (document.getElementById('tabla-packing-body')) window.renderPacking?.(true)
+            } else await window.recalcularEstadoPacking?.(venta.packing_id)
+          } catch (e) { console.warn('PK no actualizado:', e) }
+        }
 
         // 2. Anular su cuenta por cobrar (ya validamos que no tiene cobros)
         for (const cxc of (cxcs || [])) {

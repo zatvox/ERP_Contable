@@ -748,3 +748,11 @@ body.ui-moderna .modal .pp-drop-link { display: inline !important; text-transfor
 /* menús ⋮ de columnas a la altura de los títulos Entradas / Salidas */
 .hc-h-menu { position: relative; padding-right: 40px; }
 .hc-h-menu .col-menu.card-corner-menu { top: -4px; right: 0; }
+
+/* 2026-11-06 · Abonos del agente: cabecera + vouchers por etapa */
+.la-abono-h { font-size:.7rem; text-transform:uppercase; letter-spacing:.03em; color:var(--text-secondary); font-weight:600; margin-bottom:2px; }
+.la-vouchers { display:flex; flex-wrap:wrap; gap:10px; margin:6px 0 2px; }
+.la-vch { display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid var(--border-color); border-radius:12px; background:var(--bg-secondary); max-width:300px; }
+.la-vch .adj-thumb { width:44px; height:44px; border-radius:8px; cursor:zoom-in; }
+.la-vch-n { max-width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.82rem; }
+.la-vch-s { font-size:.72rem; color:var(--text-secondary); }
