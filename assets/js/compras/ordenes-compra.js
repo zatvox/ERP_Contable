@@ -509,7 +509,7 @@ window.confirmarOC = async function (id) {
  *   no lo pasan y quedan igual que antes (fecha_vencimiento null).
  */
 export async function _crearCuentaPagarSiFactura(compra, userId, crono = null) {
-  if (!compra?.id || (compra.tipo_comprobante !== '01' && compra.tipo_comprobante !== '91')) return
+  if (!compra?.id || !['01', '02', '91'].includes(compra.tipo_comprobante)) return
   try {
     const fechaVenc = crono?.cuotas?.length
       ? crono.cuotas[crono.cuotas.length - 1].fecha_vencimiento
@@ -524,7 +524,8 @@ export async function _crearCuentaPagarSiFactura(compra, userId, crono = null) {
       fecha_vencimiento:  fechaVenc,
       moneda:             compra.currency || 'PEN',
       tipo_cambio:        parseFloat(compra.tipo_cambio) || 1,
-      monto_total:        parseFloat(compra.total) || 0,
+      // RH con retención de 4ta: lo que se le debe al proveedor es el NETO (la retención va a SUNAT)
+      monto_total:        (compra.tipo_comprobante === '02' && compra.neto_pagado != null) ? parseFloat(compra.neto_pagado) : (parseFloat(compra.total) || 0),
       monto_pagado:       0,
       estado:             'pendiente',
       termino_pago_id:         crono?.terminoId ?? null,

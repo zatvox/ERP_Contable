@@ -149,12 +149,14 @@ window.cambiarTipoCompra = function (tipo) {
   // Crédito/Contado simple, igual que siempre tuvo Servicio). Los anticipos
   // disponibles del proveedor no tienen sentido si esta MISMA compra es un
   // anticipo (no se puede aplicar un anticipo a otro anticipo).
+  const selComp = document.getElementById('nqTipoComprobante')
+  if (selComp && tipo !== 'servicio' && selComp.value === '02') { selComp.value = '01'; document.getElementById('csRHBox')?.style.setProperty('display', 'none') }   // RH solo en Servicio
   const cronoWrap = document.getElementById('nqCronogramaWrap')
   if (cronoWrap) cronoWrap.style.display = (tipo === 'mercaderia') ? '' : 'none'
 
-  const titulo = { mercaderia: 'Nueva Compra (Mercadería)', servicio: 'Nueva Compra de Servicio/Gasto', anticipo: 'Nueva Compra — Anticipo a Proveedor' }
+  const titulo = { mercaderia: 'Nuevo Registro (Mercadería)', servicio: 'Nuevo Registro de Servicio/Gasto', anticipo: 'Nuevo Registro — Anticipo a Proveedor' }
   const tituloEl = document.getElementById('ncTituloModal')
-  if (tituloEl) tituloEl.textContent = titulo[tipo] || 'Nueva Compra'
+  if (tituloEl) tituloEl.textContent = titulo[tipo] || 'Nuevo Registro'
 
   _cargarAnticiposDisponiblesProveedor()
 }

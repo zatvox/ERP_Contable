@@ -57,11 +57,13 @@ async function _cargarBase() {
   const fiscales = new Set(costos.filter(k => ['credito_fiscal', 'percepcion'].includes(k.clasificacion)).map(k => k.documento_id))
   const cand = docs.filter(d => !TIPOS_EXCLUIDOS.includes(d.tipo) && !fiscales.has(d.id) && !(d.tipo === 'voucher_bancario'))
   const concepto = id => costos.find(k => k.documento_id === id)?.concepto || ''
+  let _prov = new Map()
+  try { _prov = new Map(((await getContacts()) || []).map(c => [c.id, c.nombre])) } catch (_) { /* sin nombres */ }
   return { costos, cand: cand.map(d => {
     const ks = costos.filter(k => k.documento_id === d.id)
     const igv = num(d.igv_monto), tot = num(d.monto_total)
     return { id: d.id, titulo: concepto(d.id) || d.tipo, numero: [d.serie, d.numero].filter(Boolean).join('-') || '—', fecha: d.fecha_emision, moneda: d.moneda, total: tot,
-      igv, base: d.monto_sin_igv != null ? num(d.monto_sin_igv) : Math.max(0, tot - igv), costoIds: ks.map(k => k.id), compra_id: d.compra_id || null, regul: d.regularizacion || null }
+      igv, base: d.monto_sin_igv != null ? num(d.monto_sin_igv) : Math.max(0, tot - igv), costoIds: ks.map(k => k.id), compra_id: d.compra_id || null, regul: d.regularizacion || null, proveedor_id: d.proveedor_id || null, proveedor: _prov.get(d.proveedor_id) || '' }
   }) }
 }
 
@@ -100,7 +102,7 @@ function _asegurarModal() {
   if ($('modal-liq-agente')) return
   document.body.insertAdjacentHTML('beforeend', `
   <div id="modal-liq-agente" class="modal">
-    <div class="modal-content" style="width:min(96vw, 1040px); max-width:min(96vw, 1040px); max-height:calc(100vh - 48px); display:flex; flex-direction:column;">
+    <div class="modal-content" style="width:min(98vw, 1280px); max-width:min(98vw, 1280px); max-height:calc(100vh - 48px); display:flex; flex-direction:column;">
       <div class="modal-header"><h3 class="modal-title" id="laTitulo">Liquidación del agente</h3>
         <button class="modal-close" onclick="window.cerrarLiqAgente()">&times;</button></div>
       <div style="padding:4px 20px 0;">
@@ -213,6 +215,7 @@ function _pintarDocs() {
       : (d.costoIds.length === 1 ? `<button type="button" class="la-reg" onclick="window.laRegistrarGasto(${d.costoIds[0]})" title="Abre el modal de compra de gasto con esta factura">🧾 Registrar gasto</button>` : '')
     return `<tr>${chk}
       ${cel('concepto', `<div class="la-glosa"><span>${esc(d.titulo)}</span>${estado}</div>`, 'text', d.titulo)}
+      <td class="la-prov" title="${esc(d.proveedor)}">${esc(d.proveedor) || '—'}</td>
       ${cel('numero', esc(d.numero), 'text', d.numero === '—' ? '' : d.numero)}
       ${cel('fecha', fechaDMY(d.fecha), 'date', d.fecha || '')}
       ${cel('base', `<span class="la-mon">${S}</span>${n2(d.base)}`, 'number', d.base.toFixed(2), 'la-num')}
@@ -220,9 +223,9 @@ function _pintarDocs() {
       <td class="la-num"><b><span class="la-mon">${S}</span>${n2(d.total)}</b></td>
       <td class="la-acc">${lectura || d.costoIds.length !== 1 ? '' : `<button type="button" class="la-edit" data-solo-edicion title="${d.compra_id ? 'Editar gasto (modal completo)' : 'Registrar / editar gasto (modal completo)'}" onclick="window.laRegistrarGasto(${d.costoIds[0]})">✏️</button><button type="button" class="la-edit la-del" data-solo-edicion title="Eliminar esta glosa" onclick="window.laFilaEliminar(${i})">✕</button>`}</td></tr>`
   }
-  const pie = ['USD', 'PEN'].filter(m => sub[m].n).map(m => `<tr class="la-sub"><td></td><td colspan="3">Subtotal ${m === 'USD' ? 'dólares' : 'soles'} (${sub[m].n} marcadas)</td>
+  const pie = ['USD', 'PEN'].filter(m => sub[m].n).map(m => `<tr class="la-sub"><td></td><td colspan="4">Subtotal ${m === 'USD' ? 'dólares' : 'soles'} (${sub[m].n} marcadas)</td>
       <td class="la-num"><span class="la-mon">${SIGNO(m)}</span>${n2(sub[m].b)}</td><td class="la-num"><span class="la-mon">${SIGNO(m)}</span>${n2(sub[m].i)}</td><td class="la-num"><b><span class="la-mon">${SIGNO(m)}</span>${n2(sub[m].t)}</b></td><td></td></tr>`).join('')
-  $('laDocs').innerHTML = `<div style="overflow-x:auto;"><table class="data-table la-tabla" style="width:100%"><thead><tr><th></th><th>Concepto (glosa)</th><th>N° doc.</th><th>Fecha</th><th class="la-num">Base imponible</th><th class="la-num">IGV</th><th class="la-num">Total</th><th></th></tr></thead><tbody>${_docs.map(fila).join('')}</tbody><tfoot>${pie}</tfoot></table></div>`
+  $('laDocs').innerHTML = `<div style="overflow-x:auto;"><table class="data-table la-tabla" style="width:100%"><thead><tr><th></th><th>Concepto (glosa)</th><th>Proveedor</th><th>N° doc.</th><th>Fecha</th><th class="la-num">Base imponible</th><th class="la-num">IGV</th><th class="la-num">Total</th><th></th></tr></thead><tbody>${_docs.map(fila).join('')}</tbody><tfoot>${pie}</tfoot></table></div>`
   if (_celda) setTimeout(() => { const e = $('laC_in'); if (e) { e.focus(); if (e.select && e.type !== 'date') e.select() } }, 0)
 }
 
@@ -578,10 +581,17 @@ window.laNuevaFactura = async function () {
     const marcados = new Map(_docs.map(d => [d.id, d.marcado]))
     _docs = base.cand.map(d => ({ ...d, marcado: previos.has(d.id) ? !!marcados.get(d.id) : true }))
     _pintarDocs(); window.laRecalcular(); window.laAuditar()
+    // Flujo directo (2026-11-06): la factura nueva se registra SOLA en Compras (tipo servicio/gasto) y en Cuentas por Pagar,
+    // sin segundo paso «Registrar gasto». Si algo falta (proveedor/serie/número/perfil) queda el botón 🧾 como respaldo.
+    const nuevos = base.cand.filter(d => !previos.has(d.id) && !d.compra_id)
+    for (const d of nuevos) await _autoRegistrarGasto(d)
+    if (nuevos.length) await _refrescarDocs()
   }
   await window.abrirModalLineaCosto?.()
   const m = document.getElementById('modal-linea-costo'); if (m) { document.body.appendChild(m); m.style.zIndex = 2300 }
 }
+
+async function _autoRegistrarGasto(d) { await window.registrarGastoAuto?.(d.id, d.titulo) }
 
 function _volcar() {
   const c = carpeta()

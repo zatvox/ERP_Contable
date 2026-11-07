@@ -51,9 +51,12 @@ async function _cargarCompra() {
   const c = carpeta()
   const todas = (await query('compras', {})) || []
   const num_ = String(_ci.invoice_number || '').replace(/^INVOICE-?/i, '').toLowerCase()
-  _compra = todas.find(x => x.carpeta_importacion_id === c?.id && !x.anulado)
-    || todas.find(x => !x.anulado && String(x.numero || '').toLowerCase() === num_)
-    || todas.find(x => !x.anulado && String(x.referencia || '').toLowerCase().includes(num_) && num_)
+  // Solo compras de MERCADERÍA/importación (CI tipo 91): las facturas de gasto del agente (tipo_compra servicio) también
+  // llevan carpeta_importacion_id y antes se tomaban por error como «la compra del CI» (carpeta 5 → Everest).
+  const esMerc = x => ['mercaderia', 'importacion'].includes(String(x.tipo_compra || '').toLowerCase())
+  _compra = todas.find(x => x.carpeta_importacion_id === c?.id && !x.anulado && esMerc(x))
+    || todas.find(x => !x.anulado && esMerc(x) && String(x.numero || '').toLowerCase() === num_)
+    || todas.find(x => !x.anulado && esMerc(x) && String(x.referencia || '').toLowerCase().includes(num_) && num_)
     || null
 }
 
@@ -123,9 +126,8 @@ function _pintarCompra() {
 function _validar(item) {
   const c = carpeta(), av = []
   if (c?.estado === 'cerrada') av.push(['err', 'La carpeta está cerrada.'])
-  const kg = item.det.reduce((t, d) => t + num(d.cantidad), 0)
-  const kgCI = num(_ci?.total_cantidad ?? _ci?.cantidad_total ?? _compra?.cantidad)
-  if (kgCI && Math.abs(kg - kgCI) / kgCI > 0.005) av.push(['warn', `La guía ingresó ${n0(kg)} y el CI/compra dice ${n0(kgCI)}.`])
+  // (La cantidad se valida sobre la SUMA de todas las guías de la compra — ver _resumenGuias —, no guía por guía:
+  //  un ingreso parcial en 2 guías de 24,480 cuadra con un CI de 48,960.)
   for (const d of item.det) {
     if (!d.lote) av.push(['err', `La línea ${esc(d.numero_lote || '')} no tiene lote asociado.`])
     else if (d.lote.carpeta_importacion_id && d.lote.carpeta_importacion_id !== c?.id) av.push(['err', `El lote ${esc(d.lote.numero_lote)} ya está vinculado a otra carpeta.`])
@@ -143,7 +145,16 @@ function _pintarGuias() {
       <button type="button" class="btn btn-primary" onclick="window.gcRegistrarGuia()">➕ Registrar guía de ingreso</button></div>`
     return
   }
-  $('gcGuias').innerHTML = _guias.map(item => {
+  const kgGuias = _guias.filter(x => !x.g.estado || x.g.estado === 'emitida').reduce((t, x) => t + x.det.reduce((a, d) => a + num(d.cantidad), 0), 0)
+  const kgCI = num(_ci?.total_cantidad ?? _ci?.cantidad_total ?? _compra?.cantidad)
+  const dif = kgCI - kgGuias
+  const resumen = !kgCI ? '' : Math.abs(dif) / kgCI <= 0.005
+    ? `<div class="dm-cruce ok" style="margin-bottom:8px;"><span class="dm-cruce-ico">✔</span><div>Las ${_guias.length} guía(s) suman <b>${n0(kgGuias)}</b> = CI/compra <b>${n0(kgCI)}</b>. Ingreso completo.</div></div>`
+    : dif > 0
+      ? `<div class="dm-cruce warn" style="margin-bottom:8px;"><span class="dm-cruce-ico">ℹ</span><div>Ingreso <b>parcial</b>: ${_guias.length} guía(s) suman <b>${n0(kgGuias)}</b> de <b>${n0(kgCI)}</b> del CI · faltan <b>${n0(dif)}</b>.</div></div>`
+      : `<div class="dm-cruce warn" style="margin-bottom:8px;"><span class="dm-cruce-ico">⚠</span><div>Las guías suman <b>${n0(kgGuias)}</b> y el CI/compra dice <b>${n0(kgCI)}</b>: exceden en <b>${n0(-dif)}</b>.</div></div>`
+  const lotesComp = new Set(_guias.flatMap(x => x.det.map(d => d.lote_id).filter(Boolean))).size < _guias.flatMap(x => x.det).filter(d => d.lote_id).length
+  $('gcGuias').innerHTML = resumen + _guias.map(item => {
     const { g, det, remision } = item
     const vinc = g.carpeta_importacion_id === c?.id
     const otra = g.carpeta_importacion_id && !vinc
@@ -158,7 +169,7 @@ function _pintarGuias() {
         ${vinc ? `<button type="button" class="btn btn-secondary btn-small" onclick="window.gcVincular(${g.id}, false)">Desvincular</button>`
           : `<button type="button" class="btn btn-primary btn-small" ${err || otra ? 'disabled' : ''} onclick="window.gcVincular(${g.id}, true)">🔗 Vincular a la carpeta</button>`}
       </div>
-      <table class="data-table" style="width:100%; margin-top:6px;"><thead><tr><th>Lote</th><th style="text-align:right">Ingresó</th><th style="text-align:right">Unidades</th><th style="text-align:right">Vendido</th><th style="text-align:right">Stock actual</th></tr></thead><tbody>${
+      <table class="data-table" style="width:100%; margin-top:6px;"><thead><tr><th>Lote</th><th style="text-align:right">Ingresó</th><th style="text-align:right">Unidades</th><th style="text-align:right" title="Salidas del lote completo (si varias guías comparten lote, el total se repite)">Vendido (lote)</th><th style="text-align:right">Stock actual (lote)</th></tr></thead><tbody>${
         det.map(d => `<tr><td>${esc(d.lote?.numero_lote || d.numero_lote || '—')}</td><td style="text-align:right">${n0(d.cantidad)}</td><td style="text-align:right">${n0(d.cantidad_unidades)}</td><td style="text-align:right">${d.vendido ? n0(d.vendido) : '—'}</td><td style="text-align:right">${n0(d.lote?.cantidad)}</td></tr>`).join('')}</tbody></table>
       ${av.map(([t, x]) => `<div style="font-size:.8rem; margin-top:4px;">${t === 'err' ? '⛔' : '⚠️'} ${x}</div>`).join('')}
     </div>`

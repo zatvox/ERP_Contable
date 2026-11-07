@@ -6,6 +6,7 @@ import { validarPerfilContacto } from '../shared/perfil-contacto.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { getCompras, addCompra, addCompraDetalle, getContactById, updateCuentaPagar, getTodosComprasAnticiposAplicados, addCompraAnticipoAplicado, subirAdjuntoCompra } from '../supabase-data.js'
 import { showToast } from '../helpers.js'
+import { query as _qRH } from '../supabase-client.js'
 import { estaAnulado } from '../anulacion.js'
 import { _escCompras } from './buscadores.js'
 import { _detallesCompraEnCreacion, _tipoCompraActual } from './compra-nueva.js'
@@ -18,7 +19,8 @@ import { _crearCuentaPagarSiFactura } from './ordenes-compra.js'
 
 window.calcularCompraServicio = function () {
   const subtotal = parseFloat(document.getElementById('csSubtotal')?.value || 0)
-  const igvPct   = parseFloat(document.getElementById('csIGV')?.value || 0)
+  const esRH     = document.getElementById('nqTipoComprobante')?.value === '02'
+  const igvPct   = esRH ? 0 : parseFloat(document.getElementById('csIGV')?.value || 0)   // el RH no lleva IGV
   const igvMonto = parseFloat((subtotal * igvPct / 100).toFixed(2))
   const total    = parseFloat((subtotal + igvMonto).toFixed(2))
 
@@ -26,7 +28,62 @@ window.calcularCompraServicio = function () {
   const totalEl = document.getElementById('csTotal')
   if (igvEl)   igvEl.value   = igvMonto.toFixed(2)
   if (totalEl) totalEl.value = total.toFixed(2)
+  if (esRH) window.calcularRetencion4ta?.(_rhEditada)
 }
+
+// ── Recibo por Honorarios: retención de 4ta categoría (2026-11-07) ───────────
+// Regla: 8% si el recibo supera S/ 1,500 (por recibo, no acumulado) y el proveedor no tiene suspensión vigente (Form. 1609).
+// Parámetros en parametros_renta4ta (tasa, umbral); suspensión en contacts.suspension_4ta_anio. Editable por si SUNAT/contador indica otra cosa.
+let _rhEditada = false
+let _rhParams = null
+async function _rhParametros(anio) {
+  if (_rhParams?.anio === anio) return _rhParams
+  let p = null
+  try { p = ((await _qRH('parametros_renta4ta', { anio })) || [])[0] } catch { /* tabla aún sin SQL 139 */ }
+  _rhParams = { anio, tasa: parseFloat(p?.tasa_retencion) || 0.08, umbral: parseFloat(p?.umbral_retencion_pen) || 1500, bancPen: parseFloat(p?.umbral_bancariz_pen) || 2000, bancUsd: parseFloat(p?.umbral_bancariz_usd) || 500 }
+  return _rhParams
+}
+
+window.onCambiarComprobanteCompra = function () {
+  const esRH = document.getElementById('nqTipoComprobante')?.value === '02'
+  if (esRH && _tipoCompraActual !== 'servicio') {
+    showToast('El Recibo por Honorarios solo aplica a Servicio/Gasto', 'warning')
+    document.getElementById('nqTipoComprobante').value = '01'; return
+  }
+  const box = document.getElementById('csRHBox'); if (box) box.style.display = esRH ? '' : 'none'
+  _rhEditada = false
+  window.calcularCompraServicio()
+}
+
+window.calcularRetencion4ta = async function (manual = false) {
+  _rhEditada = !!manual
+  const total = parseFloat(document.getElementById('csTotal')?.value || 0) || 0
+  const retEl = document.getElementById('csRetencion4ta'), netoEl = document.getElementById('csNetoPagar'), av = document.getElementById('csRHAviso')
+  if (!retEl) return
+  if (!manual) {
+    const fecha = document.getElementById('nqFecha')?.value || new Date().toISOString().slice(0, 10)
+    const anio = parseInt(fecha.slice(0, 4)), par = await _rhParametros(anio)
+    const moneda = document.getElementById('nqMoneda')?.value || 'PEN'
+    const tc = moneda === 'USD' ? (parseFloat(document.getElementById('nqTipoCambio')?.value || 0) || 1) : 1
+    const totalPen = total * tc
+    const contactId = parseInt(document.getElementById('nqProveedor')?.value || document.getElementById('csProveedor')?.value || 0)
+    const prov = contactId ? await getContactById(contactId) : null
+    const suspendido = prov && prov.suspension_4ta_anio === anio
+    let ret = 0, motivo
+    if (suspendido) motivo = `Proveedor con suspensión de 4ta vigente ${anio}${prov.suspension_4ta_constancia ? ' (' + prov.suspension_4ta_constancia + ')' : ''}: no se retiene.`
+    else if (totalPen <= par.umbral) motivo = `Recibo ≤ S/ ${par.umbral.toLocaleString('en-US')}: no se retiene.`
+    else { ret = parseFloat((total * par.tasa).toFixed(2)); motivo = `Recibo > S/ ${par.umbral.toLocaleString('en-US')} y sin suspensión: retención ${(par.tasa * 100).toFixed(0)}%.` }
+    retEl.value = ret.toFixed(2)
+    const banc = (moneda === 'USD' ? total > par.bancUsd : total > par.bancPen) ? ` ⚠ Supera el monto de bancarización (${moneda === 'USD' ? 'US$ ' + par.bancUsd : 'S/ ' + par.bancPen}): págalo por banco para que el gasto sea deducible.` : ''
+    if (av) av.textContent = motivo + banc + (prov ? '' : ' (Elige el proveedor para validar su suspensión.)')
+  }
+  const ret = parseFloat(retEl.value || 0) || 0
+  if (netoEl) netoEl.value = Math.max(0, total - ret).toFixed(2)
+}
+
+/** [PENDIENTE contable — sin registros] Asiento del RH: 63x gasto (honorarios) al debe · 4241 RH por pagar (neto) al haber ·
+ *  40171 renta 4ta por pagar (retención) al haber. Se activa cuando el contador confirme cuentas y ASIENTOS_AUTO_COMPRAS_ACTIVO. */
+export async function generarAsientoRH(/* compra */) { /* intencionalmente vacío: solo estructura */ }
 
 window.guardarCompraServicio = async function () {
   try {
@@ -68,6 +125,7 @@ window.guardarCompraServicio = async function () {
     const igvMonto = parseFloat(document.getElementById('csIGVMonto')?.value || 0)
     const total    = parseFloat(document.getElementById('csTotal')?.value || 0)
 
+    const retencionRH = tipoComprobante === '02' ? (parseFloat(document.getElementById('csRetencion4ta')?.value || 0) || 0) : 0
     const prov = await getContactById(contactId)
     // Si el usuario dejó el N° de Comprobante (campo ahora compartido con
     // Mercadería/Anticipo), se usa igual que allá; si no, se mantiene el
@@ -105,6 +163,7 @@ window.guardarCompraServicio = async function () {
       tipo_cambio:            tipoCambioServicio,
       estado_pago:            'pendiente',
       asiento_id:             null,
+      ...(tipoComprobante === '02' ? { retencion_4ta: retencionRH, neto_pagado: parseFloat((total - retencionRH).toFixed(2)) } : {}),
       created_by:             user.db_id
     })
 

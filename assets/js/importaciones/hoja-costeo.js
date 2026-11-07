@@ -165,6 +165,7 @@ async function _cargar() {
     liq ? Promise.all([getAdjuntos('liquidacion_agente', liq.id), getAdjuntos('liq_abono_proforma', liq.id), getAdjuntos('liq_abono_liquidacion', liq.id)]).then(r => r.flat()) : []
   ])
   const ajustes = ajustesR || [], abonosAg = abonosR || [], adjLiq = adjLiqR || []
+  let remisiones = []; try { remisiones = (await query('guias_remision', { carpeta_importacion_id: carpetaId })) || [] } catch { /* sin tabla/SQL 110 */ }
   // T.C. (soles por USD): SOLO el de la DAM (T.C. venta SUNAT de la fecha de pago de tributos).
   // Sin DAM no se inventa un tipo de cambio: las columnas en soles quedan en "—".
   const tcDam = num((dams || [])[0]?.tipo_cambio)
@@ -176,7 +177,7 @@ async function _cargar() {
   for (const d of docsAll || []) if (docIds.has(d.id)) docs[d.id] = d
   const mapaItems = {}; for (const i of items || []) mapaItems[i.id] = i
   const vouchers = { dam: vDam, aut: vAut, doc: vDoc }
-  return { cis: cisL, damsAll, lineasPI: lineasPI || [], tcInfo, carpeta, ci, pi: piRow, costos: costosOk, pagos: pagos || [], apps: appsRaw || [], contenedores: (contRaw || []).filter(c => (bls || []).some(b => b.id === c.bl_id)), dam: damRow, ajustes, liq, abonosAg, guias, lotesC, familias: familias || [], famLotes: famLotes || [], estadia, bls: bls || [], lineas: lineas || [], docs, mapaItems, adjuntos: [...(adjs || []), ...(adjLiq || [])], vouchers, proveedor: (prov || [])[0] || null, estimado: !ci }
+  return { cis: cisL, damsAll, lineasPI: lineasPI || [], tcInfo, carpeta, ci, pi: piRow, costos: costosOk, pagos: pagos || [], remisiones, apps: appsRaw || [], contenedores: (contRaw || []).filter(c => (bls || []).some(b => b.id === c.bl_id)), dam: damRow, ajustes, liq, abonosAg, guias, lotesC, familias: familias || [], famLotes: famLotes || [], estadia, bls: bls || [], lineas: lineas || [], docs, mapaItems, adjuntos: [...(adjs || []), ...(adjLiq || [])], vouchers, proveedor: (prov || [])[0] || null, estimado: !ci }
 }
 
 // ─── Cálculo ────────────────────────────────────────────────────────────────
@@ -937,7 +938,7 @@ function _html(d, r) {
           ${seccion(tit1, s1c, true, _chkFam(FAM.hayFam))}
           ${seccion('2.- Valor de aduana (OMC)', s2, true)}
           ${seccion('3.- Tributos de despacho', s2b)}
-          ${seccion('4.- Gastos de cadena local', s3)}
+          ${seccion('4.- Gastos de cadena local', s3, false, '<button type="button" class="btn btn-secondary btn-small" onclick="window.hcNuevoGasto()" title="Registrar una factura, boleta o recibo por honorarios de esta carpeta: pasa sola a Compras y Cuentas por Pagar">＋ Nuevo gasto</button>')}
           ${seccion('5.- Gastos financieros', s4)}
           <div id="hc-sec5">${sec5()}</div>
         </div>

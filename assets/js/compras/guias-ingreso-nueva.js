@@ -1,4 +1,5 @@
 import { fechaDMY } from '../helpers.js'
+import { query as _qImp, insert as _insImp } from '../supabase-client.js'
 // ============================================================================
 // compras/guias-ingreso-nueva.js — parte de compras.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
@@ -132,6 +133,7 @@ window.onSeleccionarCompraGuia = async function () {
     ])
 
     infoDiv.style.display = 'block'
+    _ngPrepararImp(compra)
     infoDiv.innerHTML = `
       <strong>Proveedor:</strong> ${compra?.proveedor_nombre || '-'} (${compra?.proveedor_ruc || '-'}) &nbsp;|&nbsp;
       <strong>Comprobante:</strong> ${compra?.serie ? compra.serie + '-' + compra.numero : (compra?.numero || '-')} &nbsp;|&nbsp;
@@ -992,6 +994,7 @@ window.guardarGuiaIngresoCompra = async function () {
     if (!guia?.id) { showToast('No se pudo registrar la guía de remisión', 'danger'); return }
 
     const totalValorGuia = await _aplicarRecepcionesAGuiaIngreso(guia, compra, compraId, recepcionesValidadas, user, fechaGuia, numeroGuia)
+    await _ngGuardarTraslado(guia, compra, numeroGuia, fechaGuia, user)
 
     // Asiento de valuación de inventario (20111 debe / 611511 haber).
     // Detrás del mismo candado de desarrollo que la factura de compra.
@@ -1131,4 +1134,59 @@ window.__zvAbrirGuiaEmbebida = async function (compraId) {
     const m = document.getElementById('modal-nueva-guia')
     new MutationObserver(() => { if (!m.classList.contains('show')) avisar('guia-cerrada') }).observe(m, { attributes: true, attributeFilter: ['class'] })
   } catch (e) { console.error('guia embebida:', e); avisar('guia-error', { motivo: e.message }) }
+}
+
+
+// ============================================================================
+// TRASLADO DE IMPORTACIÓN dentro del modal único (2026-11-07)
+// Solo aplica a compras de importación (Commercial Invoice tipo 91 o con carpeta). Las facturas locales no lo ven.
+// Al guardar la guía se crea también su fila en guias_remision (la misma que muestra la pestaña «Guía de remisión»).
+// ============================================================================
+const _g = id => document.getElementById(id)
+const _esImportacion = c => !!c && (String(c.tipo_comprobante || '') === '91' || (!!c.carpeta_importacion_id && ['mercaderia', 'importacion'].includes(String(c.tipo_compra || '').toLowerCase())))
+
+window.ngToggleImp = function () {
+  const on = !!_g('ngEsImp')?.checked
+  const c = _g('ngImpCampos'); if (c) c.style.display = on ? '' : 'none'
+}
+
+async function _ngPrepararImp(compra) {
+  const wrap = _g('ngImpWrap'); if (!wrap) return
+  const imp = _esImportacion(compra)
+  wrap.style.display = imp ? '' : 'none'
+  const chk = _g('ngEsImp'); if (chk) chk.checked = imp
+  window.ngToggleImp()
+  if (!imp) return
+  // Autocompletar con el último traslado de la misma carpeta (mismo contenedor, precinto, partida…): editable.
+  try {
+    const previas = ((await _qImp('guias_remision', compra.carpeta_importacion_id ? { carpeta_importacion_id: compra.carpeta_importacion_id } : {})) || [])
+      .filter(r => !compra.carpeta_importacion_id || r.carpeta_importacion_id === compra.carpeta_importacion_id).sort((x, y) => y.id - x.id)
+    const r = previas[0]; if (!r) return
+    const set = (id, v) => { const el = _g(id); if (el && !el.value && v != null) el.value = v }
+    set('ngITransp', r.transportista_nombre); set('ngITranspRuc', r.transportista_ruc); set('ngIPlaca', r.placa)
+    set('ngIConductor', r.conductor); set('ngILicencia', r.conductor_licencia); set('ngICont', r.contenedor_nro)
+    set('ngIPrec', r.precinto); set('ngIPartida', r.punto_partida); set('ngIDestino', r.lugar_destino)
+  } catch (e) { console.warn('autocompletar traslado', e) }
+}
+
+async function _ngGuardarTraslado(guia, compra, numeroGuia, fechaGuia, user) {
+  if (!_g('ngEsImp')?.checked || !_esImportacion(compra)) return
+  try {
+    const v = id => (_g(id)?.value || '').trim()
+    const num_ = String(compra.numero || '').toLowerCase()
+    const ci = ((await _qImp('comercial_invoices', {})) || []).find(x => compra.carpeta_importacion_id && x.carpeta_importacion_id === compra.carpeta_importacion_id
+      || String(x.invoice_number || '').replace(/^INVOICE-?/i, '').toLowerCase() === num_) || null
+    const fila = {
+      importacion_id: ci?.id || null, carpeta_importacion_id: compra.carpeta_importacion_id || null, guia_ingreso_id: guia.id,
+      tipo_guia: v('ngITipo') || 'remitente', numero_guia: numeroGuia, fecha_guia: fechaGuia, fecha_traslado: v('ngIFecTras') || null,
+      transportista_nombre: v('ngITransp') || null, transportista_ruc: v('ngITranspRuc') || null, placa: v('ngIPlaca') || null,
+      conductor: v('ngIConductor') || null, conductor_licencia: v('ngILicencia') || null, peso_bruto: parseFloat(v('ngIPeso')) || null,
+      contenedor_nro: v('ngICont') || null, precinto: v('ngIPrec') || null,
+      estado: (v('ngITransp') && v('ngIPlaca')) ? 'recibido' : 'pendiente',
+      punto_partida: v('ngIPartida') || null, lugar_destino: v('ngIDestino') || null, proveedor: compra.contact_id || null, created_by: user?.db_id
+    }
+    const f = await _insImp('guias_remision', fila)
+    if (!f?.id) showToast('La guía se guardó, pero no pude registrar el traslado: complétalo en Importaciones → Guía de ingreso', 'warning', 7000)
+    else if (fila.estado === 'pendiente') showToast('Traslado registrado como «pendiente» (falta transportista o placa)', 'info', 5000)
+  } catch (e) { console.warn('traslado importación', e); showToast('La guía se guardó; el traslado quedó pendiente de completar', 'warning', 6000) }
 }

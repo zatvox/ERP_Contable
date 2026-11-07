@@ -28,7 +28,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const $ = id => document.getElementById(id)
 
 // Cuenta de gasto sugerida según el concepto del ledger (el usuario puede cambiarla).
-const CUENTA_POR_CONCEPTO = {
+export const CUENTA_POR_CONCEPTO = {
   transporte_local: '631111', almacen: '632917', sobreestadia: '632917',
   comision_aduanas: '638211', agenciamiento: '638211', gastos_destino: '638211',
   gate_in: '638211', visto_bueno: '638211', thc: '638211', otro: '638111', interes: '638111'
@@ -355,6 +355,58 @@ window.guardarGastoFactura = async function () {
   } finally { btn.disabled = false; btn.textContent = _ctx?.editar ? '💾 Guardar cambios' : '💾 Registrar compra del gasto' }
 }
 
+/**
+ * Registro AUTOMÁTICO en Compras + CxP de una factura de gasto ya cargada en el costeo (2026-11-06).
+ * Lo usan «＋ Factura de gasto» de la liquidación del agente y «＋ Nuevo gasto» de la sección 4 de la hoja.
+ * Devuelve { ok, compraId?, cxpId?, motivo? }. Nunca lanza: si falta algo, la línea queda en el costeo y
+ * se puede completar con el botón 🧾 Registrar gasto.
+ */
+export async function registrarGastoAuto(docId, titulo = '') {
+  try {
+    await esperarContextoEmpresa()
+    const doc = ((await query('documentos_importacion', { id: docId })) || [])[0]
+    const k = ((await query('importacion_costos', { documento_id: docId })) || []).find(x => !x.anulado)
+    if (!doc || !k) return { ok: false, motivo: 'sin documento' }
+    if (doc.compra_id) return { ok: true, compraId: doc.compra_id }
+    if (!['despacho', 'nacionalizacion'].includes(k.grupo) || ['voucher_bancario', 'dam', 'autoliquidacion'].includes(doc.tipo)) return { ok: false, motivo: 'no aplica' }
+    const nombre = titulo || k.concepto || 'gasto'
+    if (!doc.proveedor_id || !doc.serie || !doc.numero || !doc.fecha_emision) {
+      showToast(`«${nombre}»: falta proveedor/serie/número; usa 🧾 Registrar gasto`, 'warning', 6000); return { ok: false, motivo: 'datos incompletos' }
+    }
+    if (!(await window.validarPerfilContacto?.(doc.proveedor_id, { rol: 'proveedor' }) ?? true)) {
+      showToast(`«${nombre}» quedó en el costeo: actualiza el contacto y usa 🧾 Registrar gasto`, 'warning', 7000); return { ok: false, motivo: 'perfil incompleto' }
+    }
+    const r = await registrarGastoFactura({
+      costoId: k.id, proveedorId: doc.proveedor_id, tipoComprobante: doc.tipo_comprobante || '01', serie: doc.serie, numero: doc.numero,
+      fecha: doc.fecha_emision, moneda: k.moneda || doc.moneda || 'USD', tc: num(k.tipo_cambio) > 1 ? k.tipo_cambio : doc.tipo_cambio, glosa: k.concepto || nombre,
+      cuentaCodigo: CUENTA_POR_CONCEPTO[k.concepto_codigo] || '638111', base: num(k.monto_moneda), igvPct: num(k.igv_monto) > 0 ? 18 : 0, igv: num(k.igv_monto),
+      archivo: null, regularizar: !!k.liquidacion_agente_id
+    })
+    showToast(`Compra #${r.compraId} registrada${r.cxpId ? ' · CxP #' + r.cxpId : ''} · ${doc.serie}-${doc.numero}`, 'success', 5000)
+    return { ok: true, compraId: r.compraId, cxpId: r.cxpId }
+  } catch (e) {
+    console.warn('registrarGastoAuto', e)
+    showToast(`«${titulo || 'gasto'}»: ${e.message || 'no se pudo registrar la compra'}; usa 🧾 Registrar gasto`, 'warning', 7000)
+    return { ok: false, motivo: e.message }
+  }
+}
+window.registrarGastoAuto = registrarGastoAuto
+
+/** «＋ Nuevo gasto» (sección 4 de la hoja): abre el registro de costos y, al guardar, la factura pasa sola a Compras + CxP. */
+window.hcNuevoGasto = async function () {
+  const carpetaId = window.costeoActual?.carpeta_importacion_id || window.carpetaActual?.id
+  if (!carpetaId) { showToast('Abre primero una carpeta', 'warning'); return }
+  const previos = new Set(((await query('importacion_costos', { carpeta_importacion_id: carpetaId })) || []).map(k => k.id))
+  window._alGuardarCosto = async () => {
+    window._alGuardarCosto = null
+    const nuevos = ((await query('importacion_costos', { carpeta_importacion_id: carpetaId })) || []).filter(k => !previos.has(k.id) && k.documento_id && !k.anulado)
+    const vistos = new Set()
+    for (const k of nuevos) { if (vistos.has(k.documento_id)) continue; vistos.add(k.documento_id); await registrarGastoAuto(k.documento_id, k.concepto) }
+    window.renderHojaCosteo?.()
+  }
+  await window.abrirModalLineaCosto?.()
+  const m = document.getElementById('modal-linea-costo'); if (m) { document.body.appendChild(m); m.style.zIndex = 2300 }
+}
 window.registrarGastoFactura = registrarGastoFactura
 window.actualizarGastoFactura = actualizarGastoFactura
 export default { abrirGastoFactura: window.abrirGastoFactura, registrarGastoFactura }

@@ -40,7 +40,7 @@ function _reglas(d) {
   const R = []
   const add = (codigo, sev, cat, tit, det) => R.push({ codigo, sev, cat, tit, det })
   if (!d) return R
-  const { dam, ci, pi, bls = [], pagos = [], apps = [], costos = [], lotesC = [], guias = [], liq, abonosAg = [], lineas = [] } = d
+  const { dam, ci, pi, bls = [], pagos = [], apps = [], costos = [], lotesC = [], guias = [], remisiones = [], docs = {}, liq, abonosAg = [], lineas = [] } = d
   const bl0 = bls[0]
   const rDAM = t => dam ? ref(t, `window.editarDAM('${dam.id}')`, 'Abrir la DAM') : esc(t)
   const rBL = t => bl0 ? ref(t, `window.abrirBL(${bl0.id})`, 'Abrir el B/L') : esc(t)
@@ -147,6 +147,28 @@ function _reglas(d) {
 
   // Lotes / guía / liquidación
   if (!guias.length) add('sin_guia', 'alerta', 'Ingreso', 'Sin guía de ingreso vinculada', `Vincula la guía de ingreso: ${rGuia('abrir guías')}.`)
+  // Guías sin datos de traslado (ya se recibió la mercadería pero falta la guía de remisión del puerto al almacén)
+  const sinTras = guias.filter(g => !remisiones.some(r => r.guia_ingreso_id === g.id))
+  if (sinTras.length) add('guia_sin_traslado', 'alerta', 'Ingreso', `Guía de ingreso sin datos de traslado (${sinTras.length})`,
+    `Completa transportista, placa y contenedor: ${rGuia('abrir guías')}.`)
+  const trasPend = remisiones.filter(r => r.estado === 'pendiente')
+  if (trasPend.length) add('traslado_pendiente', 'info', 'Ingreso', `Traslado en estado pendiente (${trasPend.length})`,
+    `Falta transportista o placa en ${rGuia(trasPend.map(r => r.numero_guia).filter(Boolean).join(', ') || 'la guía')}.`)
+  // Guías parciales: lo recibido no cubre el CI
+  const kgCI = num(ci?.cantidad_total_neto), kgLotes = lotesC.reduce((t, l) => t + num(l.cantidad ?? l.cantidad_inicial ?? 0), 0)
+  if (guias.length && kgCI && kgLotes && kgLotes < kgCI * 0.995) add('guias_parciales', 'info', 'Ingreso', 'Guías parciales: falta recibir parte del CI',
+    `Recibido ${rGuia(kg(kgLotes))} de ${rCI(kg(kgCI))} (faltan ${kg(kgCI - kgLotes)}).`)
+  // Facturas de gasto cargadas en el costeo sin pasar por Compras/CxP
+  const sinCompra = Object.values(docs || {}).filter(x => !x.compra_id && !['voucher_bancario', 'dam', 'autoliquidacion'].includes(x.tipo) && x.serie && x.numero
+    && costos.some(c => c.documento_id === x.id && ['despacho', 'nacionalizacion'].includes(c.grupo)))
+  if (sinCompra.length) add('gasto_sin_compra', 'alerta', 'Costos', `Facturas de gasto sin registrar en Compras (${sinCompra.length})`,
+    `Usa 🧾 Registrar gasto en cada línea para que lleguen a Compras y Cuentas por Pagar.`)
+  // FOB/EXW/FCA: flete y seguro los factura un tercero
+  if (/fob|exw|fca|fas/i.test(pi?.incoterm || '')) {
+    const tiene = rx => costos.some(c => rx.test(c.concepto_codigo || '') && !c.anulado)
+    if (!tiene(/flete/) || !tiene(/seguro/)) add('fob_sin_flete_seguro', 'alerta', 'Costos', `Incoterm ${esc(pi.incoterm)} sin ${!tiene(/flete/) ? 'flete' : ''}${!tiene(/flete/) && !tiene(/seguro/) ? ' ni ' : ''}${!tiene(/seguro/) ? 'seguro' : ''} registrado`,
+      `Con ${esc(pi.incoterm)} el flete y el seguro se pagan aparte: regístralos en ${rPagos('pagos al proveedor')} o en el costeo para no subvaluar el costo.`)
+  }
   const sinCosto = lotesC.filter(l => num(l.costo_real) <= 0)
   if (lotesC.length && sinCosto.length) add('lotes_sin_costo', 'alerta', 'Costos', 'Lotes sin costo real aplicado',
     `${ref(sinCosto.length + ' de ' + lotesC.length + ' lotes', 'window.abrirCostosLote()', 'Revisar y aplicar costos al lote')} siguen con costo provisional.`)

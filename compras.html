@@ -87,7 +87,7 @@
               <h3 class="card-title">Compras</h3>
               <div style="display:flex; gap: 10px;">
                 <button id="btnEliminarComprasSeleccionadas" class="btn btn-danger btn-small" style="display:none;" onclick="window.eliminarComprasSeleccionadas()">🗑 Eliminar seleccionadas (0)</button>
-                <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevaCompra()">+ Nueva Compra</button>
+                <button class="btn btn-primary btn-small" onclick="window.abrirModalNuevaCompra()">+ Nuevo Registro</button>
                 <div class="col-menu menu-tuerca">
                   <button type="button" class="card-menu-btn" onclick="event.stopPropagation(); this.parentElement.classList.toggle('open')" title="Más acciones">⚙️</button>
                   <div class="col-menu-dropdown">
@@ -503,7 +503,7 @@
   <div id="modal-nueva-compra-mercaderia" class="modal">
     <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
       <div class="modal-header">
-        <h3 class="modal-title" id="ncTituloModal">Nueva Compra</h3>
+        <h3 class="modal-title" id="ncTituloModal">Nuevo Registro</h3>
         <button class="modal-close" onclick="closeModal('modal-nueva-compra-mercaderia')">✕</button>
       </div>
       <form id="formNewCompraMercaderia">
@@ -552,8 +552,9 @@
           <div class="grid grid-3">
             <div class="form-group">
               <label>Tipo de Comprobante</label>
-              <select id="nqTipoComprobante">
+              <select id="nqTipoComprobante" onchange="window.onCambiarComprobanteCompra?.()">
                 <option value="01" selected>Factura (01)</option>
+                <option value="02">Recibo por Honorarios (02) — solo Servicio</option>
                 <option value="91">Invoice — No Domiciliado (91)</option>
               </select>
               <small style="color:var(--text-secondary); font-size:0.72rem;">Boleta no se acepta en Compras: no da derecho a crédito fiscal de IGV.</small>
@@ -667,6 +668,15 @@
             <div class="form-group">
               <label>Total</label>
               <input type="number" id="csTotal" readonly disabled placeholder="0.00">
+            </div>
+          </div>
+          <div id="csRHBox" style="display:none; margin-top:10px; padding:10px 12px; border:1px solid var(--border-color); border-radius:var(--radius-md); background:var(--bg-secondary);">
+            <strong>Retención de 4ta categoría (Recibo por Honorarios)</strong>
+            <div id="csRHAviso" style="font-size:0.8rem; color:var(--text-secondary); margin:4px 0 8px;"></div>
+            <div class="grid grid-3">
+              <div class="form-group"><label>Retención 4ta</label><input type="number" id="csRetencion4ta" step="0.01" min="0" oninput="window.calcularRetencion4ta(true)"></div>
+              <div class="form-group"><label>Neto a pagar al proveedor</label><input type="number" id="csNetoPagar" readonly disabled></div>
+              <div class="form-group"><label>&nbsp;</label><button type="button" class="btn btn-secondary btn-small" onclick="window.calcularRetencion4ta(false)">↻ Recalcular</button></div>
             </div>
           </div>
           <div class="form-group">
@@ -909,6 +919,29 @@
             <div class="form-group">
               <label>Observaciones</label>
               <input type="text" id="ngObservaciones" placeholder="Opcional">
+            </div>
+          </div>
+        </div>
+
+        <div id="ngImpWrap" style="display:none; padding:12px 20px; border-bottom:1px solid var(--border-color);">
+          <label style="display:flex; gap:8px; align-items:center; cursor:pointer; font-weight:600;">
+            <input type="checkbox" id="ngEsImp" onchange="window.ngToggleImp()"> 🚢 Es importación: registrar también los datos del traslado (guía de remisión del puerto al almacén)
+          </label>
+          <div id="ngImpCampos" style="display:none; margin-top:10px;">
+            <small style="color:var(--text-secondary);">Opcional: si falta transportista o placa, el traslado queda «pendiente» y la alerta te lo recuerda. No bloquea el guardado.</small>
+            <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; margin-top:8px;">
+              <div class="form-group"><label>Fecha de traslado</label><input type="date" id="ngIFecTras"></div>
+              <div class="form-group" style="grid-column:span 2;"><label>Transportista</label><input type="text" id="ngITransp" maxlength="120"></div>
+              <div class="form-group"><label>RUC transportista</label><input type="text" id="ngITranspRuc" maxlength="11"></div>
+              <div class="form-group"><label>Placa</label><input type="text" id="ngIPlaca" maxlength="15"></div>
+              <div class="form-group" style="grid-column:span 2;"><label>Conductor</label><input type="text" id="ngIConductor" maxlength="120"></div>
+              <div class="form-group"><label>Licencia</label><input type="text" id="ngILicencia" maxlength="20"></div>
+              <div class="form-group"><label>Peso bruto (kg)</label><input type="number" id="ngIPeso" step="0.01"></div>
+              <div class="form-group"><label>N° contenedor</label><input type="text" id="ngICont" maxlength="20"></div>
+              <div class="form-group"><label>Precinto</label><input type="text" id="ngIPrec" maxlength="30"></div>
+              <div class="form-group"><label>Tipo de guía</label><select id="ngITipo"><option value="remitente">Remitente</option><option value="transportista">Transportista</option></select></div>
+              <div class="form-group" style="grid-column:span 2;"><label>Punto de partida</label><input type="text" id="ngIPartida" maxlength="160" placeholder="Terminal / depósito"></div>
+              <div class="form-group" style="grid-column:span 2;"><label>Punto de llegada (almacén)</label><input type="text" id="ngIDestino" maxlength="160"></div>
             </div>
           </div>
         </div>

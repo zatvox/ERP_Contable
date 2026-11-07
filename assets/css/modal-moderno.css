@@ -756,3 +756,9 @@ body.ui-moderna .modal .pp-drop-link { display: inline !important; text-transfor
 .la-vch .adj-thumb { width:44px; height:44px; border-radius:8px; cursor:zoom-in; }
 .la-vch-n { max-width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.82rem; }
 .la-vch-s { font-size:.72rem; color:var(--text-secondary); }
+
+/* 2026-11-06 · Liquidación del agente: columnas ajustadas al texto + columna Proveedor */
+.la-tabla { table-layout:auto; }
+.la-tabla td, .la-tabla th { white-space:nowrap; }
+.la-tabla td.la-prov { white-space:normal; min-width:150px; max-width:260px; }
+.la-tabla td:nth-child(2) { white-space:normal; min-width:180px; }
