@@ -1,0 +1,73 @@
+/* login-v2.css — Login Genko: pantalla dividida + aurora lenta + geco que camina (2026-11-09)
+   Solo se aplica con <body class="login-page lg2">. No toca styles.css. */
+body.lg2 { display: block; background: #0a0f24; min-height: 100vh; }
+.lg2-shell { display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr); min-height: 100vh; }
+
+/* ── Panel de marca (izquierda) ───────────────────────────────────────── */
+.lg2-marca { position: relative; overflow: hidden; color: #e5e7eb; display: flex; flex-direction: column; justify-content: space-between; padding: clamp(28px, 4vw, 56px);
+  background: linear-gradient(160deg, #0a0f24 0%, #14213d 100%); isolation: isolate; }
+.lg2-marca::before { content: ''; position: absolute; inset: 0; z-index: -1; opacity: .9;
+  background-image: linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px);
+  background-size: 46px 46px; -webkit-mask-image: radial-gradient(ellipse at 40% 45%, #000 0%, transparent 72%); mask-image: radial-gradient(ellipse at 40% 45%, #000 0%, transparent 72%); }
+.lg2-marca::after { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: .07;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"); }
+.lg2-blob { position: absolute; z-index: -1; border-radius: 50%; filter: blur(70px); will-change: transform; }
+.lg2-blob.b1 { width: 46vw; height: 46vw; max-width: 640px; max-height: 640px; left: -12%; top: -14%; background: radial-gradient(circle, rgba(59,130,246,.55), transparent 65%); animation: lg2Deriva1 26s ease-in-out infinite alternate; }
+.lg2-blob.b2 { width: 34vw; height: 34vw; max-width: 480px; max-height: 480px; right: -8%; top: 28%; background: radial-gradient(circle, rgba(245,158,11,.30), transparent 65%); animation: lg2Deriva2 32s ease-in-out infinite alternate; }
+.lg2-blob.b3 { width: 38vw; height: 38vw; max-width: 520px; max-height: 520px; left: 18%; bottom: -22%; background: radial-gradient(circle, rgba(16,185,129,.28), transparent 65%); animation: lg2Deriva3 29s ease-in-out infinite alternate; }
+@keyframes lg2Deriva1 { to { transform: translate(14%, 18%) scale(1.12); } }
+@keyframes lg2Deriva2 { to { transform: translate(-18%, -12%) scale(.92); } }
+@keyframes lg2Deriva3 { to { transform: translate(16%, -14%) scale(1.1); } }
+
+.lg2-geco-fondo { position: absolute; z-index: -1; right: -4%; bottom: -6%; width: min(46vh, 380px); aspect-ratio: 300 / 371; background: rgba(255,255,255,.07); transform: rotate(-14deg);
+  -webkit-mask: url('../../landing/assets/geco.png') center / contain no-repeat; mask: url('../../landing/assets/geco.png') center / contain no-repeat; }
+.lg2-logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.15rem; letter-spacing: .01em; }
+.lg2-logo i { width: 28px; aspect-ratio: 300 / 371; background: #fff; display: block; -webkit-mask: url('../../landing/assets/geco.png') center / contain no-repeat; mask: url('../../landing/assets/geco.png') center / contain no-repeat; }
+.lg2-logo small { font-weight: 500; font-size: .66rem; letter-spacing: .16em; text-transform: uppercase; color: #94a3b8; }
+.lg2-centro h2 { font-size: clamp(1.7rem, 3.2vw, 2.6rem); line-height: 1.12; margin: 0 0 12px; color: #fff; letter-spacing: -.01em; max-width: 14em; }
+.lg2-centro h2 em { font-style: normal; background: linear-gradient(90deg, #60a5fa, #34d399); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.lg2-centro > p { margin: 0 0 26px; color: #94a3b8; max-width: 30em; font-size: .98rem; }
+.lg2-mods { display: grid; gap: 10px; max-width: 30em; }
+.lg2-mod { display: flex; align-items: center; gap: 14px; padding: 11px 14px; border-radius: 12px; border: 1px solid rgba(148,163,184,.18); background: rgba(255,255,255,.035); backdrop-filter: blur(6px); }
+.lg2-mod svg { width: 22px; height: 22px; flex: none; color: #60a5fa; }
+.lg2-mod:nth-child(2) svg { color: #fbbf24; } .lg2-mod:nth-child(3) svg { color: #34d399; } .lg2-mas svg { color: #94a3b8 !important; } .lg2-mas { border-style: dashed; }
+.lg2-mod b { display: block; font-size: .92rem; color: #f1f5f9; } .lg2-mod span { font-size: .78rem; color: #94a3b8; }
+.lg2-pie { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: .76rem; color: #94a3b8; }
+.lg2-nota { flex: 0 0 100%; margin-top: 4px; font-size: .66rem; color: #64748b; }
+.lg2-chip { display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px; border-radius: 999px; border: 1px solid rgba(148,163,184,.25); background: rgba(10,15,36,.5); color: #e5e7eb; }
+.lg2-chip::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--c); box-shadow: 0 0 10px var(--c); }
+
+/* ── Formulario (derecha) ─────────────────────────────────────────────── */
+.lg2-main { display: flex; align-items: center; justify-content: center; padding: 24px; background: var(--bg-secondary, #f9fafb); }
+.lg2 .login-container { max-width: 420px; padding: 0; }
+.lg2 .login-card { position: relative; border: 1px solid var(--border-color, #e5e7eb); box-shadow: 0 18px 50px rgba(10, 15, 36, .10), 0 2px 6px rgba(10, 15, 36, .05); }
+.lg2 .login-volver { color: var(--text-secondary, #64748b); }
+.lg2 .login-volver:hover { color: var(--color-primary, #14213d); }
+
+/* Geco que camina por el borde de la tarjeta (al enfocar el formulario o mientras ingresa) */
+.lg2-geco { display: none; }
+@supports (offset-path: inset(0 round 16px)) {
+  .lg2-geco { display: block; position: absolute; left: 0; top: 0; width: 22px; aspect-ratio: 300 / 371; background: var(--color-primary, #14213d); pointer-events: none; opacity: 0; z-index: 3;
+    -webkit-mask: url('../../landing/assets/geco.png') center / contain no-repeat; mask: url('../../landing/assets/geco.png') center / contain no-repeat;
+    offset-path: inset(0 round 12px); offset-rotate: auto 90deg; offset-anchor: 50% 50%; offset-distance: 0%; }
+  .lg2 .login-card:focus-within .lg2-geco { animation: lg2Camina 7s linear 1 forwards; }
+  .lg2 .login-card.cargando .lg2-geco { animation: lg2Camina 2.6s linear infinite; }
+}
+@keyframes lg2Camina { 0% { offset-distance: 0%; opacity: 0; } 6% { opacity: 1; } 94% { opacity: 1; } 100% { offset-distance: 100%; opacity: 0; } }
+
+/* Entrada suave, una sola vez */
+.lg2-centro, .lg2 .login-card { animation: lg2Entra .7s cubic-bezier(.22,.61,.36,1) both; }
+.lg2 .login-card { animation-delay: .12s; }
+@keyframes lg2Entra { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+/* ── Celular: sin panel, fondo aurora sutil detrás de la tarjeta ──────── */
+@media (max-width: 900px) {
+  .lg2-shell { grid-template-columns: 1fr; }
+  .lg2-marca { display: none; }
+  .lg2-main { min-height: 100vh; background: radial-gradient(900px 420px at 15% -10%, rgba(59,130,246,.35), transparent 60%), radial-gradient(700px 380px at 95% 105%, rgba(16,185,129,.22), transparent 60%), linear-gradient(160deg, #0a0f24, #14213d); }
+  .lg2 .login-volver { color: rgba(255,255,255,.72); } .lg2 .login-volver:hover { color: #fff; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lg2-blob, .lg2-centro, .lg2 .login-card, .lg2-geco { animation: none !important; }
+  .lg2-geco { display: none !important; }
+}

@@ -7,10 +7,33 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Genko · Ingresar</title>
   <link rel="stylesheet" href="assets/css/styles.css">
+  <link rel="stylesheet" href="assets/css/login-v2.css">
+  <style>
+    .login-volver { display:block; text-align:center; margin-top:18px; font-size:.88rem; color:rgba(255,255,255,.72); text-decoration:none; transition:color .2s, transform .2s; }
+    .login-volver:hover { color:#fff; transform:translateX(-2px); }
+  </style>
 </head>
-<body class="login-page">
+<body class="login-page lg2">
+<div class="lg2-shell">
+  <aside class="lg2-marca" aria-hidden="false">
+    <i class="lg2-blob b1"></i><i class="lg2-blob b2"></i><i class="lg2-blob b3"></i><i class="lg2-geco-fondo"></i>
+    <div class="lg2-logo"><i></i><span>Genko <small>by ZatVox</small></span></div>
+    <div class="lg2-centro">
+      <h2>El ERP que <em>no se olvida</em> de nada</h2>
+      <p>Stock, cobranzas, caja e importaciones de todas tus empresas, en un solo lugar y en tiempo real.</p>
+      <div class="lg2-mods">
+        <div class="lg2-mod"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg><div><b>Stock y despacho</b><span>Lotes, guías y camiones en el mapa</span></div></div>
+        <div class="lg2-mod"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20M16 15h2"/></svg><div><b>Cobranzas y caja</b><span>Quién debe, cuánto y desde cuándo</span></div></div>
+        <div class="lg2-mod"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><div><b>Importaciones</b><span>De la proforma al costo por lote</span></div></div>
+        <div class="lg2-mod lg2-mas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg><div><b>…y mucho más</b><span>CRM, compras, contabilidad, tesorería, RRHH y estadísticas</span></div></div>
+      </div>
+    </div>
+    <div class="lg2-pie"><span class="lg2-chip" style="--c:#3b82f6">Importaciones Vargas S.A.C.</span><span class="lg2-chip" style="--c:#f59e0b">Distribuidores Pérez E.I.R.L.</span><span>· multiempresa</span><small class="lg2-nota">Los nombres y la información de esta pantalla son de ejemplo.</small></div>
+  </aside>
+  <main class="lg2-main">
   <div class="login-container">
     <div class="login-card">
+      <i class="lg2-geco" aria-hidden="true"></i>
       <div class="login-header">
         <img class="login-logo" src="assets/img/genko-geco.png" alt="Genko">
         <h1>Genko</h1>
@@ -146,7 +169,10 @@
       </div>
 
     </div>
+    <a class="login-volver" href="landing/index.html">← Conocer Genko · volver al inicio</a>
   </div>
+  </main>
+</div>
 
   <script type="module" src="assets/js/config.js"></script>
   <script type="module" src="assets/js/supabase-client.js"></script>
@@ -165,6 +191,7 @@
 
       errorDiv.style.display = 'none'
       btnLogin.disabled = true; btnLogin.textContent = 'Ingresando...'
+      document.querySelector('.login-card').classList.add('cargando')
 
       try {
         const result = await window.login(email, password)
@@ -180,6 +207,7 @@
         errorDiv.style.display = 'block'
       } finally {
         btnLogin.disabled = false; btnLogin.textContent = 'Ingresar'
+        document.querySelector('.login-card').classList.remove('cargando')
       }
     }
 

@@ -16,6 +16,10 @@
 //     (cobro con medio 'saldo_favor', sin banco).
 //   • Deshacer = el recibo completo (todos sus vouchers y el saldo a favor que
 //     generó, si aún no se usó).
+// Modo "🧾 Varios recibos" (2026-11-09): UN voucher que paga documentos con
+// recibos DISTINTOS (la oficina emitió un recibo por factura). Un solo lote y un
+// solo movimiento bancario; cada cobro lleva el N° y la fecha de SU recibo.
+// La suma de los recibos debería ser el voucher: el sistema avisa, no bloquea.
 // Analogía: varias jarras (vouchers) llenan los vasos más antiguos primero; lo
 // que sobra se guarda en un termo (saldo a favor) para la próxima vez.
 // ============================================================================
@@ -61,7 +65,7 @@ function _inyectarModal() {
           ${sec('1. Cliente y recibo')}
           <div style="display:grid; grid-template-columns:minmax(260px, 2fr) minmax(170px, 1fr) auto; gap:12px; align-items:end;">
             <div class="form-group" style="margin:0;"><label>Cliente *</label><select id="cmCliente" onchange="window._cmCambioCliente()"></select></div>
-            <div class="form-group" style="margin:0;"><label>N° Recibo de cobranza</label>
+            <div class="form-group" style="margin:0;" id="cmReciboWrap"><label>N° Recibo de cobranza</label>
               <div style="display:flex; gap:6px;"><input type="text" id="cmRecibo" style="flex:1; min-width:0;"><button type="button" class="btn btn-small btn-secondary" title="Siguiente N° del correlativo" onclick="window._sugerirRecibo('cmRecibo')">⏭</button></div></div>
             <div style="display:flex; gap:14px; flex-wrap:wrap; padding-bottom:6px;">
               <label style="display:flex; gap:6px; align-items:center; cursor:pointer; margin:0;"><input type="checkbox" id="cmLetras" checked style="width:auto; margin:0;" onchange="window._cmPintar()"> Incluir letras</label>
@@ -77,6 +81,9 @@ function _inyectarModal() {
               <button type="button" class="btn btn-small btn-secondary" id="cmBtnMulti" onclick="window._cmModoMulti(true)" title="El recibo junta varios vouchers (fechas, cuentas o T.C. distintos)">➕ Vouchers</button>
               <button type="button" class="btn btn-small btn-secondary" id="cmBtnAddV" style="display:none;" onclick="window._cmAddVoucher()">+ Agregar voucher</button>
               <button type="button" class="btn btn-small btn-secondary" id="cmBtnUno" style="display:none;" onclick="window._cmModoMulti(false)" title="Volver a un solo depósito">↩ Un solo depósito</button>
+              <button type="button" class="btn btn-small btn-secondary" id="cmBtnRecibos" onclick="window._cmModoRecibos(true)" title="Un solo voucher que paga documentos con recibos distintos (un recibo por factura)">🧾 Varios recibos</button>
+              <button type="button" class="btn btn-small btn-secondary" id="cmBtnAddR" style="display:none;" onclick="window._cmAddRecibo()">+ Agregar recibo</button>
+              <button type="button" class="btn btn-small btn-secondary" id="cmBtnUnRec" style="display:none;" onclick="window._cmModoRecibos(false)" title="Volver a un solo recibo">↩ Un solo recibo</button>
             </div>
           </div>
           <div id="cmDepUno" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px;">
@@ -100,6 +107,19 @@ function _inyectarModal() {
               <tbody id="cmVouchers"></tbody>
             </table>
           </div>
+          <div id="cmRecibosBox" style="display:none; margin-top:12px;">
+            <div style="font-size:0.8rem; font-weight:700; margin-bottom:6px;">Recibos emitidos con este voucher <small style="font-weight:400; color:var(--text-secondary);">— la fecha sigue a la del voucher salvo que la cambies; en la tabla de abajo eliges a qué recibo va cada documento</small></div>
+            <div style="border:1px solid var(--border-color); border-radius:var(--radius-md); overflow:auto;">
+              <table style="width:100%; border-collapse:collapse; margin:0; font-size:0.85rem;">
+                <thead><tr style="background:var(--bg-secondary);">
+                  <th style="padding:7px; width:40px;">#</th><th style="padding:7px; text-align:left;">N° recibo</th><th style="padding:7px; text-align:left;">Fecha</th>
+                  <th style="padding:7px; text-align:right;">Importe del recibo</th><th style="padding:7px; text-align:left;">Documentos</th><th style="padding:7px; text-align:right;">Asignado</th><th style="width:36px;"></th>
+                </tr></thead>
+                <tbody id="cmRecibos"></tbody>
+              </table>
+            </div>
+            <div id="cmRecibosChk" style="margin-top:6px; font-size:0.82rem;"></div>
+          </div>
         </div>
         <div style="padding-top:12px; border-top:1px solid var(--border-color);">
           <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
@@ -115,6 +135,7 @@ function _inyectarModal() {
                 <th style="width:34px;"></th><th style="text-align:left; padding:7px;">Documento</th><th style="text-align:left; padding:7px;">Vence</th>
                 <th style="text-align:right; padding:7px;">Atraso</th><th style="text-align:center; padding:7px;">Mon.</th><th style="text-align:right; padding:7px;">Saldo</th>
                 <th style="text-align:right; padding:7px;" id="cmThRet">Retención</th><th style="text-align:right; padding:7px; width:150px;">Aplicar</th>
+                <th style="text-align:left; padding:7px; display:none;" id="cmThRec">Recibo</th>
                 <th style="text-align:left; padding:7px;">Pagado con</th><th style="text-align:center; padding:7px;">Resultado</th>
               </tr></thead>
               <tbody id="cmFilas"></tbody>
@@ -160,8 +181,9 @@ window.abrirCobroMasivo = async function (contactId = null, opc = {}) {
   C.refrescarBuscador?.('cmCliente')
   for (const k of ['cmRecibo', 'cmObs']) $(k).value = ''
   C.limpiarAdjuntos('cmas')
-  _st = { contactId: null, filas: [], multi: false, vouchers: [_nuevoV()], saldos: [], usarSobrante: true }
+  _st = { contactId: null, filas: [], multi: false, modo: 'uno', vouchers: [_nuevoV()], recibos: [], saldos: [], usarSobrante: true }
   window._cmModoMulti(!!opc.multi, true)
+  if (opc.modo === 'recibos') window._cmModoRecibos(true, true)
   await window._cmCambioCliente()
   window.openModal('modal-cobro-masivo')
   window._cmTC(0, false)
@@ -196,6 +218,7 @@ window._cmCambioCliente = async function () {
   }
   _pintarSaldos()
   _pintarVouchers()
+  _pintarRecibos()
   window._cmPintar()
 }
 
@@ -226,16 +249,118 @@ window._cmModoMulti = function (on, silencioso = false) {
     _st.vouchers = [_st.vouchers[0]]
   }
   _st.multi = !!on
-  $('cmDepUno').style.display = on ? 'none' : 'grid'
-  $('cmDepMulti').style.display = on ? '' : 'none'
-  $('cmBtnMulti').style.display = on ? 'none' : ''
-  $('cmBtnAddV').style.display = on ? '' : 'none'
-  $('cmBtnUno').style.display = on ? '' : 'none'
-  $('cmTitDep').textContent = on ? 'Vouchers del recibo (uno por depósito / transferencia)' : 'Depósito'
-  $('cmTitulo').textContent = on ? '🧾 Cobro por recibo — varios vouchers, varios documentos' : '💰 Cobro masivo — un depósito, varios documentos'
+  _st.modo = on ? 'vouchers' : 'uno'
+  _aplicarModoUI()
   if (on && _st.vouchers.length === 1 && !silencioso) { _st.vouchers.push(_nuevoV(_st.vouchers[0])); window._cmTC(1, 'fecha') }
   _pintarVouchers()
   window._cmRecalc?.()
+}
+
+/** Muestra/oculta bloques y botones según el modo: 'uno' | 'vouchers' | 'recibos'. */
+function _aplicarModoUI() {
+  const m = _st.modo, show = (id, on, disp = '') => { const el = $(id); if (el) el.style.display = on ? disp : 'none' }
+  show('cmDepUno', m !== 'vouchers', 'grid')
+  show('cmDepMulti', m === 'vouchers')
+  show('cmBtnMulti', m === 'uno'); show('cmBtnAddV', m === 'vouchers'); show('cmBtnUno', m === 'vouchers')
+  show('cmBtnRecibos', m === 'uno'); show('cmBtnAddR', m === 'recibos'); show('cmBtnUnRec', m === 'recibos')
+  show('cmRecibosBox', m === 'recibos'); show('cmReciboWrap', m !== 'recibos'); show('cmThRec', m === 'recibos')
+  $('cmTitDep').textContent = m === 'vouchers' ? 'Vouchers del recibo (uno por depósito / transferencia)' : (m === 'recibos' ? 'Voucher (un depósito / transferencia) y sus recibos' : 'Depósito')
+  $('cmTitulo').textContent = m === 'vouchers' ? '🧾 Cobro por recibo — varios vouchers, varios documentos'
+    : m === 'recibos' ? '🧾 Un voucher — varios recibos' : '💰 Cobro masivo — un depósito, varios documentos'
+}
+
+// ── Modo "1 voucher → varios recibos" ────────────────────────────────────────
+const _nuevoR = (num = '') => ({ num, fecha: _st?.vouchers?.[0]?.fecha || _hoy(), fechaPropia: false, importe: 0 })
+
+window._cmModoRecibos = function (on, silencioso = false) {
+  if (!_st) return
+  if (on) {
+    if (_st.vouchers.length > 1) {
+      if (!silencioso && !confirm(`El modo "Varios recibos" usa UN solo voucher: se descartan ${_st.vouchers.length - 1} voucher(s). ¿Continuar?`)) return
+      _st.vouchers = [_st.vouchers[0]]
+    }
+    _st.multi = false; _st.modo = 'recibos'
+    if (!_st.recibos.length) _st.recibos = [_nuevoR($('cmRecibo').value.trim()), _nuevoR()]
+    _st.filas.forEach(f => { f.rec = 0 })
+  } else {
+    if (!silencioso && _st.recibos.length > 1 && !confirm('Volver a un solo recibo: todos los documentos irán con el N° del recibo R1. ¿Continuar?')) return
+    $('cmRecibo').value = _st.recibos[0]?.num || $('cmRecibo').value
+    _st.modo = 'uno'; _st.recibos = []
+  }
+  _aplicarModoUI()
+  _pintarVouchers()
+  _pintarRecibos()
+  window._cmPintar()
+}
+window._cmAddRecibo = function () { _st.recibos.push(_nuevoR()); _pintarRecibos(); window._cmPintar() }
+window._cmQuitarRecibo = function (i) {
+  if (_st.recibos.length <= 1) return
+  _st.recibos.splice(i, 1)
+  _st.filas.forEach(f => { if ((f.rec || 0) === i) f.rec = 0; else if ((f.rec || 0) > i) f.rec-- })
+  _pintarRecibos(); window._cmPintar()
+}
+window._cmRSet = function (i, campo, v) {
+  const r = _st?.recibos?.[i]; if (!r) return
+  if (campo === 'importe') r.importe = Math.max(0, _r2(v))
+  else if (campo === 'fecha') { r.fecha = v || _st.vouchers[0]?.fecha || ''; r.fechaPropia = !!v && v !== _st.vouchers[0]?.fecha }
+  else r[campo] = v
+  if (campo === 'num') { document.querySelectorAll('#cmFilas select').forEach(sel => { const o = sel.options[i]; if (o) o.textContent = `R${i + 1}${v ? ' · ' + v : ''}` }) }
+  if (campo === 'fecha') _pintarRecibos()
+  window._cmRecalc()
+}
+window._cmSetRec = function (k, v) { const f = _st.filas.find(x => x.k === k); if (f) f.rec = parseInt(v) || 0; window._cmRecalc() }
+
+const _partesR = s => { const m = String(s || '').trim().match(/^(.*?)(\d+)$/); return m ? { pref: m[1], num: parseInt(m[2], 10), ancho: m[2].length } : null }
+/** ⏭ del recibo i: siguiente del correlativo y, si otra fila ya lo tiene, el que sigue. */
+window._cmSugerirR = async function (i) {
+  await window._sugerirRecibo(`cmRn${i}`)
+  const r = _st.recibos[i]; if (!r) return
+  const p = _partesR($(`cmRn${i}`)?.value); if (!p) return
+  const mayor = _st.recibos.filter((_, j) => j !== i).map(x => _partesR(x.num)).filter(x => x && x.pref === p.pref).reduce((a, b) => Math.max(a, b.num), 0)
+  const n = Math.max(p.num, mayor + 1)
+  r.num = `${p.pref}${String(n).padStart(p.ancho, '0')}`
+  _pintarRecibos(); window._cmPintar()
+}
+
+function _pintarRecibos() {
+  const tb = $('cmRecibos'); if (!tb) return
+  if (_st.modo !== 'recibos') { tb.innerHTML = ''; return }
+  const v0 = _st.vouchers[0], mon = _monV(v0)
+  tb.innerHTML = _st.recibos.map((r, i) => `<tr style="border-top:1px solid var(--border-color);">
+    <td style="padding:6px; text-align:center; font-weight:700;">R${i + 1}</td>
+    <td style="padding:6px; min-width:170px;"><div style="display:flex; gap:4px;"><input type="text" id="cmRn${i}" value="${_esc(r.num)}" style="flex:1; min-width:0; padding:5px 7px;" oninput="window._cmRSet(${i}, 'num', this.value)"><button type="button" class="btn btn-small btn-secondary" title="Siguiente N° del correlativo" onclick="window._cmSugerirR(${i})">⏭</button></div></td>
+    <td style="padding:6px;"><input type="date" value="${r.fecha || ''}" style="padding:5px 7px; ${r.fechaPropia ? 'border-color:var(--color-warning);' : ''}" title="${r.fechaPropia ? 'Fecha distinta a la del voucher' : 'Sigue a la fecha del voucher'}" onchange="window._cmRSet(${i}, 'fecha', this.value)"></td>
+    <td style="padding:6px; white-space:nowrap;"><div style="display:flex; gap:4px; align-items:center; justify-content:flex-end;"><span class="mon mon-${mon.toLowerCase()}">${mon}</span><input type="number" step="0.01" min="0" value="${r.importe || ''}" style="width:120px; text-align:right; font-weight:700; padding:5px 6px;" oninput="window._cmRSet(${i}, 'importe', this.value)"></div></td>
+    <td style="padding:6px; font-size:0.78rem;" id="cmRdocs${i}"></td>
+    <td style="padding:6px; text-align:right; white-space:nowrap;" id="cmRasig${i}"></td>
+    <td style="text-align:center;">${_st.recibos.length > 1 ? `<button type="button" class="btn btn-small btn-danger" title="Quitar recibo" onclick="window._cmQuitarRecibo(${i})">✕</button>` : ''}</td>
+  </tr>`).join('')
+}
+
+/** Avisos (no bloquean) del modo varios recibos. */
+function _avisosRecibos(asig) {
+  if (_st.modo !== 'recibos') return { avisos: [], porRec: [] }
+  const v0 = _st.vouchers[0], mon = _monV(v0), imp = _r2(v0.importe)
+  const porRec = _st.recibos.map(() => ({ src: 0, docs: [] }))
+  for (const a of asig) {
+    const ri = Math.min(a.f.rec || 0, _st.recibos.length - 1)
+    if (a.s.tipo === 'voucher') porRec[ri].src = _r2(porRec[ri].src + a.montoSrc)
+    if (!porRec[ri].docs.includes(a.f)) porRec[ri].docs.push(a.f)
+  }
+  const avisos = []
+  const suma = _r2(_st.recibos.reduce((t, r) => t + r.importe, 0))
+  if (Math.abs(suma - imp) > 0.009) avisos.push(`La suma de los recibos (${mon} ${formatNumber(suma)}) no es igual al voucher (${mon} ${formatNumber(imp)}).`)
+  _st.recibos.forEach((r, i) => {
+    const R = `R${i + 1}${r.num ? ' (' + r.num + ')' : ''}`
+    if (!r.num.trim()) avisos.push(`${R}: sin N° de recibo.`)
+    if (!porRec[i].docs.length) avisos.push(`${R}: no tiene documentos asignados.`)
+    else if (r.importe > 0 && Math.abs(porRec[i].src - r.importe) > 0.009) avisos.push(`${R}: importe ${formatNumber(r.importe)} ≠ asignado a sus documentos ${formatNumber(porRec[i].src)}.`)
+    if (r.fechaPropia) avisos.push(`${R}: fecha ${fechaDMY(r.fecha)} distinta a la del voucher (${fechaDMY(v0.fecha)}).`)
+  })
+  const nums = _st.recibos.map(r => r.num.trim().toLowerCase()).filter(Boolean)
+  const rep = [...new Set(nums.filter((n, i) => nums.indexOf(n) !== i))]
+  if (rep.length) avisos.push(`N° de recibo repetido entre filas: ${rep.join(', ')}.`)
+  return { avisos, porRec }
 }
 
 window._cmAddVoucher = function () {
@@ -275,6 +400,7 @@ function _pintarVouchers() {
 window._cmVSet = function (i, campo, v, soloRecalc = false) {
   const x = _st?.vouchers?.[i]; if (!x) return
   x[campo] = campo === 'importe' ? Math.max(0, _r2(v)) : (campo === 'tc' ? (parseFloat(v) || '') : v)
+  if (campo === 'fecha' && i === 0 && _st.modo === 'recibos') { _st.recibos.forEach(r => { if (!r.fechaPropia) r.fecha = v }); _pintarRecibos() }
   if (!soloRecalc) _pintarVouchers()
   window._cmRecalc()
 }
@@ -361,6 +487,7 @@ window._cmPintar = function () {
       <td style="padding:6px 7px; text-align:right; font-weight:600;">${formatNumber(f.saldo)}</td>
       <td style="padding:6px 7px; text-align:right; ${sujeto ? '' : 'display:none;'}">${f.retPosible ? `<input type="number" step="0.01" min="0" value="${f.ret.toFixed(2)}" style="width:90px; text-align:right; padding:4px 6px;" oninput="window._cmSet('${f.k}', 'ret', this.value)">` : '—'}</td>
       <td style="padding:6px 7px;"><input type="number" step="0.01" min="0" value="${f.aplicar ? f.aplicar.toFixed(2) : ''}" placeholder="0.00" id="cmAp-${f.k}" style="width:100%; text-align:right; padding:5px 7px; font-weight:600;" oninput="window._cmSet('${f.k}', 'aplicar', this.value)"></td>
+      <td style="padding:6px 7px; ${_st.modo === 'recibos' ? '' : 'display:none;'}">${_st.modo === 'recibos' ? `<select style="padding:4px 6px; min-width:90px;" onchange="window._cmSetRec('${f.k}', this.value)">${_st.recibos.map((r, i) => `<option value="${i}" ${(f.rec || 0) === i ? 'selected' : ''}>R${i + 1}${r.num ? ' · ' + _esc(r.num) : ''}</option>`).join('')}</select>` : ''}</td>
       <td style="padding:6px 7px; font-size:0.78rem;" id="cmEq-${f.k}"></td>
       <td style="text-align:center;" id="cmRes-${f.k}"></td>
     </tr>`
@@ -400,8 +527,32 @@ window._cmDistribuir = function () {
   const sinTC = fs.some(s => s.tipo === 'voucher' && _filasVisibles().some(f => f.moneda !== s.mon) && !(s.tc > 0))
   if (sinTC) { showToast('Falta el T.C. de algún voucher (hay documentos en otra moneda)', 'warning'); return }
   _st.filas.forEach(f => { f.aplicar = 0 })
+  if (_st.modo === 'recibos' && _st.recibos.some(r => r.importe > 0)) return _distribuirPorRecibos()
   const { asig } = _asignar(f => _maxAplicable(f))
   for (const a of asig) a.f.aplicar = _r2(a.f.aplicar + a.montoDoc)
+  window._cmPintar()
+}
+
+/** Cada recibo, en orden, cubre los documentos más antiguos que siguen libres con SU importe. */
+function _distribuirPorRecibos() {
+  const v = _st.vouchers[0], mon = _monV(v)
+  const vis = _filasVisibles()
+  _st.recibos.forEach((r, ri) => {
+    let resto = r.importe
+    for (const f of vis) {
+      if (resto <= 0.004) break
+      const libre = _r2(_maxAplicable(f) - f.aplicar)
+      if (libre <= 0.004) continue
+      const tc = parseFloat(v.tc) || parseFloat(f.obj?.tipo_cambio) || 1
+      const disp = _conv(resto, mon, f.moneda, tc)
+      const toma = Math.min(libre, disp)
+      if (f.aplicar > 0 && (f.rec || 0) !== ri) continue   // ya es de otro recibo: cada recibo va a sus propios documentos
+      if (!(f.aplicar > 0)) f.rec = ri
+      f.aplicar = _r2(f.aplicar + toma)
+      resto = toma >= disp - 0.004 ? 0 : _r2(resto - _conv(toma, f.moneda, mon, tc))
+    }
+  })
+  if (_st.saldos.some(s => s.usar && s.monto > 0)) showToast('Hay saldo a favor marcado: se usa primero y lo del voucher que sobre irá a saldo a favor. Desmárcalo si no corresponde.', 'info', 8000)
   window._cmPintar()
 }
 
@@ -460,11 +611,25 @@ window._cmRecalc = function () {
       <input type="checkbox" style="width:auto; margin:3px 0 0;" ${_st.usarSobrante ? 'checked' : ''} onchange="_cmSobranteOk(this.checked)">
       <span><b>Registrar el sobrante (${txt(sobr)}) como SALDO A FAVOR del cliente.</b><br><small style="color:var(--text-secondary);">El dinero entra completo al banco. En la próxima cobranza de este cliente aparecerá el aviso para netearlo.</small></span></label>`
   } else { sb.style.display = 'none'; sb.innerHTML = '' }
+  if (_st.modo === 'recibos') {
+    const { avisos, porRec } = _avisosRecibos(asig)
+    const mon = _monV(_st.vouchers[0])
+    porRec.forEach((p, i) => {
+      const d = $(`cmRdocs${i}`), a = $(`cmRasig${i}`), r = _st.recibos[i]
+      if (d) d.innerHTML = p.docs.length ? p.docs.map(f => `<span class="badge badge-secondary" style="font-size:0.7rem; margin:1px;">${_esc(f.doc)}</span>`).join(' ') : '<span style="color:var(--text-secondary);">—</span>'
+      const ok = !(r.importe > 0) || Math.abs(p.src - r.importe) <= 0.009
+      if (a) a.innerHTML = `<span style="font-weight:600; color:${ok ? 'var(--color-success)' : 'var(--color-warning)'};">${mon} ${formatNumber(p.src)}</span>`
+    })
+    const suma = _r2(_st.recibos.reduce((t, r) => t + r.importe, 0)), imp = _r2(_st.vouchers[0]?.importe)
+    $('cmRecibosChk').innerHTML = `<b>Σ recibos ${mon} ${formatNumber(suma)}</b> · voucher ${mon} ${formatNumber(imp)} → `
+      + (Math.abs(suma - imp) <= 0.009 ? '<span style="color:var(--color-success); font-weight:700;">cuadra ✔</span>' : `<span style="color:var(--color-warning); font-weight:700;">difiere ${formatNumber(_r2(imp - suma))}</span>`)
+      + (avisos.length ? `<div style="margin-top:4px; color:var(--color-warning);">⚠️ ${avisos.map(_esc).join('<br>⚠️ ')}<br><small style="color:var(--text-secondary);">Son recomendaciones: puedes registrar igual.</small></div>` : '')
+  }
   const aplicado = Object.values(aplicadoMon).reduce((t, x) => t + x, 0)
   const btn = $('cmBtnOk')
   if (btn && !btn.classList.contains('btn-cargando')) {
     btn.disabled = !(fuentes.length) || !cuadra || (aplicado <= 0 && !haySobr)
-    btn.textContent = _st.multi ? '💾 Registrar recibo' : '💾 Registrar cobro'
+    btn.textContent = _st.modo === 'recibos' ? `💾 Registrar ${_st.recibos.length} recibos` : (_st.multi ? '💾 Registrar recibo' : '💾 Registrar cobro')
   }
 }
 window._cmSobranteOk = function (on) { _st.usarSobrante = !!on; window._cmRecalc() }
@@ -472,7 +637,12 @@ window._cmSobranteOk = function (on) { _st.usarSobrante = !!on; window._cmRecalc
 // ── Confirmar ────────────────────────────────────────────────────────────────
 window.confirmarCobroMasivo = async function () {
   if (!_st?.contactId) { showToast('Elige el cliente', 'warning'); return }
-  const recibo = $('cmRecibo').value.trim() || null, obs = $('cmObs').value.trim() || null
+  const modoRec = _st.modo === 'recibos'
+  const numsRec = modoRec ? [...new Set(_st.recibos.map(r => r.num.trim()).filter(Boolean))] : []
+  // En "varios recibos" el lote guarda todos los N° (R1 / R2…); cada cobro, el de SU recibo
+  const recibo = modoRec ? (numsRec.join(' / ') || null) : ($('cmRecibo').value.trim() || null), obs = $('cmObs').value.trim() || null
+  const recDe = f => modoRec ? (_st.recibos[Math.min(f.rec || 0, _st.recibos.length - 1)]?.num.trim() || null) : recibo
+  const fechaDe = (f, def) => modoRec ? (_st.recibos[Math.min(f.rec || 0, _st.recibos.length - 1)]?.fecha || def) : def
   const vouchers = _st.vouchers.filter(v => _r2(v.importe) > 0)
   if (_st.vouchers.some(v => _r2(v.importe) > 0 && (!v.fecha || !v.bancoId))) { showToast('Cada voucher necesita fecha y cuenta', 'warning'); return }
   if (!vouchers.length && !_st.saldos.some(s => s.usar && s.monto > 0)) { showToast('Ingresa el importe recibido', 'warning'); return }
@@ -509,19 +679,32 @@ window.confirmarCobroMasivo = async function () {
     const { data: ya } = await supabase.from('cobros_lote').select('id, fecha, monto_recibido, numero_operacion').eq('banco_id', v.bancoId).ilike('numero_operacion', `*${n}`)
     const igual = (ya || []).find(x => String(x.numero_operacion || '').replace(/^0+(?=\d)/, '').toLowerCase() === n.toLowerCase())
     if (igual) { showToast(`⛔ La operación N° ${op} ya está registrada en esa cuenta (L${igual.id}, ${fechaDMY(igual.fecha)}, ${formatNumber(igual.monto_recibido)}).`, 'danger', 10000); return }
+    // …o en un cobro INDIVIDUAL (se registró factura por factura): avisa con los datos
+    const { data: ind } = await supabase.from('cobros').select('id, cxc_id, fecha, monto, moneda, numero_recibo, numero_operacion, referencia, banco_id, lote_id')
+      .is('lote_id', null).or(`numero_operacion.ilike."*${n}",referencia.ilike."*${n}"`)
+    const indIg = (ind || []).filter(x => String(x.numero_operacion || x.referencia || '').trim().replace(/^0+(?=\d)/, '').toLowerCase() === n.toLowerCase()
+      && (!x.banco_id || Number(x.banco_id) === Number(v.bancoId)))
+    if (indIg.length) {
+      const lista = indIg.map(x => { const d = C.cxc().find(c => c.id === x.cxc_id); return `• ${d ? C.descDoc(d) : 'cobro #' + x.id} — ${fechaDMY(x.fecha)} — ${x.moneda || ''} ${formatNumber(x.monto)}${x.numero_recibo ? ' — Rec. ' + x.numero_recibo : ''}` }).join('\n')
+      if (!confirm(`⚠️ La operación N° ${op} ya está en ${indIg.length} cobro(s) individual(es) de esa cuenta:\n${lista}\n\nSi es ESTE mismo voucher, elimina primero esos cobros (si no, el ingreso al banco se duplica) y vuelve a registrar aquí.\n¿Registrar igual?`)) return
+    }
   }
   const { asig, falta, fuentes } = _asignar(f => f.aplicar)
   if (Object.values(falta).reduce((t, x) => t + x, 0) > 0.05) { showToast('Lo recibido no alcanza para lo aplicado: ajusta los montos o agrega un voucher', 'warning'); return }
   const sobr = _sobrantes(fuentes)
   if (Object.keys(sobr).length && !_st.usarSobrante) { showToast('Hay un sobrante: márcalo como saldo a favor o ajusta los montos', 'warning'); return }
-  if (!(await C.reciboLibre(recibo, _st.contactId))) return
+  if (modoRec) { for (const n of numsRec) if (!(await C.reciboLibre(n, _st.contactId))) return }
+  else if (!(await C.reciboLibre(recibo, _st.contactId))) return
+  const { avisos: avisosRec } = _avisosRecibos(asig)
 
   const resumen = [
     ...fuentes.map(s => `• ${s.label}${s.tipo === 'voucher' ? ` ${fechaDMY(s.fecha)}` : ''}: ${s.mon} ${formatNumber(s.monto - (s.tipo === 'saldo' ? s.resto : 0))}${s.tipo === 'voucher' && s.resto > 0.009 ? ` (sobran ${formatNumber(s.resto)} → saldo a favor)` : ''}`),
     '',
-    ...sel.map(f => { const r = _retAplicada(f), queda = _r2(f.saldo - f.aplicar - r); return `• ${f.doc}: ${f.moneda} ${formatNumber(f.aplicar)}${r ? ` + ret. ${formatNumber(r)}` : ''} → ${queda <= 0.009 ? 'CANCELA' : 'parcial, queda ' + formatNumber(queda)}` })
+    ...sel.map(f => { const r = _retAplicada(f), queda = _r2(f.saldo - f.aplicar - r); return `• ${modoRec ? `[Rec. ${recDe(f) || 'R' + ((f.rec || 0) + 1)}] ` : ''}${f.doc}: ${f.moneda} ${formatNumber(f.aplicar)}${r ? ` + ret. ${formatNumber(r)}` : ''} → ${queda <= 0.009 ? 'CANCELA' : 'parcial, queda ' + formatNumber(queda)}` }),
+    ...(avisosRec.length ? ['', '⚠️ Revisa (no bloquea):', ...avisosRec.map(a => '• ' + a)] : [])
   ].join('\n')
-  if (!confirm(`${_st.multi ? 'Cobro por recibo' : 'Cobro masivo'} — ${C.nombre(_st.contactId)}${recibo ? ` · Recibo ${recibo}` : ''}\n\n${resumen}\n\n¿Registrar?`)) return
+  const titConf = modoRec ? `Un voucher — ${numsRec.length || _st.recibos.length} recibos` : (_st.multi ? 'Cobro por recibo' : 'Cobro masivo')
+  if (!confirm(`${titConf} — ${C.nombre(_st.contactId)}${recibo ? ` · Recibo ${recibo}` : ''}\n\n${resumen}\n\n¿Registrar?`)) return
 
   const user = getCurrentUser()
   const grupo = _uuid()
@@ -552,7 +735,7 @@ window.confirmarCobroMasivo = async function () {
           const tcDoc = f.moneda === 'PEN' && s.mon === 'PEN' ? 1 : (parseFloat(v.tc) || parseFloat(f.obj.tipo_cambio) || 1)
           const cobro = await addCobro({
             empresa_id: f.obj.empresa_id ?? empresaRec,
-            numero_recibo: recibo, cxc_id: f.obj.id, contact_id: f.obj.contact_id, fecha: v.fecha, monto: a.montoDoc,
+            numero_recibo: recDe(f), cxc_id: f.obj.id, contact_id: f.obj.contact_id, fecha: fechaDe(f, v.fecha), monto: a.montoDoc,
             moneda: f.moneda, tipo_cambio: tcDoc, medio_pago: v.medio, referencia: (v.numOp || '').trim() || `Recibo L${lote.id}`,
             banco_id: parseInt(v.bancoId), numero_operacion: (v.numOp || '').trim() || null, monto_retencion: ret, lote_id: lote.id
           })
@@ -561,9 +744,9 @@ window.confirmarCobroMasivo = async function () {
           await C.aplicarEfectosCobro(cobro, f.obj, { sinMov: true })
         } else {
           await C.registrarAbonoLetra(f.obj, {
-            ubicacion: 'cartera', medio: v.medio, bancoId: parseInt(v.bancoId), fecha: v.fecha, numOp: (v.numOp || '').trim() || null, recibo,
+            ubicacion: 'cartera', medio: v.medio, bancoId: parseInt(v.bancoId), fecha: fechaDe(f, v.fecha), numOp: (v.numOp || '').trim() || null, recibo: recDe(f),
             tcDia: parseFloat(v.tc) || parseFloat(f.obj.tipo_cambio) || 1,
-            amort: a.montoDoc, interes: 0, portes: 0, comision: 0, otros: 0, obs: `Recibo${recibo ? ' ' + recibo : ''} L${lote.id}`, sinMov: true, loteId: lote.id
+            amort: a.montoDoc, interes: 0, portes: 0, comision: 0, otros: 0, obs: `Recibo${recDe(f) ? ' ' + recDe(f) : ''} L${lote.id}`, sinMov: true, loteId: lote.id
           })
           f.obj = (await C.getLetra(f.obj.id)) || f.obj   // monto_pagado fresco para el siguiente voucher
         }
@@ -572,7 +755,7 @@ window.confirmarCobroMasivo = async function () {
     }
     const mov = await C.registrarMov({
       bancoId: parseInt(v.bancoId), tipo: 'ingreso', fecha: v.fecha, categoria: 'Cobranza clientes',
-      concepto: `Depósito ${C.nombre(_st.contactId)} — ${_st.multi ? 'recibo' : 'cobro masivo'} L${lote.id}${recibo ? ` Rec. ${recibo}` : ''}`,
+      concepto: `Depósito ${C.nombre(_st.contactId)} — ${modoRec ? 'varios recibos' : (_st.multi ? 'recibo' : 'cobro masivo')} L${lote.id}${recibo ? ` Rec. ${recibo}` : ''}`,
       referencia: (v.numOp || '').trim() || `LOTE-COBRO ${lote.id}`, numeroOperacion: (v.numOp || '').trim() || null, monto: s.monto, monedaMonto: s.mon, tc: parseFloat(v.tc) || 1
     })
     await supabase.from('cobros_lote').update({ movimiento_banco_id: mov?.id || null }).eq('id', lote.id)
@@ -599,7 +782,7 @@ window.confirmarCobroMasivo = async function () {
       retUsada.add(f.k)
       const cobro = await addCobro({
         empresa_id: f.obj.empresa_id ?? empresaRec,
-        numero_recibo: recibo, cxc_id: f.obj.id, contact_id: f.obj.contact_id, fecha: fechaSF, monto: a.montoDoc,
+        numero_recibo: recDe(f), cxc_id: f.obj.id, contact_id: f.obj.contact_id, fecha: fechaDe(f, fechaSF), monto: a.montoDoc,
         moneda: f.moneda, tipo_cambio: a.s.mon === f.moneda ? (parseFloat(f.obj.tipo_cambio) || 1) : a.tc, medio_pago: 'saldo_favor',
         referencia: `Saldo a favor #${a.s.ref.id}`, banco_id: null, monto_retencion: ret, lote_id: loteAncla,
         saldo_favor_id: a.s.ref.id, saldo_favor_monto: a.montoSrc
@@ -615,7 +798,7 @@ window.confirmarCobroMasivo = async function () {
   window.closeModal('modal-cobro-masivo')
   const L = lotes.map(x => 'L' + x.lote.id).join(', ')
   if (errores.length) showToast(`⚠️ ${hechos.length} aplicado(s), ${errores.length} con error — ${errores.join(' · ')}. Revisa y usa "Deshacer recibo" si hace falta.`, 'danger', 15000)
-  else showToast(`${_st.multi ? 'Recibo' : 'Cobro masivo'} ✅ ${L} — ${hechos.join(' · ')}`, 'success', 8000)
+  else showToast(`${modoRec ? 'Recibos' : (_st.multi ? 'Recibo' : 'Cobro masivo')} ✅ ${L} — ${hechos.join(' · ')}`, 'success', 8000)
   await C.refrescar()
 }
 
@@ -670,12 +853,12 @@ export async function htmlSeccionLote(loteId) {
     const lote0 = await _sb(supabase.from('cobros_lote').select('*').eq('id', loteId).single())
     const lotes = lote0.grupo_recibo ? await _sb(supabase.from('cobros_lote').select('*').eq('grupo_recibo', lote0.grupo_recibo).order('fecha')) : [lote0]
     const ids = lotes.map(l => l.id)
-    const cobros = await _sb(supabase.from('cobros').select('id, cxc_id, monto, moneda, monto_retencion, lote_id, medio_pago, fecha').in('lote_id', ids))
+    const cobros = await _sb(supabase.from('cobros').select('id, cxc_id, monto, moneda, monto_retencion, lote_id, medio_pago, fecha, numero_recibo').in('lote_id', ids))
     const abonos = await _sb(supabase.from('letras_abonos').select('id, letra_id, monto_amortizado, moneda, lote_id, fecha').in('lote_id', ids))
     let saldos = []
     try { saldos = lote0.grupo_recibo ? await _sb(supabase.from('saldos_favor_cliente').select('*').eq('grupo_recibo', lote0.grupo_recibo)) : await _sb(supabase.from('saldos_favor_cliente').select('*').in('lote_id', ids)) } catch (_) {}
     const filas = [
-      ...cobros.map(c => { const d = C.cxc().find(x => x.id === c.cxc_id); const l = lotes.find(x => x.id === c.lote_id); return `<tr><td>${_esc(d ? C.descDoc(d) : 'cobro #' + c.id)}</td><td>${c.medio_pago === 'saldo_favor' ? '<span class="badge badge-success">Saldo a favor</span>' : `L${l?.id} · ${fechaDMY(l?.fecha)}`}</td><td>${c.moneda}</td><td style="text-align:right;">${formatNumber(c.monto)}</td><td style="text-align:right;">${parseFloat(c.monto_retencion) ? formatNumber(c.monto_retencion) : '—'}</td></tr>` }),
+      ...cobros.map(c => { const d = C.cxc().find(x => x.id === c.cxc_id); const l = lotes.find(x => x.id === c.lote_id); return `<tr><td>${_esc(d ? C.descDoc(d) : 'cobro #' + c.id)}${c.numero_recibo && c.numero_recibo !== lote0.numero_recibo ? `<br><small style="color:var(--text-secondary);">Rec. ${_esc(c.numero_recibo)}</small>` : ''}</td><td>${c.medio_pago === 'saldo_favor' ? '<span class="badge badge-success">Saldo a favor</span>' : `L${l?.id} · ${fechaDMY(l?.fecha)}`}</td><td>${c.moneda}</td><td style="text-align:right;">${formatNumber(c.monto)}</td><td style="text-align:right;">${parseFloat(c.monto_retencion) ? formatNumber(c.monto_retencion) : '—'}</td></tr>` }),
       ...abonos.map(a => { const l = C.letras().find(x => x.id === a.letra_id); const lo = lotes.find(x => x.id === a.lote_id); return `<tr><td>Letra ${_esc(l?.numero_letra || '#' + a.letra_id)}</td><td>L${lo?.id} · ${fechaDMY(lo?.fecha)}</td><td>${a.moneda || ''}</td><td style="text-align:right;">${formatNumber(a.monto_amortizado)}</td><td>—</td></tr>` })
     ].join('')
     const titulo = lotes.length > 1

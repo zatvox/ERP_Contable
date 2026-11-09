@@ -300,12 +300,23 @@ async function _validarDuplicadoOperacion(esCobro, { docId, fecha, monto, bancoI
         showToast(`⛔ La operación N° ${op} ya está registrada en este documento (${que} del ${fechaDMY(enEste.fecha)} por ${formatNumber(enEste.monto)}). No se graba dos veces el mismo depósito.`, 'danger', 10000)
         return false
       }
-      if (mismos.length) {
+      if (mismos.length && !esCobro) {
         const otros = mismos.map(x => {
-          const d = (esCobro ? _cxcList : _cxpList).find(c => c.id === x[campoDoc])
+          const d = _cxpList.find(c => c.id === x[campoDoc])
           return `• ${d ? _descDocCP(d) : 'doc #' + x[campoDoc]} — ${fechaDMY(x.fecha)} — ${formatNumber(x.monto)}`
         }).join('\n')
-        if (!confirm(`⚠️ La operación N° ${op} (misma cuenta) ya se usó en otro(s) documento(s):\n${otros}\n\nSi es UN depósito que paga varias facturas está bien (mejor usa Cobro masivo).\n¿Registrar igual?`)) return false
+        if (!confirm(`⚠️ La operación N° ${op} (misma cuenta) ya se usó en otro(s) documento(s):\n${otros}\n\nSi es UN depósito que paga varias facturas está bien.\n¿Registrar igual?`)) return false
+      }
+      if (mismos.length && esCobro) {
+        // 2026-11-09: muestra lo ya registrado y sugiere el flujo correcto (Cobro masivo → 🧾 Varios recibos)
+        const r = await _dialogoOpEnOtroDoc(op, mismos)
+        if (r === 'masivo') {
+          const cid = _cxcList.find(c => c.id === Number(docId))?.contact_id || null
+          window.closeModal?.('modal-registrar-cobro')
+          window.abrirCobroMasivo?.(cid, { modo: 'recibos' })
+          return false
+        }
+        if (r !== 'seguir') return false
       }
     }
     const { data: mismoDia } = await supabase.from(tabla).select('id, fecha, monto, referencia, numero_operacion')
@@ -321,6 +332,46 @@ async function _validarDuplicadoOperacion(esCobro, { docId, fecha, monto, bancoI
   } catch (e) { console.warn('_validarDuplicadoOperacion:', e.message) }
   return true
 }
+/**
+ * Aviso del Registrar Cobro individual (2026-11-09): el N° de operación ya está en
+ * OTRO documento. No bloquea: muestra lo registrado y ofrece el flujo correcto.
+ * Devuelve 'seguir' | 'masivo' | 'cancelar'.
+ */
+async function _dialogoOpEnOtroDoc(op, mismos) {
+  let full = mismos
+  try {
+    const { data } = await supabase.from('cobros').select('id, cxc_id, fecha, monto, moneda, numero_recibo, lote_id, banco_id').in('id', mismos.map(x => x.id))
+    if (data?.length) full = data
+  } catch (_) {}
+  const enLote = full.some(x => x.lote_id)
+  const filas = full.map(x => {
+    const d = _cxcList.find(c => c.id === x.cxc_id)
+    return `<tr><td>${_esc(d ? _descDocCP(d) : 'doc #' + x.cxc_id)}</td><td>${fechaDMY(x.fecha)}</td><td style="text-align:right;">${_esc(x.moneda || '')} ${formatNumber(x.monto)}</td><td>${_esc(x.numero_recibo || '—')}</td><td>${x.lote_id ? `L${x.lote_id}` : 'individual'}</td></tr>`
+  }).join('')
+  return new Promise(resolve => {
+    const m = document.createElement('div')
+    m.className = 'modal show'; m.style.zIndex = 3000
+    m.innerHTML = `<div class="modal-content" style="max-width:640px; width:min(94vw,640px); padding:20px;">
+      <h3 style="margin:0 0 8px;">⚠️ La operación N° ${_esc(op)} ya está registrada</h3>
+      <p style="margin:0 0 10px; color:var(--text-secondary); font-size:0.9rem;">Misma cuenta, en otro(s) documento(s):</p>
+      <div style="border:1px solid var(--border-color); border-radius:var(--radius-md); overflow-x:auto; margin-bottom:10px;">
+        <table style="width:100%; border-collapse:collapse; margin:0; font-size:0.85rem;"><thead><tr style="background:var(--bg-secondary);"><th>Documento</th><th>Fecha</th><th style="text-align:right;">Importe</th><th>Recibo</th><th>Registro</th></tr></thead><tbody>${filas}</tbody></table></div>
+      <p style="margin:0 0 14px; font-size:0.88rem; line-height:1.45;">Si es <b>un solo voucher</b> que paga varias facturas, lo correcto es ${enLote
+        ? 'agregar este documento a ese cobro masivo: <b>deshazlo</b> (Ver detalle → Deshacer) y vuelve a registrarlo con todos los documentos.'
+        : '<b>eliminar el cobro anterior</b> y registrar todo junto en <b>Cobro masivo</b> (con <b>🧾 Varios recibos</b> si la oficina emitió un recibo por factura). Así el banco recibe un solo ingreso.'}
+        <br><small style="color:var(--text-secondary);">Registrarlo aparte aquí crea un segundo ingreso en el banco por el mismo voucher.</small></p>
+      <div style="display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
+        <button class="btn btn-secondary btn-small" data-r="cancelar">Cancelar</button>
+        <button class="btn btn-secondary btn-small" data-r="seguir">Registrar igual</button>
+        <button class="btn btn-primary btn-small" data-r="masivo">🧾 Abrir Cobro masivo</button>
+      </div></div>`
+    document.body.appendChild(m)
+    const cerrar = r => { m.remove(); resolve(r) }
+    m.querySelectorAll('[data-r]').forEach(b => { b.onclick = () => cerrar(b.dataset.r) })
+    m.addEventListener('click', e => { if (e.target === m) cerrar('cancelar') })
+  })
+}
+
 /** Suma de lo cobrado/pagado por los OTROS registros del documento (para revertir sin descuadrar). */
 async function _sumaOtrosCP(esCobro, docId, excluirId) {
   try {
