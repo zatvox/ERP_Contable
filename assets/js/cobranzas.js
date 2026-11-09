@@ -8,7 +8,7 @@
 // ============================================================================
 
 import { getCurrentUser } from './auth-supabase.js'
-import { supabase } from './supabase-client.js'
+import { supabase, empresaTrabajoCtx } from './supabase-client.js'
 import { miniaturaArchivoHTML, pintarMiniaturaArchivo } from './shared/adj-preview.js'
 import { tabularDetalle, dtInsignia } from './shared/detalle-tabs.js'
 import { getTipoCambioDia } from './sunat-api.js'
@@ -598,6 +598,10 @@ async function _registrarMovimientoBancario({ bancoId, tipo, fecha, concepto, re
     const saldoNuevo  = tipo === 'ingreso' ? saldoPrevio + monto : saldoPrevio - monto
 
     const mov = await addMovimientoBanco({
+      // Tesorería (SQL 123): el movimiento hereda ámbito y empresa de la CUENTA
+      // (CHECK: 'empresa' ⇒ empresa_id NOT NULL; 'familiar' ⇒ empresa_id NULL).
+      ambito: banco?.ambito || (banco?.empresa_id != null ? 'empresa' : 'familiar'),
+      empresa_id: banco?.ambito === 'familiar' ? null : (banco?.empresa_id ?? null),
       banco_id: bancoId, fecha, tipo, concepto,
       categoria: categoria || (tipo === 'ingreso' ? 'Cobranza clientes' : 'Pago proveedores'),
       referencia: referencia || null,
@@ -671,7 +675,9 @@ window.registrarCobro = async function() {
     if (!_reciboValidoParaCliente(numeroRecibo, cxc.contact_id, null)) return
     if (!(await _validarDuplicadoOperacion(true, { docId: cxcId, fecha, monto, bancoId, numOp: referencia }))) return
 
+    if (!_validarBancoEmpresa(bancoId, _empDoc(cxc), 'la factura')) return
     const cobro = await addCobro({
+      empresa_id: _empDoc(cxc),
       numero_recibo: numeroRecibo,
       cxc_id: cxcId, contact_id: cxc.contact_id, fecha, monto,
       moneda: cxc.moneda || 'PEN', tipo_cambio: tipoCambio,
@@ -1047,7 +1053,9 @@ window.registrarPagoProveedor = async function() {
     }
     if (!(await _validarDuplicadoOperacion(false, { docId: cxpId, fecha, monto, bancoId, numOp: referencia }))) return
 
+    if (!_validarBancoEmpresa(bancoId, _empDoc(cxp), 'la compra')) return
     const pago = await addPagoProveedor({
+      empresa_id: _empDoc(cxp),
       cxp_id: cxpId, compra_id: cxp.compra_id, contact_id: cxp.contact_id,
       fecha, monto, moneda, tipo_cambio: tipoCambio,
       medio_pago: medioPago, referencia: referencia || null,
@@ -2488,6 +2496,7 @@ window.guardarLetra = async function () {
       const monto = _r2(f.monto)
       const numero = f.numero.trim()
       const letra = await addLetraCambio({
+        empresa_id: _empDoc(cabecera),
         numero_letra: numero,
         tipo,
         contact_id: contactId,
@@ -2626,6 +2635,7 @@ async function _registrarComisionBancariaLetra(letra, proveedorId, monto) {
     tipo_comprobante: '01',
     serie: null,
     numero: referencia,
+    ...(_empDoc(letra) != null ? { empresa_id: _empDoc(letra) } : {}),
     periodo_mes: parseInt(hoy.slice(5, 7)),
     periodo_ano: parseInt(hoy.slice(0, 4)),
     fecha_emision: hoy,
@@ -2663,6 +2673,7 @@ async function _registrarComisionBancariaLetra(letra, proveedorId, monto) {
 
   try {
     await addCuentaPagar({
+      empresa_id: _empDoc(compra),
       contact_id: proveedorId, compra_id: compra.id,
       tipo_comprobante: '01', serie: null, numero_comprobante: referencia,
       fecha_emision: hoy, fecha_vencimiento: null,
@@ -2815,6 +2826,24 @@ const _descDocCP = d => `${d?.tipo_comprobante || ''} ${d?.serie || ''}-${numCom
 // Para reactivar: poner true.
 // ============================================================================
 const ASIENTOS_COBRANZAS = false
+
+// ============================================================================
+// MULTIEMPRESA (2026-11-09): todo lo que nace de un documento lleva la empresa
+// DEL DOCUMENTO, no la "empresa de trabajo" del switch (insert() sella con la de
+// trabajo; si hay 2+ empresas marcadas un cobro de Benji quedaba como Jhiro y el
+// trigger trg_mx_linea_coherente lo rechazaba). Los inserts directos
+// (supabase.from().insert) NO se sellan solos → empresa explícita siempre.
+// ============================================================================
+const _empDoc = d => (d && d.empresa_id != null) ? d.empresa_id : null
+/** La cuenta bancaria debe ser de la misma empresa que el documento (las cuentas familiares no). */
+function _validarBancoEmpresa(bancoId, empresaId, que = 'el documento') {
+  if (!bancoId || empresaId == null) return true
+  const b = _bancosMap[bancoId]
+  if (!b || b.empresa_id == null) return true
+  if (Number(b.empresa_id) === Number(empresaId)) return true
+  showToast(`⛔ La cuenta "${b.nombre}" es de otra empresa que ${que}. Elige una cuenta de la misma empresa.`, 'danger', 9000)
+  return false
+}
 
 async function _aplicarEfectosCobro(cobro, cxc, opts = {}) {
   const user     = getCurrentUser()
@@ -4556,6 +4585,7 @@ window.confirmarRefinanciar = async function () {
   try {
     // 1) Cabecera + orígenes
     refin = await _sb(supabase.from('letras_refinanciacion').insert({
+      empresa_id: _empDoc(l0) ?? empresaTrabajoCtx(),
       tipo: _rfin.tipo, modalidad, contact_id: _rfin.contactId, fecha, moneda: _rfin.moneda, tipo_cambio: tcNueva,
       total_saldos: saldos, monto_abono: ab?.amort || 0, interes_refin: intRef, total_nuevas: enLetras,
       observaciones: $('rfinObs').value.trim() || null, created_by: user?.db_id || null
@@ -4567,6 +4597,7 @@ window.confirmarRefinanciar = async function () {
     const comun = campo => { const v = origenes.map(x => x[campo] || null); return v.every(z => z === v[0]) ? v[0] : null }
     for (const f of filas) {
       const nueva = await addLetraCambio({
+        empresa_id: _empDoc(l0),
         numero_letra: f.numero, tipo: _rfin.tipo, contact_id: _rfin.contactId,
         venta_id: comun('venta_id'), compra_id: comun('compra_id'), cxc_id: comun('cxc_id'), cxp_id: comun('cxp_id'),
         cuota_cobrar_id: comun('cuota_cobrar_id'), cuota_pagar_id: comun('cuota_pagar_id'),

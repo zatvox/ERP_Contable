@@ -16,7 +16,7 @@
 // primero; el último vaso queda a medias.
 // ============================================================================
 
-import { supabase } from './supabase-client.js'
+import { supabase, empresaTrabajoCtx } from './supabase-client.js'
 import { showToast, formatNumber, fechaDMY } from './helpers.js'
 import { addCobro, deleteCobro, eliminarAsientoContable } from './supabase-data.js'
 import { getTipoCambioDia } from './sunat-api.js'
@@ -32,7 +32,8 @@ const $ = id => document.getElementById(id)
 
 export function initCobroMasivo(ctx) { C = ctx; _inyectarModal() }
 
-function _sb(q) { return q.then(({ data, error }) => { if (error) throw new Error(/cobros_lote|lote_id/.test(error.message) ? 'Falta ejecutar el SQL 83 (cobros masivos): ' + error.message : error.message); return data }) }
+// Solo culpa al SQL 83 si la tabla/columna NO existe (antes cualquier error de cobros_lote decía "falta el SQL 83").
+function _sb(q) { return q.then(({ data, error }) => { if (error) throw new Error(/does not exist|no existe|schema cache/i.test(error.message) && /cobros_lote|lote_id/.test(error.message) ? 'Falta ejecutar el SQL 83 (cobros masivos): ' + error.message : error.message); return data }) }
 
 // ── Modal (se inyecta una sola vez) ──────────────────────────────────────────
 function _inyectarModal() {
@@ -309,6 +310,15 @@ window.confirmarCobroMasivo = async function () {
     if (f.aplicar + _retAplicada(f) > real + 0.009) { showToast(`${f.doc}: ya fue cobrada por otro usuario. Saldo real ${formatNumber(Math.max(0, real))}. Cierra y vuelve a abrir el cobro masivo.`, 'warning', 9000); return }
     f.obj = { ...f.obj, ...fr }
   }
+  // MULTIEMPRESA (2026-11-09): un depósito es de UNA empresa. Todos los
+  // documentos y la cuenta bancaria deben ser de la misma.
+  const emps = [...new Set(sel.map(f => f.obj?.empresa_id).filter(e => e != null).map(Number))]
+  if (emps.length > 1) { showToast('⛔ Elegiste documentos de empresas distintas. Un depósito es de una sola empresa: haz un cobro masivo por empresa.', 'danger', 9000); return }
+  const empresaLote = emps[0] ?? null
+  const bancoSel = C.bancos().find(b => Number(b.id) === bancoId)
+  if (empresaLote != null && bancoSel?.empresa_id != null && Number(bancoSel.empresa_id) !== empresaLote) {
+    showToast(`⛔ La cuenta "${bancoSel.nombre}" es de otra empresa que los documentos. Elige una cuenta de la misma empresa.`, 'danger', 9000); return
+  }
   const aplicado = _r2(sel.reduce((s, f) => s + _aCta(f.aplicar, f.moneda), 0))
   const tol = sel.some(f => f.moneda !== mon) ? 0.05 : 0.009
   if (Math.abs(recibido - aplicado) > tol) { showToast(`No cuadra: recibido ${formatNumber(recibido)} vs aplicado ${formatNumber(aplicado)}`, 'warning'); return }
@@ -323,6 +333,7 @@ window.confirmarCobroMasivo = async function () {
   let lote
   try {
     lote = await _sb(supabase.from('cobros_lote').insert({
+      empresa_id: empresaLote ?? bancoSel?.empresa_id ?? empresaTrabajoCtx(),
       contact_id: _st.contactId, fecha, banco_id: bancoId, moneda: mon, tipo_cambio: tc || null, monto_recibido: recibido,
       monto_aplicado: aplicado, medio_pago: medio, numero_operacion: numOp, numero_recibo: recibo, observaciones: obs, created_by: user?.db_id || null
     }).select().single())
@@ -336,11 +347,12 @@ window.confirmarCobroMasivo = async function () {
         const cxc = f.obj
         const tcDoc = f.moneda === 'PEN' && mon === 'PEN' ? 1 : (tc || parseFloat(cxc.tipo_cambio) || 1)
         const cobro = await addCobro({
+          empresa_id: cxc.empresa_id ?? empresaLote,
           numero_recibo: recibo, cxc_id: cxc.id, contact_id: cxc.contact_id, fecha, monto: f.aplicar,
           moneda: f.moneda, tipo_cambio: tcDoc, medio_pago: medio, referencia: numOp || `Cobro masivo L${lote.id}`,
           banco_id: bancoId, numero_operacion: numOp, monto_retencion: _retAplicada(f), lote_id: lote.id
         })
-        if (!cobro?.id) throw new Error('no se pudo crear el cobro (¿falta el SQL 83?)')
+        if (!cobro?.id) throw new Error('no se pudo crear el cobro (revisa la consola: empresa/permiso)')
         primerCobroId ||= cobro.id
         await C.aplicarEfectosCobro(cobro, cxc, { sinMov: true })
       } else {

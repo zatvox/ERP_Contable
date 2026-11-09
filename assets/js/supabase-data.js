@@ -2,7 +2,7 @@
 // SUPABASE-DATA.JS - Gestión de datos con Supabase
 // ============================================================================
 
-import { supabase, getAll, getById, insert, update, deleteRecord, query, ultimoErrorDelete, ultimoErrorInsert  , empresaTrabajoCtx } from './supabase-client.js'
+import { supabase, getAll, getById, insert, update, deleteRecord, query, ultimoErrorDelete, ultimoErrorInsert  , empresaTrabajoCtx, fromSinFiltro } from './supabase-client.js'
 
 // Se re-exporta para que los módulos puedan explicar en pantalla por qué
 // falló un borrado (qué tabla sigue referenciando el registro).
@@ -2516,7 +2516,22 @@ export async function getMovimientosBanco(bancoId) {
   if (bancoId) return await query('movimientos_banco', { banco_id: bancoId })
   return await getAll('movimientos_banco')
 }
-export async function addMovimientoBanco(m) { return await insert('movimientos_banco', m) }
+/**
+ * Inserta un movimiento bancario. Desde Tesorería (SQL 123) `ambito` es NOT NULL
+ * y debe cuadrar con empresa_id: si quien llama no lo manda, se HEREDA de la
+ * cuenta (bancos.ambito / bancos.empresa_id). Antes Cobranzas, Bancos e
+ * Importaciones insertaban sin ámbito y el movimiento se perdía en silencio.
+ */
+export async function addMovimientoBanco(m) {
+  if (m && !m.ambito && m.banco_id) {
+    const { data: b } = await fromSinFiltro('bancos').select('ambito, empresa_id').eq('id', m.banco_id).maybeSingle()
+    if (b) {
+      const amb = b.ambito || (b.empresa_id != null ? 'empresa' : 'familiar')
+      m = { ...m, ambito: amb, empresa_id: amb === 'familiar' ? null : (m.empresa_id ?? b.empresa_id) }
+    }
+  }
+  return await insert('movimientos_banco', m)
+}
 export async function updateMovimientoBanco(id, data) { return await update('movimientos_banco', id, data) }
 export async function deleteMovimientoBanco(id) { return await deleteRecord('movimientos_banco', id) }
 
