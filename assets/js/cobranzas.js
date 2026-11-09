@@ -11,6 +11,7 @@ import { getCurrentUser } from './auth-supabase.js'
 import { supabase, empresaTrabajoCtx } from './supabase-client.js'
 import { miniaturaArchivoHTML, pintarMiniaturaArchivo } from './shared/adj-preview.js'
 import { tabularDetalle, dtInsignia } from './shared/detalle-tabs.js'
+import { vincularTCaFecha, marcarTC } from './shared/tc-fecha.js'
 import { getTipoCambioDia } from './sunat-api.js'
 import {
   getCuentasCobrar, updateCuentaCobrar,
@@ -539,6 +540,7 @@ window.onSelectCxC = function() {
   const moneda    = cxc.moneda || 'PEN'
 
   if (info) { info.innerHTML = _cardDocCP(cxc, true, saldoTotal); info.style.display = 'block' }
+  _avisoSaldoFavor(cxc.contact_id, info)
 
   _cobroRetencionPendiente = contacto?.sujeto_retencion ? _calcularRetencionPendiente(cxc) : 0
 
@@ -553,6 +555,23 @@ window.onSelectCxC = function() {
 
   _actualizarMontoCobroConRetencion(saldoTotal)
   window._tcDefaultCP('cobro')
+}
+
+/**
+ * Saldo a favor del cliente (SQL 151): si tiene, se avisa en el cobro individual
+ * y se ofrece netearlo en "Cobro por recibo" (que es donde se aplica).
+ */
+async function _avisoSaldoFavor(contactId, cont) {
+  if (!cont || !contactId) return
+  try {
+    const { data } = await supabase.from('saldos_favor_cliente').select('id, moneda, monto, monto_aplicado').eq('contact_id', contactId).eq('estado', 'disponible')
+    const disp = {}
+    for (const x of data || []) { const d = _r2(parseFloat(x.monto) - parseFloat(x.monto_aplicado || 0)); if (d > 0.009) disp[x.moneda] = _r2((disp[x.moneda] || 0) + d) }
+    if (!Object.keys(disp).length) return
+    cont.insertAdjacentHTML('beforeend', `<div style="margin-top:8px; padding:8px 10px; border-radius:var(--radius-sm); background:rgba(16,185,129,.12); border:1px solid rgba(16,185,129,.4); font-size:0.85rem; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+      <span>💚 Este cliente tiene <b>saldo a favor ${Object.entries(disp).map(([m, v]) => `${m} ${formatNumber(v)}`).join(' · ')}</b>: netéalo en este cobro.</span>
+      <button type="button" class="btn btn-small btn-primary" onclick="window.closeModal('modal-registrar-cobro'); window.abrirCobroMasivo(${contactId})">Usar saldo a favor →</button></div>`)
+  } catch (_) { /* sin SQL 151 todavía: no se avisa */ }
 }
 
 function _actualizarMontoCobroConRetencion(saldoTotal) {
@@ -3269,6 +3288,8 @@ window.abrirEditarCP = async function(tipo, id) {
     $('ecpMonto').value      = reg.monto
     $('ecpRetencion').value  = reg.monto_retencion || 0
     $('ecpTC').value         = reg.tipo_cambio ?? 1
+    // Ley T.C. ↔ fecha: al cambiar la fecha del cobro/pago se trae el T.C. del día
+    vincularTCaFecha({ fecha: 'ecpFecha', tc: 'ecpTC', lado: () => _edicionCP?.tipo === 'pago' ? 'compra' : 'venta' })
     $('ecpReferencia').value = reg.referencia || ''
     $('ecpNumeroRecibo').value = reg.numero_recibo || ''
     $('ecpObs').value        = reg.observaciones || ''
@@ -5670,7 +5691,7 @@ window._tcDefaultCP = async function (tipo) {
   } catch (e) { /* sin caché: queda el de la factura */ }
   if (tc > 0) {
     $(k.tc).value = tc
-    $(k.tc).title = fuente
+    marcarTC($(k.tc), fuente.startsWith('SUNAT'), fuente.startsWith('SUNAT') ? fuente : `No hay T.C. del ${fechaDMY(fecha)}: se usa el de la factura`)
     window._cpRecalc(tipo, 'tc')
   }
 }

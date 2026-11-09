@@ -62,7 +62,7 @@ export const TABLAS_EMPRESA = new Set([
   // Inventario
   'lotes', 'kardex', 'almacenes', 'ubicaciones', 'familias',
   // Cobranzas y tesorería
-  'cuentas_cobrar', 'cuentas_pagar', 'cobros', 'cobros_lote', 'pagos', 'pagos_proveedores',
+  'cuentas_cobrar', 'cuentas_pagar', 'cobros', 'cobros_lote', 'saldos_favor_cliente', 'pagos', 'pagos_proveedores',
   'letras_cambio', 'letras_refinanciacion', 'bancos', 'movimientos_banco',
   'gastos', 'entregas_a_rendir', 'reposiciones_caja',
   // Campanita de avisos (SQL 136)

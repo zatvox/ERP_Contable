@@ -2780,3 +2780,8 @@ body.paleta-laton .login-form input:focus {
 .sidebar-logout-top:hover { background: var(--color-danger); }
 .sidebar-user .btn-logout { display: none !important; }
 body.sidebar-collapsed .sidebar-logout-top { position: static; margin: 0 auto 8px; }
+
+/* LEY T.C. ↔ FECHA (2026-11-09, shared/tc-fecha.js): feedback al actualizarse solo */
+@keyframes tcFlash { 0% { box-shadow:0 0 0 3px rgba(16,185,129,.55); background:rgba(16,185,129,.18); } 100% { box-shadow:none; background:transparent; } }
+input.tc-actualizado { animation: tcFlash 1.4s ease-out; }
+input.tc-sin-dato { border-color: var(--color-warning) !important; box-shadow: 0 0 0 2px rgba(245,158,11,.25); }
