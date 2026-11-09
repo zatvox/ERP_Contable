@@ -376,6 +376,7 @@ async function _subirRapido(files, concepto) {
   _carpetaId = id
   if (document.getElementById('modal-adjuntos-carpeta')?.classList.contains('active') || document.getElementById('acLista')?.offsetParent) await _pintarLista()
   window.renderHojaCosteo?.()
+  document.dispatchEvent(new Event('adj-carpeta-cambio'))
 }
 window.acSubirA = function (concepto) {
   const inp = document.createElement('input'); inp.type = 'file'; inp.multiple = true; inp.accept = 'application/pdf,image/*,.xlsx,.xls,.doc,.docx'
@@ -415,6 +416,7 @@ window.borrarAdjuntoCarpeta = async function (id, nombre) {
     await eliminarAdjunto(id)
     showToast('Documento eliminado', 'success')
     await _pintarLista()
+    document.dispatchEvent(new Event('adj-carpeta-cambio'))
   } catch (e) {
     showToast(e.message || 'No se pudo eliminar', 'danger')
   }
@@ -452,4 +454,5 @@ window.abrirAdjuntosCarpeta = async function (foco) {
   }, 120)
 }
 
+export { _comprimir as comprimirAdjunto }
 export default { abrirAdjuntosCarpeta: window.abrirAdjuntosCarpeta, CONCEPTOS_CARPETA }

@@ -1,4 +1,4 @@
--- 139 · Recibo por Honorarios (02) en Compras + retención de 4ta categoría (2026-11-07)
+-- 142 · Recibo por Honorarios (02) en Compras + retención de 4ta categoría (2026-11-07)
 -- Regla: se retiene 8% si el RH supera S/ 1,500 (por recibo) y el proveedor NO tiene suspensión vigente (Form. 1609, año calendario).
 -- Solo estructura y parámetros: sin asientos (generarAsientoRH queda como función semi armada con comentarios).
 

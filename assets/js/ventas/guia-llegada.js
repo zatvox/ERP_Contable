@@ -32,6 +32,16 @@ export async function prefillLlegada(venta, cliente, guia = null) {
     const { data } = await supabase.from('packing').select('numero, despacho_lat, despacho_lng, termino_despacho, despacho_usa_dir_cliente, despacho_direccion, despacho_distrito, despacho_maps_url').eq('id', venta.packing_id).maybeSingle()
     pk = data || null
   }
+  // La FACTURA manda (2026-11-07): su término/dirección de despacho puede haber
+  // cambiado respecto del PK — se usa primero el de la venta.
+  if (venta?.termino_despacho) {
+    pk = { ...(pk || {}), numero: venta.numero || pk?.numero || 'la factura',
+      termino_despacho: venta.termino_despacho,
+      despacho_usa_dir_cliente: !venta.despacho_direccion,
+      despacho_direccion: venta.despacho_direccion || null,
+      despacho_distrito: venta.despacho_distrito || pk?.despacho_distrito || null,
+      despacho_maps_url: venta.despacho_maps_url || pk?.despacho_maps_url || null }
+  }
   set('gdHoraSalida', ''); set('gdLlegadaCoord', pk?.despacho_lat != null ? `${pk.despacho_lat}, ${pk.despacho_lng}` : '')
   const dirCli = cliente?.direccion || '', disCli = cliente?.distrito || ''
   if (pk?.termino_despacho === 'despacho' && pk.despacho_usa_dir_cliente === false && pk.despacho_direccion) {

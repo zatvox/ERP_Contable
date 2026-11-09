@@ -13,6 +13,7 @@ import { getModuloConfig } from '../config-modulo.js'
 import { _actualizarAvisoRetencionVenta, _actualizarAvisoStockLineaVenta, _poblarSelectClientes, _poblarSelectItems, _refrescarStockLoteEnVivo, _stockTotalPorItem, _sugerirUnidadesLineaVenta } from './helpers.js'
 import { calcLineaIGV, tipoIGVUI, precioUI } from './helpers.js'
 import { registrarPesaje, cargarPesaje } from './linea-pesaje.js'
+import { montarSeccionPkDespacho, cargarPKsCliente, modoPKFijo, setDespacho, despachoDePK, leerPkDespacho, validarPkDespacho } from './venta-pk-despacho.js'
 import { _aplicarAnticiposVentaSeleccionados } from './venta-anticipo.js'
 import { _setEv } from './ventas-editar.js'
 import { renderVentas } from './ventas-lista.js'
@@ -108,6 +109,11 @@ window.abrirModalNuevaVenta = async function() {
     if (atvDesc) atvDesc.value = 'ANTICIPO'
     window.cambiarTipoVenta('mercaderia')
 
+    // Packing y despacho (2026-11-07): sin PK de origen → buscador del cliente
+    montarSeccionPkDespacho('venta')
+    modoPKFijo('venta', null)
+    setDespacho('venta', {})
+    await cargarPKsCliente('venta', parseInt(document.getElementById('ventaContactId')?.value || 0) || null)
     window.openModal('modal-nueva-venta')
   } catch (e) {
     showToast('Error al abrir modal: ' + e.message, 'danger')
@@ -416,6 +422,9 @@ window.guardarNuevaVenta = async function() {
     const observaciones = document.getElementById('ventaObservaciones')?.value?.trim() || null
 
     if (!contactId)           { showToast('Selecciona un cliente', 'warning'); return }
+    // Packing asociado obligatorio (PK del ERP o N° escrito) + término de despacho
+    const pkDesp = leerPkDespacho('venta', S._packingOrigen)
+    { const e = validarPkDespacho(pkDesp); if (e) { showToast(e, 'warning', 7000); return } }
     if (tipoComp === '01' && !(await validarPerfilContacto(contactId, { rol: 'cliente' }))) return   // solo facturas (boleta = DNI)
 
     // ── Facturando un PK: precio distinto al pactado → aviso (editable) ──
@@ -585,7 +594,12 @@ window.guardarNuevaVenta = async function() {
       observaciones,
       termino_pago_id:  cronograma?.terminoId || null,
       cronograma_personalizado: !!cronograma?.personalizado,
-      packing_id:       S._packingOrigen?.id || null,
+      packing_id:       pkDesp.packing_id,
+      packing_ref:      pkDesp.packing_ref,
+      termino_despacho: pkDesp.termino_despacho,
+      despacho_direccion: pkDesp.despacho_direccion,
+      despacho_distrito:  pkDesp.despacho_distrito,
+      despacho_maps_url:  pkDesp.despacho_maps_url,
       created_by:       user?.db_id
     })
 
@@ -594,6 +608,10 @@ window.guardarNuevaVenta = async function() {
     if (S._packingOrigen?.id) {
       await marcarPackingFacturado(S._packingOrigen.id, venta.id)
       S._packingOrigen = null
+    }
+    else if (pkDesp.packing_id) {
+      // PK elegido a mano en el buscador: su estado se recalcula (queda Parcial/Facturado)
+      try { await window.recalcularEstadoPacking?.(pkDesp.packing_id) } catch (e) { console.warn('Estado PK:', e.message) }
     }
 
     // La venta SOLO registra el comprobante — NO mueve stock ni kardex
@@ -1105,6 +1123,9 @@ void getCuentasCobrar
 window.abrirNuevaVentaDesdePacking = async function (pk, lineasPk) {
   await window.abrirModalNuevaVenta()
   S._packingOrigen = { id: pk.id, numero: pk.numero }
+  // PK heredado: solo lectura + término de despacho pactado (editable en la factura)
+  modoPKFijo('venta', S._packingOrigen)
+  setDespacho('venta', despachoDePK(pk), pk.termino_despacho ? `Heredado del ${pk.numero}. Puedes cambiarlo para esta factura.` : `El ${pk.numero} no tiene término de despacho: defínelo aquí.`)
   // Hereda el término de pago del PK ANTES de cargar el cliente: el cambio de
   // cliente re-pinta el cronograma y antes lo pisaba con el término del contacto.
   S._terminoHeredado = pk.termino_pago_id || null
@@ -1167,4 +1188,11 @@ window.abrirNuevaVentaDesdePacking = async function (pk, lineasPk) {
     _av.style.display = ''
     _av.textContent = `📦 Facturando ${pk.numero}: se heredaron cliente, vendedor, fecha, moneda/T.C., término de pago${obsPk ? ', observaciones' : ''} y productos. Revisa serie y cantidades. Si facturas más que lo pedido, el PK se actualiza con la cantidad real; al guardar el PK queda "Parcial" o "Facturado".`
   }
+}
+
+
+// Cambio de cliente en Nueva Factura → recarga el buscador de PKs (si no viene de un PK)
+window._vpdOnClienteVenta = async function () {
+  if (S._packingOrigen?.id) return
+  await cargarPKsCliente('venta', parseInt(document.getElementById('ventaContactId')?.value || 0) || null)
 }

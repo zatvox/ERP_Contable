@@ -196,6 +196,7 @@ window.rciGuardar = async function () {
     if (!_adicional) await update('carpetas_importacion', _carpeta.id, { comercial_invoice_id: ci.id })
     else for (const m of _propAnticipo(total).prevMat) await update('comercial_invoices', m.id, { anticipo_asignado: m.monto })
     window.ciActivoPorCarpeta = window.ciActivoPorCarpeta || {}; window.ciActivoPorCarpeta[_carpeta.id] = ci.id
+    try { await window.adjBloqueSubirPendientes?.('modal-registrar-ci') } catch (e) { console.warn('adjuntos del CI:', e) }
     let fallidas = 0
     for (const l of lin) {
       const f = await insert('detalle_comercial_invoice', { comercial_invoice_id: ci.id, product_id: l.product_id, lote: '',

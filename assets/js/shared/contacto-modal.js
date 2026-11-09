@@ -12,7 +12,7 @@
 //   'cliente-creado'    contacto             (compat. Nuevo PK: nuevo + rol cliente)
 // Requiere SQL 76 (contacts.ubicacion_maps).
 // ============================================================================
-import { getContacts, getContactById, addContact, updateContact, tiposDeContacto } from '../supabase-data.js'
+import { getContacts, getContactById, addContact, updateContact, tiposDeContacto, errorDocumentoContacto } from '../supabase-data.js'
 import { attachConsultaDocumento, pintarBadgeSunat } from '../sunat-api.js'
 import { showToast } from '../helpers.js'
 
@@ -84,7 +84,7 @@ function _asegurarModal() {
           <label>Tipo documento *</label>
           <select id="ctTipoDoc">
             <option value="RUC">RUC</option><option value="DNI">DNI</option><option value="CE">Carné ext.</option>
-            <option value="pasaporte">Pasaporte</option><option value="VAT">VAT (extranjero)</option><option value="otro">Otro</option>
+            <option value="pasaporte">Pasaporte</option><option value="VAT">VAT (extranjero)</option>
           </select>
         </div>
         <div class="form-group" style="margin:0;">
@@ -258,7 +258,8 @@ export async function abrirModalContacto({ id = null, roles = [] } = {}) {
       <div style="font-size:0.85rem; color:var(--text-secondary); margin-top:2px;">${_esc(c.tipo_documento || '')} ${_esc(c.nro_documento || '')}</div>`
   } else { info.style.display = 'none'; info.innerHTML = '' }
 
-  $('ctTipoDoc').value = c?.tipo_documento || 'RUC'
+  // Contacto antiguo con tipo "otro": queda en blanco para obligar a elegir uno válido
+  $('ctTipoDoc').value = (c?.tipo_documento && String(c.tipo_documento).toLowerCase() !== 'otro') ? c.tipo_documento : (c ? '' : 'RUC')
   $('ctNroDoc').value = c?.nro_documento || ''
   $('ctNombre').value = c?.nombre || ''
   $('ctTelefono').value = telefonoDe(c)
@@ -288,7 +289,10 @@ window._ctGuardar = async () => {
   const maps = normalizarLinkMaps($('ctMaps').value)
 
   if (!_rolesSel.size) { showToast('Elige al menos un rol: Cliente, Proveedor o Vendedor', 'warning'); return }
+  if (!tipo) { showToast('Elige el tipo de documento (el tipo "Otro" ya no existe)', 'warning'); $('ctTipoDoc').focus(); return }
   if (!nro) { showToast('Ingresa el N° de documento', 'warning'); $('ctNroDoc').focus(); return }
+  const errDoc = errorDocumentoContacto(tipo, nro)
+  if (errDoc) { showToast(errDoc, 'warning', 7000); $('ctNroDoc').focus(); return }
   if (tipo === 'RUC' && !/^\d{11}$/.test(nro)) { showToast('El RUC debe tener 11 dígitos', 'warning'); return }
   if (tipo === 'DNI' && !/^\d{8}$/.test(nro)) { showToast('El DNI debe tener 8 dígitos', 'warning'); return }
   if (!nombre) { showToast('Ingresa el nombre o razón social', 'warning'); $('ctNombre').focus(); return }
@@ -335,7 +339,7 @@ window._ctGuardar = async () => {
     condicion: _sunatVal('ctCondicionSunat'),
     es_buen_contribuyente: _sunatBool('ctBuenContribSunat'),
     es_agente_retencion_sunat: _sunatBool('ctAgenteRetSunat'),
-    // Renta 4ta (SQL 139): solo se envía si la columna existe o el usuario llenó el dato (así no rompe si falta el SQL)
+    // Renta 4ta (SQL 142): solo se envía si la columna existe o el usuario llenó el dato (así no rompe si falta el SQL)
     ...((_tiene4ta || $('ct4taAnio').value) ? { suspension_4ta_anio: parseInt($('ct4taAnio').value) || null, suspension_4ta_constancia: ($('ct4taRef').value || '').trim() || null } : {})
   }
 

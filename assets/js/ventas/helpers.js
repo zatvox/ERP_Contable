@@ -78,6 +78,7 @@ window.onCambiarClienteVenta = async function () {
   const crono = leerCronograma('venta-cronograma')
   if (_cronogramaVentaListo && !crono?.personalizado) _prepararCronogramaVenta(true)
   _cargarAnticiposDisponiblesCliente()
+  window._vpdOnClienteVenta?.()   // PKs del cliente para "Packing asociado" (2026-11-07)
 }
 
 /** Editar Venta: el Cliente normalmente ya viene precargado; si el usuario lo
@@ -96,6 +97,7 @@ window._onCambiarClienteEditarVenta = async function (soloOpciones = false) {
       await window._onCambiarTipoEdicionVenta?.()
     }
   }
+  if (soloOpciones !== true) window._vpdOnClienteEv?.()   // PKs del nuevo cliente (2026-11-07)
 }
 
 /** Cotización: mismo patrón. */

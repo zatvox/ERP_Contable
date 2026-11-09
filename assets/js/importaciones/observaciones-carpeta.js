@@ -158,6 +158,14 @@ function _reglas(d) {
   const kgCI = num(ci?.cantidad_total_neto), kgLotes = lotesC.reduce((t, l) => t + num(l.cantidad ?? l.cantidad_inicial ?? 0), 0)
   if (guias.length && kgCI && kgLotes && kgLotes < kgCI * 0.995) add('guias_parciales', 'info', 'Ingreso', 'Guías parciales: falta recibir parte del CI',
     `Recibido ${rGuia(kg(kgLotes))} de ${rCI(kg(kgCI))} (faltan ${kg(kgCI - kgLotes)}).`)
+  // Comprobante ya en Compras pero sin Cuenta por Pagar (ej. RH): un solo registro → se completa con un clic
+  const sinCxp = Object.values(docs || {}).filter(x => x.compra_id && !x.cxp_id && ['01', '02'].includes(x.tipo_comprobante || '01'))
+  for (const x of sinCxp) add('gasto_sin_cxp_' + x.id, 'alerta', 'Costos', 'Comprobante en Compras sin Cuenta por Pagar',
+    `${esc([x.serie, x.numero].filter(Boolean).join('-'))}: ${ref('crear la CxP ahora', `window.completarCxpGasto(${x.id})`, 'Crea la CxP (por el neto si es RH)')}.`)
+  // Líneas marcadas «sin sustento»: el gasto está pero falta encontrar/subir su comprobante
+  const sinSust = Object.values(docs || {}).filter(x => x.sustentado === false)
+  if (sinSust.length) add('gasto_por_revisar', 'alerta', 'Costos', `Gastos por revisar: falta el comprobante (${sinSust.length})`,
+    `${sinSust.map(x => esc([x.serie, x.numero].filter(Boolean).join('-') || 'sin N°')).join(', ')} — suma al costo pero no tiene documento. Súbelo o regulariza la línea.`)
   // Facturas de gasto cargadas en el costeo sin pasar por Compras/CxP
   const sinCompra = Object.values(docs || {}).filter(x => !x.compra_id && !['voucher_bancario', 'dam', 'autoliquidacion'].includes(x.tipo) && x.serie && x.numero
     && costos.some(c => c.documento_id === x.id && ['despacho', 'nacionalizacion'].includes(c.grupo)))

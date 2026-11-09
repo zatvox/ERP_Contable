@@ -14,8 +14,11 @@ export {
   actualizarCarga,
   tituloCarga,
   ocultarCarga,
-  conCarga
+  conCarga,
+  cargaActiva
 } from './cargador.js'
+
+export { conCargaAuto, PROCESOS, UMBRAL_MS, estimadoMs } from './auto-carga.js'
 
 export {
   ESTILOS_CARGA,

@@ -14,6 +14,7 @@ import { _ventaRevertidaPorNC, _guiaEstaVigente } from './ventas-editar.js'
 import { getSeries } from '../series.js'
 import { supabase } from '../supabase-client.js'
 import { badgeEmpresa, textoEmpresa } from '../empresa.js'
+import { _esc } from './init.js'
 
 // ============================================================================
 // TAB: VENTAS (Facturas / Boletas + NUBEFACT CPE)
@@ -76,7 +77,7 @@ function _valorOrdenVenta({ v, cliente, vendedor }, campo) {
     case 'total':        return parseFloat(v.total) || 0
     case 'cpe':          return v.cpe_estado || ''
     case 'despacho':     return _ORDEN_DESPACHO[_estadoDespachoVenta(v)] ?? 9
-    case 'packing':      return _packingPorIdCache.get(v.packing_id)?.numero || ''
+    case 'packing':      return _packingPorIdCache.get(v.packing_id)?.numero || v.packing_ref || ''
     case 'pago':         return _ORDEN_PAGO[_estadoPagoVenta(v)?.estado] ?? 9
     case 'notas':        return (_notasPorVenta().get(v.id) || []).length || (v.venta_referencia_id ? -1 : 0)
     default: return ''
@@ -299,7 +300,9 @@ export async function renderVentas(forzar = false) {
  * ventas de mercadería normales. */
 /** Celda "Packing": N° del PK vinculado (clic → abre el packing). */
 function _celdaPackingVenta(v) {
-  if (!v.packing_id) return '<span style="color:var(--text-secondary);">—</span>'
+  if (!v.packing_id) return v.packing_ref
+    ? `<em style="white-space:nowrap; color:var(--text-secondary);" title="PK escrito a mano: no está registrado en el ERP">${_esc(v.packing_ref)}</em>`
+    : '<span style="color:var(--text-secondary);">—</span>'
   const pk = _packingPorIdCache.get(v.packing_id)
   if (!pk) return `<small style="color:var(--text-secondary);">PK #${v.packing_id}</small>`
   const anulado = pk.estado === 'anulado'
@@ -393,7 +396,7 @@ function _pintarFilasVentas() {
   if (busqueda) {
     listaFiltrada = listaFiltrada.filter(({ v, cliente, vendedor }) => {
       const comprobante = `${v.serie || ''}-${String(v.correlativo || '').padStart(8, '0')}`
-      const pk = _packingPorIdCache.get(v.packing_id)?.numero || ''
+      const pk = _packingPorIdCache.get(v.packing_id)?.numero || v.packing_ref || ''
       const pago = _LBL_PAGO[_estadoPagoVenta(v)?.estado] || ''
       return `${comprobante} ${textoEmpresa(v.empresa_id)} ${pk} ${pago} ${cliente || ''} ${vendedor || ''} ${v.moneda || ''} ${v.tipo_comprobante || ''}`
         .toLowerCase().includes(busqueda)

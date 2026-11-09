@@ -741,7 +741,7 @@ function _html(d, r) {
   const tc = r.tc
   const cr = calcularCronograma(d)
   const tlHtml = _timelineHtml(d, cr)   // fija _etapaUlt (etapa actual) antes de pintar la cabecera
-  const fila = (cols, extra = '') => `<tr style="${extra}">${cols.map((c, i) => `<td style="${i === 0 ? TDL : TD}">${c}</td>`).join('')}</tr>`
+  const fila = (cols, extra = '', attrs = '') => `<tr ${attrs} style="${attrs ? "cursor:context-menu;" : ""}${extra}">${cols.map((c, i) => `<td style="${i === 0 ? TDL : TD}">${c}</td>`).join('')}</tr>`
   // Cabecera compacta: celdas etiqueta-arriba / valor-abajo en 2 columnas (span=2 ocupa todo el ancho)
   const cab = (k, v, ojo = '', span = 1) => `<div style="grid-column:${span > 1 ? '1 / -1' : 'auto'}; display:flex; align-items:center; gap:8px; padding:6px 12px; border-bottom:1px solid var(--border-color); min-width:0;">
       <div style="flex:1; min-width:0;"><div style="font-size:0.76rem; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); line-height:1.2;">${k}</div>
@@ -761,7 +761,7 @@ function _html(d, r) {
     + (r.art.length > PILLS_VISIBLES ? `<span class="hcx-mas" hidden>${r.art.slice(PILLS_VISIBLES).map(_pill).join('')}</span><button type="button" class="hcx-vermas" onclick="window.hcPills(this)" data-n="${r.art.length - PILLS_VISIBLES}">Ver más… (+${r.art.length - PILLS_VISIBLES})</button>` : '') : ''
   const estadoCI = ci?.status ? `<span class="cr-chip" style="--c:${ci.status === 'confirmado' ? '#10b981' : '#6b7280'};">${esc(ci.status)}</span>` : ''
   const ciTabs = cisL.map((c, i) => `<button type="button" class="hcx-ci ${ci && c.id === ci.id ? 'on' : ''}" onclick="window.cambiarCI(${c.id})" title="Trabajar con este CI: BL, DAM, guía y costeo pasan a ser los de este CI">
-      <span class="hcx-ci-n">CI ${i + 1}</span><span class="hcx-ci-d">${esc(c.invoice_number)}</span><span class="hcx-ci-m">${mon$} ${n2(c.valor_total_final_ci)}</span></button>`).join('')
+      <span class="hcx-ci-n">CI ${i + 1}</span><span class="hcx-ci-d">${esc(c.invoice_number)}</span><span class="hcx-ci-m">${mon$} ${n2(c.valor_total_final_ci)}</span>${ci && c.id === ci.id && cisL.length > 1 ? '<span class="hcx-ci-on">● Trabajando aquí</span>' : ''}</button>`).join('')
   // Solo se ofrece partir la PI si aún queda saldo por embarcar (fuera de la tolerancia); con la PI completa solo confundiría
   const addCI = pi && (!cisL.length || !emb.completa) ? (cisL.length
     ? `<button type="button" class="hcx-add" onclick="window.abrirRegistrarOtroCI()" title="La PI se embarca en más de un Commercial Invoice (cada uno con su BL, ETA, DAM y saldo)">＋ ${multiCI ? 'Otro CI' : 'La PI se divide en otro CI'}</button>`
@@ -787,7 +787,7 @@ function _html(d, r) {
         <div class="hcx-doc hcx-doc-ci">
           <div class="hcx-k">🧾 Commercial invoice${multiCI ? ` <span class="hcx-tag hcx-tag-hi">${cisL.length} CI en esta PI</span>` : ''}</div>
           ${cisL.length ? `<div class="hcx-cis">${ciTabs}${addCI}</div>` : `<div class="hcx-v">${dash}</div><div class="hcx-cis">${addCI}</div>`}
-          ${ci ? `<div class="hcx-sub">CI activo: <strong>${esc(ci.invoice_number)}</strong> · ${fechaDMY(ci.fecha)}</div><span class="hcx-ojo">${ojoBtn('window.verCI()', 'Ver / editar el Commercial Invoice')}</span>` : ''}
+          ${ci ? `<div class="hcx-sub hcx-ci-activo">CI activo: <strong>${esc(ci.invoice_number)}</strong> · ${fechaDMY(ci.fecha)}</div><span class="hcx-ojo">${ojoBtn('window.verCI()', 'Ver / editar el Commercial Invoice')}</span>` : ''}
         </div>
         <div class="hcx-doc hcx-doc-ag">
           <div class="hcx-k">🧑‍💼 Agente aduanero</div>
@@ -867,7 +867,9 @@ function _html(d, r) {
   const igvUsd = c => c.moneda === 'PEN' ? num(c.igv_monto) / (num(c.tipo_cambio) || 1) : num(c.igv_monto)
   const igvPen = c => c.moneda === 'PEN' ? num(c.igv_monto) : num(c.igv_monto) * (num(c.tipo_cambio) || 1)
   const orig = c => c.moneda === 'PEN' ? ' <span class="cr-chip" style="--c:#6b7280;" title="Factura emitida en soles">S/</span>' : ''
-  const filaGasto = c => fila([esc(c.concepto) + orig(c), docNum(c), docFecha(c), n3(c.tipo_cambio), '$ ' + n2(c.monto_usd), '$ ' + n2(igvUsd(c)), 'S/ ' + n2(c.monto_pen), 'S/ ' + n2(igvPen(c))])
+  const rev = c => docs[c.documento_id]?.sustentado === false ? ' <span class="cr-chip" style="--c:#f59e0b;" title="Falta el comprobante: no se encuentra el documento. Súbelo o regularízalo en la línea de costo.">Por revisar</span>' : ''
+  const ATTR = c => `data-costo="${c.id}" data-doc="${c.documento_id || ''}" title="Clic derecho o doble clic: editar gasto"`
+  const filaGasto = c => fila([esc(c.concepto) + orig(c) + rev(c), docNum(c), docFecha(c), n3(c.tipo_cambio), '$ ' + n2(c.monto_usd), '$ ' + n2(igvUsd(c)), 'S/ ' + n2(c.monto_pen), 'S/ ' + n2(igvPen(c))], '', ATTR(c))
   const sumL = f => r.locales.reduce((t, c) => t + f(c), 0)
   const s3 = r.locales.length ? tabla(['Concepto', 'N° doc.', 'Fecha', 'T.C.', 'Costo $', 'IGV $', 'Costo S/', 'IGV S/'],
       r.locales.map(filaGasto).join(''),
@@ -875,7 +877,7 @@ function _html(d, r) {
 
   // 4. Gastos financieros
   const s4 = r.financ.length ? tabla(['Concepto', 'N° doc.', 'Fecha', 'T.C.', 'Costo $', 'Costo S/'],
-      r.financ.map(c => fila([esc(c.concepto), docNum(c), docFecha(c), n3(c.tipo_cambio), '$ ' + n2(c.monto_usd), 'S/ ' + n2(c.monto_pen)])).join(''),
+      r.financ.map(c => fila([esc(c.concepto) + rev(c), docNum(c), docFecha(c), n3(c.tipo_cambio), '$ ' + n2(c.monto_usd), 'S/ ' + n2(c.monto_pen)], '', ATTR(c))).join(''),
       fila(['TOTAL', '', '', '', '$ ' + n2(r.financ.reduce((t, c) => t + num(c.monto_usd), 0)), 'S/ ' + n2(r.financ.reduce((t, c) => t + num(c.monto_pen), 0))], TOT)) : sinRegistros()
 
   // 5. Factor de distribución
@@ -1006,4 +1008,26 @@ window.subirVoucherPago = function (entidad, id) {
     window.renderHojaCosteo?.()
   }
   inp.click()
+}
+
+
+// ── Menú de clic derecho / doble clic en las filas de gastos (secciones 4 y 5) ───────────────────
+// Abre el MISMO modal «Editar gasto» que usa la liquidación del agente (compra + CxP + costeo en un solo paso).
+function _cerrarMenuGasto() { document.getElementById('hcCtxMenu')?.remove() }
+function _menuGasto(ev) {
+  const tr = ev.target.closest?.('tr[data-costo]'); if (!tr) return
+  ev.preventDefault(); _cerrarMenuGasto()
+  const id = +tr.dataset.costo, tieneDoc = !!tr.dataset.doc
+  const op = (ico, txt, js) => `<button type="button" style="display:flex;gap:8px;width:100%;padding:8px 14px;background:none;border:0;color:inherit;cursor:pointer;text-align:left;font-size:.88rem" onmouseover="this.style.background='rgba(99,102,241,.18)'" onmouseout="this.style.background='none'" onclick="document.getElementById('hcCtxMenu')?.remove(); ${js}">${ico} ${txt}</button>`
+  const m = document.createElement('div'); m.id = 'hcCtxMenu'
+  m.style.cssText = `position:fixed; z-index:2600; left:${Math.min(ev.clientX, innerWidth - 240)}px; top:${Math.min(ev.clientY, innerHeight - 130)}px; min-width:220px; background:var(--bg-card, #1e293b); color:var(--text-primary, #e2e8f0); border:1px solid var(--border-color, #334155); border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.45); padding:4px 0;`
+  m.innerHTML = (tieneDoc ? op('✏️', 'Editar gasto / compra', `window.abrirGastoFactura(${id})`) : '') + op('🧮', 'Editar línea de costo', `window.editarLineaCosto(${id})`) + op('👁', 'Ver detalle', `window.verLineaCosto(${id})`)
+  document.body.appendChild(m)
+}
+if (!window._hcMenuGasto) {
+  window._hcMenuGasto = true
+  document.addEventListener('contextmenu', _menuGasto)
+  document.addEventListener('click', _cerrarMenuGasto)
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') _cerrarMenuGasto() })
+  document.addEventListener('dblclick', e => { const tr = e.target.closest?.('tr[data-costo]'); if (tr?.dataset.doc) window.abrirGastoFactura?.(+tr.dataset.costo) })
 }

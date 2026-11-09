@@ -28,10 +28,18 @@ export async function emisorPDF(pk) {
   }
   const esJhiro = !ec || String(ec.ruc) === EMPRESA.ruc
   const color = /^#[0-9a-f]{6}$/i.test(ec?.color || '') ? ec.color : '#2f6db5'
-  return esJhiro
-    ? { ...EMPRESA, logo: ec?.logo_url || EMPRESA.logo, color, corto: ec?.nombre_comercial || 'JHIRO' }
-    : { nombre: ec.razon_social, ruc: ec.ruc, direccion: ec.direccion || '', email: ec.email || '', telefono: ec.telefono || '', web: ec.web || '',
-        logo: ec.logo_url || null, color, corto: ec.nombre_comercial || ec.codigo || '' }
+  // 2026-11-09: TODO sale del perfil de la empresa (Perfil → Multiempresa).
+  // Los datos fijos de JHIRO quedan solo como respaldo de campos vacíos.
+  const base = esJhiro ? EMPRESA : {}
+  const val = (k, kb) => (ec?.[k] != null && String(ec[k]).trim() !== '') ? ec[k] : (base[kb || k] || '')
+  return {
+    nombre: val('razon_social', 'nombre'), ruc: ec?.ruc || base.ruc || '',
+    direccion: val('direccion'), email: val('email'), telefono: val('telefono'), web: val('web'),
+    logo: val('logo_url', 'logo') || null, isotipo: base.isotipo || null,
+    logoAlto: Math.min(150, Math.max(40, parseInt(ec?.logo_alto) || 70)),
+    logoAlign: ['left', 'center', 'right'].includes(ec?.logo_align) ? ec.logo_align : 'left',
+    color, corto: ec?.nombre_comercial || ec?.codigo || base.corto || 'JHIRO'
+  }
 }
 /** Texto legible sobre un fondo: oscuro si el color es claro (luminancia WCAG). */
 export function textoSobre(hex) {
@@ -132,3 +140,88 @@ export async function descargarPDFDesdeHTML(html, nombreArchivo) {
   } finally { ifr.remove() }
 }
 
+
+/**
+ * Pie "Cuentas para depósito" (2026-11-09): cuentas bancarias de la empresa
+ * marcadas en su perfil (bancos.mostrar_en_pdf, SQL 147). '' si no hay.
+ * color = color de la empresa (encabezado de la tablita).
+ */
+export async function cuentasDepositoPDF(empresaId, color = '#2f6db5') {
+  if (!empresaId) return ''
+  let cuentas = []
+  try {
+    const { data, error } = await supabase.from('bancos')
+      .select('nombre, banco, numero_cuenta, cci, moneda, tipo_cuenta, mostrar_en_pdf, activo, empresa_id')
+      .eq('empresa_id', empresaId).eq('mostrar_en_pdf', true).order('moneda').order('banco')
+    if (error) return ''          // sin SQL 147 todavía: el PDF sale igual, sin cuentas
+    cuentas = (data || []).filter(c => c.activo !== false)
+  } catch { return '' }
+  if (!cuentas.length) return ''
+  const mon = m => m === 'USD' ? 'Dólares (US$)' : 'Soles (S/)'
+  const tipo = t => ({ corriente: 'Cta. corriente', ahorro: 'Cta. ahorros', detracciones: 'Detracciones', cuentas_recaudacion: 'Recaudación' }[t] || '')
+  return `
+  <div style="margin-top:18px; page-break-inside:avoid;">
+    <div style="font-weight:700; font-size:11px; letter-spacing:.04em; color:${color}; margin-bottom:4px;">CUENTAS PARA DEPÓSITO</div>
+    <table style="width:100%; border-collapse:collapse; font-size:10.5px;">
+      <thead><tr style="background:${tinte(color, 0.12)};">
+        <th style="text-align:left; padding:5px 8px; border:1px solid #d1d5db;">Banco</th>
+        <th style="text-align:left; padding:5px 8px; border:1px solid #d1d5db;">Moneda</th>
+        <th style="text-align:left; padding:5px 8px; border:1px solid #d1d5db;">N° de cuenta</th>
+        <th style="text-align:left; padding:5px 8px; border:1px solid #d1d5db;">CCI</th>
+      </tr></thead>
+      <tbody>${cuentas.map(c => `<tr>
+        <td style="padding:5px 8px; border:1px solid #d1d5db;"><b>${_esc(c.banco || c.nombre)}</b>${tipo(c.tipo_cuenta) ? ` <span style="color:#6b7280;">· ${tipo(c.tipo_cuenta)}</span>` : ''}</td>
+        <td style="padding:5px 8px; border:1px solid #d1d5db;">${mon(c.moneda)}</td>
+        <td style="padding:5px 8px; border:1px solid #d1d5db; font-family:monospace;">${_esc(c.numero_cuenta || '')}</td>
+        <td style="padding:5px 8px; border:1px solid #d1d5db; font-family:monospace;">${_esc(c.cci || '—')}</td></tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Cabecera ÚNICA de los PDF (Packing, Cotización, OC) y de la vista previa del
+// perfil de empresa — 2026-11-09. Un solo código = lo que ves es lo que sale.
+//   · El logo arranca arriba de todo (sin la franja vacía del "by: ZV").
+//   · RUC de la empresa debajo de su razón social.
+//   · Alineación izq.: la columna del logo mide lo que mide el logo (más
+//     espacio para los datos). Centro/der.: columna fija de 210 px.
+// ════════════════════════════════════════════════════════════════════════════
+export const ANCHO_PAPEL_PDF = 714   // ancho útil del lienzo del PDF (794 px − 40 px por lado)
+
+export function cssCabeceraPDF(C, CT) {
+  return `
+  .top { display:flex; align-items:flex-start; gap:16px; }
+  .logo { flex:none; display:flex; align-items:flex-start; }
+  .logo img { display:block; object-fit:contain; }
+  .emp { flex:1; min-width:0; font-size:10px; line-height:1.45; padding-top:2px; }
+  .emp .rz { font-size:12px; font-weight:bold; }
+  .emp .ruc { font-size:10.5px; font-weight:bold; color:#374151; }
+  .doc { flex:none; margin-top:26px; border:1.5px solid ${C}; border-radius:10px; padding:10px 16px; text-align:center; min-width:170px; font-size:12px; }
+  .doc b { display:block; font-size:13px; }
+  .logo-txt { display:inline-flex; align-items:center; justify-content:center; min-width:120px; height:64px; padding:0 16px; border-radius:14px; background:${C}; color:${CT}; font-size:26px; font-weight:800; letter-spacing:3px; }
+  .zv { position:absolute; top:0; right:0; display:flex; pointer-events:none; z-index:0; }
+  .zv-in { display:inline-flex; align-items:center; gap:6px; opacity:.8; }
+  .zv-mono { width:16px; height:16px; border-radius:5px; display:inline-flex; align-items:center; justify-content:center; background:#111827; color:#fff; font:800 8px/1 Arial, sans-serif; letter-spacing:-.3px; }
+  .zv-txt { font:italic 400 9px/1 Georgia, 'Times New Roman', serif; color:#6b7280; letter-spacing:.4px; }`
+}
+
+export function htmlCabeceraPDF(E, { colorTitulo, titulo, numero, lblTelefono = 'Teléfono', lblWeb = 'Sitio web' } = {}) {
+  const alto = E.logoAlto || 70
+  const align = E.logoAlign || 'left'
+  const colW = align === 'left' ? 'auto' : '210px'
+  const just = ({ left: 'flex-start', center: 'center', right: 'flex-end' })[align] || 'flex-start'
+  const logo = E.logo
+    ? `<img src="${_esc(E.logo)}" alt="${_esc(E.corto)}" style="height:${alto}px; max-width:210px;" onerror="this.outerHTML='<span class=&quot;logo-txt&quot;>${_esc(E.corto)}</span>'">`
+    : `<span class="logo-txt">${_esc(E.corto || E.nombre)}</span>`
+  const l = (k, v) => v ? `<br><b>${k}:</b> ${_esc(v)}` : ''
+  return `
+  <div style="position:relative;">
+    <div class="zv"><span class="zv-in"><span class="zv-txt">by:</span><span class="zv-mono">ZV</span></span></div>
+    <div class="top">
+      <div class="logo" style="width:${colW}; justify-content:${just};">${logo}</div>
+      <div class="emp"><span class="rz">${_esc(E.nombre)}</span>${E.ruc ? `<br><span class="ruc">RUC ${_esc(E.ruc)}</span>` : ''}${E.direccion ? '<br>' + _esc(E.direccion) : ''}${l('Email', E.email)}${l(lblTelefono, E.telefono)}${l(lblWeb, E.web)}</div>
+      <div class="doc"><b style="color:${colorTitulo || '#111'};">${_esc(titulo)}</b><span style="font-size:14px;">${_esc(numero)}</span></div>
+    </div>
+  </div>`
+}

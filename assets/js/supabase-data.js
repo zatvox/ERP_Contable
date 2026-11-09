@@ -467,13 +467,31 @@ export async function getCustomers() {
   return await getContactsByType('cliente')
 }
 
+// Documento de contacto (2026-11-07): ya no existe el tipo "Otro" ni números
+// de relleno (0000…, 9999…). Bloqueo central: aplica a TODO alta/edición de
+// contactos, venga del modal que venga (respaldado por el CHECK del SQL 145).
+export const TIPOS_DOC_CONTACTO = ['RUC', 'DNI', 'CE', 'pasaporte', 'VAT']
+export function errorDocumentoContacto(tipo, nro) {
+  if (tipo == null && nro == null) return null   // contactos internos sin documento (ej. empleados)
+  if (String(tipo || '').toLowerCase() === 'otro') return 'El tipo de documento "Otro" ya no se permite: elige RUC, DNI, Carné ext., Pasaporte o VAT.'
+  const n = String(nro ?? '').trim()
+  if (n && /^(0+|9+)$/.test(n)) return `El N° de documento "${n}" no es válido (no se permiten números de relleno 000… / 999…). Registra el documento real del cliente.`
+  return null
+}
+
 export async function addContact(contact) {
+  const errDoc = errorDocumentoContacto(contact?.tipo_documento, contact?.nro_documento)
+  if (errDoc) throw new Error(errDoc)
   const r = await insert('contacts', contact)
   if (r) invalidateContactsCache()
   return r
 }
 
 export async function updateContact(id, data) {
+  if ('tipo_documento' in (data || {}) || 'nro_documento' in (data || {})) {
+    const errDoc = errorDocumentoContacto(data.tipo_documento, data.nro_documento)
+    if (errDoc) throw new Error(errDoc)
+  }
   const r = await update('contacts', id, data)
   if (r) invalidateContactsCache()
   return r

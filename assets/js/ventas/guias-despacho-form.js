@@ -7,7 +7,7 @@ import { S } from './state.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { getCustomers, getLotes, getLoteById, updateLote, getVentas, getVentaById, getDetalleVentas, updateDetalleVenta, getAlmacenes, getStockUbicaciones, updateStockUbicacion, deleteStockUbicacion, getUbicacionCustomers, addKardexMovimiento, getGuiasDespachoVenta, getGuiaDespachoVentaById, addGuiaDespachoVenta, updateGuiaDespachoVenta, getDetalleGuiasDespachoVenta, getDetalleGuiasDespachoVentaByVenta, addDetalleGuiaDespachoVenta, deleteDetalleGuiaDespachoVenta, getLoteBultosDisponiblesZona, updateLoteBulto, recalcularLoteDesdeBultos, getKardexDeGuia } from '../supabase-data.js'
 import { showToast, formatQty } from '../helpers.js'
-import { getUbicaciones, getKardexByVenta } from '../supabase-data.js'
+import { getUbicaciones, getKardexByVenta, deleteGuiaDespachoVenta } from '../supabase-data.js'
 import { estaAnulado } from '../anulacion.js'
 import { convertirEnBuscador, refrescarBuscador } from '../buscador-select.js'
 import { _invalidarCacheVentas } from './anulacion.js'
@@ -227,10 +227,12 @@ window.abrirModalNuevaGuiaDespacho = async function (ventaIdPre = null) {
       sel.innerHTML = '<option value="">-- Selecciona una venta pendiente/parcial --</option>' +
         ventasPend.map(v => `<option value="${v.id}">${v.serie || ''}-${String(v.correlativo || '').padStart(8,'0')} — ${v.clienteNombre} (${v.estado_despacho})</option>`).join('')
     }
+    refrescarBuscador('gdVenta')
     window.openModal('modal-nueva-guia-despacho')
     // Desde Ventas ⋮ → "Emitir guía": la venta ya viene elegida (2026-10-31)
     if (ventaIdPre && sel && [...sel.options].some(o => o.value === String(ventaIdPre))) {
       sel.value = String(ventaIdPre)
+      refrescarBuscador('gdVenta')   // el buscador visible muestra la venta elegida (2026-11-07)
       await window.onSeleccionarVentaGuiaDespacho()
     } else if (ventaIdPre) showToast('Esa venta ya no tiene productos pendientes de despacho', 'info')
   } catch (error) {
@@ -774,6 +776,10 @@ window.guardarGuiaDespachoVenta = async function () {
     })
 
     if (!guia?.id) { showToast('No se pudo registrar la guía de despacho', 'danger'); return }
+    // 2026-11-07: si algo falla DESPUÉS de crear la cabecera, no puede quedar
+    // una guía "emitida" sin líneas ni kardex (caso GN01-00000052): se revierte.
+    let _lineasOk = 0, _stockTocado = false
+    try {
     await registrarUsoGuia(numeroGuia)
 
     // Destino de la salida en el Kardex: lo define la serie de la guía
@@ -806,10 +812,12 @@ window.guardarGuiaDespachoVenta = async function () {
       } else {
         nuevaCantidadLote = parseFloat(((parseFloat(lote?.cantidad) || 0) - d.cantidad).toFixed(4))
         nuevaUnidadesLote = Math.max(0, parseFloat(((parseFloat(lote?.cantidad_unidades) || 0) - (d.cantidad_unidades || 0)).toFixed(4)))
+        _stockTocado = true
         await updateLote(d.lote_id, { cantidad: nuevaCantidadLote, cantidad_unidades: nuevaUnidadesLote })
       }
 
       const filaStock = stockLocalPorFila.get(d.filaStockId)
+      _stockTocado = true
       const nuevaCantidadZona = parseFloat(((parseFloat(filaStock?.cantidad) || 0) - d.cantidad).toFixed(4))
       const nuevaUnidadesZona = Math.max(0, parseFloat(((parseFloat(filaStock?.cantidad_unidades) || 0) - (d.cantidad_unidades || 0)).toFixed(4)))
       if (filaStock) { filaStock.cantidad = nuevaCantidadZona; filaStock.cantidad_unidades = nuevaUnidadesZona } // acumular para el próximo despacho de esta misma fila
@@ -834,6 +842,8 @@ window.guardarGuiaDespachoVenta = async function () {
         lote_id:            d.lote_id,
         ubicacion_id:       d.ubicacion_id
       })
+      if (!detalleGuia?.id) throw new Error(`no se pudo registrar la línea de ${S._guiaDespachoLineas.find(l => l.detalle_venta_id === d.detalle_venta_id)?.nombre || 'un producto'} en la guía`)
+      _lineasOk++
 
       if (esPesoVariable) {
         for (const bultoId of d.bultosSeleccionados) {
@@ -892,6 +902,13 @@ window.guardarGuiaDespachoVenta = async function () {
         ubicacion_id: d.ubicacion_id,
         costo_unitario: costoUnitLote
       })
+    }
+    } catch (errLineas) {
+      if (_lineasOk === 0 && !_stockTocado) {
+        try { await deleteGuiaDespachoVenta(guia.id) } catch (_) { /* se reporta abajo */ }
+        throw new Error(`la guía ${numeroGuia} NO se registró (${errLineas.message}). No se movió stock: corrige y vuelve a guardar.`)
+      }
+      throw new Error(`la guía ${numeroGuia} quedó INCOMPLETA (${_lineasOk} línea(s) grabadas): ${errLineas.message}. Revísala en Guías de Despacho antes de seguir.`)
     }
 
     // Recalcular estado_despacho de la venta: comparar total despachado

@@ -242,6 +242,9 @@ function _pintarDetalle() {
   d.textContent = `${prefijo}${hechos} de ${total}${cola}`
 }
 
+/** ¿Hay un overlay visible ahora mismo? */
+export function cargaActiva() { return !!_overlay }
+
 /** Quita el overlay. `inmediato` salta la transición de salida. */
 export function ocultarCarga(inmediato = false) {
   if (_estado?.timer) clearInterval(_estado.timer)

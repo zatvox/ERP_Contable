@@ -52,6 +52,7 @@ export const CONCEPTOS_COSTO = [
   { codigo: 'gate_in',           label: 'Gate in / devolución de contenedor',     grupo: 'despacho',        clasificacion: 'inventario',       base: 'peso_bruto' },
   { codigo: 'boletin_quimico',   label: 'Boletín químico SUNAT',                  grupo: 'despacho',        clasificacion: 'inventario',       base: 'peso_bruto' },
   { codigo: 'sobreestadia',      label: 'Sobreestadía / demora de contenedor',    grupo: 'despacho',        clasificacion: 'inventario',       base: 'peso_bruto' },
+  { codigo: 'recargo_naviera',      label: 'Recargo / penalidad de naviera (late payment, etc.)',    grupo: 'despacho',        clasificacion: 'inventario',       base: 'peso_bruto' },
   // ── Nacionalización física ────────────────────────────────────────────────
   { codigo: 'gastos_destino',    label: 'Gastos en destino',                      grupo: 'nacionalizacion', clasificacion: 'inventario',       base: 'peso_bruto' },
   { codigo: 'almacen',           label: 'Almacenaje',                             grupo: 'nacionalizacion', clasificacion: 'inventario',       base: 'peso_bruto' },
@@ -62,7 +63,7 @@ export const CONCEPTOS_COSTO = [
   { codigo: 'refrigerio',        label: 'Refrigerio de cuadrilla',                grupo: 'nacionalizacion', clasificacion: 'inventario',       base: 'peso_bruto' },
   // ── Financieros ───────────────────────────────────────────────────────────
   { codigo: 'comision_bancaria', label: 'Comisión bancaria / SWIFT',              grupo: 'financiero',      clasificacion: 'gasto_financiero', base: 'valor_fob' },
-  { codigo: 'interes',           label: 'Intereses moratorios',                   grupo: 'financiero',      clasificacion: 'gasto_financiero', base: 'valor_fob' },
+  { codigo: 'interes',           label: 'Intereses moratorios (préstamo/financiamiento)',           grupo: 'financiero',      clasificacion: 'gasto_financiero', base: 'valor_fob' },
   // ── Ajustes de gestión ────────────────────────────────────────────────────
   { codigo: 'reposicion',        label: 'Costo de reposición (% del CIF)',        grupo: 'ajuste',          clasificacion: 'solo_gestion',     base: 'valor_fob' },
   { codigo: 'otro',              label: 'Otro gasto',                             grupo: 'nacionalizacion', clasificacion: 'inventario',       base: 'valor_fob' }
@@ -138,6 +139,17 @@ let _archivosPendientes = []
 const n2 = v => formatNumber(parseFloat(v) || 0, 2)
 const n4 = v => formatNumber(parseFloat(v) || 0, 4)
 const num = v => parseFloat(v) || 0
+const r2 = v => Math.round((num(v) + Number.EPSILON) * 100) / 100
+
+// Tipo de IGV del comprobante (2026-11-07). Sin columna nueva: gravado = igv_monto > 0; la factura del exterior se
+// guarda con tipo_comprobante '91' (comprobante de no domiciliado: sin IGV ni crédito fiscal).
+const TIPOS_IGV = {
+  gravada:      'Gravado 18% — IGV aparte',
+  gravada_incl: 'Gravado 18% — el importe ya incluye IGV',
+  exonerada:    'Exonerado / inafecto (sin IGV)',
+  exterior:     'Factura del exterior — no domiciliado (sin IGV)'
+}
+const IGV_TASA = 0.18
 
 /** La carpeta de la importación seleccionada arriba. */
 function carpetaActual() {
@@ -659,13 +671,18 @@ function _asegurarModalLinea() {
         <hr style="border:none; border-top:1px solid var(--border-color); margin:14px 0;">
         <strong style="display:block; margin-bottom:8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">Importes</strong>
         <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px;">
+          <div class="form-group" style="grid-column: span 2;">
+            <label>Tipo de IGV *</label>
+            <select id="lcTipoIGV" onchange="this.dataset.tocado='1'; window.lcOnTipoIGV()">${opts(TIPOS_IGV, 'gravada')}</select>
+            <small id="lcTipoIGVNota" style="color:var(--text-secondary);"></small>
+          </div>
           <div class="form-group">
-            <label>Importe sin IGV *</label>
-            <input type="number" id="lcMonto" step="0.0001" placeholder="0.0000" oninput="window.lcRecalcular()">
+            <label id="lcLblMonto">Importe sin IGV *</label>
+            <input type="number" id="lcMonto" step="0.0001" placeholder="0.0000" oninput="window.lcRecalcular(true)">
           </div>
           <div class="form-group">
             <label>IGV del documento</label>
-            <input type="number" id="lcIGV" step="0.01" placeholder="0.00" oninput="window.lcRecalcular()">
+            <input type="number" id="lcIGV" step="0.01" placeholder="0.00" oninput="this.dataset.manual='1'; window.lcRecalcular()">
           </div>
           <div class="form-group">
             <label>Total del documento</label>
@@ -723,7 +740,10 @@ window.lcOnTipoDoc = function () {
   if (prov && tipo === 'proforma') prov.checked = true
   const sust = document.getElementById('lcSustentado')
   if (sust && tipo === 'sin_comprobante') sust.checked = false
-  window.lcRecalcular()
+  // Sugerencia de tipo de IGV según el comprobante (el usuario puede cambiarla)
+  const ti = document.getElementById('lcTipoIGV')
+  if (ti && !ti.dataset.tocado) { const sin = ['rh', 'dam', 'autoliquidacion', 'liquidacion_sunat', 'voucher_bancario', 'sin_comprobante'].includes(tipo); ti.value = sin ? 'exonerada' : (ti.value === 'exonerada' ? 'gravada' : ti.value) }
+  window.lcOnTipoIGV()
 }
 
 window.lcOnConcepto = function () {
@@ -759,10 +779,40 @@ window.lcOnBase = function () {
   if (grupo) grupo.style.display = (sel && sel.value) === 'directo' ? '' : 'none'
 }
 
-window.lcRecalcular = function () {
+/** Base e IGV reales según el tipo de IGV: en «ya incluye IGV» el importe tecleado es el TOTAL y se desglosa. */
+function _importes() {
   const g = id => document.getElementById(id)
-  const monto = num(g('lcMonto') && g('lcMonto').value)
-  const igv = num(g('lcIGV') && g('lcIGV').value)
+  const tipo = (g('lcTipoIGV') && g('lcTipoIGV').value) || 'exonerada'
+  const entrada = num(g('lcMonto') && g('lcMonto').value)
+  if (tipo === 'gravada_incl') { const base = r2(entrada / (1 + IGV_TASA)); return { tipo, base, igv: r2(entrada - base) } }
+  if (tipo === 'gravada') return { tipo, base: entrada, igv: num(g('lcIGV') && g('lcIGV').value) }
+  return { tipo, base: entrada, igv: 0 }
+}
+
+window.lcOnTipoIGV = function () {
+  const g = id => document.getElementById(id)
+  const tipo = g('lcTipoIGV').value
+  const igvEl = g('lcIGV'); if (igvEl) igvEl.dataset.manual = ''
+  const nota = { gravada: 'El IGV se calcula solo (18%); puedes corregirlo si el comprobante difiere.',
+    gravada_incl: 'Escribe el TOTAL del comprobante: el sistema separa base e IGV.',
+    exonerada: 'No se registra IGV (servicios inafectos, RH, tributos de la DAM…).',
+    exterior: 'Invoice de proveedor del exterior: sin IGV ni crédito fiscal (comprobante tipo 91).' }[tipo]
+  if (g('lcTipoIGVNota')) g('lcTipoIGVNota').textContent = nota || ''
+  if (g('lcLblMonto')) g('lcLblMonto').textContent = tipo === 'gravada_incl' ? 'Importe total (con IGV) *' : 'Importe sin IGV *'
+  window.lcRecalcular(true)
+}
+
+window.lcRecalcular = function (recalcIGV) {
+  const g = id => document.getElementById(id)
+  const imp = _importes()
+  const igvEl = g('lcIGV')
+  let igv = imp.igv
+  if (imp.tipo === 'gravada' && recalcIGV === true && igvEl && igvEl.dataset.manual !== '1') igv = r2(imp.base * IGV_TASA)
+  if (igvEl) {
+    igvEl.readOnly = imp.tipo !== 'gravada'
+    if (imp.tipo !== 'gravada' || (recalcIGV === true && igvEl.dataset.manual !== '1')) igvEl.value = igv ? igv.toFixed(2) : (imp.tipo === 'gravada' ? '' : '0.00')
+  }
+  const monto = imp.base
   const tc = num(g('lcTC') && g('lcTC').value) || 1
   const moneda = (g('lcMoneda') && g('lcMoneda').value) || 'USD'
   const total = monto + igv
@@ -886,7 +936,7 @@ window.abrirModalLineaCosto = async function () {
   const hoy = new Date().toISOString().slice(0, 10)
   const set = (id, v) => { const e = document.getElementById(id); if (e) e.value = v }
   set('lcFecha', hoy); set('lcVencimiento', ''); set('lcSerie', ''); set('lcNumero', '')
-  set('lcConcepto', ''); set('lcDescripcion', ''); set('lcMonto', ''); set('lcIGV', '')
+  set('lcConcepto', ''); set('lcDescripcion', ''); set('lcMonto', ''); set('lcIGV', ''); { const ti = document.getElementById('lcTipoIGV'); if (ti) { ti.dataset.tocado = ''; ti.value = 'gravada' } const ig = document.getElementById('lcIGV'); if (ig) ig.dataset.manual = '' }
   set('lcRetencion', ''); set('lcObservaciones', ''); set('lcProveedor', ''); _syncProveedor()
   set('lcTipoDoc', 'factura'); set('lcMoneda', 'USD'); set('lcEstadoPago', 'pendiente')
   const desc = document.getElementById('lcDescripcion'); if (desc) delete desc.dataset.tocado
@@ -916,6 +966,8 @@ window.editarLineaCosto = async function (id) {
   await _llenarSelectoresModal()
   _editandoId = id
   _archivosPendientes = []
+  const _docDe = async x => (x.documento_id ? ((await query('documentos_importacion', { id: x.documento_id }))?.[0] || null) : null)
+  const docTipoCmp = (await _docDe(l))?.tipo_comprobante
 
   const set = (campo, v) => { const e = document.getElementById(campo); if (e) e.value = (v === null || v === undefined) ? '' : v }
   document.getElementById('tituloModalLineaCosto').textContent = `Editar costo · ${l.concepto}`
@@ -929,6 +981,9 @@ window.editarLineaCosto = async function (id) {
   set('lcBase', l.base_prorrateo); set('lcContenedor', l.contenedor_id || '')
   set('lcDetalleCI', l.detalle_ci_id || ''); set('lcDescripcion', l.concepto)
   set('lcMonto', num(l.monto_moneda)); set('lcIGV', num(l.igv_monto))
+  { const ti = document.getElementById('lcTipoIGV'), ig = document.getElementById('lcIGV')
+    if (ti) { ti.dataset.tocado = '1'; ti.value = num(l.igv_monto) > 0 ? 'gravada' : ((docTipoCmp === '91') ? 'exterior' : 'exonerada') }
+    if (ig) ig.dataset.manual = '1' }
   set('lcObservaciones', l.observaciones)
   const desc = document.getElementById('lcDescripcion'); if (desc) desc.dataset.tocado = '1'
   const tc = document.getElementById('lcTC'); if (tc) tc.dataset.auto = '0'
@@ -969,12 +1024,13 @@ window.guardarLineaCosto = async function () {
 
     btn.disabled = true; btn.textContent = 'Guardando...'
     const user = await getCurrentUser()
-    const igv = num(v('lcIGV'))
+    const imp = _importes()
+    const igv = imp.igv, montoBase = imp.base
     const retencion = tipoDoc === 'rh' ? num(v('lcRetencion')) : 0
 
     const doc = {
       tipo: tipoDoc,
-      tipo_comprobante: TIPO_COMPROBANTE_SUNAT[tipoDoc] || null,
+      tipo_comprobante: imp.tipo === 'exterior' ? '91' : (TIPO_COMPROBANTE_SUNAT[tipoDoc] || null),
       serie: v('lcSerie') || null,
       numero: v('lcNumero') || null,
       proveedor_id: proveedorId,
@@ -982,11 +1038,11 @@ window.guardarLineaCosto = async function () {
       fecha_vencimiento: v('lcVencimiento') || null,
       moneda: v('lcMoneda'),
       tipo_cambio: num(v('lcTC')),
-      monto_sin_igv: monto,
+      monto_sin_igv: montoBase,
       igv_monto: igv,
-      monto_total: monto + igv,
+      monto_total: montoBase + igv,
       retencion_4ta: retencion,
-      neto_pagado: tipoDoc === 'rh' ? (monto + igv - retencion) : null,
+      neto_pagado: tipoDoc === 'rh' ? (montoBase + igv - retencion) : null,
       estado_pago: v('lcEstadoPago'),
       es_provisional: chk('lcProvisional'),
       sustentado: chk('lcSustentado'),
@@ -1006,7 +1062,7 @@ window.guardarLineaCosto = async function () {
       entra_costo_gestion: chk('lcEntraGestion'),
       moneda: v('lcMoneda'),
       tipo_cambio: num(v('lcTC')),
-      monto_moneda: monto,
+      monto_moneda: montoBase,
       igv_monto: igv,
       base_prorrateo: base,
       detalle_ci_id: base === 'directo' ? parseInt(v('lcDetalleCI')) : null,

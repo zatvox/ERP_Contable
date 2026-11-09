@@ -63,7 +63,7 @@ async function _cargarBase() {
     const ks = costos.filter(k => k.documento_id === d.id)
     const igv = num(d.igv_monto), tot = num(d.monto_total)
     return { id: d.id, titulo: concepto(d.id) || d.tipo, numero: [d.serie, d.numero].filter(Boolean).join('-') || '—', fecha: d.fecha_emision, moneda: d.moneda, total: tot,
-      igv, base: d.monto_sin_igv != null ? num(d.monto_sin_igv) : Math.max(0, tot - igv), costoIds: ks.map(k => k.id), compra_id: d.compra_id || null, regul: d.regularizacion || null, proveedor_id: d.proveedor_id || null, proveedor: _prov.get(d.proveedor_id) || '' }
+      igv, base: d.monto_sin_igv != null ? num(d.monto_sin_igv) : Math.max(0, tot - igv), costoIds: ks.map(k => k.id), compra_id: d.compra_id || null, regul: d.regularizacion || null, sustentado: d.sustentado !== false, proveedor_id: d.proveedor_id || null, proveedor: _prov.get(d.proveedor_id) || '' }
   }) }
 }
 
@@ -78,7 +78,7 @@ async function _cargarLiq() {
   ])
   _liq = (liqs || [])[0] || null
   const vinculados = new Set(base.costos.filter(k => _liq && k.liquidacion_agente_id === _liq.id).map(k => k.documento_id))
-  _docs = base.cand.map(d => ({ ...d, marcado: _liq ? vinculados.has(d.id) : true }))
+  _forzar.clear(); _docs = _partir(base)
   _abonos = _liq ? (((await query('importacion_liquidacion_abonos', { liquidacion_agente_id: _liq.id })) || []).sort((a, b) => a.id - b.id)) : []
   _dam = (dams || [])[0] || null
   _bancos = bancos || []
@@ -86,6 +86,28 @@ async function _cargarLiq() {
   _prof = { numero: _liq?.proforma_numero || '', fecha: _liq?.proforma_fecha || '', tc: _liq?.proforma_tc || '', gl: _normLineas(_liq?.proforma_items?.gl, 'USD'), tr: _normLineas(_liq?.proforma_items?.tr, 'PEN') }
   return base
 }
+
+// ── criterio: qué gastos de la carpeta pertenecen a ESTA liquidación (2026-11-07) ─────────────────
+// Entran: (1) los ya vinculados a esta liquidación, (2) las facturas del propio agente, (3) las agregadas desde este modal o
+// incluidas a mano. Quedan FUERA los gastos pagados directo (cuadrilla/estiba, RH, etc.) y los de otra liquidación: se ven
+// en «Gastos de la carpeta fuera de esta liquidación» con un enlace para incluirlos si hace falta.
+let _fuera = []
+let _baseCache = null
+const _forzar = new Set()
+function _partir(base) {
+  _baseCache = base
+  const vinc = new Set(base.costos.filter(k => _liq && k.liquidacion_agente_id === _liq.id).map(k => k.documento_id))
+  const otra = new Set(base.costos.filter(k => k.liquidacion_agente_id && (!_liq || k.liquidacion_agente_id !== _liq.id)).map(k => k.documento_id))
+  const ag = ((typeof v === 'function' && $('laAgente') ? v('laAgente') : '') || _liq?.agente_nombre || '').trim().toLowerCase()
+  const agId = _liq?.agente_id || (_contactosAg || []).find(c => (c.nombre || '').trim().toLowerCase() === ag)?.id || null
+  const esAg = d => (agId && d.proveedor_id === agId) || (ag && (d.proveedor || '').trim().toLowerCase() === ag)
+  const dentro = [], fuera = []
+  for (const d of base.cand) ((!ag && !agId && !_liq) || vinc.has(d.id) || _forzar.has(d.id) || (!otra.has(d.id) && esAg(d)) ? dentro : fuera).push(d)
+  _fuera = fuera
+  return dentro.map(d => ({ ...d, marcado: true }))
+}
+window.laIncluir = id => { _forzar.add(id); _docs = _partir(_baseCache); _pintarDocs(); aplicarModoVerEditar('modal-liq-agente', false); window.laRecalcular(); window.laAuditar() }
+window.laReclasificar = () => { if (_baseCache) { _docs = _partir(_baseCache); _pintarDocs(); aplicarModoVerEditar('modal-liq-agente', $('modal-liq-agente')?.dataset.modo === 'lectura'); window.laRecalcular(); window.laAuditar() } }
 
 // ── cálculos ──────────────────────────────────────────────────────────────────
 function _saldos(docs, abonos) {
@@ -146,7 +168,7 @@ function _asegurarModal() {
               <select id="laEstado"><option value="conforme">Conforme</option><option value="observada">Observada</option><option value="borrador">Borrador</option></select></div>
             <div class="form-group"><label>DAM</label><input type="text" id="laDam" maxlength="60"></div>
           </div>
-          <div class="e3-sub">Facturas y gastos pagados por el agente <small style="font-weight:400">(marca las que van en esta liquidación)</small> <button type="button" class="btn btn-secondary btn-small" data-solo-edicion onclick="window.laNuevaFactura()">＋ Factura de gasto</button></div>
+          <div class="e3-sub">Facturas y gastos pagados por el agente <button type="button" class="btn btn-secondary btn-small" data-solo-edicion onclick="window.laNuevaFactura()">＋ Factura de gasto</button></div>
           <div id="laDocs" style="margin-bottom:8px;"></div>
           <div class="e3-sub">Auditoría · proforma vs liquidación final</div>
           <div id="laAudit" style="margin-bottom:8px;"></div>
@@ -191,16 +213,18 @@ function _asegurarModal() {
   </div>`)
 }
 
+const _notaFuera = lectura => !_fuera.length ? '' : `<div class="dm-nota" style="margin-top:8px;">📌 <b>Fuera de esta liquidación</b> (pagados directo, no pasan por el agente): ${_fuera.map(d => `${esc(d.titulo)} <small>${esc(d.numero)} · ${SIGNO(d.moneda)} ${n2(d.total)}</small>${lectura ? '' : ` <a href="#" onclick="window.laIncluir(${d.id}); return false;" title="Incluir en esta liquidación">incluir</a>`}`).join(' · ')}</div>`
 let _celda = null   // celda en edición (doble clic, estilo Excel): { i, col }
 const COLS_ED = ['concepto', 'numero', 'fecha', 'base', 'igv']
+const _ocultas = { USD: false, PEN: false }   // subtotal clicable: oculta/muestra las facturas de esa moneda
+window.laTogMoneda = m => { _ocultas[m] = !_ocultas[m]; _pintarDocs(); aplicarModoVerEditar('modal-liq-agente', $('modal-liq-agente')?.dataset.modo === 'lectura') }
 function _pintarDocs() {
   const lectura = $('modal-liq-agente')?.dataset.modo === 'lectura'
-  if (!_docs.length) { $('laDocs').innerHTML = '<div class="dm-nota">La carpeta aún no tiene facturas de gastos locales. Usa «＋ Factura de gasto» para registrarlas (entran al costeo y a esta liquidación).</div>'; return }
+  if (!_docs.length) { $('laDocs').innerHTML = '<div class="dm-nota">Esta liquidación aún no tiene facturas. Usa «＋ Factura de gasto» para registrarlas (entran al costeo y a esta liquidación).</div>' + _notaFuera(lectura); return }
   const sub = { USD: { b: 0, i: 0, t: 0, n: 0 }, PEN: { b: 0, i: 0, t: 0, n: 0 } }
   for (const d of _docs.filter(x => x.marcado)) { const m = sub[d.moneda === 'PEN' ? 'PEN' : 'USD']; m.b += d.base; m.i += d.igv; m.t += d.total; m.n++ }
   const fila = (d, i) => {
     const S = SIGNO(d.moneda)
-    const chk = `<td><input type="checkbox" style="width:auto;margin:0" ${d.marcado ? 'checked' : ''} ${lectura ? 'disabled' : ''} onchange="window.laMarcar(${i}, this.checked)"></td>`
     const editable = !lectura && d.costoIds.length === 1
     // Celda editable: doble clic → input; si no, texto
     const cel = (col, html, tipo, valor, cls = '') => {
@@ -210,11 +234,11 @@ function _pintarDocs() {
       }
       return `<td class="${cls} ${editable ? 'la-cel' : ''}" ${editable ? `ondblclick="window.laCeldaEd(${i}, '${col}')" title="Doble clic para editar"` : ''}>${html}</td>`
     }
-    const estado = d.compra_id
+    const porRev = d.sustentado === false ? ' <span class="badge badge-warning" style="background:#f59e0b;color:#1f1300" title="Falta el comprobante: no se encuentra el documento. Súbelo o regularízalo.">Por revisar</span>' : ''
+    const estado = porRev + (d.compra_id
       ? `<span class="badge badge-success" title="Compra #${d.compra_id} en el Registro de Compras">Compra #${d.compra_id}</span>${d.regul === 'pendiente' ? ' <span class="badge badge-warning" title="Pagada por el agente: concílíala en Cuentas por Pagar">Por regularizar</span>' : ''}`
-      : (d.costoIds.length === 1 ? `<button type="button" class="la-reg" onclick="window.laRegistrarGasto(${d.costoIds[0]})" title="Abre el modal de compra de gasto con esta factura">🧾 Registrar gasto</button>` : '')
-    return `<tr>${chk}
-      ${cel('concepto', `<div class="la-glosa"><span>${esc(d.titulo)}</span>${estado}</div>`, 'text', d.titulo)}
+      : (d.costoIds.length === 1 ? `<button type="button" class="la-reg" onclick="window.laRegistrarGasto(${d.costoIds[0]})" title="Abre el modal de compra de gasto con esta factura">🧾 Registrar gasto</button>` : ''))
+    return `<tr>      ${cel('concepto', `<div class="la-glosa"><span>${esc(d.titulo)}</span>${estado}</div>`, 'text', d.titulo)}
       <td class="la-prov" title="${esc(d.proveedor)}">${esc(d.proveedor) || '—'}</td>
       ${cel('numero', esc(d.numero), 'text', d.numero === '—' ? '' : d.numero)}
       ${cel('fecha', fechaDMY(d.fecha), 'date', d.fecha || '')}
@@ -223,16 +247,17 @@ function _pintarDocs() {
       <td class="la-num"><b><span class="la-mon">${S}</span>${n2(d.total)}</b></td>
       <td class="la-acc">${lectura || d.costoIds.length !== 1 ? '' : `<button type="button" class="la-edit" data-solo-edicion title="${d.compra_id ? 'Editar gasto (modal completo)' : 'Registrar / editar gasto (modal completo)'}" onclick="window.laRegistrarGasto(${d.costoIds[0]})">✏️</button><button type="button" class="la-edit la-del" data-solo-edicion title="Eliminar esta glosa" onclick="window.laFilaEliminar(${i})">✕</button>`}</td></tr>`
   }
-  const pie = ['USD', 'PEN'].filter(m => sub[m].n).map(m => `<tr class="la-sub"><td></td><td colspan="4">Subtotal ${m === 'USD' ? 'dólares' : 'soles'} (${sub[m].n} marcadas)</td>
+  const pie = ['USD', 'PEN'].filter(m => sub[m].n).map(m => `<tr class="la-sub" style="cursor:pointer" onclick="window.laTogMoneda('${m}')" title="Clic para ${_ocultas[m] ? 'mostrar' : 'ocultar'} las facturas en ${m === 'USD' ? 'dólares' : 'soles'}"><td colspan="4">${_ocultas[m] ? '▸' : '▾'} Subtotal ${m === 'USD' ? 'dólares' : 'soles'} (${sub[m].n} factura${sub[m].n === 1 ? '' : 's'})</td>
       <td class="la-num"><span class="la-mon">${SIGNO(m)}</span>${n2(sub[m].b)}</td><td class="la-num"><span class="la-mon">${SIGNO(m)}</span>${n2(sub[m].i)}</td><td class="la-num"><b><span class="la-mon">${SIGNO(m)}</span>${n2(sub[m].t)}</b></td><td></td></tr>`).join('')
-  $('laDocs').innerHTML = `<div style="overflow-x:auto;"><table class="data-table la-tabla" style="width:100%"><thead><tr><th></th><th>Concepto (glosa)</th><th>Proveedor</th><th>N° doc.</th><th>Fecha</th><th class="la-num">Base imponible</th><th class="la-num">IGV</th><th class="la-num">Total</th><th></th></tr></thead><tbody>${_docs.map(fila).join('')}</tbody><tfoot>${pie}</tfoot></table></div>`
+  $('laDocs').innerHTML = `<div style="overflow-x:auto;"><table class="data-table la-tabla" style="width:100%"><thead><tr><th>Concepto (glosa)</th><th>Proveedor</th><th>N° doc.</th><th>Fecha</th><th class="la-num">Base imponible</th><th class="la-num">IGV</th><th class="la-num">Total</th><th></th></tr></thead><tbody>${_docs.map((d, i) => _ocultas[d.moneda === 'PEN' ? 'PEN' : 'USD'] ? '' : fila(d, i)).join('')}</tbody><tfoot>${pie}</tfoot></table></div>`
+  $('laDocs').insertAdjacentHTML('beforeend', _notaFuera(lectura))
   if (_celda) setTimeout(() => { const e = $('laC_in'); if (e) { e.focus(); if (e.select && e.type !== 'date') e.select() } }, 0)
 }
 
 async function _refrescarDocs() {
   const previos = new Map(_docs.map(d => [d.id, d.marcado]))
   const base = await _cargarBase(); _costos = base.costos
-  _docs = base.cand.map(d => ({ ...d, marcado: previos.has(d.id) ? !!previos.get(d.id) : true }))
+  _docs = _partir(base)
   _pintarDocs(); aplicarModoVerEditar('modal-liq-agente', $('modal-liq-agente')?.dataset.modo === 'lectura'); window.laRecalcular(); window.laAuditar()
 }
 window.laRegistrarGasto = async function (costoId) {
@@ -415,6 +440,16 @@ function _pintarProforma() {
 }
 window.laPfRepintar = () => { _pintarProforma(); aplicarModoVerEditar('modal-liq-agente', false) }
 const _igvUsdC = c => c.moneda === 'PEN' ? num(c.igv_monto) / (num(c.tipo_cambio) || 1) : num(c.igv_monto)
+// Validaciones de las facturas de la liquidación (se muestran bajo la auditoría)
+function _avisosDocs() {
+  const av = []
+  const sinProv = _docs.filter(d => !d.proveedor_id).length, sinNum = _docs.filter(d => !d.numero || d.numero === '—').length
+  const sinMon = _docs.filter(d => !d.moneda).length, sinFecha = _docs.filter(d => !d.fecha).length
+  const sinCompra = _docs.filter(d => !d.compra_id).length, cero = _docs.filter(d => num(d.total) <= 0).length
+  if (sinProv) av.push(`${sinProv} sin proveedor`); if (sinNum) av.push(`${sinNum} sin N° de documento`); if (sinMon) av.push(`${sinMon} sin moneda`)
+  if (sinFecha) av.push(`${sinFecha} sin fecha`); if (cero) av.push(`${cero} con monto 0`); if (sinCompra) av.push(`${sinCompra} sin registrar en Compras`)
+  return av.length ? `<div class="la-alerta">⚠ Revisa las facturas: ${av.join(' · ')}.</div>` : ''
+}
 window.laAuditar = function () {
   const host = $('laAudit'); if (!host) return
   const hay = _prof.gl.length || _prof.tr.length
@@ -429,7 +464,7 @@ window.laAuditar = function () {
     realTR[k] = (realTR[k] || 0) + num(c.monto_pen)
   }
   const etq = c => c === '__igv' ? 'IGV de los gastos locales' : (CONCEPTOS_COSTO.find(x => x.codigo === c)?.label || c || 'Sin equivalente')
-  const bloque = (tipo, real, sign, campo) => {
+  const bloque = (tipo, real, sign, campo, soloTot) => {
     const prof = {}
     for (const l of _prof[tipo]) { const k = l.codigo || '__sin'; (prof[k] = prof[k] || { n: [], v: 0 }); prof[k].n.push(l.concepto); prof[k].v += _enMon(l, tipo === 'gl' ? 'USD' : 'PEN') }
     const claves = [...new Set([...Object.keys(prof), ...Object.keys(real).filter(k => Math.abs(real[k]) > 0.005)])]
@@ -442,11 +477,28 @@ window.laAuditar = function () {
       return `<tr><td>${nom}${nota}</td><td style="text-align:right">${sign} ${n2(p)}</td><td style="text-align:right">${sign} ${n2(r)}</td><td style="text-align:right; color:${dif > 0.005 ? '#ef4444' : dif < -0.005 ? '#10b981' : 'inherit'}">${dif > 0 ? '+' : ''}${n2(dif)}</td></tr>`
     }).join('')
     const dif = tr - tp
+    if (soloTot) return { tp, tr }
     return `<table class="data-table" style="width:100%"><thead><tr><th>${tipo === 'gl' ? 'Gastos locales (USD)' : 'Derechos e impuestos (S/)'}</th><th style="text-align:right">Proforma</th><th style="text-align:right">Real</th><th style="text-align:right">Diferencia</th></tr></thead><tbody>${filas}
       <tr style="font-weight:700"><td>Total</td><td style="text-align:right">${sign} ${n2(tp)}</td><td style="text-align:right">${sign} ${n2(tr)}</td><td style="text-align:right; color:${dif > 0.005 ? '#ef4444' : dif < -0.005 ? '#10b981' : 'inherit'}">${dif > 0 ? '+' : ''}${n2(dif)}</td></tr></tbody></table>`
   }
-  host.innerHTML = (_prof.gl.length ? bloque('gl', realGL, '$', 'usd') : '') + (_prof.tr.length ? '<div style="height:8px"></div>' + bloque('tr', realTR, 'S/', 'pen') : '') +
-    '<div class="dm-nota">Rojo = costó más que la proforma · verde = costó menos. «Real» sale del costeo de la carpeta (no de los totales de la liquidación).</div>'
+  // Resumen pequeño, SEPARADO por moneda (cada moneda en su propia moneda, sin convertir):
+  // proforma, real (facturas locales + tributos en esa moneda), diferencia, abonos y saldo (abonos − facturas de la liquidación, igual que el paso 5)
+  const col = d => d > 0.005 ? '#ef4444' : d < -0.005 ? '#10b981' : 'inherit'
+  const lineasP = [..._prof.gl, ..._prof.tr]
+  const profM = m => lineasP.filter(l => (l.moneda === 'PEN' ? 'PEN' : 'USD') === m).reduce((t, l) => t + num(l.monto), 0)
+  // Real = las MISMAS facturas del paso 3 (incluye intereses/gastos financieros facturados por el agente); tributos solo si la proforma los trae
+  const realM = m => _docs.filter(d => (d.moneda === 'PEN' ? 'PEN' : 'USD') === m).reduce((t, d) => t + num(d.total), 0)
+    + (m === 'PEN' && _prof.tr.length ? Object.values(realTR).reduce((t, x) => t + x, 0) : 0)
+  const fila = (tit, m) => {
+    const sign = SIGNO(m), sd = _saldos(_docs, _abonos)[m], tp = profM(m), tr = realM(m)
+    if (!tp && !tr && !sd.abono) return ''
+    const dif = tr - tp, sal = sd.saldo
+    const est = Math.abs(sal) < 0.005 ? '<span style="color:#10b981">Cuadrado ✔</span>'
+      : sal > 0 ? `<span style="color:#10b981"><b>A tu favor ${sign} ${n2(sal)}</b></span>` : `<span style="color:#ef4444"><b>En contra ${sign} ${n2(-sal)}</b> (debes al agente)</span>`
+    return `<tr><td>${tit}</td><td style="text-align:right">${sign} ${n2(tp)}</td><td style="text-align:right">${sign} ${n2(tr)}</td><td style="text-align:right; color:${col(dif)}">${dif > 0 ? '+' : ''}${n2(dif)}</td><td style="text-align:right">${sign} ${n2(sd.abono)}</td><td>${est}</td></tr>`
+  }
+  host.innerHTML = `<table class="data-table" style="width:100%"><thead><tr><th></th><th style="text-align:right">Proforma</th><th style="text-align:right">Real</th><th style="text-align:right">Diferencia</th><th style="text-align:right">Abonos</th><th title="Abonos − facturas de la liquidación en esa moneda (igual que el paso 5)">Saldo</th></tr></thead><tbody>${fila('Dólares (US$)', 'USD')}${fila('Soles (S/)', 'PEN')}</tbody></table>
+    ${_avisosDocs()}<div class="dm-nota">Diferencia: rojo = costó más que la proforma, verde = menos. Cada moneda va por separado, sin convertir. Real = total de las facturas del paso 3 (con IGV e intereses); los tributos solo entran si la proforma los incluye. Saldo = abonos − facturas de la liquidación (paso 3).</div>`
 }
 
 const _sumAb = (etapa, mon) => _abonos.filter(a => (a.concepto === 'proforma' ? 'proforma' : 'liquidacion') === etapa && (a.moneda === 'PEN' ? 'PEN' : 'USD') === mon).reduce((t, a) => t + num(a.monto), 0)
@@ -484,6 +536,7 @@ window.laRecalcular = function () {
   const nota = etapa => comTot(etapa) ? `<div class="dm-nota">🏦 Comisiones bancarias de estos abonos: <b>${comTot(etapa)}</b> → pasan al costeo como <b>gasto financiero</b> (no inflan el inventario; no cambian lo que debes al agente).</div>` : ''
   $('laResProf').innerHTML += nota('proforma'); $('laResLiq').innerHTML += nota('liquidacion')
   _pintarPasos(s, hayLiq)
+  try { _aud0() } catch { /* sin proforma */ }
 }
 
 // ── Pasos (pestañas) ─────────────────────────────────────────────────────────
@@ -562,7 +615,7 @@ function _montarBuscadorAg() {
   sel.dataset.bus = '1'
   convertirEnBuscador(sel, { placeholder: 'Escribe el nombre o RUC del agente...', sinResultados: 'Ningún contacto coincide',
     alCrearNuevo: { label: 'Agregar agente (contacto nuevo, con búsqueda por RUC)', onClick: () => { _pendienteAg = true; abrirModalContacto({ roles: ['proveedor'] }) } } })
-  sel.addEventListener('change', () => { _textosAgente(); const h = $('laAgHint'); if (h) h.textContent = '' })
+  sel.addEventListener('change', () => { _textosAgente(); const h = $('laAgHint'); if (h) h.textContent = ''; window.laReclasificar?.() })
 }
 window.addEventListener('contacto-guardado', async e => {
   if (!_pendienteAg) return
@@ -578,8 +631,8 @@ window.laNuevaFactura = async function () {
   window._alGuardarCosto = async () => {
     window._alGuardarCosto = null
     const base = await _cargarBase(); _costos = base.costos
-    const marcados = new Map(_docs.map(d => [d.id, d.marcado]))
-    _docs = base.cand.map(d => ({ ...d, marcado: previos.has(d.id) ? !!marcados.get(d.id) : true }))
+    base.cand.filter(d => !previos.has(d.id)).forEach(d => _forzar.add(d.id))   // lo agregado aquí pertenece a esta liquidación
+    _docs = _partir(base)
     _pintarDocs(); window.laRecalcular(); window.laAuditar()
     // Flujo directo (2026-11-06): la factura nueva se registra SOLA en Compras (tipo servicio/gasto) y en Cuentas por Pagar,
     // sin segundo paso «Registrar gasto». Si algo falta (proveedor/serie/número/perfil) queda el botón 🧾 como respaldo.

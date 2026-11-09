@@ -13,6 +13,7 @@ import { exigirEmpresaDeTrabajo } from '../empresa.js'
 // ============================================================================
 import { S } from './state.js'
 import { getCurrentUser } from '../auth-supabase.js'
+import { errorDocumentoContacto } from '../supabase-data.js'
 import { getTerminosPago, getContactById, subirAdjuntos, validarArchivoAdjunto, getAdjuntos, getConteoAdjuntos, getUrlAdjunto, eliminarAdjuntosDe } from '../supabase-data.js'
 import { supabase, insert, update, deleteRecord , empresaTrabajoCtx } from '../supabase-client.js'
 import { showToast, formatNumber, pintarDocumentoContacto } from '../helpers.js'
@@ -25,7 +26,7 @@ import { registrarColumnas, colStyle } from '../col-menu.js'
 import { getTCVenta, textoAvisoTC } from '../sunat-api.js'
 import { vincularTCEnVivo } from '../tc-en-vivo.js'
 import { estaAnulado } from '../anulacion.js'
-import { descargarPDFDesdeHTML as _descargarPDFDesdeHTML } from '../shared/pdf-documento.js'   // PDF A4 con saltos de página limpios
+import { descargarPDFDesdeHTML as _descargarPDFDesdeHTML, cuentasDepositoPDF, cssCabeceraPDF, htmlCabeceraPDF } from '../shared/pdf-documento.js'   // PDF A4 con saltos de página limpios
 // Despacho + PV de lista + efecto de margen (SQL 136) y campanita de avisos (2026-11-05)
 import { htmlDespacho, ATR_PANEL_GAN, HTML_GAN_EXTRA, HTML_PV_HINT, iniciarDespacho, validarDespacho, leerDespacho, alCambiarLineas, pintarPistaPV, lineasBajoPV, pintarGanancia } from './packing-despacho.js'
 import { crearAviso, resolverAviso, urlConBusqueda } from '../shared/campanita.js'
@@ -49,10 +50,18 @@ async function _emisorPK(pk) {
   }
   const esJhiro = !ec || String(ec.ruc) === EMPRESA.ruc
   const color = /^#[0-9a-f]{6}$/i.test(ec?.color || '') ? ec.color : '#2f6db5'
-  return esJhiro
-    ? { ...EMPRESA, logo: ec?.logo_url || EMPRESA.logo, color, corto: ec?.nombre_comercial || 'JHIRO' }
-    : { nombre: ec.razon_social, ruc: ec.ruc, direccion: ec.direccion || '', email: ec.email || '', telefono: ec.telefono || '', web: ec.web || '',
-        logo: ec.logo_url || null, color, corto: ec.nombre_comercial || ec.codigo || '' }
+  // 2026-11-09: TODO sale del perfil de la empresa (Perfil → Multiempresa).
+  // Los datos fijos de JHIRO quedan solo como respaldo de campos vacíos.
+  const base = esJhiro ? EMPRESA : {}
+  const val = (k, kb) => (ec?.[k] != null && String(ec[k]).trim() !== '') ? ec[k] : (base[kb || k] || '')
+  return {
+    nombre: val('razon_social', 'nombre'), ruc: ec?.ruc || base.ruc || '',
+    direccion: val('direccion'), email: val('email'), telefono: val('telefono'), web: val('web'),
+    logo: val('logo_url', 'logo') || null, isotipo: base.isotipo || null,
+    logoAlto: Math.min(150, Math.max(40, parseInt(ec?.logo_alto) || 70)),
+    logoAlign: ['left', 'center', 'right'].includes(ec?.logo_align) ? ec.logo_align : 'left',
+    color, corto: ec?.nombre_comercial || ec?.codigo || base.corto || 'JHIRO'
+  }
 }
 /** Texto legible sobre un fondo: oscuro si el color es claro (luminancia WCAG). */
 function _textoSobre(hex) {
@@ -1160,6 +1169,18 @@ window.guardarPacking = async function () {
     const contactId = parseInt(document.getElementById('pkCliente').value) || null
     const fecha = document.getElementById('pkFecha').value
     if (!contactId) { showToast('Selecciona el cliente', 'warning'); return }
+    // Cotización (2026-11-07): el cliente debe tener un documento peruano válido
+    // (RUC, DNI, Carné ext. o Pasaporte). Ni VAT (extranjero) ni "Otro", ni N° de relleno.
+    if (_pkModoCot) {
+      const cli = await getContactById(contactId)
+      const td = String(cli?.tipo_documento || '').trim()
+      const errDoc = errorDocumentoContacto(td || null, cli?.nro_documento ?? null)
+      if (!td || td.toUpperCase() === 'VAT' || td.toLowerCase() === 'otro' || errDoc) {
+        showToast(`No se puede guardar la cotización: el cliente "${cli?.nombre || ''}" tiene documento ${td || '(vacío)'} ${cli?.nro_documento || ''}. `
+          + 'Debe ser RUC, DNI, Carné ext. o Pasaporte (no VAT ni "Otro"). Corrige el cliente en Contactos y vuelve a intentar.', 'warning', 9000)
+        return
+      }
+    }
     if (!fecha) { showToast('Ingresa la fecha de emisión', 'warning'); return }
     if (!_pkLineas.length) { showToast('Agrega al menos un producto', 'warning'); return }
     const errDesp = validarDespacho()
@@ -1678,6 +1699,7 @@ window.imprimirPacking = async function (id) {
     const E = await _emisorPK(pk)
     const C = E.color, CT = _textoSobre(C), C10 = _tinte(C, 0.10), C25 = _tinte(C, 0.25)
     const CTXT = CT === '#ffffff' ? C : '#111827'   // color de marca usable como TEXTO sobre blanco
+    const _cuentasPie = await cuentasDepositoPDF(pk.empresa_id, C)   // cuentas elegidas en el perfil de la empresa (SQL 147)
     // Nombres EXACTOS de columnas según cómo se registraron los precios (sql/114)
     const nIncl = lineas.filter(l => l.igv_incluido).length
     const _pdfIGV = nIncl === 0
@@ -1689,12 +1711,7 @@ window.imprimirPacking = async function (id) {
 <style>
   @page { size: A4; margin: 14mm; }
   body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color:#111; }
-  .top { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-top:24px; }
-  .logo { width:210px; font-size:28px; font-weight:bold; letter-spacing:2px; }
-  .emp { flex:1; font-size:10px; line-height:1.45; }
   * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-  .doc { border:1.5px solid ${C}; border-radius:10px; padding:10px 18px; text-align:center; min-width:210px; font-size:12px; }
-  .doc b { display:block; font-size:13px; }
   .box { border:1px solid ${C25}; background:${C10}; border-radius:10px; padding:8px 12px; margin-top:16px; display:grid; grid-template-columns:90px 1fr 110px 1fr; gap:4px 8px; font-size:10px; }
   .box .k { font-weight:bold; }
   table.l { width:100%; border-collapse:collapse; margin-top:16px; }
@@ -1709,23 +1726,10 @@ window.imprimirPacking = async function (id) {
   .tot { width:48%; margin-left:auto; border-collapse:collapse; margin-top:10px; }
   .tot td { border:1px solid #bbb; padding:6px 8px; } .tot td:first-child { color:${CTXT}; font-weight:bold; }
   .tot tr.t td { background:${C}; color:${CT}; font-weight:bold; }
-  .logo-txt { display:inline-flex; align-items:center; justify-content:center; min-width:120px; height:64px; padding:0 16px; border-radius:14px; background:${C}; color:${CT}; font-size:26px; font-weight:800; letter-spacing:3px; }
-  /* Marca de agua del autor — fija arriba en cada hoja impresa */
-  .zv { position:fixed; top:14px; right:40px; display:flex; pointer-events:none; z-index:0; }
-  .zv-in { display:inline-flex; align-items:center; gap:6px; opacity:.8; }
-  .zv-mono { width:16px; height:16px; border-radius:5px; display:inline-flex; align-items:center; justify-content:center;
-             background:#111827; color:#fff; font:800 8px/1 Arial, sans-serif; letter-spacing:-.3px; }
-  .zv-txt { font:italic 400 9px/1 Georgia, 'Times New Roman', serif; color:#6b7280; letter-spacing:.4px; }
   .letras { font-weight:bold; margin-top:14px; }
+  ${cssCabeceraPDF(C, CT)}
 </style></head><body>
-  <div class="zv"><span class="zv-in"><span class="zv-txt">by:</span><span class="zv-mono">ZV</span></span></div>
-  <div class="top">
-    <div class="logo">${E.logo
-      ? `<img src="${_esc(E.logo)}" alt="${_esc(E.corto)}" style="width:200px; max-height:70px; object-fit:contain;" onerror="this.outerHTML='<span class=&quot;logo-txt&quot;>${_esc(E.corto)}</span>'">`
-      : `<span class="logo-txt">${_esc(E.corto || E.nombre)}</span>`}</div>
-    <div class="emp"><b>${_esc(E.nombre)}</b>${E.direccion ? '<br>' + _esc(E.direccion) : ''}${E.email ? `<br><b>Email:</b> ${_esc(E.email)}` : ''}${E.telefono ? `<br><b>Teléfono:</b> ${_esc(E.telefono)}` : ''}${E.web ? `<br><b>Sitio web:</b> ${_esc(E.web)}` : ''}</div>
-    <div class="doc"><b style="color:${CTXT};">${pk.estado === 'cotizacion' ? 'Cotización' : 'Orden de Venta'}</b>RUC ${_esc(E.ruc)}<br><span style="font-size:14px;">${_esc(pk.numero)}</span></div>
-  </div>
+  ${htmlCabeceraPDF(E, { colorTitulo: CTXT, titulo: pk.estado === 'cotizacion' ? 'Cotización' : 'Orden de Venta', numero: pk.numero })}
   <div class="box">
     <span class="k">CLIENTE</span><span>${_esc(cliente?.nombre || '')}<br>RUC : ${_esc(cliente?.nro_documento || '')}</span>
     <span class="k">TÉRMINO PAGO</span><span>${_esc(termino)}</span>
@@ -1751,6 +1755,7 @@ window.imprimirPacking = async function (id) {
   <table class="tot"><tr><td>OP. GRAVADA</td><td class="r">${f(pk.subtotal)}</td></tr>
     <tr><td>IGV 18%</td><td class="r">${f(pk.igv)}</td></tr><tr class="t"><td>TOTAL</td><td class="r">${f(pk.total)}</td></tr></table>
   <p style="margin-top:18px;">Términos de pago: ${_esc(termino)}</p>
+  ${_cuentasPie}
 </body></html>`
     await _descargarPDFDesdeHTML(html, `${pk.numero}_${String(cliente?.nombre || '').replace(/[^\w]+/g, '_').slice(0, 40)}.pdf`)
     if (pk.estado === 'borrador') {

@@ -39,7 +39,7 @@ let _rhParams = null
 async function _rhParametros(anio) {
   if (_rhParams?.anio === anio) return _rhParams
   let p = null
-  try { p = ((await _qRH('parametros_renta4ta', { anio })) || [])[0] } catch { /* tabla aún sin SQL 139 */ }
+  try { p = ((await _qRH('parametros_renta4ta', { anio })) || [])[0] } catch { /* tabla aún sin SQL 142 */ }
   _rhParams = { anio, tasa: parseFloat(p?.tasa_retencion) || 0.08, umbral: parseFloat(p?.umbral_retencion_pen) || 1500, bancPen: parseFloat(p?.umbral_bancariz_pen) || 2000, bancUsd: parseFloat(p?.umbral_bancariz_usd) || 500 }
   return _rhParams
 }

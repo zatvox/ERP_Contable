@@ -323,6 +323,8 @@ window.closeModal = closeModalGlobal
 // vuelve a su estado original. Evita registros duplicados por doble clic.
 // No usa el atributo `disabled` a propósito: varias funciones guardarX ya
 // revisan `if (btn.disabled) return` y se bloquearían a sí mismas.
+import { conCargaAuto } from './animaciones/auto-carga.js'
+
 export async function conCarga(btn, fn, texto = 'Guardando…') {
   if (!btn || typeof fn !== 'function') return
   if (btn.dataset.cargando === '1') return          // 2° clic ignorado
@@ -332,7 +334,7 @@ export async function conCarga(btn, fn, texto = 'Guardando…') {
   btn.setAttribute('aria-busy', 'true')
   btn.innerHTML = `<span class="spinner-btn" aria-hidden="true"></span>${texto}`
   try {
-    return await fn()
+    return await conCargaAuto(btn.id || texto, { titulo: texto.replace(/…$/, '') || 'Procesando', sub: '' }, fn)
   } finally {
     btn.innerHTML = html
     btn.classList.remove('btn-cargando')

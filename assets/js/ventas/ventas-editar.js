@@ -17,6 +17,8 @@ import { _guardarCuotasDeCxC } from './venta-nueva.js'
 import { _ventasListaEnriquecida, renderVentas } from './ventas-lista.js'
 import { getSeries, seriesDeTipo, getSerie, siguienteCorrelativo, NOMBRE_TIPO_SERIE, poblarSelectSeries, esClienteDNI } from '../series.js'
 import { generarNumeroVenta, getContactById } from '../supabase-data.js'
+import { supabase } from '../supabase-client.js'
+import { montarSeccionPkDespacho, cargarPKsCliente, modoPKFijo, setDespacho, habilitarSeccion, leerPkDespacho, validarPkDespacho } from './venta-pk-despacho.js'
 
 // ─── Editar Venta (solo cabecera: no se tocan líneas/stock ya descontado) ────
 
@@ -167,6 +169,23 @@ window.editarVenta = async function (id) {
       document.getElementById(a)?.classList.remove('visible')
     })
 
+    // Packing y despacho (2026-11-07): editable aquí (buscador de PKs del cliente u "Otro N°")
+    montarSeccionPkDespacho('ev')
+    modoPKFijo('ev', null)
+    const _hostPk = document.getElementById('evPkDespHost')
+    const _conPk = !esNota(v.tipo_comprobante) && v.tipo_venta !== 'anticipo'
+    if (_hostPk) _hostPk.style.display = _conPk ? '' : 'none'
+    if (_conPk) {
+      let pkActual = null
+      if (v.packing_id) {
+        const { data } = await supabase.from('packing').select('id, numero').eq('id', v.packing_id).maybeSingle()
+        pkActual = data || { id: v.packing_id, numero: `PK #${v.packing_id}` }
+      }
+      await cargarPKsCliente('ev', v.contact_id, { actual: pkActual, ref: v.packing_ref || '' })
+      setDespacho('ev', { termino: v.termino_despacho || '', dir: v.despacho_direccion || '', dist: v.despacho_distrito || '', maps: v.despacho_maps_url || '' },
+        !v.packing_id && !v.packing_ref ? '⚠ Esta factura no tiene Packing asociado: elígelo al editar.' : '')
+    }
+
     window.onCambiarMonedaEdicion()
     _pintarAvisosEdicion()
     _evModoVista = true
@@ -225,6 +244,7 @@ function _aplicarModoVistaEdicionVenta() {
   // (moneda/cliente según cobros/notas) — el bucle de arriba solo maneja el
   // apagado general de "estoy viendo, no editando".
   if (!_evModoVista) window.onCambiarMonedaEdicion()
+  habilitarSeccion('ev', !_evModoVista)
 
   const numero = `${c.venta.serie || ''}-${String(c.venta.correlativo || '').padStart(8, '0')}`
   _setEv('ev-titulo', `${_evModoVista ? 'Detalle de' : 'Editar'} ${nombreTipoComprobante(c.venta.tipo_comprobante)} ${numero}`)
@@ -583,6 +603,10 @@ window.guardarEdicionVenta = async function () {
     const tipoCambio = parseFloat(document.getElementById('evTipoCambio')?.value || 0) || 1
     const descripcion   = document.getElementById('evDescripcion')?.value?.trim() || null
     const observaciones = document.getElementById('evObservaciones')?.value?.trim() || null
+    if (!esNota(c.venta.tipo_comprobante) && c.venta.tipo_venta !== 'anticipo') {
+      const e = validarPkDespacho(leerPkDespacho('ev'))
+      if (e) { showToast(e, 'warning', 7000); return }
+    }
 
     if (!fechaEmi) { showToast('La fecha de emisión es obligatoria', 'warning'); return }
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(periodo || '')) {
@@ -688,13 +712,27 @@ window.guardarEdicionVenta = async function () {
     if (Math.abs(tipoCambio - (parseFloat(c.venta.tipo_cambio) || 1)) > 0.0001) cambios.push('tipo de cambio')
     if (crono?.cuotas?.length) cambios.push('cronograma de pago')
     if (huboCambioPrecios) cambios.push(`precio/IGV de ${detallesCambiados.length} línea(s) — nuevo total ${formatNumber(nuevoTotal)}`)
+    // 2026-11-07: estos campos también cuentan como cambio (antes daba "No hay cambios")
+    const _n = x => (x == null || x === '') ? null : x
+    if ((vendedorId || null) !== (c.venta.vendedor_id || null)) cambios.push('vendedor')
+    if (_n(descripcion) !== _n(c.venta.descripcion)) cambios.push('descripción')
+    if (_n(observaciones) !== _n(c.venta.observaciones)) cambios.push('observaciones')
+    const _conPk = !esNota(c.venta.tipo_comprobante) && c.venta.tipo_venta !== 'anticipo'
+    const pkDesp = _conPk ? leerPkDespacho('ev') : null
+    if (pkDesp) {
+      if ((pkDesp.packing_id || null) !== (c.venta.packing_id || null) || _n(pkDesp.packing_ref) !== _n(c.venta.packing_ref)) cambios.push('packing asociado')
+      if (['termino_despacho', 'despacho_direccion', 'despacho_distrito', 'despacho_maps_url'].some(k => _n(pkDesp[k]) !== _n(c.venta[k]))) cambios.push('término/dirección de despacho')
+    }
 
     if (cambios.length === 0) {
       showToast('No hay cambios que guardar', 'info')
       return
     }
+    const _avisoPk = (pkDesp && (pkDesp.packing_id || null) !== (c.venta.packing_id || null) && c.venta.packing_id)
+      ? `\n\n⚠ Cambio de PK: el PK anterior quedará otra vez PENDIENTE de facturar (sus líneas se desenlazan de esta factura). Cobros, guías y kardex de esta factura NO se tocan.`
+      : ''
     if (!confirm(
-      `Se actualizará ${cambios.join(', ')} en la venta ${numeroViejo}` +
+      `Se actualizará ${cambios.join(', ')} en la venta ${numeroViejo}` + _avisoPk +
       (cambioTipo && c.venta.asiento_id ? ` (el asiento contable ya generado NO se regenera)` : '') +
       (c.cxc ? `, y se propagará a su Cuenta por Cobrar${crono ? ' y su cronograma de cuotas' : ''}.` : '.') +
       `\n\n¿Confirmar?`
@@ -707,7 +745,10 @@ window.guardarEdicionVenta = async function () {
       ? crono.cuotas[crono.cuotas.length - 1].fecha_vencimiento
       : c.venta.fecha_vencimiento
 
+    // Packing asociado + despacho (2026-11-07) — pkDesp ya leído arriba
+    const pkAnterior = c.venta.packing_id || null
     const okVenta = await updateVenta(id, {
+      ...(pkDesp || {}),
       tipo_comprobante: tipoComp,
       contact_id: contactId, vendedor_id: vendedorId,
       serie, correlativo: correl.replace(/^0+/, '') || correl,
@@ -722,6 +763,36 @@ window.guardarEdicionVenta = async function () {
       total:          parseFloat(nuevoTotal.toFixed(2))
     })
     if (!okVenta) throw new Error('no se pudo actualizar la venta')
+
+    // ── 1a) Cambio de PK: desenlazar líneas del PK anterior y recalcular ambos ──
+    if (pkDesp && (pkDesp.packing_id || null) !== pkAnterior) {
+      if (pkAnterior) {
+        const { data: dps } = await supabase.from('detalle_packing').select('id').eq('packing_id', pkAnterior)
+        const ids = (dps || []).map(d => d.id)
+        if (ids.length) await supabase.from('detalle_ventas').update({ detalle_packing_id: null }).eq('venta_id', id).in('detalle_packing_id', ids)
+        try { await window.recalcularEstadoPacking?.(pkAnterior) } catch (e) { console.warn('Estado PK anterior:', e.message) }
+      }
+      if (pkDesp.packing_id) {
+        // Enlazar cada línea de la factura con la línea del PK nuevo del MISMO
+        // producto (primera libre, sin pasarse de lo pedido) → el PK queda
+        // "Facturado"/"Parcial" de verdad, no solo por la cabecera. No toca
+        // cobros, CxC, guías ni kardex.
+        try {
+          const [{ data: dpNuevo }, { data: dvVenta }] = await Promise.all([
+            supabase.from('detalle_packing').select('id, item_id, cantidad, orden').eq('packing_id', pkDesp.packing_id).order('orden').order('id'),
+            supabase.from('detalle_ventas').select('id, item_id, cantidad, detalle_packing_id').eq('venta_id', id)
+          ])
+          const usadas = new Set()
+          for (const dv of (dvVenta || []).filter(x => !x.detalle_packing_id)) {
+            const par = (dpNuevo || []).find(dp => dp.item_id === dv.item_id && !usadas.has(dp.id))
+            if (!par) continue
+            usadas.add(par.id)
+            await supabase.from('detalle_ventas').update({ detalle_packing_id: par.id }).eq('id', dv.id)
+          }
+        } catch (e) { console.warn('Enlace de líneas con el PK nuevo:', e.message) }
+        try { await window.recalcularEstadoPacking?.(pkDesp.packing_id) } catch (e) { console.warn('Estado PK nuevo:', e.message) }
+      }
+    }
 
     // ── 1b) Líneas con precio/IGV corregido ─────────────────────────────
     // Solo las que realmente cambiaron — el resto de detalle_ventas queda
@@ -810,3 +881,11 @@ window.guardarEdicionVenta = async function () {
 
 export function _setEv(id, txt) { const el = document.getElementById(id); if (el) el.textContent = txt }
 export function _valEv(id, v)   { const el = document.getElementById(id); if (el) el.value = v }
+
+
+// Cambio de cliente en Editar Factura → PKs del nuevo cliente
+window._vpdOnClienteEv = async function () {
+  const host = document.getElementById('evPkDespHost')
+  if (!host || host.style.display === 'none') return
+  await cargarPKsCliente('ev', parseInt(document.getElementById('evContactId')?.value || 0) || null)
+}
