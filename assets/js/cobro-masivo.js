@@ -30,6 +30,7 @@ import { addCobro, deleteCobro, eliminarAsientoContable } from './supabase-data.
 import { getTipoCambioDia } from './sunat-api.js'
 import { getCurrentUser } from './auth-supabase.js'
 import { marcarTC } from './shared/tc-fecha.js'
+import { getModuloConfig } from './config-modulo.js'
 
 let C = null          // contexto que entrega cobranzas.js (funciones internas)
 let _st = null        // estado del modal
@@ -43,7 +44,7 @@ const _uuid = () => (crypto?.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4
 export function initCobroMasivo(ctx) { C = ctx; _inyectarModal() }
 
 // Solo culpa al SQL si la tabla/columna NO existe.
-function _sb(q) { return q.then(({ data, error }) => { if (error) throw new Error(/does not exist|no existe|schema cache/i.test(error.message) && /cobros_lote|lote_id|grupo_recibo|saldo_favor/.test(error.message) ? 'Falta ejecutar el SQL 83/151 (cobro por recibo): ' + error.message : error.message); return data }) }
+function _sb(q) { return q.then(({ data, error }) => { if (error) throw new Error(/does not exist|no existe|schema cache/i.test(error.message) && /cobros_lote|lote_id|grupo_recibo|saldo_favor|ajuste/.test(error.message) ? 'Falta ejecutar el SQL 83/151/154 (cobro por recibo / ajuste por redondeo): ' + error.message : error.message); return data }) }
 
 const MEDIOS = [['transferencia', 'Transferencia'], ['deposito', 'Depósito'], ['efectivo', 'Efectivo'], ['cheque', 'Cheque'], ['yape_plin', 'Yape / Plin'], ['otro', 'Otro']]
 const _optsMedio = v => MEDIOS.map(([k, t]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${t}</option>`).join('')
@@ -181,7 +182,7 @@ window.abrirCobroMasivo = async function (contactId = null, opc = {}) {
   C.refrescarBuscador?.('cmCliente')
   for (const k of ['cmRecibo', 'cmObs']) $(k).value = ''
   C.limpiarAdjuntos('cmas')
-  _st = { contactId: null, filas: [], multi: false, modo: 'uno', vouchers: [_nuevoV()], recibos: [], saldos: [], usarSobrante: true }
+  _st = { contactId: null, filas: [], multi: false, modo: 'uno', vouchers: [_nuevoV()], recibos: [], saldos: [], usarSobrante: true, sobranteRedondeo: true, faltanteRedondeo: true }
   window._cmModoMulti(!!opc.multi, true)
   if (opc.modo === 'recibos') window._cmModoRecibos(true, true)
   await window._cmCambioCliente()
@@ -432,6 +433,50 @@ window._cmTC = async function (i = 0, modo = false, btn = null) {
   window._cmRecalc()
 }
 
+// ── AJUSTE POR REDONDEO (2026-11-10, SQL 154) ───────────────────────────────
+// Diferencias de céntimos entre lo que pagó el cliente y el saldo del documento.
+// Hasta la TOLERANCIA (⚙️ Configuración → Cobranzas: tolRedondeoPEN / tolRedondeoUSD)
+// se ofrece cerrarlas como ajuste; por encima: saldo a favor o documento parcial.
+//
+// CONTABILIDAD (asientos de Cobranzas hoy desactivados; esto es lo que deben generar):
+//   • SOBRANTE (pagó de más) → OTROS INGRESOS DE GESTIÓN (ctaRedondeoIngreso, def. 7599)
+//       D 104x Bancos .......... importe real del voucher
+//       H 121x Facturas x cobrar  saldo cancelado
+//       H 7599 Otros ingresos ... sobrante
+//     Rastro: cobros_lote.monto_ajuste (+) / tipo_ajuste='redondeo_ingreso' / cuenta_ajuste.
+//   • FALTANTE (pagó de menos) → OTROS GASTOS DE GESTIÓN (ctaRedondeoGasto, def. 6599)
+//       D 104x Bancos .......... importe real del voucher
+//       D 6599 Otros gastos .... faltante
+//       H 121x Facturas x cobrar  saldo completo → la factura queda CANCELADA
+//     Rastro: cobro SIN banco, medio_pago='ajuste_redondeo', cuenta_ajuste, mismo lote_id.
+//   El banco SIEMPRE registra el importe real (no se toca la conciliación).
+//   Reporte de rastreo: vista v_ajustes_redondeo_cobranza.
+//   Mayor a la tolerancia NO es redondeo: es saldo a favor (122 Anticipos de clientes)
+//   o un saldo pendiente real del cliente.
+const _cfgCob = () => { try { return getModuloConfig('cobranzas') || {} } catch (_) { return {} } }
+const _tol = mon => { const c = _cfgCob(); const v = parseFloat(mon === 'USD' ? c.tolRedondeoUSD : c.tolRedondeoPEN); return Number.isFinite(v) && v >= 0 ? v : (mon === 'USD' ? 0.30 : 1.00) }
+const _ctaRedIng = () => String(_cfgCob().ctaRedondeoIngreso || '7599').trim() || '7599'
+const _ctaRedGas = () => String(_cfgCob().ctaRedondeoGasto || '6599').trim() || '6599'
+
+/**
+ * Faltantes que se pueden cerrar con ajuste (gasto): facturas tocadas cuyo saldo,
+ * descontando lo cubierto con dinero real (vouchers/saldo a favor) y la retención,
+ * queda entre 0 y la tolerancia. Devuelve { k: monto en moneda del documento }.
+ */
+function _ajustesGasto(asig) {
+  const cub = {}
+  for (const a of asig) cub[a.f.k] = _r2((cub[a.f.k] || 0) + a.montoDoc)
+  const out = {}
+  for (const f of _filasVisibles()) {
+    if (f.tipo !== 'factura' || !(f.aplicar > 0)) continue     // letras: no (se abonan por su flujo propio)
+    const resto = _r2(f.saldo - _retAplicada(f) - (cub[f.k] || 0))
+    if (resto > 0.004 && resto <= _tol(f.moneda) + 1e-9) out[f.k] = resto
+  }
+  return out
+}
+/** ¿Todo el sobrante (por moneda) cabe en la tolerancia? */
+const _sobranteEsRedondeo = sobr => Object.keys(sobr).length > 0 && Object.entries(sobr).every(([m, v]) => v <= _tol(m) + 1e-9)
+
 // ── Motor de asignación (FIFO fuentes × documentos) ─────────────────────────
 /** Fuentes ordenadas: saldos a favor marcados (solo facturas) y luego vouchers por fecha. */
 function _fuentes() {
@@ -567,50 +612,74 @@ window._cmRecalc = function () {
   const { asig, falta, fuentes } = _asignar(f => f.aplicar)
   const porDoc = {}
   for (const a of asig) (porDoc[a.f.k] ||= []).push(a)
+  const ajCand = _ajustesGasto(asig)                          // faltantes de céntimos (candidatos)
+  const ajGas = _st.faltanteRedondeo ? ajCand : {}            // los que se cierran con gasto 6599
   let cancelados = 0, parciales = 0, retTot = 0
   const aplicadoMon = {}
   for (const f of _filasVisibles()) {
     const r = _retAplicada(f) && f.aplicar > 0 ? f.ret : 0
     retTot = _r2(retTot + r)
-    const queda = _r2(f.saldo - f.aplicar - r)
+    const queda = ajGas[f.k] ? 0 : _r2(f.saldo - f.aplicar - r)
     if (f.aplicar > 0) aplicadoMon[f.moneda] = _r2((aplicadoMon[f.moneda] || 0) + f.aplicar)
     const eqTd = $(`cmEq-${f.k}`)
     if (eqTd) eqTd.innerHTML = !f.aplicar ? '<span style="color:var(--text-secondary);">—</span>'
       : (porDoc[f.k] || []).map(a => `<span class="badge ${a.s.tipo === 'saldo' ? 'badge-success' : 'badge-secondary'}" style="font-size:0.7rem; margin:1px;" title="${_esc(a.s.label)} · ${fechaDMY(a.s.fecha)}${a.s.mon !== f.moneda ? ` · T.C. ${a.tc}` : ''}">${a.s.corto} ${a.s.mon} ${formatNumber(a.montoSrc)}</span>`).join(' ')
-        + (falta[f.k] ? ` <span class="badge badge-danger" style="font-size:0.7rem;">falta ${formatNumber(falta[f.k])}</span>` : '')
+        + (ajGas[f.k] ? ` <span class="badge badge-warning" style="font-size:0.7rem;" title="Ajuste por redondeo → Otros gastos (${_ctaRedGas()})">AJ ${f.moneda} ${formatNumber(ajGas[f.k])}</span>`
+          : (falta[f.k] ? ` <span class="badge badge-danger" style="font-size:0.7rem;">falta ${formatNumber(falta[f.k])}</span>` : ''))
     const res = $(`cmRes-${f.k}`)
     if (res) res.innerHTML = !f.aplicar ? '<span style="color:var(--text-secondary);">—</span>'
-      : queda <= 0.009 ? '<span class="badge badge-success">Cancela</span>'
+      : (falta[f.k] && !ajGas[f.k]) ? `<span class="badge badge-danger" title="Baja el importe a aplicar o agrega un voucher">Falta ${formatNumber(falta[f.k])}</span>`
+      : queda <= 0.009 ? `<span class="badge badge-success">${ajGas[f.k] ? 'Cancela (redondeo)' : 'Cancela'}</span>`
       : `<span class="badge badge-warning" title="Queda ${formatNumber(queda)}">Parcial · queda ${formatNumber(queda)}</span>`
     if (f.aplicar > 0) { if (queda <= 0.009) cancelados++; else parciales++ }
-    const i = $(`cmAp-${f.k}`); if (i) i.style.borderColor = (f.aplicar > _maxAplicable(f) + 0.009 || falta[f.k]) ? 'var(--color-danger)' : ''
+    const i = $(`cmAp-${f.k}`); if (i) i.style.borderColor = (f.aplicar > _maxAplicable(f) + 0.009 || (falta[f.k] && !ajGas[f.k])) ? 'var(--color-danger)' : ''
   }
   const recibidoMon = {}
   for (const s of fuentes) if (s.tipo === 'voucher') recibidoMon[s.mon] = _r2((recibidoMon[s.mon] || 0) + s.monto)
   const saldoUsado = {}
   for (const s of fuentes) if (s.tipo === 'saldo' && s.monto - s.resto > 0.004) saldoUsado[s.mon] = _r2((saldoUsado[s.mon] || 0) + s.monto - s.resto)
   const sobr = _sobrantes(fuentes)
-  const faltaTot = Object.values(falta).reduce((t, x) => t + x, 0)
+  // Lo que falta y NO se cierra con ajuste por redondeo
+  const faltaTot = _r2(Object.entries(falta).filter(([k]) => !ajGas[k]).reduce((t, [, x]) => t + x, 0))
   const txt = o => Object.keys(o).length ? Object.entries(o).map(([m, v]) => `${m} ${formatNumber(v)}`).join(' · ') : '—'
   const caja = (t, v, st = '') => `<div><div style="font-size:0.7rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary);">${t}</div><div style="font-weight:700; font-size:1.02rem;${st}">${v}</div></div>`
   const haySobr = Object.keys(sobr).length > 0
-  const cuadra = faltaTot <= 0.05 && (!haySobr || _st.usarSobrante)
+  const sobRedPosible = _sobranteEsRedondeo(sobr)
+  const sobRed = sobRedPosible && _st.sobranteRedondeo        // sobrante → 7599 Otros ingresos
+  const ajGasMon = {}
+  for (const f of _filasVisibles()) if (ajGas[f.k]) ajGasMon[f.moneda] = _r2((ajGasMon[f.moneda] || 0) + ajGas[f.k])
+  const cuadra = faltaTot <= 0.009 && (!haySobr || sobRed || _st.usarSobrante)
   $('cmResumen').innerHTML =
     caja(`Recibido (${_st.vouchers.length} voucher${_st.vouchers.length === 1 ? '' : 's'})`, txt(recibidoMon)) +
     (Object.keys(saldoUsado).length ? caja('Saldo a favor usado', txt(saldoUsado), ' color:var(--color-success);') : '') +
     caja('Aplicado a documentos', txt(aplicadoMon)) +
-    caja(faltaTot > 0.05 ? 'Falta cubrir' : (haySobr ? 'Sobrante → saldo a favor' : 'Cuadra ✔'),
-      faltaTot > 0.05 ? formatNumber(faltaTot) : (haySobr ? txt(sobr) : '0.00'),
-      ` color:${faltaTot > 0.05 ? 'var(--color-danger)' : (haySobr ? 'var(--color-warning)' : 'var(--color-success)')};`) +
+    caja(faltaTot > 0.009 ? 'Falta cubrir' : (haySobr ? (sobRed ? `Sobrante → redondeo (${_ctaRedIng()})` : 'Sobrante → saldo a favor') : 'Cuadra ✔'),
+      faltaTot > 0.009 ? formatNumber(faltaTot) : (haySobr ? txt(sobr) : '0.00'),
+      ` color:${faltaTot > 0.009 ? 'var(--color-danger)' : (haySobr ? 'var(--color-warning)' : 'var(--color-success)')};`) +
+    (Object.keys(ajGasMon).length ? caja(`Faltante → redondeo (${_ctaRedGas()})`, txt(ajGasMon), ' color:var(--color-warning);') : '') +
     caja('Cancelados / parciales', `${cancelados} / ${parciales}`) +
     (retTot ? caja('Retención IGV', formatNumber(retTot), ' color:var(--color-warning);') : '')
   const sb = $('cmSobranteBox')
-  if (haySobr) {
-    sb.style.display = ''
-    sb.innerHTML = `<label style="display:flex; gap:10px; align-items:flex-start; padding:10px 14px; border-radius:var(--radius-md); border:1px solid var(--color-warning); background:rgba(245,158,11,.08); cursor:pointer;">
+  const cajaAviso = inner => `<div style="display:flex; flex-direction:column; gap:6px; padding:10px 14px; border-radius:var(--radius-md); border:1px solid var(--color-warning); background:rgba(245,158,11,.08);">${inner}</div>`
+  const opc = (name, val, on, titulo, sub) => `<label style="display:flex; gap:10px; align-items:flex-start; cursor:pointer;"><input type="radio" name="${name}" style="width:auto; margin:3px 0 0;" ${on ? 'checked' : ''} onchange="window._cmAjusteModo('${name}', '${val}')"><span><b>${titulo}</b><br><small style="color:var(--text-secondary);">${sub}</small></span></label>`
+  const partes = []
+  if (haySobr && sobRedPosible) {
+    partes.push(cajaAviso(`<div style="font-weight:700;">Sobrante de ${txt(sobr)} (dentro de la tolerancia de redondeo)</div>`
+      + opc('cmSob', 'red', _st.sobranteRedondeo, `Ajuste por redondeo → Otros ingresos (${_ctaRedIng()}) — recomendado`, 'El banco recibe el importe completo; la diferencia queda registrada en el lote para contabilidad.')
+      + opc('cmSob', 'saldo', !_st.sobranteRedondeo, 'Saldo a favor del cliente', 'Queda pendiente para netearlo en la próxima cobranza.')))
+  } else if (haySobr) {
+    partes.push(`<label style="display:flex; gap:10px; align-items:flex-start; padding:10px 14px; border-radius:var(--radius-md); border:1px solid var(--color-warning); background:rgba(245,158,11,.08); cursor:pointer;">
       <input type="checkbox" style="width:auto; margin:3px 0 0;" ${_st.usarSobrante ? 'checked' : ''} onchange="_cmSobranteOk(this.checked)">
-      <span><b>Registrar el sobrante (${txt(sobr)}) como SALDO A FAVOR del cliente.</b><br><small style="color:var(--text-secondary);">El dinero entra completo al banco. En la próxima cobranza de este cliente aparecerá el aviso para netearlo.</small></span></label>`
-  } else { sb.style.display = 'none'; sb.innerHTML = '' }
+      <span><b>Registrar el sobrante (${txt(sobr)}) como SALDO A FAVOR del cliente.</b><br><small style="color:var(--text-secondary);">El dinero entra completo al banco. En la próxima cobranza de este cliente aparecerá el aviso para netearlo. (Supera la tolerancia de redondeo: no se puede llevar a otros ingresos.)</small></span></label>`)
+  }
+  if (Object.keys(ajCand).length) {
+    const lista = _filasVisibles().filter(f => ajCand[f.k]).map(f => `${_esc(f.doc)} ${f.moneda} ${formatNumber(ajCand[f.k])}`).join(' · ')
+    partes.push(cajaAviso(`<div style="font-weight:700;">Faltan céntimos para cancelar: ${lista}</div>`
+      + opc('cmFal', 'red', _st.faltanteRedondeo, `Cerrar con ajuste por redondeo → Otros gastos (${_ctaRedGas()}) — recomendado`, 'La factura queda CANCELADA; se registra un cobro sin banco (medio "ajuste por redondeo") para el rastro contable.')
+      + opc('cmFal', 'parcial', !_st.faltanteRedondeo, 'Dejar el saldo pendiente', 'La factura queda parcial por esos céntimos (en "Aplicar" pon solo lo recibido).')))
+  }
+  if (partes.length) { sb.style.display = ''; sb.innerHTML = partes.join('<div style="height:8px;"></div>') }
+  else { sb.style.display = 'none'; sb.innerHTML = '' }
   if (_st.modo === 'recibos') {
     const { avisos, porRec } = _avisosRecibos(asig)
     const mon = _monV(_st.vouchers[0])
@@ -633,6 +702,11 @@ window._cmRecalc = function () {
   }
 }
 window._cmSobranteOk = function (on) { _st.usarSobrante = !!on; window._cmRecalc() }
+window._cmAjusteModo = function (grupo, val) {
+  if (grupo === 'cmSob') _st.sobranteRedondeo = val === 'red'
+  else _st.faltanteRedondeo = val === 'red'
+  window._cmRecalc()
+}
 
 // ── Confirmar ────────────────────────────────────────────────────────────────
 window.confirmarCobroMasivo = async function () {
@@ -660,6 +734,7 @@ window.confirmarCobroMasivo = async function () {
     const real = _r2(C.saldoCxC(fr))
     if (f.aplicar + _retAplicada(f) > real + 0.009) { showToast(`${f.doc}: ya fue cobrada por otro usuario. Saldo real ${formatNumber(Math.max(0, real))}. Cierra y vuelve a abrir.`, 'warning', 9000); return }
     f.obj = { ...f.obj, ...fr }
+    f.saldo = _r2(real)   // el ajuste por redondeo se calcula sobre el saldo REAL
   }
   // MULTIEMPRESA: un recibo es de UNA empresa (documentos, cuentas y saldos a favor)
   const emps = [...new Set([...sel.map(f => f.obj?.empresa_id), ..._st.saldos.filter(s => s.usar).map(s => s.empresa_id)].filter(e => e != null).map(Number))]
@@ -690,17 +765,20 @@ window.confirmarCobroMasivo = async function () {
     }
   }
   const { asig, falta, fuentes } = _asignar(f => f.aplicar)
-  if (Object.values(falta).reduce((t, x) => t + x, 0) > 0.05) { showToast('Lo recibido no alcanza para lo aplicado: ajusta los montos o agrega un voucher', 'warning'); return }
+  const ajGas = _st.faltanteRedondeo ? _ajustesGasto(asig) : {}
+  if (Object.entries(falta).filter(([k]) => !ajGas[k]).reduce((t, [, x]) => t + x, 0) > 0.009) { showToast('Lo recibido no alcanza para lo aplicado: ajusta los montos o agrega un voucher', 'warning'); return }
   const sobr = _sobrantes(fuentes)
-  if (Object.keys(sobr).length && !_st.usarSobrante) { showToast('Hay un sobrante: márcalo como saldo a favor o ajusta los montos', 'warning'); return }
+  const sobRed = _sobranteEsRedondeo(sobr) && _st.sobranteRedondeo
+  if (Object.keys(sobr).length && !sobRed && !_st.usarSobrante) { showToast('Hay un sobrante: márcalo como saldo a favor o ajusta los montos', 'warning'); return }
+  const ctaIng = _ctaRedIng(), ctaGas = _ctaRedGas()
   if (modoRec) { for (const n of numsRec) if (!(await C.reciboLibre(n, _st.contactId))) return }
   else if (!(await C.reciboLibre(recibo, _st.contactId))) return
   const { avisos: avisosRec } = _avisosRecibos(asig)
 
   const resumen = [
-    ...fuentes.map(s => `• ${s.label}${s.tipo === 'voucher' ? ` ${fechaDMY(s.fecha)}` : ''}: ${s.mon} ${formatNumber(s.monto - (s.tipo === 'saldo' ? s.resto : 0))}${s.tipo === 'voucher' && s.resto > 0.009 ? ` (sobran ${formatNumber(s.resto)} → saldo a favor)` : ''}`),
+    ...fuentes.map(s => `• ${s.label}${s.tipo === 'voucher' ? ` ${fechaDMY(s.fecha)}` : ''}: ${s.mon} ${formatNumber(s.monto - (s.tipo === 'saldo' ? s.resto : 0))}${s.tipo === 'voucher' && s.resto > 0.009 ? ` (sobran ${formatNumber(s.resto)} → ${sobRed ? `ajuste por redondeo, otros ingresos ${ctaIng}` : 'saldo a favor'})` : ''}`),
     '',
-    ...sel.map(f => { const r = _retAplicada(f), queda = _r2(f.saldo - f.aplicar - r); return `• ${modoRec ? `[Rec. ${recDe(f) || 'R' + ((f.rec || 0) + 1)}] ` : ''}${f.doc}: ${f.moneda} ${formatNumber(f.aplicar)}${r ? ` + ret. ${formatNumber(r)}` : ''} → ${queda <= 0.009 ? 'CANCELA' : 'parcial, queda ' + formatNumber(queda)}` }),
+    ...sel.map(f => { const r = _retAplicada(f), queda = ajGas[f.k] ? 0 : _r2(f.saldo - f.aplicar - r); return `• ${modoRec ? `[Rec. ${recDe(f) || 'R' + ((f.rec || 0) + 1)}] ` : ''}${f.doc}: ${f.moneda} ${formatNumber(f.aplicar)}${r ? ` + ret. ${formatNumber(r)}` : ''}${ajGas[f.k] ? ` + ajuste redondeo ${formatNumber(ajGas[f.k])} (otros gastos ${ctaGas})` : ''} → ${queda <= 0.009 ? 'CANCELA' : 'parcial, queda ' + formatNumber(queda)}` }),
     ...(avisosRec.length ? ['', '⚠️ Revisa (no bloquea):', ...avisosRec.map(a => '• ' + a)] : [])
   ].join('\n')
   const titConf = modoRec ? `Un voucher — ${numsRec.length || _st.recibos.length} recibos` : (_st.multi ? 'Cobro por recibo' : 'Cobro masivo')
@@ -722,7 +800,9 @@ window.confirmarCobroMasivo = async function () {
         empresa_id: empresaRec, grupo_recibo: grupo,
         contact_id: _st.contactId, fecha: v.fecha, banco_id: parseInt(v.bancoId), moneda: s.mon, tipo_cambio: parseFloat(v.tc) || null,
         monto_recibido: s.monto, monto_aplicado: usadoSrc, medio_pago: v.medio, numero_operacion: (v.numOp || '').trim() || null,
-        numero_recibo: recibo, observaciones: obs, created_by: user?.db_id || null
+        numero_recibo: recibo, observaciones: obs, created_by: user?.db_id || null,
+        // Contabilidad: sobrante de céntimos → D Banco / H 7599 Otros ingresos (SQL 154)
+        ...(sobRed && s.resto > 0.009 ? { monto_ajuste: s.resto, tipo_ajuste: 'redondeo_ingreso', cuenta_ajuste: ctaIng } : {})
       }).select().single())
     } catch (e) { errores.push(`${s.label}: ${e.message}`); continue }
     lotes.push({ s, lote })
@@ -759,8 +839,9 @@ window.confirmarCobroMasivo = async function () {
       referencia: (v.numOp || '').trim() || `LOTE-COBRO ${lote.id}`, numeroOperacion: (v.numOp || '').trim() || null, monto: s.monto, monedaMonto: s.mon, tc: parseFloat(v.tc) || 1
     })
     await supabase.from('cobros_lote').update({ movimiento_banco_id: mov?.id || null }).eq('id', lote.id)
-    // Sobrante de este voucher → saldo a favor
-    if (s.resto > 0.009) {
+    // Sobrante de este voucher → saldo a favor (si es redondeo ya quedó en el lote)
+    if (s.resto > 0.009 && sobRed) hechos.push(`ajuste redondeo +${s.mon} ${formatNumber(s.resto)} (${ctaIng})`)
+    if (s.resto > 0.009 && !sobRed) {
       try {
         await _sb(supabase.from('saldos_favor_cliente').insert({
           empresa_id: empresaRec, contact_id: _st.contactId, fecha: v.fecha, moneda: s.mon, monto: s.resto,
@@ -792,6 +873,28 @@ window.confirmarCobroMasivo = async function () {
       await C.aplicarEfectosCobro(cobro, f.obj, { sinMov: true })
       hechos.push(`${f.doc} (saldo a favor)`)
     } catch (e) { console.error('saldo a favor', f.doc, e); errores.push(`${f.doc} (saldo a favor): ${e.message}`) }
+  }
+
+  // 3) FALTANTE de céntimos → cobro SIN banco, medio 'ajuste_redondeo' (SQL 154).
+  //    Contabilidad: D 6599 Otros gastos de gestión / H 121x Facturas por cobrar.
+  //    Va en el lote del último voucher que pagó ese documento (deshacer lo revierte junto).
+  for (const f of sel.filter(x => ajGas[x.k])) {
+    try {
+      const ultimo = [...asig].reverse().find(a => a.f.k === f.k && a.s.tipo === 'voucher')
+      const loteDoc = (ultimo && lotes.find(x => x.s.k === ultimo.s.k)?.lote?.id) || loteAncla
+      const fechaAj = fechaDe(f, ultimo?.s?.fecha || fechaSF)
+      const cobro = await addCobro({
+        empresa_id: f.obj.empresa_id ?? empresaRec,
+        numero_recibo: recDe(f), cxc_id: f.obj.id, contact_id: f.obj.contact_id, fecha: fechaAj, monto: ajGas[f.k],
+        moneda: f.moneda, tipo_cambio: parseFloat(ultimo?.s?.tc) || parseFloat(f.obj.tipo_cambio) || 1, medio_pago: 'ajuste_redondeo',
+        referencia: `Ajuste por redondeo (otros gastos ${ctaGas})`, banco_id: null, monto_retencion: 0, lote_id: loteDoc,
+        cuenta_ajuste: ctaGas
+      })
+      if (!cobro?.id) throw new Error('no se pudo crear el ajuste por redondeo (¿falta el SQL 154?)')
+      primerCobroId ||= cobro.id
+      await C.aplicarEfectosCobro(cobro, f.obj, { sinMov: true })
+      hechos.push(`${f.doc} (ajuste redondeo ${formatNumber(ajGas[f.k])})`)
+    } catch (e) { console.error('ajuste redondeo', f.doc, e); errores.push(`${f.doc} (ajuste redondeo): ${e.message}`) }
   }
 
   if (primerCobroId) await C.subirAdjuntos('cmas', 'cobro', primerCobroId)
@@ -853,12 +956,12 @@ export async function htmlSeccionLote(loteId) {
     const lote0 = await _sb(supabase.from('cobros_lote').select('*').eq('id', loteId).single())
     const lotes = lote0.grupo_recibo ? await _sb(supabase.from('cobros_lote').select('*').eq('grupo_recibo', lote0.grupo_recibo).order('fecha')) : [lote0]
     const ids = lotes.map(l => l.id)
-    const cobros = await _sb(supabase.from('cobros').select('id, cxc_id, monto, moneda, monto_retencion, lote_id, medio_pago, fecha, numero_recibo').in('lote_id', ids))
+    const cobros = await _sb(supabase.from('cobros').select('*').in('lote_id', ids))
     const abonos = await _sb(supabase.from('letras_abonos').select('id, letra_id, monto_amortizado, moneda, lote_id, fecha').in('lote_id', ids))
     let saldos = []
     try { saldos = lote0.grupo_recibo ? await _sb(supabase.from('saldos_favor_cliente').select('*').eq('grupo_recibo', lote0.grupo_recibo)) : await _sb(supabase.from('saldos_favor_cliente').select('*').in('lote_id', ids)) } catch (_) {}
     const filas = [
-      ...cobros.map(c => { const d = C.cxc().find(x => x.id === c.cxc_id); const l = lotes.find(x => x.id === c.lote_id); return `<tr><td>${_esc(d ? C.descDoc(d) : 'cobro #' + c.id)}${c.numero_recibo && c.numero_recibo !== lote0.numero_recibo ? `<br><small style="color:var(--text-secondary);">Rec. ${_esc(c.numero_recibo)}</small>` : ''}</td><td>${c.medio_pago === 'saldo_favor' ? '<span class="badge badge-success">Saldo a favor</span>' : `L${l?.id} · ${fechaDMY(l?.fecha)}`}</td><td>${c.moneda}</td><td style="text-align:right;">${formatNumber(c.monto)}</td><td style="text-align:right;">${parseFloat(c.monto_retencion) ? formatNumber(c.monto_retencion) : '—'}</td></tr>` }),
+      ...cobros.map(c => { const d = C.cxc().find(x => x.id === c.cxc_id); const l = lotes.find(x => x.id === c.lote_id); return `<tr><td>${_esc(d ? C.descDoc(d) : 'cobro #' + c.id)}${c.numero_recibo && c.numero_recibo !== lote0.numero_recibo ? `<br><small style="color:var(--text-secondary);">Rec. ${_esc(c.numero_recibo)}</small>` : ''}</td><td>${c.medio_pago === 'saldo_favor' ? '<span class="badge badge-success">Saldo a favor</span>' : c.medio_pago === 'ajuste_redondeo' ? `<span class="badge badge-warning" title="Otros gastos de gestión">Ajuste redondeo · ${_esc(c.cuenta_ajuste || '6599')}</span>` : `L${l?.id} · ${fechaDMY(l?.fecha)}`}</td><td>${c.moneda}</td><td style="text-align:right;">${formatNumber(c.monto)}</td><td style="text-align:right;">${parseFloat(c.monto_retencion) ? formatNumber(c.monto_retencion) : '—'}</td></tr>` }),
       ...abonos.map(a => { const l = C.letras().find(x => x.id === a.letra_id); const lo = lotes.find(x => x.id === a.lote_id); return `<tr><td>Letra ${_esc(l?.numero_letra || '#' + a.letra_id)}</td><td>L${lo?.id} · ${fechaDMY(lo?.fecha)}</td><td>${a.moneda || ''}</td><td style="text-align:right;">${formatNumber(a.monto_amortizado)}</td><td>—</td></tr>` })
     ].join('')
     const titulo = lotes.length > 1
@@ -869,6 +972,7 @@ export async function htmlSeccionLote(loteId) {
       <div style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:6px;">Se edita o elimina deshaciendo el ${lotes.length > 1 ? 'recibo completo' : 'lote completo'}.</div>
       <div style="border:1px solid var(--border-color); border-radius:var(--radius-md); overflow-x:auto;"><table style="width:100%; border-collapse:collapse; margin:0;">
         <thead><tr style="background:var(--bg-secondary);"><th>Documento</th><th>Pagado con</th><th>Mon.</th><th style="text-align:right;">Aplicado</th><th style="text-align:right;">Retención</th></tr></thead><tbody>${filas}</tbody></table></div>
+      ${lotes.some(l => parseFloat(l.monto_ajuste) > 0) ? `<div style="margin-top:8px; padding:8px 12px; border-radius:var(--radius-md); background:rgba(245,158,11,.10); font-size:0.85rem;">🔸 Ajuste por redondeo (otros ingresos): ${lotes.filter(l => parseFloat(l.monto_ajuste) > 0).map(l => `L${l.id} ${l.moneda} ${formatNumber(l.monto_ajuste)} · cta ${_esc(l.cuenta_ajuste || '7599')}`).join(' · ')}</div>` : ''}
       ${saldos.length ? `<div style="margin-top:8px; padding:8px 12px; border-radius:var(--radius-md); background:rgba(16,185,129,.10); font-size:0.85rem;">💚 Saldo a favor generado: ${saldos.map(s => `#${s.id} ${s.moneda} ${formatNumber(s.monto)} (${s.estado}${parseFloat(s.monto_aplicado) ? ', usado ' + formatNumber(s.monto_aplicado) : ''})`).join(' · ')}</div>` : ''}
       <button class="btn btn-danger btn-small" style="margin-top:8px;" onclick="window.deshacerCobroMasivo(${lote0.id})">↩ Deshacer ${lotes.length > 1 ? 'recibo' : 'cobro masivo'}</button>`
   } catch (e) { return `<p style="color:var(--color-danger);">${_esc(e.message)}</p>` }

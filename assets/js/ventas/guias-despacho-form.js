@@ -4,6 +4,7 @@ import { fechaDMY } from '../helpers.js'
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
 import { S } from './state.js'
+import { supabase } from '../supabase-client.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { getCustomers, getLotes, getLoteById, updateLote, getVentas, getVentaById, getDetalleVentas, updateDetalleVenta, getAlmacenes, getStockUbicaciones, updateStockUbicacion, deleteStockUbicacion, getUbicacionCustomers, addKardexMovimiento, getGuiasDespachoVenta, getGuiaDespachoVentaById, addGuiaDespachoVenta, updateGuiaDespachoVenta, getDetalleGuiasDespachoVenta, getDetalleGuiasDespachoVentaByVenta, addDetalleGuiaDespachoVenta, deleteDetalleGuiaDespachoVenta, getLoteBultosDisponiblesZona, updateLoteBulto, recalcularLoteDesdeBultos, getKardexDeGuia } from '../supabase-data.js'
 import { showToast, formatQty } from '../helpers.js'
@@ -670,6 +671,19 @@ window.guardarGuiaDespachoVenta = async function () {
     if (!numeroGuia)  { showToast('Ingresa el N° de Guía', 'warning'); return }
     if (!fechaGuia)   { showToast('Ingresa la fecha de la guía', 'warning'); return }
     if (!S._guiaDespachoLineas || S._guiaDespachoLineas.length === 0) { showToast('Esta venta no tiene productos pendientes', 'warning'); return }
+    // Término de despacho OBLIGATORIO antes de la guía (2026-11-10): de la factura o, si no, de su PK
+    {
+      const vD = await getVentaById(ventaId)
+      let termino = vD?.termino_despacho || null
+      if (!termino && vD?.packing_id) {
+        const { data: pkD } = await supabase.from('packing').select('termino_despacho, numero').eq('id', vD.packing_id).maybeSingle()
+        termino = pkD?.termino_despacho || null
+      }
+      if (!termino) {
+        showToast(`Falta el término de despacho de ${vD?.numero || 'la venta'}: defínelo (¿recoge el cliente o lo llevamos?) en Editar factura → Packing y despacho, o en su PK, y vuelve a emitir la guía.`, 'warning', 9000)
+        return
+      }
+    }
 
     _sincronizarDespachosGuiaDesdeDOM()
 

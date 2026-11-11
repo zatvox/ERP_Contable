@@ -5,6 +5,10 @@
 ============================================================ */
 
 /* ⬇️ CAMBIAR AQUÍ: número de WhatsApp en formato internacional sin + ni espacios */
+/* ⬇️ CAMBIAR AQUÍ: tu perfil público del QR personal.
+   Mientras no esté el slug, apunta a la portada del sitio. */
+var QR_PERSONAL = 'https://zatvox.github.io/qr-personal-web/pages/perfil.html?u=luis-paz';
+
 var WSP_NUMERO  = '51970741197';
 var WSP_MENSAJE = 'Hola, me interesa Genko para mi empresa. Quisiera una demo.';
 
@@ -16,6 +20,14 @@ document.addEventListener('DOMContentLoaded', function () {
     enlaces[i].setAttribute('href', url);
     enlaces[i].setAttribute('target', '_blank');
     enlaces[i].setAttribute('rel', 'noopener');
+  }
+
+  // Enlace al portafolio / QR personal
+  var qr = document.querySelectorAll('[data-qr]');
+  for (var q = 0; q < qr.length; q++) {
+    qr[q].setAttribute('href', QR_PERSONAL);
+    qr[q].setAttribute('target', '_blank');
+    qr[q].setAttribute('rel', 'noopener');
   }
 
   var anio = document.getElementById('anio');

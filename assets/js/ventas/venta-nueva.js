@@ -38,6 +38,7 @@ window.abrirModalNuevaVenta = async function() {
     document.getElementById('ventaTotalBase').textContent   = '0.00'
     document.getElementById('ventaTotalIGV').textContent    = '0.00'
     document.getElementById('ventaTotalFinal').textContent  = '0.00'
+    window._ventaPintarSimbolo?.()
     const avisoRet = document.getElementById('ventaClienteRetencionAviso')
     if (avisoRet) avisoRet.style.display = 'none'
     const docInfoCliente = document.getElementById('ventaClienteDocInfo')
@@ -368,6 +369,7 @@ function _renderLineasVenta() {
   document.getElementById('ventaTotalBase').textContent   = base.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   document.getElementById('ventaTotalIGV').textContent    = igv.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   document.getElementById('ventaTotalFinal').textContent  = total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  window._ventaPintarSimbolo()
   _actualizarAvisoRetencionVenta()
   // Las cuotas se prorratean sobre el total: si cambian las líneas, el
   // cronograma tiene que seguirlas o dejaría de cuadrar.
@@ -1195,4 +1197,12 @@ window.abrirNuevaVentaDesdePacking = async function (pk, lineasPk) {
 window._vpdOnClienteVenta = async function () {
   if (S._packingOrigen?.id) return
   await cargarPKsCliente('venta', parseInt(document.getElementById('ventaContactId')?.value || 0) || null)
+}
+
+
+// Símbolo de moneda en los totales de Nueva Venta (2026-11-10), igual que PK/COT.
+// Va en un <span> aparte: el número sigue solo en #ventaTotalFinal (otros cálculos lo leen).
+window._ventaPintarSimbolo = function () {
+  const sim = document.getElementById('ventaMoneda')?.value === 'USD' ? '$ ' : 'S/ '
+  document.querySelectorAll('#modal-nueva-venta .vt-sim').forEach(el => { el.textContent = sim })
 }

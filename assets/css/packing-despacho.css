@@ -62,3 +62,6 @@
 }
 
 .pk-desp [hidden] { display: none !important; }
+/* Aviso de despacho pendiente (2026-11-10): no bloquea guardar, sí la guía */
+.pk-desp-aviso { margin: 4px 0 10px; padding: 9px 12px; border-radius: var(--radius-md, 8px); border: 1px solid rgba(245,158,11,.45); border-left: 4px solid var(--color-warning); background: rgba(245,158,11,.10); color: var(--text-primary); font-size: .82rem; line-height: 1.45; }
+.pk-desp-aviso b { color: var(--color-warning); }

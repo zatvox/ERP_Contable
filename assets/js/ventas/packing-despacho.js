@@ -48,7 +48,7 @@ export function htmlDespacho() {
     <strong style="display:block; margin-bottom:8px; color:var(--text-secondary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.03em;">🚚 Despacho</strong>
     <div class="pk-desp-cab">
       <div class="form-group">
-        <label>Término de despacho *</label>
+        <label>Término de despacho</label>
         <select id="pkDespTermino" onchange="window._pkDespTermino()">
           <option value="">— Elige —</option>
           <option value="recoge_cliente">🏭 Recoge el cliente</option>
@@ -57,6 +57,7 @@ export function htmlDespacho() {
       </div>
       <span class="pk-desp-chip" id="pkDespChip">Define quién lleva la mercadería</span>
     </div>
+    <div class="pk-desp-aviso" id="pkDespAviso" hidden></div>
     <div class="pk-desp-cuerpo" id="pkDespCuerpo" hidden>
       <label class="pk-desp-chk full">
         <input type="checkbox" id="pkDespUsaCli" onchange="window._pkDespUsaCli()">
@@ -65,17 +66,17 @@ export function htmlDespacho() {
       </label>
       <div class="form-group full" id="pkDespDirGrp" hidden>
         <label>Dirección de entrega</label>
-        <input type="text" id="pkDespDir" placeholder="Calle, número, referencia">
+        <input type="text" id="pkDespDir" placeholder="Calle, número, referencia" oninput="window._pkDespAviso()">
       </div>
       <div class="form-group">
-        <label>Distrito de entrega *</label>
-        <input type="text" id="pkDespDistrito" list="pkDespDistritos" placeholder="Ej.: Ate" autocomplete="off" oninput="window._pkDespDistrito()">
+        <label>Distrito de entrega</label>
+        <input type="text" id="pkDespDistrito" list="pkDespDistritos" placeholder="Ej.: Ate" autocomplete="off" oninput="window._pkDespDistrito(); window._pkDespAviso()">
         <datalist id="pkDespDistritos"></datalist>
       </div>
       <div class="form-group">
-        <label>Link de Google Maps *</label>
+        <label>Link de Google Maps</label>
         <div class="pk-desp-maps">
-          <input type="url" id="pkDespMaps" placeholder="https://maps.app.goo.gl/…" oninput="window._pkDespMapsCambio()">
+          <input type="url" id="pkDespMaps" placeholder="https://maps.app.goo.gl/…" oninput="window._pkDespMapsCambio(); window._pkDespAviso()">
           <button type="button" class="btn btn-small btn-secondary" id="pkDespMapsAbrir" onclick="window._pkDespMapsAbrir()" title="Abrir en Google Maps">📍</button>
         </div>
         <small style="color:var(--text-secondary);">Pega el enlace de la ubicación exacta de entrega.</small>
@@ -104,7 +105,8 @@ export function enlazarDespacho() {
   _enlazado = true
   _$('pkCliente')?.addEventListener('change', _pintarDirCliente)
   window._pkDespTermino = () => { _aplicarTermino(); _recalcFlete(true) }
-  window._pkDespUsaCli = () => { _aplicarUsaCli(); _recalcFlete(true) }
+  window._pkDespUsaCli = () => { _aplicarUsaCli(); _recalcFlete(true); _pintarAviso() }
+  window._pkDespAviso = () => _pintarAviso()
   window._pkDespDistrito = () => { _manual = false; _recalcFlete(true) }
   window._pkDespCostoManual = () => { _manual = true; _flete.costo = parseFloat(_$('pkDespCosto').value) || 0; _repintarGanancia() }
   window._pkDespRecalcular = () => { _manual = false; _flete.key = ''; _recalcFlete(true) }
@@ -147,6 +149,25 @@ function _aplicarTermino() {
   chip.textContent = t === 'despacho' ? 'El flete va dentro del precio · se resta del margen' : t === 'recoge_cliente' ? 'Sin flete · el cliente retira (aparece como "por retirar")' : 'Define quién lleva la mercadería'
   if (t === 'despacho') { _pintarDirCliente(); _aplicarUsaCli() }
   _repintarGanancia()
+  _pintarAviso()
+}
+
+/** Datos de despacho que faltan (2026-11-10: todo es OPCIONAL al guardar el PK/COT). */
+export function pendientesDespacho() {
+  const t = _$('pkDespTermino')?.value
+  if (!t) return ['término de despacho (¿recoge el cliente o lo llevamos?)']
+  if (t !== 'despacho') return []
+  const f = []
+  if (!_$('pkDespUsaCli').checked && !_$('pkDespDir').value.trim()) f.push('dirección de entrega')
+  if (!_$('pkDespDistrito').value.trim()) f.push('distrito')
+  if (!_$('pkDespMaps').value.trim()) f.push('link de Google Maps')
+  return f
+}
+function _pintarAviso() {
+  const el = _$('pkDespAviso'); if (!el) return
+  const f = pendientesDespacho()
+  el.hidden = !f.length
+  if (f.length) el.innerHTML = `⚠ <b>Despacho pendiente:</b> falta ${f.join(', ')}. Puedes guardar así y completarlo después en el PK o en la factura, <b>pero es obligatorio antes de emitir la guía de despacho.</b>`
 }
 
 async function _cargarDistritos() {
@@ -213,16 +234,10 @@ export function alCambiarLineas(itemIds) {
 
 // ── Lectura / validación / payload ─────────────────────────────────────────
 export function validarDespacho() {
-  const t = _$('pkDespTermino').value
-  if (!t) return 'Elige el término de despacho: ¿recoge el cliente o va con despacho incluido?'
-  if (t === 'despacho') {
-    if (!_$('pkDespDistrito').value.trim()) return 'Con despacho incluido indica el distrito de entrega.'
-    const m = _$('pkDespMaps').value.trim()
-    if (!m) return 'Con despacho incluido pega el link de Google Maps de la entrega.'
-    if (!_mapsValido(m)) return 'El link no parece de Google Maps (ej.: https://maps.app.goo.gl/…).'
-    if (!_$('pkDespUsaCli').checked && !_$('pkDespDir').value.trim()) return 'Escribe la dirección de entrega o usa la del cliente.'
-    if (!(parseFloat(_$('pkDespCosto').value) >= 0) || _$('pkDespCosto').value === '') return 'Falta el costo de flete: espera el cálculo o ingrésalo a mano.'
-  }
+  // 2026-11-10: los datos de despacho son opcionales al guardar (ver pendientesDespacho).
+  // Solo se bloquea un link de Maps escrito pero inválido.
+  const m = _$('pkDespMaps')?.value.trim()
+  if (_$('pkDespTermino')?.value === 'despacho' && m && !_mapsValido(m)) return 'El link no parece de Google Maps (ej.: https://maps.app.goo.gl/…).'
   return null
 }
 

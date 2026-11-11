@@ -168,6 +168,7 @@ window.irATab = function(nombre) {
   document.querySelector(`#cobTabs .tab-btn[data-tab="${nombre}"]`)?.click()
 }
 
+window._cobRefrescar = () => _refrescarTodo()   // ↺ Actualizar: fuerza lectura real de la BD
 function _refrescarTodo() {
   invalidarVarios(['cuentas_cobrar', 'cuentas_pagar', 'cobros', 'pagos_proveedores', 'bancos', 'cuotas_cobrar', 'cuotas_pagar', 'letras_cambio', 'letras_abonos'])
   _cuotasCache = []
@@ -1496,7 +1497,7 @@ function construirReporte(panelId) {
       filtros: [
         { key: 'cliente', label: 'Cliente', tipo: 'texto', campos: ['cliente', 'documento', 'recibo'], placeholder: 'Cliente, documento o recibo...' },
         { key: 'origen', label: 'Origen', tipo: 'select', opciones: ['Factura', 'Letra'] },
-        { key: 'medio', label: 'Medio', tipo: 'select', opciones: ['transferencia', 'deposito', 'efectivo', 'cheque', 'detraccion', 'banco_letra', 'yape_plin', 'otro'] },
+        { key: 'medio', label: 'Medio', tipo: 'select', opciones: ['transferencia', 'deposito', 'efectivo', 'cheque', 'detraccion', 'banco_letra', 'yape_plin', 'saldo_favor', 'ajuste_redondeo', 'otro'] },
         { key: 'rango', label: 'Fecha', tipo: 'rango', campo: 'fecha' }
       ],
       agruparPorDefecto: ['mes'],

@@ -26,6 +26,7 @@ import { formatNumber, fechaDMY, showToast, hacerTablaOrdenable } from '../helpe
 import { ojoBtn } from '../shared/ver-editar.js'
 import { CONCEPTOS_CARPETA } from './adjuntos-carpeta.js'
 import { anticipoDeCI, resumenEmbarcado } from './ci-multi.js'
+import { sincronizarComprasCarpeta } from './ci-compra.js'
 import { cargarObservaciones, observacionesHtml } from './observaciones-carpeta.js'
 
 const num = v => parseFloat(v) || 0
@@ -126,6 +127,8 @@ async function _cargar() {
   const carpeta = window.carpetaActual || null
   const ci = window.costeoActual?.id ? window.costeoActual : null
   if (!carpeta) return null
+  // Autocuración: todo CI de la carpeta debe estar en Compras + CxP (y su pagado al día). No bloquea el dibujo de la hoja.
+  sincronizarComprasCarpeta(carpeta.id).catch(e => console.warn('sync CI→Compras', e))
   const carpetaId = carpeta.id
   await cargarObservaciones(carpetaId)
   // Ola 1: TODO lo que depende solo de la carpeta/CI, en paralelo (antes eran ~25 viajes uno tras otro).

@@ -6,6 +6,7 @@
 // carpeta (carpetas_importacion.comercial_invoice_id). Luego el saldo se paga
 // desde el cronograma / el modal del CI.
 // ============================================================================
+import { sincronizarCompraCI } from './ci-compra.js'
 import { insert, update, query, supabase, ultimoErrorInsert } from '../supabase-client.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { showToast, fechaDMY } from '../helpers.js'
@@ -197,6 +198,8 @@ window.rciGuardar = async function () {
     else for (const m of _propAnticipo(total).prevMat) await update('comercial_invoices', m.id, { anticipo_asignado: m.monto })
     window.ciActivoPorCarpeta = window.ciActivoPorCarpeta || {}; window.ciActivoPorCarpeta[_carpeta.id] = ci.id
     try { await window.adjBloqueSubirPendientes?.('modal-registrar-ci') } catch (e) { console.warn('adjuntos del CI:', e) }
+    // LEY: un solo registro. El CI nace también como Compra (comprobante 91) + CxP, enlazado a la carpeta y a la OC.
+    try { await sincronizarCompraCI(ci.id, { silencioso: false }) } catch (e) { console.warn('CI→Compras:', e) }
     let fallidas = 0
     for (const l of lin) {
       const f = await insert('detalle_comercial_invoice', { comercial_invoice_id: ci.id, product_id: l.product_id, lote: '',

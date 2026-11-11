@@ -28,7 +28,7 @@ import { vincularTCEnVivo } from '../tc-en-vivo.js'
 import { estaAnulado } from '../anulacion.js'
 import { descargarPDFDesdeHTML as _descargarPDFDesdeHTML, cuentasDepositoPDF, cssCabeceraPDF, htmlCabeceraPDF } from '../shared/pdf-documento.js'   // PDF A4 con saltos de página limpios
 // Despacho + PV de lista + efecto de margen (SQL 136) y campanita de avisos (2026-11-05)
-import { htmlDespacho, ATR_PANEL_GAN, HTML_GAN_EXTRA, HTML_PV_HINT, iniciarDespacho, validarDespacho, leerDespacho, alCambiarLineas, pintarPistaPV, lineasBajoPV, pintarGanancia } from './packing-despacho.js'
+import { htmlDespacho, ATR_PANEL_GAN, HTML_GAN_EXTRA, HTML_PV_HINT, iniciarDespacho, validarDespacho, pendientesDespacho, leerDespacho, alCambiarLineas, pintarPistaPV, lineasBajoPV, pintarGanancia } from './packing-despacho.js'
 import { crearAviso, resolverAviso, urlConBusqueda } from '../shared/campanita.js'
 
 // Datos del emisor para el PDF (mismos del PDF de Odoo). Logo: assets/img/logo-jhiro.png
@@ -1185,6 +1185,7 @@ window.guardarPacking = async function () {
     if (!_pkLineas.length) { showToast('Agrega al menos un producto', 'warning'); return }
     const errDesp = validarDespacho()
     if (errDesp) { showToast(errDesp, 'warning', 6000); document.getElementById('pkDespSec')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); return }
+    { const pend = pendientesDespacho(); if (pend.length) showToast(`Se guarda con despacho pendiente (${pend.join(', ')}). Complétalo antes de emitir la guía.`, 'info', 7000) }
     // PV de lista: NO bloquea; se guarda con alerta y va a la campanita
     const bajoPV = lineasBajoPV(_pkLineas, document.getElementById('pkMoneda').value, parseFloat(document.getElementById('pkTC').value) || 0)
     const corr = _pkModoCot ? { manual: false } : await _pkCorrelativoElegido()

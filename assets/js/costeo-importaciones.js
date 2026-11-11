@@ -894,6 +894,7 @@ window.guardarCambiosImportacion = async function () {
     window.costeoActual = resultado
  
     // Actualizar UI
+    try { const m = await import('./importaciones/ci-compra.js'); await m.sincronizarCompraCI(window.costeoActual.id, { silencioso: false }) } catch (e) { console.warn('CI→Compras', e) }
     await cargarCabecera()
     await cargarImportacionesList()
  

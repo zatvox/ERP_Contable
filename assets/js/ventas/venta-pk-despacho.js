@@ -55,13 +55,20 @@ export function montarSeccionPkDespacho(pfx) {
           <input type="url" id="${pfx}DespMaps" placeholder="Link Google Maps">
         </div>
       </div>
-    </div>`
+    </div>
+    <div id="${pfx}DespAviso" hidden style="margin-top:10px; padding:9px 12px; border-radius:8px; border:1px solid rgba(245,158,11,.45); border-left:4px solid var(--color-warning); background:rgba(245,158,11,.10); font-size:.82rem; line-height:1.45;"></div>`
   convertirEnBuscador(`${pfx}PkSel`, { placeholder: 'Escribe el N° de PK…', sinResultados: 'Ningún PK coincide' })
 }
 
 window._vpdTermino = function (pfx) {
+  const t = $(`${pfx}DespTermino`)?.value
   const d = $(`${pfx}DespDatos`)
-  if (d) d.style.display = $(`${pfx}DespTermino`)?.value === 'despacho' ? 'flex' : 'none'
+  if (d) d.style.display = t === 'despacho' ? 'flex' : 'none'
+  const av = $(`${pfx}DespAviso`)
+  if (av) {
+    av.hidden = !!t
+    av.innerHTML = '⚠ <b style="color:var(--color-warning);">Despacho pendiente:</b> aún no se definió si recoge el cliente o lo llevamos. Puedes guardar la factura así, <b style="color:var(--color-warning);">pero es obligatorio antes de emitir la guía de despacho.</b>'
+  }
 }
 window._vpdPkCambio = function (pfx) {
   const v = $(`${pfx}PkSel`)?.value

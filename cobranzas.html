@@ -102,7 +102,7 @@
                 <button class="btn btn-secondary btn-small" onclick="window.abrirCobroMasivo()" title="Uno o varios depósitos (vouchers) del cliente aplicados a varias facturas/letras, de la más antigua a la más nueva. Con ➕ Vouchers: un recibo con varios vouchers. Con 🧾 Varios recibos: un voucher con varios recibos">💰 Cobro masivo</button>
                 <button class="btn btn-primary btn-small" onclick="window.abrirRegistrarCobro()">+ Registrar Cobro</button>
                 <button class="btn btn-secondary btn-small" onclick="window.exportarCxC()">⬇ CSV</button>
-                <button class="btn btn-secondary btn-small" onclick="window.cargarCxC()">↺ Actualizar</button>
+                <button class="btn btn-secondary btn-small" onclick="window._cobRefrescar?.(); window.cargarCxC()">↺ Actualizar</button>
               </div>
             </div>
             </div>
@@ -203,7 +203,7 @@
               <div style="display:flex; gap:8px; flex-wrap:wrap;">
                 <button class="btn btn-primary btn-small" onclick="window.abrirRegistrarPago()">+ Registrar Pago</button>
                 <button class="btn btn-secondary btn-small" onclick="window.exportarCxP()">⬇ CSV</button>
-                <button class="btn btn-secondary btn-small" onclick="window.cargarCxP()">↺ Actualizar</button>
+                <button class="btn btn-secondary btn-small" onclick="window._cobRefrescar?.(); window.cargarCxP()">↺ Actualizar</button>
               </div>
             </div>
             </div>
@@ -295,7 +295,7 @@
               <div class="card-acciones">
               <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
                 <input type="month" id="retencionesPeriodo" onchange="window.cargarRetenciones()">
-                <button class="btn btn-secondary btn-small" onclick="window.cargarRetenciones()">↺ Actualizar</button>
+                <button class="btn btn-secondary btn-small" onclick="window._cobRefrescar?.(); window.cargarRetenciones()">↺ Actualizar</button>
               </div>
             </div>
             </div>

@@ -8,6 +8,7 @@
 
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/+esm'
 import { SUPABASE_CONFIG } from './config.js'
+import { invalidarPorEscritura } from './data-cache.js'
 
 export const supabase = createClient(SUPABASE_CONFIG.URL, SUPABASE_CONFIG.ANON_KEY)
 
@@ -134,6 +135,18 @@ export function filtrarPorEmpresa(q, table) {
 const _fromOriginal = supabase.from.bind(supabase)
 supabase.from = function (table) {
   const qb = _fromOriginal(table)
+  // 2026-11-10: toda escritura directa invalida la caché de esa tabla (y sus
+  // dependientes) antes y justo después de responder, en esta y en las demás pestañas.
+  for (const m of ['insert', 'update', 'upsert', 'delete']) {
+    const orig = qb[m]?.bind(qb); if (!orig) continue
+    qb[m] = (...args) => {
+      invalidarPorEscritura(table)
+      const b = orig(...args)
+      const thenOrig = b.then.bind(b)
+      b.then = (ok, ko) => thenOrig(r => { invalidarPorEscritura(table); return r }).then(ok, ko)
+      return b
+    }
+  }
   if (!TABLAS_EMPRESA.has(table) && !TABLAS_CON_AMBITO.has(table)) return qb
   const _selectOriginal = qb.select.bind(qb)
   qb.select = (...args) => filtrarPorEmpresa(_selectOriginal(...args), table)

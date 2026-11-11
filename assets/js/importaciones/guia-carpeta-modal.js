@@ -119,7 +119,7 @@ let _gNueva = null // id de la guía recién registrada desde este modal (se mar
 function _pintarCompra() {
   const c = _compra
   $('gcCompra').innerHTML = !_ci ? '' : c
-    ? `<label>Compra enlazada</label><div class="dm-cruce ok"><span class="dm-cruce-ico">✔</span><div><b>${esc(c.serie || '')}-${esc(c.numero || '')}</b> · ${esc(c.proveedor_nombre || '')}<br>${n0(c.cantidad)} ${esc(c.unidad_medida || '')} · ${c.currency === 'PEN' ? 'S/' : '$'} ${n2(c.total)}</div></div>`
+    ? `<label>Compra enlazada</label><div class="dm-cruce ok"><span class="dm-cruce-ico">✔</span><div><b>${esc([c.serie, c.numero].filter(Boolean).join('-'))}</b> · ${esc(c.proveedor_nombre || '')}<br>${n0(c.cantidad)} ${esc(c.unidad_medida || '')} · ${c.currency === 'PEN' ? 'S/' : '$'} ${n2(c.total)}</div></div>`
     : `<label>Compra enlazada</label><div class="dm-cruce warn"><span class="dm-cruce-ico">⚠</span><div>No encontré la compra de este CI. Regístrala en Compras (o la guía de ingreso se vincula desde ahí).</div></div>`
 }
 

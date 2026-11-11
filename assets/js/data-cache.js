@@ -37,6 +37,38 @@ function _k(clave) { return _sufijoEmpresa + clave }
 // viene filtrado. Perder unos milisegundos es barato; mezclar empresas no.
 function _cacheActiva() { return _sufijoEmpresa !== '' }
 const TTL_DEFECTO = 5 * 60 * 1000   // 5 minutos
+
+// 2026-11-10 — TABLAS OPERATIVAS: lo que el usuario acaba de grabar tiene que
+// verse YA (una factura nueva en CxC para cobrarla). Para estas no se usa
+// sessionStorage (Ctrl+Shift+R no lo borra) y en memoria viven máx. 60 s.
+// Los reportes pesados siguen con 5 min. Analogía: la pizarra del día se
+// borra al recargar; el archivo histórico (reportes) sí se guarda un rato.
+const OPERATIVAS = new Set(['cuentas_cobrar', 'cuentas_pagar', 'cobros', 'pagos_proveedores', 'cuotas_cobrar', 'cuotas_pagar',
+  'letras_cambio', 'letras_abonos', 'cobros_lote', 'saldos_favor_cliente', 'bancos', 'movimientos_banco', 'contactos'])
+const TTL_OPERATIVA = 60 * 1000
+const _base = clave => String(clave).split(':')[0]
+
+// Escribir en una tabla vuelve vieja a otra (triggers): un cobro cambia el saldo de la CxC.
+const DEPENDE = {
+  cobros: ['cuentas_cobrar', 'cuotas_cobrar', 'movimientos_banco', 'bancos'],
+  pagos_proveedores: ['cuentas_pagar', 'cuotas_pagar', 'movimientos_banco', 'bancos'],
+  ventas: ['cuentas_cobrar', 'cuotas_cobrar'], detalle_ventas: ['cuentas_cobrar'],
+  compras: ['cuentas_pagar', 'cuotas_pagar'],
+  letras_abonos: ['letras_cambio', 'cuentas_cobrar', 'cuentas_pagar'], letras_cambio: ['cuentas_cobrar', 'cuentas_pagar', 'cuotas_cobrar', 'cuotas_pagar'],
+  cobros_lote: ['cobros', 'movimientos_banco', 'bancos'], movimientos_banco: ['bancos'],
+  cuentas_cobrar: ['cuotas_cobrar'], cuentas_pagar: ['cuotas_pagar'], contacts: ['contactos']
+}
+
+// Las OTRAS pestañas abiertas del ERP (mismo sitio) se enteran de la invalidación.
+let _bc = null
+try { _bc = new BroadcastChannel('jhiro_cache'); _bc.onmessage = e => { const d = e.data || {}; if (d.todo) _invalidarTodoLocal(); else if (d.prefijo) _invalidarLocal(d.prefijo) } } catch (_) { _bc = null }
+const _avisar = msg => { try { _bc?.postMessage(msg) } catch (_) {} }
+
+/** Una escritura en `tabla` (lo llaman insert/update/delete de supabase-client): limpia ella y sus dependientes. */
+export function invalidarPorEscritura(tabla) {
+  const t = String(tabla || ''); if (!t) return
+  invalidarVarios([t, ...(DEPENDE[t] || [])])
+}
 const MAX_PERSIST_BYTES = 900 * 1024 // no persistir payloads gigantes en sessionStorage
 
 let _statsHits = 0
@@ -49,8 +81,9 @@ let _statsMiss = 0
  * @param {object}   opciones  { ttl, persistir }
  */
 export async function cacheado(clave, fetcher, opciones = {}) {
-  const ttl       = opciones.ttl ?? TTL_DEFECTO
-  const persistir = opciones.persistir !== false
+  const operativa = OPERATIVAS.has(_base(clave))
+  const ttl       = operativa ? Math.min(opciones.ttl ?? TTL_OPERATIVA, TTL_OPERATIVA) : (opciones.ttl ?? TTL_DEFECTO)
+  const persistir = !operativa && opciones.persistir !== false
   const ahora     = Date.now()
 
   if (!_cacheActiva()) return await fetcher()
@@ -94,6 +127,10 @@ export async function cacheado(clave, fetcher, opciones = {}) {
 
 /** Invalida por prefijo: invalidar('ventas') borra 'ventas', 'ventas:2026-08', etc. */
 export function invalidar(prefijo) {
+  _invalidarLocal(prefijo)
+  _avisar({ prefijo })
+}
+function _invalidarLocal(prefijo) {
   // MULTIEMPRESA: las claves llevan delante el sufijo de empresas activas
   // ('e1_ventas:2026-08'). Se ignora ese sufijo al comparar, así una escritura
   // en Benji también limpia lo cacheado de Jhiro: invalidar de más es
@@ -119,6 +156,10 @@ export function invalidar(prefijo) {
 export function invalidarVarios(prefijos = []) { prefijos.forEach(invalidar) }
 
 export function invalidarTodo() {
+  _invalidarTodoLocal()
+  _avisar({ todo: true })
+}
+function _invalidarTodoLocal() {
   MEM.clear()
   limpiarPersistencia()
 }
