@@ -33,7 +33,8 @@ function updateThemeButton() {
   const btn = document.getElementById('themeToggle');
   if (btn) {
     const isDark = document.body.classList.contains('dark-mode');
-    btn.textContent = isDark ? '☀️ Claro' : '🌙 Oscuro';
+    btn.textContent = isDark ? '☀️' : '🌙';
+    btn.title = isDark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro';
   }
 }
 
@@ -164,23 +165,40 @@ function initSidebarCollapse(sidebar) {
 
   _reestructurarLinksSidebar(sidebar);
 
+  // Columna de herramientas arriba del sidebar: tema, colapsar y cerrar sesión.
+  const tools = document.createElement('div');
+  tools.className = 'sidebar-tools';
+
+  let theme = document.getElementById('themeToggle');
+  if (!theme) {
+    theme = document.createElement('button');
+    theme.id = 'themeToggle';
+    theme.type = 'button';
+    theme.dataset.b = '1';
+    theme.addEventListener('click', toggleTheme);
+  }
+  theme.classList.add('theme-toggle', 'sidebar-tool', 'sidebar-tool-theme');
+  tools.appendChild(theme);
+
   const btn = document.createElement('button');
   btn.id = 'sidebarCollapseBtn';
-  btn.className = 'sidebar-toggle-btn';
+  btn.className = 'sidebar-toggle-btn sidebar-tool';
   btn.type = 'button';
   btn.title = 'Colapsar menú';
   btn.textContent = '«';
-  sidebar.insertBefore(btn, sidebar.firstChild);
+  tools.appendChild(btn);
 
-  // Cerrar sesión: botón en la esquina superior izquierda, con confirmación.
   const out = document.createElement('button');
   out.id = 'sidebarLogoutBtn';
-  out.className = 'sidebar-logout-top';
+  out.className = 'sidebar-logout-top sidebar-tool';
   out.type = 'button';
   out.title = 'Cerrar sesión';
   out.textContent = '⏻';
   out.addEventListener('click', confirmarCerrarSesion);
-  sidebar.insertBefore(out, sidebar.firstChild);
+  tools.appendChild(out);
+
+  sidebar.insertBefore(tools, sidebar.firstChild);
+  updateThemeButton();
 
   function aplicarEstado(colapsado) {
     document.body.classList.toggle('sidebar-collapsed', colapsado);
@@ -403,7 +421,7 @@ if (document.readyState === 'loading') {
     
     const themeBtn = document.getElementById('themeToggle');
     if (themeBtn) {
-      themeBtn.addEventListener('click', toggleTheme);
+      if (!themeBtn.dataset.b) { themeBtn.dataset.b = '1'; themeBtn.addEventListener('click', toggleTheme); }
     }
   });
 } else {
@@ -413,7 +431,7 @@ if (document.readyState === 'loading') {
   
   const themeBtn = document.getElementById('themeToggle');
   if (themeBtn) {
-    themeBtn.addEventListener('click', toggleTheme);
+    if (!themeBtn.dataset.b) { themeBtn.dataset.b = '1'; themeBtn.addEventListener('click', toggleTheme); }
   }
 }
 

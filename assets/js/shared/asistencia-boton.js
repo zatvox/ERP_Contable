@@ -34,11 +34,11 @@ function _pintar() {
   if (!_btn || !_estado) return
   const { entrada, salida } = _estado
   if (!entrada) {
-    _btn.textContent = '🟢 Marcar ingreso'; _btn.className = 'btn btn-primary btn-small'; _btn.disabled = false
-    _btn.title = 'Registra tu hora de ingreso (hora oficial de Lima)'
+    _btn.textContent = '🟢 Marcar'; _btn.className = 'btn btn-primary btn-small'; _btn.disabled = false
+    _btn.title = 'Marcar ingreso (hora oficial de Lima)'
   } else if (!salida) {
-    _btn.textContent = '🔴 Marcar salida'; _btn.className = 'btn btn-warning btn-small'; _btn.disabled = false
-    _btn.title = `Ingresaste a las ${_hm(entrada)}`
+    _btn.textContent = '🔴 Marcar'; _btn.className = 'btn btn-warning btn-small'; _btn.disabled = false
+    _btn.title = `Marcar salida · ingresaste a las ${_hm(entrada)}`
   } else {
     _btn.textContent = `✔ ${_hm(entrada)} – ${_hm(salida)}`; _btn.className = 'btn btn-secondary btn-small'; _btn.disabled = true
     _btn.title = 'Jornada de hoy completa'

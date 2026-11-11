@@ -38,6 +38,7 @@ import { getModuloConfig, renderConfiguracionTab, aplicarPreferenciasVista } fro
 import { cacheado, invalidarVarios } from './data-cache.js'
 import { renderEstadoCuentaCliente } from './estado-cuenta.js'
 import { initCobroMasivo, htmlSeccionLote } from './cobro-masivo.js'
+import { initRetencionCRE } from './retencion-cre.js'
 import { columnasAuto } from './col-menu.js'
 import { badgeEmpresa } from './empresa.js'
 import { crearReporte, diasVencidos, tramoAntiguedad, nombreMes, mesActual, descargarCSV } from './reportes.js'
@@ -124,6 +125,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.querySelectorAll('.tab-content:not(#tab-reportes) table').forEach(hacerTablaOrdenable)
     calcularKPIs()
     _initCobroMasivo()
+    _initRetencionCRE()
     // Menú ⋮ (mostrar/ocultar columnas) en todas las tablas de trabajo del módulo
     document.querySelectorAll('.tab-content:not(#tab-reportes):not(#tab-configuracion) table').forEach(t => {
       const tab = t.closest('.tab-content')?.id?.replace('tab-', '') || 'x'
@@ -561,6 +563,19 @@ window.irARegistrarCobro = function(cxcId) { window.abrirRegistrarCobro(cxcId) }
 // RETENCIÓN EN EL COBRO
 // ============================================================================
 
+/**
+ * Retención de ESTE cobro (R.S. 037-2002: el 3 % se aplica sobre cada pago).
+ * Si el cobro cancela la factura → toda la retención pendiente; si es parcial →
+ * 3 % del pago bruto (neto × t / (1 − t)), sin pasar la pendiente.
+ */
+function _retParaCobro(neto, saldo) {
+  const pend = _cobroRetencionPendiente
+  if (!(pend > 0)) return 0
+  if (neto + pend >= saldo - 0.01) return pend
+  const t = tasaRetencion()
+  return Math.min(pend, _r2(neto * t / (1 - t)))
+}
+
 function _calcularRetencionPendiente(cxc) {
   const total    = parseFloat(cxc.monto_total || 0)
   const retenido = parseFloat(cxc.monto_retenido || 0)
@@ -734,10 +749,9 @@ window.registrarCobro = async function() {
     const contacto = _contactsMap[cxc.contact_id]
     const chkRet   = document.getElementById('cobroAplicarRetencion')
     const aplicaRet = !!(contacto?.sujeto_retencion && chkRet?.checked && _cobroRetencionPendiente > 0)
-    const montoRetencion = aplicaRet ? _cobroRetencionPendiente : 0
-
     // Validación de sobre-cobro: no permitir cobrar más de lo pendiente.
     const saldo = _saldoCxC(cxc)
+    const montoRetencion = aplicaRet ? _retParaCobro(monto, saldo) : 0
     if (monto + montoRetencion > saldo + 0.01) {
       showToast(`El cobro (${formatNumber(monto + montoRetencion)}) supera el saldo pendiente (${formatNumber(saldo)})`, 'warning')
       return
@@ -1198,49 +1212,95 @@ window.filtrarPagosRecientes = function() {
 // RETENCIONES IGV
 // ============================================================================
 
+/**
+ * Retenciones IGV (2026-11-11, SQL 156). Une dos fuentes:
+ *   • cobros con monto_retencion > 0 (la retención registrada al cobrar)
+ *   • comprobantes_retencion (el CRE del cliente: serie-número, T.C., S/ y PDF)
+ * Lo DEDUCIBLE en el PDT 621 es la retención S/ de los CRE registrados, en el
+ * periodo de la FECHA DEL CRE. Lo que no tiene CRE es "pendiente de sustento":
+ * se muestra estimado en S/ (retención × T.C. del cobro) solo como referencia.
+ */
+async function _datosRetenciones() {
+  const periodo = document.getElementById('retencionesPeriodo')?.value || ''
+  const [cobros, cxcList] = await Promise.all([cacheado('cobros', getCobros), cacheado('cuentas_cobrar', getCuentasCobrar)])
+  const cxcMap = {}; for (const c of (cxcList || [])) cxcMap[c.id] = c
+  let cres = [], adjCnt = {}
+  try {
+    const { data } = await supabase.from('comprobantes_retencion').select('*').eq('estado', 'registrado')
+    cres = data || []
+    if (cres.length) {
+      const { data: adj } = await supabase.from('adjuntos').select('entidad_id').eq('entidad', 'comprobante_retencion').in('entidad_id', cres.map(c => c.id))
+      for (const a of adj || []) adjCnt[a.entidad_id] = (adjCnt[a.entidad_id] || 0) + 1
+    }
+  } catch (_) { /* sin SQL 156 todavía */ }
+  const crePorCobro = {}; for (const r of cres) if (r.cobro_id) (crePorCobro[r.cobro_id] ||= []).push(r)
+  const filas = []
+  for (const c of (cobros || []).filter(x => (parseFloat(x.monto_retencion) || 0) > 0)) {
+    const lista = crePorCobro[c.id] || []
+    if (lista.length) for (const r of lista) filas.push({ cobro: c, cre: r, cxc: cxcMap[c.cxc_id] })
+    else filas.push({ cobro: c, cre: null, cxc: cxcMap[c.cxc_id] })
+  }
+  // CRE cuyo cobro ya no existe (no debería pasar, pero se muestra para corregirlo)
+  const usados = new Set(filas.filter(f => f.cre).map(f => f.cre.id))
+  for (const r of cres) if (!usados.has(r.id)) filas.push({ cobro: null, cre: r, cxc: cxcMap[r.cxc_id] })
+  const fechaFila = f => f.cre?.fecha_emision || f.cobro?.fecha || ''
+  const out = (periodo ? filas.filter(f => fechaFila(f).startsWith(periodo)) : filas)
+    .sort((a, b) => fechaFila(b).localeCompare(fechaFila(a)))
+  return { filas: out, adjCnt, fechaFila }
+}
+
 window.cargarRetenciones = async function() {
   try {
-    const periodo = document.getElementById('retencionesPeriodo')?.value
-    const [cobros, cxcList] = await Promise.all([
-      cacheado('cobros', getCobros), cacheado('cuentas_cobrar', getCuentasCobrar)
-    ])
-    const cxcMap = {}
-    for (const c of (cxcList || [])) cxcMap[c.id] = c
-
-    let retenciones = (cobros || []).filter(c => (parseFloat(c.monto_retencion) || 0) > 0)
-    if (periodo) retenciones = retenciones.filter(c => (c.fecha || '').startsWith(periodo))
-    retenciones.sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''))
-
     const tbody   = document.getElementById('tbody-retenciones')
     const totalEl = document.getElementById('retenciones-total')
     if (!tbody) return
-
-    if (retenciones.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">Sin retenciones en el periodo</td></tr>'
+    const { filas, adjCnt, fechaFila } = await _datosRetenciones()
+    if (!filas.length) {
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">Sin retenciones en el periodo</td></tr>'
       if (totalEl) totalEl.textContent = 'S/ 0.00'
       return
     }
-
-    let total = 0
-    const mRet = {}
-    tbody.innerHTML = retenciones.map(c => {
-      const cxc = cxcMap[c.cxc_id]
-      const comprobante = cxc ? `${cxc.tipo_comprobante || ''} ${cxc.serie || ''}-${numComp(cxc.numero_comprobante)}` : '-'
-      const monto = parseFloat(c.monto_retencion) || 0
-      total += monto
-      _sumaMon(mRet, c.moneda, monto)
+    let deducible = 0, pendienteEst = 0, sinPdf = 0
+    tbody.innerHTML = filas.map(f => {
+      const c = f.cobro, r = f.cre, cxc = f.cxc
+      const mon = c?.moneda || r?.doc_moneda || 'PEN'
+      const retDoc = r ? parseFloat(r.retencion_doc) : parseFloat(c.monto_retencion) || 0
+      const doc = cxc ? _descDocCP(cxc) : (r ? `${r.doc_serie || ''}-${r.doc_numero || ''}` : '-')
+      let creHtml, penHtml, acciones
+      if (r) {
+        deducible += parseFloat(r.retencion_pen) || 0
+        const tienePdf = !!adjCnt[r.id]; if (!tienePdf) sinPdf++
+        creHtml = `<b>${_esc(r.serie)}-${r.numero}</b> · ${fechaDMY(r.fecha_emision)}${r.origen === 'sin_cobro' ? ' <span class="badge badge-info" style="font-size:0.65rem;" title="Retención registrada con el CRE (cobro sin banco)">sin cobro</span>' : ''}
+          ${tienePdf ? '' : ' <span class="badge badge-warning" style="font-size:0.65rem;">⚠ sin archivo</span>'}${r.doc_moneda !== 'PEN' ? `<br><small style="color:var(--text-secondary);">T.C. ${r.tipo_cambio}</small>` : ''}`
+        penHtml = `<b>S/ ${formatNumber(r.retencion_pen)}</b>`
+        acciones = menuAccionesFila([
+          tienePdf ? { icono: '📄', label: 'Ver PDF del CRE', onclick: `window.verPdfCRE(${r.id})` } : { icono: '📎', label: 'Subir PDF del CRE', onclick: `window.subirPdfCRE(${r.id})` },
+          c && { icono: '👁', label: 'Ver cobro', onclick: `window.verDetalleCP('cobro', ${c.id})` },
+          { separador: true },
+          { icono: '✕', label: 'Anular CRE', peligro: true, onclick: `window.anularCRE(${r.id})` }
+        ].filter(Boolean))
+      } else {
+        const est = _r2(retDoc * (mon === 'PEN' ? 1 : (parseFloat(c.tipo_cambio) || 1)))
+        pendienteEst += est
+        creHtml = `<span class="badge badge-warning" title="Registra el comprobante de retención cuando el cliente lo entregue">⚠ pendiente de CRE</span>`
+        penHtml = `<span style="color:var(--text-secondary);" title="Estimado con el T.C. del cobro">≈ S/ ${formatNumber(est)}</span>`
+        acciones = `<button class="btn btn-small btn-primary" onclick="window.abrirRegistrarCRE({ cobroId: ${c.id} })">🧾 Registrar CRE</button>`
+          + menuAccionesFila([{ icono: '👁', label: 'Ver cobro', onclick: `window.verDetalleCP('cobro', ${c.id})` }, { icono: '✏️', label: 'Editar cobro', onclick: `window.abrirEditarCP('cobro', ${c.id})` }])
+      }
       return `<tr>
-        <td>${badgeEmpresa(c.empresa_id)}</td>
-        <td>${fechaDMY(c.fecha, '-')}</td>
-        <td>${_esc(_nombreContacto(c.contact_id))}</td>
-        <td>${_esc(comprobante)}</td>
-        <td style="text-align:right; font-weight:bold; white-space:nowrap;">${_fm(monto, c.moneda)}</td>
-        <td>${c.numero_comprobante_retencion ? _esc(c.numero_comprobante_retencion) : '<span class="badge badge-warning" title="Edita el cobro (✏️) para registrar el N° del comprobante de retención">⚠ pendiente</span>'}</td>
-        <td style="white-space:nowrap;">${_botonesCP('cobro', c.id)}</td>
+        <td>${badgeEmpresa(c?.empresa_id ?? r?.empresa_id)}</td>
+        <td>${fechaDMY(fechaFila(f), '-')}</td>
+        <td>${_esc(_nombreContacto(c?.contact_id ?? r?.contact_id))}</td>
+        <td>${_esc(doc)}</td>
+        <td style="text-align:right; font-weight:bold; white-space:nowrap;">${_fm(retDoc, mon)}</td>
+        <td>${creHtml}</td>
+        <td style="text-align:right; white-space:nowrap;">${penHtml}</td>
+        <td style="white-space:nowrap;">${acciones}</td>
       </tr>`
     }).join('')
-
-    if (totalEl) totalEl.innerHTML = _fmTotales(mRet).replace('<br>', ' · ')
+    if (totalEl) totalEl.innerHTML = `Deducible (con CRE): <b>S/ ${formatNumber(deducible)}</b>`
+      + (pendienteEst ? ` · <span style="color:var(--color-warning);">Pendiente de CRE ≈ S/ ${formatNumber(pendienteEst)}</span>` : '')
+      + (sinPdf ? ` · <span style="color:var(--color-warning);">${sinPdf} CRE sin archivo</span>` : '')
   } catch (e) {
     console.error('cargarRetenciones:', e)
     showToast('Error al cargar retenciones: ' + e.message, 'danger')
@@ -1260,17 +1320,16 @@ window.guardarComprobanteRetencion = async function(cobroId) {
 
 window.exportarRetenciones = async function() {
   const periodo = document.getElementById('retencionesPeriodo')?.value
-  const [cobros, cxcList] = await Promise.all([cacheado('cobros', getCobros), cacheado('cuentas_cobrar', getCuentasCobrar)])
-  const cxcMap = {}; (cxcList || []).forEach(c => { cxcMap[c.id] = c })
-  let rows = (cobros || []).filter(c => (parseFloat(c.monto_retencion) || 0) > 0)
-  if (periodo) rows = rows.filter(c => (c.fecha || '').startsWith(periodo))
+  const { filas, adjCnt, fechaFila } = await _datosRetenciones()
   descargarCSV(`retenciones_igv_${periodo || 'todas'}.csv`, [
-    ['Fecha', 'Cliente', 'Comprobante', 'Monto retenido', 'N° Comprobante Retención'],
-    ...rows.map(c => {
-      const cxc = cxcMap[c.cxc_id]
-      return [c.fecha || '', _nombreContacto(c.contact_id),
-        cxc ? `${cxc.tipo_comprobante || ''} ${cxc.serie || ''}-${numComp(cxc.numero_comprobante)}` : '',
-        parseFloat(c.monto_retencion || 0).toFixed(2), c.numero_comprobante_retencion || '']
+    ['Fecha', 'Cliente', 'Factura', 'Moneda', 'Retención (moneda factura)', 'CRE', 'Fecha CRE', 'T.C.', 'Base del pago', 'Retención S/', 'Neto S/', 'Estado', 'PDF'],
+    ...filas.map(f => {
+      const c = f.cobro, r = f.cre
+      return [fechaFila(f), _nombreContacto(c?.contact_id ?? r?.contact_id), f.cxc ? _descDocCP(f.cxc) : '',
+        c?.moneda || r?.doc_moneda || '', (r ? parseFloat(r.retencion_doc) : parseFloat(c.monto_retencion || 0)).toFixed(2),
+        r ? `${r.serie}-${r.numero}` : '', r?.fecha_emision || '', r?.tipo_cambio ?? '', r?.importe_pago ?? '',
+        r ? parseFloat(r.retencion_pen).toFixed(2) : '', r ? parseFloat(r.neto_pen).toFixed(2) : '',
+        r ? 'con CRE' : 'pendiente de CRE', r ? (adjCnt[r.id] ? 'sí' : 'no') : '']
     })
   ])
 }
@@ -1497,7 +1556,7 @@ function construirReporte(panelId) {
       filtros: [
         { key: 'cliente', label: 'Cliente', tipo: 'texto', campos: ['cliente', 'documento', 'recibo'], placeholder: 'Cliente, documento o recibo...' },
         { key: 'origen', label: 'Origen', tipo: 'select', opciones: ['Factura', 'Letra'] },
-        { key: 'medio', label: 'Medio', tipo: 'select', opciones: ['transferencia', 'deposito', 'efectivo', 'cheque', 'detraccion', 'banco_letra', 'yape_plin', 'saldo_favor', 'ajuste_redondeo', 'otro'] },
+        { key: 'medio', label: 'Medio', tipo: 'select', opciones: ['transferencia', 'deposito', 'efectivo', 'cheque', 'detraccion', 'banco_letra', 'yape_plin', 'saldo_favor', 'ajuste_redondeo', 'retencion', 'otro'] },
         { key: 'rango', label: 'Fecha', tipo: 'rango', campo: 'fecha' }
       ],
       agruparPorDefecto: ['mes'],
@@ -3155,6 +3214,10 @@ window.eliminarCP = async function(tipo, id) {
       return
     }
 
+    if (esCobro && reg.medio_pago === 'retencion') {
+      showToast('Este es un cobro de retención creado por un CRE: anúlalo desde la pestaña "Retenciones IGV" (🧾 Anular CRE).', 'warning', 9000)
+      return
+    }
     const { mov } = await _buscarMovimientoCP(tipo, reg)
     const extras = []
     if (esCobro && reg.numero_comprobante_retencion) extras.push(`⚠️ Tiene comprobante de retención N° ${reg.numero_comprobante_retencion}.`)
@@ -3167,6 +3230,8 @@ window.eliminarCP = async function(tipo, id) {
     if (!confirm(msg)) return
 
     const { avisos, asiento } = await _revertirEfectosCP(tipo, reg)
+    // El CRE vinculado a este cobro queda ANULADO (su PDF se conserva para el rastro)
+    if (esCobro) { try { await supabase.from('comprobantes_retencion').update({ estado: 'anulado', anulado_at: new Date().toISOString() }).eq('cobro_id', id).eq('estado', 'registrado') } catch (_) {} }
     const ok = esCobro ? await deleteCobro(id) : await deletePagoProveedor(id)
     if (!ok) throw new Error('Efectos revertidos, pero la fila no se pudo eliminar. NO reintentes: avisa para corregirlo por SQL.')
     await eliminarAdjuntosDe(tipo, id)
@@ -3510,6 +3575,7 @@ function _menuDocCP(tipoDoc, doc) {
     pendiente && { label: esCxC ? 'Cobrar' : 'Pagar', icono: '💵', onclick: `window.${esCxC ? 'irARegistrarCobro' : 'irARegistrarPago'}(${doc.id})` },
     { label: 'Ver detalle', icono: '👁', onclick: `window.accionDocCP('${tipoDoc}', ${doc.id}, 'ver')` },
     pendiente && { label: 'Canjear en letras', icono: '🔁', onclick: `window.canjearDocEnLetras('${tipoDoc}', ${doc.id})` },
+    esCxC && _contactsMap[doc.contact_id]?.sujeto_retencion && { label: 'Registrar comprobante de retención', icono: '🧾', onclick: `window.abrirRegistrarCRE({ cxcId: ${doc.id} })` },
     (nMov + nLet) > 0 && { separador: true },
     (nMov + nLet) > 0 && { label: `Editar ${nombre}${nLet ? '/letra' : ''}`, icono: '✏️', onclick: `window.accionDocCP('${tipoDoc}', ${doc.id}, 'editar')` },
     (nMov + nLet) > 0 && { label: `Eliminar ${nombre}${nLet ? '/letra' : ''}`, icono: '✕', peligro: true, onclick: `window.accionDocCP('${tipoDoc}', ${doc.id}, 'eliminar')` },
@@ -5539,7 +5605,7 @@ window._cpRecalc = function (tipo, origen) {
   const apl = parseFloat($(k.apl).value) || 0
   const mov = parseFloat($(k.mov).value) || 0
   const pend = doc ? Math.max(0, k.saldo(doc)) : 0
-  const ret = tipo === 'cobro' && $('cobroAplicarRetencion')?.checked && _cobroRetencionPendiente > 0 ? _cobroRetencionPendiente : 0
+  const ret = tipo === 'cobro' && $('cobroAplicarRetencion')?.checked && _cobroRetencionPendiente > 0 ? _retParaCobro(apl, pend) : 0
   const queda = _r2(pend - apl - ret)
   const celda = (lbl, val, color = 'var(--text-primary)') => `<div><div style="font-size:11px; color:var(--text-secondary);">${lbl}</div><div style="font-size:16px; font-weight:600; color:${color};">${val}</div></div>`
   $(k.resumen).innerHTML = doc
@@ -5554,7 +5620,7 @@ window._cpRecalc = function (tipo, origen) {
 // ============================================================================
 // Hasta 3 archivos por vez, cada uno con su concepto. Se eligen en el modal
 // (quedan "pendientes" en memoria) y se suben al guardar el cobro/pago.
-const _adjPendientes = { cobro: [], pago: [], ecp: [], clet: [], rlet: [], rfin: [], cmas: [] }
+const _adjPendientes = { cobro: [], pago: [], ecp: [], clet: [], rlet: [], rfin: [], cmas: [], cre: [] }
 const _adjConteo = { cobro: {}, pago: {} }
 const _ADJ_MAX_VEZ = 3
 
@@ -5903,6 +5969,25 @@ function _initCobroMasivo() {
     }
   })
   convertirVarios([{ id: 'cmCliente', placeholder: 'Escribe el cliente...', sinResultados: 'Sin clientes con deuda pendiente' }])
+}
+
+// Comprobante de Retención Electrónico (CRE) — retencion-cre.js (SQL 156)
+function _initRetencionCRE() {
+  initRetencionCRE({
+    cargar: async () => { _cxcList = await cacheado('cuentas_cobrar', getCuentasCobrar) },
+    cxc: () => _cxcList, contacto: id => _contactsMap[id], nombre: id => _nombreContacto(id), descDoc: d => _descDocCP(d),
+    saldoCxC: c => _saldoCxC(c), tasa: () => tasaRetencion(), refrescarBuscador: id => refrescarBuscador(id),
+    aplicarEfectosCobro: (cobro, cxc, o) => _aplicarEfectosCobro(cobro, cxc, o),
+    revertirEfectosCP: (t, r) => _revertirEfectosCP(t, r),
+    limpiarAdjuntos: pref => { _adjPendientes[pref] = []; _pintarAdjPendientes(pref) },
+    subirAdjuntos: (pref, ent, id) => _subirAdjuntosPendientes(pref, ent, id),
+    refrescar: async () => {
+      _refrescarTodo()
+      await _recargarTrasCambioCP()
+      if (document.getElementById('tab-retenciones')?.classList.contains('active')) await window.cargarRetenciones()
+    }
+  })
+  convertirVarios([{ id: 'creCliente', placeholder: 'Escribe el cliente...', sinResultados: 'Sin clientes agentes de retención' }])
 }
 
 // Ver detalle de un cobro de lote: pinta la sección del lote cuando aparece el contenedor

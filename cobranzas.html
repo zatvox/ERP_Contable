@@ -296,29 +296,31 @@
               <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
                 <input type="month" id="retencionesPeriodo" onchange="window.cargarRetenciones()">
                 <button class="btn btn-secondary btn-small" onclick="window._cobRefrescar?.(); window.cargarRetenciones()">↺ Actualizar</button>
+                <button class="btn btn-primary btn-small" onclick="window.abrirRegistrarCRE()">🧾 Registrar comprobante de retención</button>
               </div>
             </div>
             </div>
             <p style="padding:0 16px; color:var(--text-secondary); font-size:0.85rem;">
-              Cada fila es un cobro donde se aplicó retención de IGV. Completa el N° de Comprobante de Retención
-              cuando el cliente te lo entregue — es la base para deducirlo de tu IGV por pagar del periodo.
+              Cada fila es una retención de IGV que hizo un cliente agente. Cuando te entregue su comprobante de retención (CRE),
+              regístralo con <b>🧾 Registrar CRE</b> y súbele el PDF: lo <b>deducible</b> en el PDT 621 es la retención en soles de los CRE,
+              en el mes de la fecha del CRE.
             </p>
             <div class="table-container">
               <table>
                 <thead>
                   <tr>
-                    <th>Empresa</th><th>Fecha Cobro</th><th>Cliente</th><th>Comprobante</th>
-                    <th style="text-align:right;">Monto Retenido</th>
-                    <th>N° Comprobante Retención</th><th>Acciones</th>
+                    <th>Empresa</th><th>Fecha</th><th>Cliente</th><th>Factura</th>
+                    <th style="text-align:right;">Retenido</th>
+                    <th>Comprobante de retención</th><th style="text-align:right;">S/ deducible</th><th>Acciones</th>
                   </tr>
                 </thead>
                 <tbody id="tbody-retenciones">
-                  <tr><td colspan="6" style="text-align:center;">Cargando...</td></tr>
+                  <tr><td colspan="8" style="text-align:center;">Cargando...</td></tr>
                 </tbody>
               </table>
             </div>
             <div style="padding:16px; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; border-top:1px solid var(--border-color);">
-              <strong>Total retenido del periodo: <span id="retenciones-total">S/ 0.00</span></strong>
+              <strong>Retenciones del periodo: <span id="retenciones-total">S/ 0.00</span></strong>
               <div style="display:flex; gap:8px;">
                 <button class="btn btn-secondary btn-small" onclick="window.exportarRetenciones()">⬇ CSV</button>
                 <button class="btn btn-primary btn-small" onclick="window.aplicarDeduccionRetenciones()">Aplicar deducción a IGV del periodo</button>

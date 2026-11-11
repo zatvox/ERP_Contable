@@ -19,7 +19,7 @@ async function esperarEmpresa() {
 }
 
 // ---------- pestañas ----------
-const TABS = { cot: tCot, cli: tCli, stk: tStk, pre: tPre, cat: tCat, web: tWeb, map: tMapa }
+const TABS = { cot: tCot, cli: tCli, stk: tStk, pre: tPre, cat: tCat, web: tWeb, map: tMapa, doc: tDoc }
 function ir(t) {
   if (!TABS[t]) t = 'cot'
   if (['pre', 'cat', 'web'].includes(t) && !yo.esGestor) t = 'cot'
@@ -246,6 +246,13 @@ async function tMapa() {
     const { renderMapaEntregas } = await import('./mapa-entregas.js')
     await renderMapaEntregas(document.getElementById('mp-card'), { rows: ent, dias: DIAS, empresas: orgs.map(([id, o]) => ({ id, codigo: o && o.empresa_codigo, color: o && o.empresa_color })), origenes: Object.fromEntries(orgs.map(([e, o]) => [e, o || {}])), alRefrescar: () => tMapa() })
   } catch (e) { document.getElementById('mp-card').innerHTML = U.err(e.message) }
+}
+
+// ---------- DOCUMENTOS (Orden de Producción · Solicitud de Línea de Crédito) ----------
+async function tDoc() {
+  const v = vista('doc'); v.innerHTML = U.skel()
+  const { renderDocumentos } = await import('./documentos-formato.js')
+  await renderDocumentos(v, { emp })
 }
 
 // ---------- arranque ----------

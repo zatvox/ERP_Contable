@@ -885,7 +885,7 @@ export const ADJ_CONCEPTOS = {
   voucher: 'Voucher', recibo: 'Recibo', dietario: 'Dietario del banco', otro: 'Otro', swift: 'SWIFT', correo: 'Correo de confirmación', certificado_origen: 'Certificado de origen', ficha_tecnica: 'Ficha técnica', contrato: 'Contrato',
   proforma: 'Proforma Invoice (PI)', invoice: 'Commercial Invoice (CI)', bl: 'Bill of Lading (BL)', packing: 'Packing list',
   poliza: 'Póliza de seguro', dam: 'DAM / DUA', autoliquidacion: 'Autoliquidación (duda razonable)', boletin: 'Boletín químico', notificacion_aduana: 'Notificación de Aduanas (duda razonable)', garantia: 'Orden de depósito de garantía', dam_completa: 'DAM completa (hojas A, B y DAV)',
-  liquidacion: 'Liquidación del agente', factura_gasto: 'Factura de gasto', rh: 'Recibo por honorarios', guia: 'Guía de remisión'
+  liquidacion: 'Liquidación del agente', cre: 'Comprobante de retención', factura_gasto: 'Factura de gasto', rh: 'Recibo por honorarios', guia: 'Guía de remisión'
 }
 // Se acepta CUALQUIER tipo de archivo (PDF, fotos, Excel, correos .eml/.msg, zip...). Solo los PDF e
 // imágenes tienen previsualización; el resto se descarga. Se bloquean los ejecutables por seguridad.
