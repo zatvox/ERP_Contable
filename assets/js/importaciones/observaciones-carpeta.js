@@ -6,6 +6,7 @@
 // ============================================================================
 import { supabase, esperarContextoEmpresa } from '../supabase-client.js'
 import { showToast } from '../helpers.js'
+import { limiteDeposito } from '../shared/detraccion.js'
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 const num = v => Number(v) || 0
@@ -162,6 +163,13 @@ function _reglas(d) {
   const sinCxp = Object.values(docs || {}).filter(x => x.compra_id && !x.cxp_id && ['01', '02'].includes(x.tipo_comprobante || '01'))
   for (const x of sinCxp) add('gasto_sin_cxp_' + x.id, 'alerta', 'Costos', 'Comprobante en Compras sin Cuenta por Pagar',
     `${esc([x.serie, x.numero].filter(Boolean).join('-'))}: ${ref('crear la CxP ahora', `window.completarCxpGasto(${x.id})`, 'Crea la CxP (por el neto si es RH)')}.`)
+  // Detracciones (SPOT) por depositar: factura de servicio con detracción sin depósito acreditado (SQL 157). Plazo aprox.: 5.º día hábil del mes siguiente.
+  const hoyISO = new Date().toISOString().slice(0, 10)
+  for (const x of Object.values(docs || {}).filter(x => x.compra_id && x.detraccion_estado === 'pendiente')) {
+    const lim = limiteDeposito(x.fecha_emision), venc = lim && hoyISO > lim
+    add('detraccion_pend_' + x.id, venc ? 'alerta' : 'info', 'Costos', venc ? 'Detracción vencida sin depositar' : 'Detracción por depositar',
+      `${esc([x.serie, x.numero].filter(Boolean).join('-'))}: S/ ${num(x.detraccion_monto).toLocaleString('en-US')}${lim ? ` · límite aprox. ${lim} (o al pagar la factura)` : ''}. ${ref('registrar / ver', `window.abrirModalDetraccion(${x.compra_id})`, 'Registrar la constancia o editar la detracción')} · sin el depósito a tiempo se pierde el crédito fiscal del IGV (verifica con el contador).`)
+  }
   // Líneas marcadas «sin sustento»: el gasto está pero falta encontrar/subir su comprobante
   const sinSust = Object.values(docs || {}).filter(x => x.sustentado === false)
   if (sinSust.length) add('gasto_por_revisar', 'alerta', 'Costos', `Gastos por revisar: falta el comprobante (${sinSust.length})`,

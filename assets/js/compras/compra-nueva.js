@@ -5,7 +5,7 @@
 import { validarPerfilContacto } from '../shared/perfil-contacto.js'
 import { vincularTCEnVivo } from '../tc-en-vivo.js'
 import { getCurrentUser } from '../auth-supabase.js'
-import { getCompraById, addCompra, addCompraDetalle, getSuppliers, getContactById, generarAsientoCompra, subirAdjuntoCompra, getUrlAdjuntoCompra, eliminarAdjuntoCompra } from '../supabase-data.js'
+import { getCompraById, getCompras, getOrderCompraById, getOrderCompraDetalles, getItemById, updateOrderCompra, addCompra, addCompraDetalle, getSuppliers, getContactById, generarAsientoCompra, subirAdjuntoCompra, getUrlAdjuntoCompra, eliminarAdjuntoCompra } from '../supabase-data.js'
 import { ASIENTOS_AUTO_COMPRAS_ACTIVO } from '../config-asientos-auto.js'
 import { showToast, formatNumber, pintarDocumentoContacto } from '../helpers.js'
 import { getModuloConfig } from '../config-modulo.js'
@@ -13,7 +13,8 @@ import { renderEditorCronograma, actualizarCronograma, leerCronograma } from '..
 import { _invalidarCacheCompras } from './anulacion.js'
 import { _aplicarAnticiposSeleccionados, _cargarAnticiposDisponiblesProveedor } from './compra-servicio-anticipo.js'
 import { renderCompras } from './compras-lista.js'
-import { _crearCuentaPagarSiFactura, cargarItemsSelectDetalle } from './ordenes-compra.js'
+import { _crearCuentaPagarSiFactura, cargarItemsSelectDetalle, renderOrdenes } from './ordenes-compra.js'
+import { refrescarBuscador } from '../buscador-select.js'
 
 // ============================================================================
 // ADJUNTO DE COMPRA — 1 documento (PDF/JPEG/PNG) por compra. Pensado para
@@ -102,10 +103,23 @@ export let _detallesCompraEnCreacion = []
 // Tipo actualmente seleccionado en el modal unificado: 'mercaderia' | 'servicio' | 'anticipo'.
 export let _tipoCompraActual = 'mercaderia'
 
+// OC que se está confirmando en este modal (null = compra directa normal).
+let _ocOrigen = null
+
+/** Muestra/oculta el selector de Tipo (en modo OC el tipo queda fijo: Mercadería). */
+function _modoOC(oc) {
+  _ocOrigen = oc || null
+  const bar = document.getElementById('tcBtnMercaderia')?.parentElement
+  if (bar) bar.style.display = oc ? 'none' : ''
+  const num = document.getElementById('nqNumeroComprobante')
+  if (num) num.required = !!oc
+}
+
 /** Punto de entrada único del botón "+ Nueva Compra" — reemplaza a los
  * antiguos abrirModalNuevaCompraMercaderia/abrirModalCompraServicio, hoy
  * fusionados en un solo modal con selector de Tipo (2026-09-07). */
 window.abrirModalNuevaCompra = function () {
+  _modoOC(null)
   _detallesCompraEnCreacion = []
   _totalesCompraManual = false
   const form = document.getElementById('formNewCompraMercaderia')
@@ -124,6 +138,7 @@ window.abrirModalNuevaCompra = function () {
   _prepararCronogramaCompra(true)
   const atDesc = document.getElementById('atDescripcion')
   if (atDesc) atDesc.value = 'ANTICIPO'
+  window._csDetrReiniciar?.()   // limpia la caja de detracción del modal anterior
   window.cambiarTipoCompra('mercaderia')
   window.openModal('modal-nueva-compra-mercaderia')
 }
@@ -156,9 +171,61 @@ window.cambiarTipoCompra = function (tipo) {
 
   const titulo = { mercaderia: 'Nuevo Registro (Mercadería)', servicio: 'Nuevo Registro de Servicio/Gasto', anticipo: 'Nuevo Registro — Anticipo a Proveedor' }
   const tituloEl = document.getElementById('ncTituloModal')
-  if (tituloEl) tituloEl.textContent = titulo[tipo] || 'Nuevo Registro'
+  if (tituloEl) tituloEl.textContent = _ocOrigen ? `Confirmar ${_ocOrigen.numero} — Registro de compra (Mercadería)` : (titulo[tipo] || 'Nuevo Registro')
 
   _cargarAnticiposDisponiblesProveedor()
+}
+
+/** Confirmar OC: abre este mismo modal (Mercadería) con los datos de la OC.
+ *  Reglas (acordadas con Luis 2026-11-11): 1 OC = 1 compra · N° de comprobante
+ *  obligatorio, formato SERIE-NÚMERO y sin duplicar por proveedor · líneas
+ *  editables (quitar/agregar producto; Subtotal/IGV ajustables) · el stock
+ *  entra por la Guía de Remisión, por eso no se piden lote ni partida aquí. */
+window.abrirNuevaCompraDesdeOC = async function (ocId) {
+  const oc = await getOrderCompraById(ocId)
+  if (!oc) { showToast('Orden no encontrada', 'warning'); return }
+  if (oc.status === 'confirmado') { showToast('Esta OC ya fue confirmada', 'warning'); return }
+  if (oc.es_importacion) { showToast('Las OC de importación se confirman con "Confirmar Proforma"', 'warning'); return }
+
+  const [detalles, compras] = await Promise.all([getOrderCompraDetalles(ocId), getCompras()])
+  if (!detalles?.length) { showToast('La OC no tiene productos', 'warning'); return }
+  const yaEnlazada = (compras || []).find(c => c.orden_compra_id === oc.id)
+  if (yaEnlazada) { showToast(`Esta OC ya tiene la compra ${yaEnlazada.referencia || '#' + yaEnlazada.id}`, 'warning'); return }
+
+  const items = {}
+  await Promise.all([...new Set(detalles.map(d => d.item_id))].map(async id => { items[id] = await getItemById(id) }))
+
+  window.abrirModalNuevaCompra()           // limpia y abre el modal
+  _modoOC({ id: oc.id, numero: oc.numero || `OC-${oc.id}` })
+  window.cambiarTipoCompra('mercaderia')   // refresca el título
+
+  const prov = document.getElementById('nqProveedor')
+  if (prov) { prov.value = String(oc.contact_id || ''); refrescarBuscador('nqProveedor'); window.onCambiarProveedorCompra() }
+  const mon = document.getElementById('nqMoneda')
+  if (mon) { mon.value = oc.currency || 'PEN'; mon.dispatchEvent(new Event('change', { bubbles: true })); window.onCambiarMonedaCompra?.() }
+  const fec = document.getElementById('nqFecha')
+  if (fec) { fec.value = new Date().toISOString().split('T')[0]; fec.dispatchEvent(new Event('change', { bubbles: true })) }
+
+  _detallesCompraEnCreacion.length = 0
+  for (const d of detalles) {
+    const it = items[d.item_id]
+    _detallesCompraEnCreacion.push({
+      item_id: d.item_id,
+      nombre: it?.nombre || it?.name || `Item #${d.item_id}`,
+      glosa: '',
+      cantidad: parseFloat(d.cantidad) || 0,
+      unidad_medida: d.unidad_medida || 'KG',
+      precio_unitario: parseFloat(d.precio_unitario) || 0,
+      igv_porcentaje: parseFloat(d.igv_porcentaje) || 0,
+      subtotal: parseFloat(d.subtotal) || 0,
+      igv_monto: parseFloat(d.igv_monto) || 0,
+      total: parseFloat(d.total) || 0,
+      unidades: parseFloat(d.cantidad_unidades) || null
+    })
+  }
+  _totalesCompraManual = false
+  _renderTablaDetalleCompra()
+  document.getElementById('nqNumeroComprobante')?.focus()
 }
 
 /** Despacha el guardado al flujo correcto según el Tipo de Compra elegido. */
@@ -485,6 +552,17 @@ window.guardarCompraMercaderia = async function () {
       return
     }
 
+    // Confirmación de OC: comprobante obligatorio, con formato y sin duplicar
+    if (_ocOrigen) {
+      if (!nroComprobante) { showToast('Ingresa el N° de comprobante del proveedor para confirmar la OC', 'warning'); return }
+      if (!/^[A-Za-z0-9]{1,4}-\d{1,8}$/.test(nroComprobante)) {
+        showToast('El N° de comprobante debe tener formato SERIE-NÚMERO (ej. F001-00012345)', 'warning'); return
+      }
+      const dup = (await getCompras() || []).find(c => c.contact_id === contactId &&
+        String(c.referencia || '').toUpperCase() === nroComprobante.toUpperCase() && !c.comprobante_anulado)
+      if (dup) { showToast(`Ese proveedor ya tiene registrado el comprobante ${nroComprobante}`, 'warning'); return }
+    }
+
     const prov = await getContactById(contactId)
     const cantidadTotal = _detallesCompraEnCreacion.reduce((s, d) => s + (parseFloat(d.cantidad) || 0), 0) || 1
     const unidadesTotal = _detallesCompraEnCreacion.reduce((s, d) => s + (parseFloat(d.unidades) || 0), 0) || null
@@ -522,7 +600,8 @@ window.guardarCompraMercaderia = async function () {
 
     const compra = await addCompra({
       referencia,
-      tipo_referencia:        'compra_directa',
+      tipo_referencia:        _ocOrigen ? 'orden_compra' : 'compra_directa',
+      orden_compra_id:        _ocOrigen?.id || null,
       tipo_comprobante:       tipoComprobanteC,
       serie:                  serieC,
       numero:                 numeroC,
@@ -534,7 +613,7 @@ window.guardarCompraMercaderia = async function () {
       proveedor_ruc:          prov?.nro_documento || '-',
       proveedor_nombre:       prov?.nombre || '-',
       tipo_compra:            'mercaderia',
-      descripcion:            `Compra directa - ${prov?.nombre || ''}`,
+      descripcion:            _ocOrigen ? `Compra ${_ocOrigen.numero} - ${prov?.nombre || ''}` : `Compra directa - ${prov?.nombre || ''}`,
       cantidad:               cantidadTotal,
       total_unidades:         unidadesTotal,
       precio_unitario:        parseFloat((subtotalC / cantidadTotal).toFixed(6)) || 0,
@@ -598,6 +677,12 @@ window.guardarCompraMercaderia = async function () {
       })
     }
 
+    if (_ocOrigen) {
+      const okOC = await updateOrderCompra(_ocOrigen.id, { status: 'confirmado' })
+      if (!okOC) showToast(`Compra registrada, pero no se pudo marcar ${_ocOrigen.numero} como confirmada. Revísala en Órdenes de Compra.`, 'warning', 8000)
+      _modoOC(null)
+      renderOrdenes().catch(() => {})
+    }
     showToast('Compra registrada. Registra la Guía de Remisión para ingresar el stock a Inventario.', 'success')
     window.closeModal('modal-nueva-compra-mercaderia')
     _detallesCompraEnCreacion = []

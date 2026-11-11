@@ -12,14 +12,16 @@
 //   5. abonos de la liquidación del agente → 'pendiente' de regularizar
 // Uso: window.abrirGastoFactura(costoId)  ·  API sin pantalla: registrarGastoFactura({...})
 // ============================================================================
+import { montarDetraccion, detraccionAutomatica, espejoCxP, guardarDetraccionCompra } from '../shared/detraccion.js'
 import '../shared/perfil-contacto.js'
 import { query, update, esperarContextoEmpresa } from '../supabase-client.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { showToast, formatNumber } from '../helpers.js'
-import { convertirEnBuscador, refrescarBuscador } from '../buscador-select.js'
+import { convertirEnBuscador, refrescarBuscador } from '../shared/buscador-vivo.js'
+import { abrirModalContacto } from '../shared/contacto-modal.js'
 import { getTipoCambioDia } from '../sunat-api.js'
 import { CONCEPTOS_COSTO } from './costos-ledger.js'
-import { getSuppliers, getContactById, addCompra, addCompraDetalle, addCuentaPagar, getCuentasGasto,
+import { getSuppliers, getContactById, updateContact, addCompra, addCompraDetalle, addCuentaPagar, getCuentasGasto,
          subirAdjuntoCompra, subirAdjuntos } from '../supabase-data.js'
 
 const num = x => { const n = parseFloat(String(x ?? '').replace(/,/g, '')); return isNaN(n) ? 0 : n }
@@ -58,7 +60,7 @@ async function _crearCxpGasto({ compra, proveedorId, tipo, serie, numero, fecha,
   return await addCuentaPagar({
     contact_id: proveedorId, compra_id: compra.id, tipo_comprobante: tipo,
     serie, numero_comprobante: numero, fecha_emision: fecha, fecha_vencimiento: null,
-    moneda, tipo_cambio: tc, monto_total: r2(num(total) - num(retencion)), monto_pagado: 0, estado: 'pendiente',
+    moneda, tipo_cambio: tc, monto_total: r2(num(total) - num(retencion)), monto_pagado: 0, estado: 'pendiente', ...espejoCxP(compra),
     observaciones: observaciones || null, empresa_id: empresaId ?? undefined, created_by: userId
   })
 }
@@ -111,6 +113,9 @@ export async function registrarGastoFactura(p) {
   const carpeta = (await query('carpetas_importacion', { id: costo.carpeta_importacion_id }))?.[0]
   const refCarpeta = carpeta?.numero_carpeta ? ` · Carpeta ${carpeta.numero_carpeta}` : ''
 
+  // Detracción (SQL 157): con pantalla viene en p.detraccion; en el registro automático se detecta aquí (servicio gravado > S/ 700)
+  const detr = p.detraccion !== undefined ? (p.detraccion?.detraccion_aplica ? p.detraccion : {})
+    : (!esRH ? await detraccionAutomatica({ proveedorId: p.proveedorId, texto: p.glosa, tipoComprobante: p.tipoComprobante || '01', igvMonto: igv, total, moneda, tc }) : {})
   const compra = await addCompra({
     referencia: `${p.serie}-${p.numero}`,
     tipo_referencia: 'compra_directa',
@@ -128,6 +133,7 @@ export async function registrarGastoFactura(p) {
     currency: moneda, tipo_cambio: tc,
     estado_pago: 'pendiente', asiento_id: null,
     ...(esRH ? { retencion_4ta: ret, neto_pagado: r2(total - ret) } : {}),
+    ...detr,
     carpeta_importacion_id: costo.carpeta_importacion_id,
     empresa_id: doc.empresa_id ?? undefined,
     created_by: user?.db_id
@@ -152,6 +158,7 @@ export async function registrarGastoFactura(p) {
     proveedor_id: p.proveedorId, tipo_comprobante: p.tipoComprobante || '01', serie: p.serie, numero: p.numero,
     fecha_emision: p.fecha, moneda, tipo_cambio: tc, monto_sin_igv: base, igv_monto: igv, monto_total: total,
     compra_id: compra.id, cxp_id: cxp?.id ?? null, sustentado: !p.sinSustento,
+    ...(detr.detraccion_aplica ? { detraccion_monto: detr.detraccion_monto, detraccion_estado: detr.detraccion_estado } : {}),
     ...(esRH ? { retencion_4ta: ret, neto_pagado: r2(total - ret) } : {})
   }
   if (p.regularizar !== false) cambiosDoc.regularizacion = 'pendiente'
@@ -181,6 +188,7 @@ export async function registrarGastoFactura(p) {
       }
     } catch (e) { console.warn('abonos regularizar', e) }
   }
+  if (p.detraccion?.detraccion_aplica && p.detraccionPerfil && Object.keys(p.detraccionPerfil).length) { try { await updateContact(p.proveedorId, p.detraccionPerfil) } catch (e) { console.warn('perfil detracción', e) } }
   return { compraId: compra.id, cxpId: cxp?.id ?? null, base, igv, total }
 }
 
@@ -253,6 +261,7 @@ export async function actualizarGastoFactura(p) {
     try { await subirAdjuntoCompra(doc.compra_id, p.archivo) } catch (e) { showToast(e.message || 'No se pudo adjuntar a la compra', 'warning') }
     try { await subirAdjuntos('documento_importacion', doc.id, [{ file: p.archivo, concepto: 'factura_gasto' }], user?.db_id) } catch (e) { console.warn('adjunto doc', e) }
   }
+  if (p.detraccion !== undefined) await guardarDetraccionCompra({ compraId: doc.compra_id, valores: p.detraccion, perfilPatch: p.detraccionPerfil, contactId: p.proveedorId })
   return { compraId: doc.compra_id, base, igv, total }
 }
 
@@ -296,6 +305,7 @@ function _asegurarModal() {
           <div class="form-group"><label>Monto IGV</label><input type="number" id="gfIgv" step="0.01" oninput="window.gfCalc('igv')"></div>
           <div class="form-group"><label id="gfLblTotal">Total del comprobante</label><input type="number" id="gfTotal" step="0.01" oninput="window.gfCalc('total')"></div>
         </div>
+        <div id="gfDetrHost"></div>
         <div id="gfRHBox" style="display:none; grid-template-columns:1fr 3fr; gap:10px; align-items:end;">
           <div class="form-group"><label>Retención 4ta</label><input type="number" id="gfRet" step="0.01" min="0" oninput="window.gfCalcRet(true)"></div>
           <div id="gfRetMotivo" style="font-size:.8rem; color:var(--text-secondary); padding-bottom:10px;"></div>
@@ -313,7 +323,8 @@ function _asegurarModal() {
       </div>
     </div>
   </div>`)
-  convertirEnBuscador($('gfProveedor'), { placeholder: 'Buscar por nombre o RUC…' })
+  convertirEnBuscador($('gfProveedor'), { placeholder: 'Buscar por nombre o RUC…',
+    alCrearNuevo: { label: 'Nuevo contacto', onClick: () => { _gfEsperaProv = true; abrirModalContacto({ roles: ['proveedor'] }) } } })
 }
 
 window.gfCalc = function (origen) {
@@ -327,7 +338,11 @@ window.gfCalc = function (origen) {
     const t = num($('gfTotal').value); const b = r2(t / (1 + pct / 100))
     $('gfBase').value = t ? b.toFixed(2) : ''; $('gfIgv').value = t ? r2(t - b).toFixed(2) : ''
   }
+  window.gfDetrActualizar?.()
 }
+// Detracción (SPOT): caja embebida (SQL 157)
+let _gfDetr = null
+window.gfDetrActualizar = async () => { if (!_gfDetr) return; await _gfDetr.actualizar({ tipoCompra: 'servicio', tipoComprobante: $('gfTipo').value, igvMonto: num($('gfIgv').value), total: num($('gfTotal').value), moneda: $('gfMoneda').value, tc: num($('gfTC').value) || 1, proveedorId: parseInt($('gfProveedor').value) || null, texto: $('gfGlosa').value }) }
 // Recibo por honorarios: retención de 4ta editable (auto: 8% si > S/ 1,500 y sin suspensión). La CxP queda por el NETO.
 let _retManual = false
 window.gfOnTipo = () => { const rh = $('gfTipo').value === '02', ext = $('gfTipo').value === '91'; $('gfRHBox').style.display = rh ? 'grid' : 'none'; if (ext) { $('gfIgvPct').value = '0'; window.gfCalc('base') } if (rh) { $('gfIgvPct').value = '0'; window.gfCalc('base'); window.gfCalcRet(false) } }
@@ -337,7 +352,7 @@ window.gfCalcRet = async function (manual) {
   $('gfRet').value = r.ret.toFixed(2); $('gfRetMotivo').textContent = `Auto: ${r.motivo}. Editable. Neto a pagar al proveedor: ${n2(num($('gfTotal').value) - r.ret)}.`
 }
 window.gfEtiquetas = () => { const m = $('gfMoneda').value; $('gfLblBase').textContent = `Base imponible (${m}) *`; $('gfLblTotal').textContent = `Total del comprobante (${m})` }
-window.gfOnMoneda = () => { $('gfTC').disabled = false; window.gfEtiquetas(); window.gfTCAuto() }
+window.gfOnMoneda = () => { $('gfTC').disabled = false; window.gfEtiquetas(); window.gfTCAuto(); window.gfDetrActualizar?.() }
 window.gfTCAuto = async function (forzar) {
   const f = $('gfFecha').value; if (!f) return
   if (!forzar && num($('gfTC').value) > 1 && $('gfTC').dataset.fecha === f) return
@@ -347,7 +362,7 @@ window.gfTCAuto = async function (forzar) {
     else if (forzar) showToast(r?.error || 'Sin T.C. para esa fecha', 'warning')
   } catch (e) { if (forzar) showToast('No se pudo consultar el T.C.', 'warning') }
 }
-window.cerrarGastoFactura = () => window.closeModal('modal-gasto-factura')
+window.cerrarGastoFactura = () => { _gfDetr = null; window.closeModal('modal-gasto-factura') }
 
 window.abrirGastoFactura = async function (costoId) {
   try {
@@ -404,6 +419,10 @@ window.abrirGastoFactura = async function (costoId) {
     $('gfTit').textContent = editar ? `✏️ Editar gasto · compra #${doc.compra_id}` : '🧾 Registrar gasto · factura del proveedor'
     $('gfGuardar').textContent = editar ? '💾 Guardar cambios' : '💾 Registrar compra del gasto'
     window.gfOnMoneda()
+    _gfDetr = await montarDetraccion($('gfDetrHost'), { prefijo: 'gfd' })
+    for (const id of ['gfProveedor', 'gfGlosa', 'gfTC', 'gfTipo']) $(id)?.addEventListener('change', () => window.gfDetrActualizar())
+    if (editar && compra?.detraccion_aplica) _gfDetr.cargar(compra)
+    await window.gfDetrActualizar()
     $('gfRHBox').style.display = $('gfTipo').value === '02' ? 'grid' : 'none'
     window.gfEtiquetas()
     if ($('gfTipo').value === '02') { if (editar && compra?.retencion_4ta != null) { $('gfRet').value = num(compra.retencion_4ta).toFixed(2); _retManual = true } else window.gfCalcRet(false) }
@@ -416,6 +435,8 @@ window.guardarGastoFactura = async function () {
   const btn = $('gfGuardar'); if (!_ctx) return
   if (window.validarRequeridos?.(['gfProveedor', 'gfSerie', 'gfNumero', 'gfFecha', 'gfGlosa', 'gfCuenta', 'gfBase']) === false) return
   if (!(await window.validarPerfilContacto?.(parseInt($('gfProveedor').value) || 0, { rol: 'proveedor' }) ?? true)) return
+  let det = null
+  if (_gfDetr && $('gfTipo').value === '01') { await window.gfDetrActualizar(); det = _gfDetr.leer(); if (det.error) { showToast(det.error, 'warning'); return } }
   try {
     btn.disabled = true; btn.textContent = _ctx.editar ? 'Guardando…' : 'Registrando…'
     const r = await (_ctx.editar ? actualizarGastoFactura : registrarGastoFactura)({
@@ -424,7 +445,8 @@ window.guardarGastoFactura = async function () {
       moneda: $('gfMoneda').value, tc: $('gfTC').value, glosa: $('gfGlosa').value.trim(), cuentaCodigo: $('gfCuenta').value,
       base: $('gfBase').value, igvPct: $('gfIgvPct').value, igv: $('gfIgv').value,
       archivo: $('gfArchivo').files?.[0] || null, regularizar: $('gfRegul').checked, retencion4ta: $('gfTipo').value === '02' ? $('gfRet').value : 0,
-      conceptoCodigo: $('gfConcepto').value, sinSustento: $('gfSinDoc').checked
+      conceptoCodigo: $('gfConcepto').value, sinSustento: $('gfSinDoc').checked,
+      detraccion: det ? det.valores : undefined, detraccionPerfil: det?.perfilPatch
     })
     showToast(`Compra #${r.compraId} ${_ctx.editar ? 'actualizada' : 'registrada'} · base ${n2(r.base)} + IGV ${n2(r.igv)} = ${n2(r.total)}`, 'success')
     window.cerrarGastoFactura()
@@ -508,3 +530,16 @@ window.hcNuevoGasto = async function () {
 window.registrarGastoFactura = registrarGastoFactura
 window.actualizarGastoFactura = actualizarGastoFactura
 export default { abrirGastoFactura: window.abrirGastoFactura, registrarGastoFactura }
+
+// «＋ Nuevo contacto» desde el buscador de proveedor: recarga la lista y deja elegido al recién creado.
+let _gfEsperaProv = false
+window.addEventListener('contacto-guardado', async e => {
+  const sp = $('gfProveedor'); if (!sp || !_gfEsperaProv) return
+  _gfEsperaProv = false
+  const c = e.detail?.contacto; if (!c?.id || c._eliminado) return
+  await (await import('../supabase-data.js')).getContacts(true).catch(() => {})
+  const provs = await getSuppliers()
+  sp.innerHTML = '<option value="">— Selecciona —</option>' + (provs || []).map(p => `<option value="${p.id}">${esc(p.nombre)}${p.nro_documento ? ' · ' + esc(p.nro_documento) : ''}</option>`).join('')
+  sp.value = String(c.id); sp.dispatchEvent(new Event('change', { bubbles: true }))
+  showToast(`${c.nombre} seleccionado`, 'success')
+})

@@ -13,13 +13,14 @@ import { miniaturaArchivoHTML, pintarMiniaturaArchivo } from './shared/adj-previ
 import { tabularDetalle, dtInsignia } from './shared/detalle-tabs.js'
 import { vincularTCaFecha, marcarTC } from './shared/tc-fecha.js'
 import { getTipoCambioDia } from './sunat-api.js'
+import { badgeDetraccion, abrirModalDetraccion } from './shared/detraccion.js'
 import {
   getCuentasCobrar, updateCuentaCobrar,
   getCuotasCobrar, updateCuotaCobrar, getAntiguedadCxC,
   getCuotasPagar, updateCuotaPagar, deleteCuotaCobrar, deleteCuotaPagar,
   addTerminoPago, updateTerminoPago, deleteTerminoPago,
   addTerminoPagoCuota, deleteTerminoPagoCuota, getTerminosPagoCuotas,
-  getCuentasPagar, updateCuentaPagar,
+  getCuentasPagar, updateCuentaPagar, updateCompra,
   getCobros, addCobro, updateCobro, deleteCobro, getCobroById,
   getPagosProveedores, addPagoProveedor, updatePagoProveedor, deletePagoProveedor, getPagoProveedorById,
   getCuentaCobrarById, getCuentaPagarById, getBancoById, deleteCuentaCobrar, deleteCuentaPagar,
@@ -971,8 +972,12 @@ function _filtrarCxP() {
   const moneda = document.getElementById('cxp-filtro-moneda')?.value || ''
   const desde  = document.getElementById('cxp-filtro-desde')?.value || ''
   const hasta  = document.getElementById('cxp-filtro-hasta')?.value || ''
+  const detr   = document.getElementById('cxp-filtro-detr')?.value || ''
 
   return _cxpList.filter(c => {
+    if (detr === 'pendiente' && !(c.detraccion_aplica && c.detraccion_estado === 'pendiente')) return false
+    if (detr === 'depositada' && !(c.detraccion_aplica && c.detraccion_estado === 'depositada')) return false
+    if (detr === 'sin' && c.detraccion_aplica) return false
     if (!estado) { if (c.estado === 'pagado' || c.estado === 'anulado') return false }
     else if (estado !== '_todos' && c.estado !== estado) return false
     if (moneda && (c.moneda || 'PEN') !== moneda) return false
@@ -1033,7 +1038,7 @@ window.cargarCxP = async function() {
         <td style="text-align:right;">${formatNumber(total)}</td>
         <td style="text-align:right;">${formatNumber(pagado)}${nCr > 0 ? `<br><small style="color:var(--color-danger);">−NC ${formatNumber(nCr)}</small>` : ''}${nDb > 0 ? `<br><small style="color:var(--color-success);">+ND ${formatNumber(nDb)}</small>` : ''}</td>
         <td style="text-align:right; font-weight:bold;">${formatNumber(pend)}</td>
-        <td><span class="badge ${badge}">${cxp.estado || 'pendiente'}</span></td>
+        <td><span class="badge ${badge}">${cxp.estado || 'pendiente'}</span>${badgeDetraccion(cxp) ? '<br>' + badgeDetraccion(cxp) : ''}</td>
         <td style="white-space:nowrap;">${_menuDocCP('cxp', cxp)}</td>
       </tr>`
     }).join('')
@@ -1046,6 +1051,7 @@ window.cargarCxP = async function() {
       <td colspan="2"></td>`
 
     _poblarSelectCxP(_cxpList.filter(c => c.estado !== 'pagado' && c.estado !== 'anulado'))
+    _avisoDetraccionesCxP()
     calcularKPIs()
   } catch (e) {
     console.error('cargarCxP:', e)
@@ -1093,11 +1099,13 @@ window.onSelectCompra = function() {
   const cxp   = _cxpList.find(c => c.id === cxpId)
   if (!cxp) {
     if (info) { info.innerHTML = ''; info.style.display = 'none' }
+    _pintarDetraccionPago(null)
     window._cpRecalc('pago', 'doc')
     return
   }
   const pendiente = Math.max(0, _saldoCxP(cxp))
   if (info) { info.innerHTML = _cardDocCP(cxp, false, pendiente); info.style.display = 'block' }
+  _pintarDetraccionPago(cxp)
   document.getElementById('pagoMonto').value = pendiente.toFixed(2)
   window._cpRecalc('pago', 'doc')
   window._tcDefaultCP('pago')
@@ -1106,6 +1114,104 @@ window.onSelectCompra = function() {
 // ============================================================================
 // REGISTRAR PAGO A PROVEEDOR
 // ============================================================================
+
+// ============================================================================
+// DETRACCIÓN (SPOT) EN EL PAGO A PROVEEDOR — SQL 157 (2026-11-11)
+// La CxP está por el TOTAL. Dos caminos: (A) pagamos el total y el proveedor deposita → se registra SU constancia (botón del panel o Compras → ⋮ → Detracción);
+// (B) depositamos nosotros: pago medio 'detraccion' (egreso de nuestro banco, en soles) + pago del neto al proveedor.
+// CONTABILIDAD (pendiente): el pago B es un pago a proveedor más (Debe 42xx / Haber banco); el depósito va a la cuenta de detracciones DEL PROVEEDOR.
+// ============================================================================
+function _detrDe(cxp) {
+  const pct = parseFloat(cxp.detraccion_pct) || 0
+  const total = parseFloat(cxp.monto_total) || 0
+  const pen = parseFloat(cxp.detraccion_monto) || Math.round(total * pct / 100)
+  // En soles el depósito es el entero de SUNAT; en dólares la parte aplicada es total × % (el depósito en S/ sale del T.C. venta del voucher)
+  return { pct, montoPen: pen, montoDoc: (cxp.moneda || 'PEN') === 'USD' ? _r2(total * pct / 100) : pen, dep: cxp.detraccion_estado === 'depositada' }
+}
+
+function _pintarDetraccionPago(cxp) {
+  const box = document.getElementById('pago-detr-panel'); if (!box) return
+  if (!cxp?.detraccion_aplica) { box.style.display = 'none'; box.innerHTML = ''; return }
+  const d = _detrDe(cxp), m = cxp.moneda || 'PEN', saldo = Math.max(0, _saldoCxP(cxp))
+  const neto = _r2((parseFloat(cxp.monto_total) || 0) - d.montoDoc)
+  const estado = d.dep
+    ? `<span class="badge badge-success">✔ depositada por ${cxp.detraccion_pagada_por === 'nosotros' ? 'nosotros' : 'el proveedor'}${cxp.detraccion_fecha ? ' · ' + fechaDMY(cxp.detraccion_fecha) : ''}${cxp.detraccion_operacion ? ' · op. ' + _esc(cxp.detraccion_operacion) : ''}</span>`
+    : '<span class="badge badge-warning">🧾 por depositar</span>'
+  const btn = (modo, txt, ayuda) => `<button type="button" class="btn btn-secondary btn-small" title="${ayuda}" onclick="window._detrModoPago('${modo}')">${txt}</button>`
+  box.innerHTML = `<div style="padding:10px 14px; border:1px solid var(--border-color); border-left:3px solid var(--color-warning); border-radius:var(--radius-md); background:var(--bg-secondary); font-size:0.86rem;">
+    <div style="display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; align-items:center;"><strong>🧾 Esta factura tiene detracción</strong>${estado}</div>
+    <div style="margin:4px 0 8px; color:var(--text-secondary);">Detracción ${d.pct}% = <b>S/ ${formatNumber(d.montoPen)}</b> · Neto al proveedor <b>${m} ${formatNumber(neto)}</b> · Saldo de la CxP ${m} ${formatNumber(saldo)}</div>
+    <div style="display:flex; gap:6px; flex-wrap:wrap;">${d.dep
+      ? btn('saldo', 'Pagar el saldo', 'Llena el importe con el saldo pendiente')
+      : btn('neto', 'Pagar el neto', 'Total menos la detracción: lo que se le paga al proveedor') +
+        btn('detraccion', 'Pagar la detracción (nosotros)', 'Depósito en la cuenta de detracciones del proveedor, saliendo de nuestro banco') +
+        btn('total', 'Pagar el total (deposita el proveedor)', 'Le pagamos todo y él deposita; luego registra su constancia') +
+        btn('constancia', 'Registrar constancia del proveedor', 'El proveedor ya depositó: guarda fecha, operación y archivo')}</div></div>`
+  box.style.display = ''
+}
+
+window._detrModoPago = async function (modo) {
+  const $ = id => document.getElementById(id)
+  const cxp = _cxpList.find(c => c.id === parseInt($('pagoSelectCompra')?.value || 0)); if (!cxp) return
+  const d = _detrDe(cxp), saldo = Math.max(0, _saldoCxP(cxp)), m = cxp.moneda || 'PEN'
+  if (modo === 'constancia') {
+    abrirModalDetraccion(cxp.compra_id, { alGuardar: async () => { invalidarVarios(['cuentas_pagar', 'compras']); await cargarCxP(); window.onSelectCompra() } })
+    return
+  }
+  const med = $('pagoMedioPago')
+  if (modo === 'detraccion') {
+    if (d.dep) { showToast('La detracción de esta factura ya figura depositada', 'warning'); return }
+    med.value = 'detraccion'
+    // Sugerir una cuenta del Banco de la Nación de la misma empresa (PEN, libre disposición) si aún no hay banco elegido
+    if (!$('pagoBanco').value) {
+      const bn = Object.values(_bancosMap).find(b => b.moneda === 'PEN' && b.tipo_cuenta !== 'detracciones' && /naci[oó]n|^bn$/i.test(b.banco || '') && (b.empresa_id == null || Number(b.empresa_id) === Number(_empDoc(cxp))))
+      if (bn) { $('pagoBanco').value = bn.id; refrescarBuscador('pagoBanco') }
+    }
+    window._cpRecalc('pago', 'banco')
+    $('pagoMoneda').value = 'PEN'
+    let tc = 1
+    if (m === 'USD') {
+      const r = await getTipoCambioDia($('pagoFecha').value, { permitirApi: false }).catch(() => null)   // T.C. VENTA de la fecha del voucher
+      tc = r?.venta || parseFloat(cxp.tipo_cambio) || 1
+      $('pagoTipoCambio').value = tc
+    }
+    $('pagoMonto').value = d.montoDoc.toFixed(2)
+    window._cpRecalc('pago', 'aplicado')
+    $('pagoMontoMoneda').value = String(m === 'USD' ? Math.round((parseFloat(cxp.monto_total) || 0) * tc * d.pct / 100) : d.montoPen)
+    window._cpRecalc('pago', 'recibido')
+    $('pagoReferencia').placeholder = 'N° de operación del depósito (constancia BN)'
+    return
+  }
+  if (med.value === 'detraccion') med.value = 'transferencia'
+  $('pagoMonto').value = (modo === 'neto' ? Math.max(0, saldo - (d.dep ? 0 : d.montoDoc)) : saldo).toFixed(2)
+  window._cpRecalc('pago', 'aplicado')
+  if (modo === 'total') showToast('Cuando el proveedor te pase la constancia del depósito, regístrala en este mismo panel (Registrar constancia).', 'info', 8000)
+}
+
+/** Tras guardar un pago medio «detracción»: la compra y la CxP quedan con la detracción DEPOSITADA por nosotros. */
+async function _marcarDetraccionPagada(pago, cxp, fecha, referencia) {
+  const montoPen = _r2(parseFloat(document.getElementById('pagoMontoMoneda')?.value) || pago.monto)
+  let cuenta = null
+  if (cxp.compra_id) { const { data } = await supabase.from('compras').select('detraccion_cuenta_bn').eq('id', cxp.compra_id).maybeSingle(); cuenta = data?.detraccion_cuenta_bn || null }
+  await updatePagoProveedor(pago.id, { monto_pen: montoPen, detraccion_cuenta_bn: cuenta })
+  const patch = { detraccion_estado: 'depositada', detraccion_pagada_por: 'nosotros', detraccion_fecha: fecha, detraccion_operacion: referencia || null, detraccion_monto: montoPen }
+  if (cxp.compra_id) await updateCompra(cxp.compra_id, { ...patch, detraccion_pago_id: pago.id })
+  await updateCuentaPagar(cxp.id, patch)
+}
+/** Al eliminar un pago medio «detracción»: la detracción vuelve a «por depositar». */
+async function _desmarcarDetraccion(reg) {
+  try {
+    const patch = { detraccion_estado: 'pendiente', detraccion_fecha: null, detraccion_operacion: null }
+    if (reg.compra_id) await updateCompra(reg.compra_id, { ...patch, detraccion_pago_id: null })
+    if (reg.cxp_id) await updateCuentaPagar(reg.cxp_id, patch)
+  } catch (e) { console.warn('_desmarcarDetraccion', e) }
+}
+/** Aviso bajo el filtro: cuántas facturas esperan depósito de detracción y por cuánto (reporte «Detracciones por depositar»). */
+function _avisoDetraccionesCxP() {
+  const el = document.getElementById('cxp-detr-aviso'); if (!el) return
+  const pend = _cxpList.filter(c => c.detraccion_aplica && c.detraccion_estado === 'pendiente' && c.estado !== 'anulado')
+  el.innerHTML = pend.length ? `<b style="color:var(--color-warning);">${pend.length} por depositar · S/ ${formatNumber(pend.reduce((a, c) => a + (parseFloat(c.detraccion_monto) || 0), 0))}</b>` : ''
+}
 
 window.registrarPagoProveedor = async function() {
   try {
@@ -1139,6 +1245,14 @@ window.registrarPagoProveedor = async function() {
     if (!(await _validarDuplicadoOperacion(false, { docId: cxpId, fecha, monto, bancoId, numOp: referencia }))) return
 
     if (!_validarBancoEmpresa(bancoId, _empDoc(cxp), 'la compra')) return
+    if (medioPago === 'detraccion') {
+      if (!cxp.detraccion_aplica) { showToast('Esta CxP no tiene detracción registrada. Regístrala primero (Compras → ⋮ → Detracción).', 'warning', 8000); return }
+      if (cxp.detraccion_estado === 'depositada') { showToast('La detracción de esta factura ya figura depositada.', 'warning'); return }
+      const bo = _bancosMap[parseInt(bancoId)]
+      if (!bo) { showToast('Elige la cuenta de origen: la detracción se paga desde un banco.', 'warning'); return }
+      if (bo.moneda && bo.moneda !== 'PEN') { showToast('La detracción se deposita en soles: elige una cuenta en PEN.', 'warning'); return }
+      if (bo.tipo_cuenta === 'detracciones') showToast('Ojo: la cuenta de detracciones propia solo paga tributos SUNAT; para pagar a un proveedor usa una cuenta de libre disposición.', 'warning', 9000)
+    }
     const pago = await addPagoProveedor({
       empresa_id: _empDoc(cxp),
       cxp_id: cxpId, compra_id: cxp.compra_id, contact_id: cxp.contact_id,
@@ -1150,10 +1264,11 @@ window.registrarPagoProveedor = async function() {
     if (pago?.id) {
       // Asiento + movimiento bancario + CxP + cuotas (misma rutina que usa Editar)
       await _aplicarEfectosPago(pago, cxp)
+      if (medioPago === 'detraccion') await _marcarDetraccionPagada(pago, cxp, fecha, referencia)
       await _subirAdjuntosPendientes('pago', 'pago', pago.id)
     }
 
-    showToast('Pago a proveedor registrado ✅', 'success')
+    showToast(medioPago === 'detraccion' ? 'Detracción pagada y registrada ✅ (compra y CxP actualizadas)' : 'Pago a proveedor registrado ✅', 'success')
 
     window.closeModal('modal-registrar-pago')
     document.getElementById('pagoSelectCompra').value = ''
@@ -3230,6 +3345,7 @@ window.eliminarCP = async function(tipo, id) {
     if (!confirm(msg)) return
 
     const { avisos, asiento } = await _revertirEfectosCP(tipo, reg)
+    if (!esCobro && reg.medio_pago === 'detraccion') await _desmarcarDetraccion(reg)
     // El CRE vinculado a este cobro queda ANULADO (su PDF se conserva para el rastro)
     if (esCobro) { try { await supabase.from('comprobantes_retencion').update({ estado: 'anulado', anulado_at: new Date().toISOString() }).eq('cobro_id', id).eq('estado', 'registrado') } catch (_) {} }
     const ok = esCobro ? await deleteCobro(id) : await deletePagoProveedor(id)
@@ -5804,8 +5920,9 @@ window._tcDefaultCP = async function (tipo) {
   let fuente = 'T.C. de la factura'
   try {
     const r = await getTipoCambioDia(fecha, { permitirApi: false })
-    const v = tipo === 'cobro' ? r?.venta : r?.compra
-    if (v > 0) { tc = v; fuente = `SUNAT ${tipo === 'cobro' ? 'venta' : 'compra'} del ${fechaDMY(fecha)}` }
+    const usaVenta = tipo === 'cobro' || $('pagoMedioPago')?.value === 'detraccion'   // la detracción usa T.C. VENTA de la fecha del voucher
+    const v = usaVenta ? r?.venta : r?.compra
+    if (v > 0) { tc = v; fuente = `SUNAT ${usaVenta ? 'venta' : 'compra'} del ${fechaDMY(fecha)}` }
   } catch (e) { /* sin caché: queda el de la factura */ }
   if (tc > 0) {
     $(k.tc).value = tc

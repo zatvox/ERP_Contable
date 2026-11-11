@@ -25,6 +25,8 @@ import { getLotes, getItems,
 } from './supabase-data.js'
 import { getTCCompra, getTCVenta, textoAvisoTC } from './sunat-api.js'
 import { showToast, formatNumber, formatQty } from './helpers.js'
+import { convertirEnBuscador } from './shared/buscador-vivo.js'
+import { abrirModalContacto } from './shared/contacto-modal.js'
 
 // ─── TC COMPRA automático para DAM ───────────────────────────────────────────
 
@@ -3098,3 +3100,18 @@ window.exportarPDF = function () {
 
 // El BL ahora se ve/edita con el modal nuevo (importaciones/bl-modal.js); el viejo queda como respaldo.
 window.editarBL = (id) => window.abrirBL ? window.abrirBL(id) : window.editarBLLegacy(id)
+
+// ── Estándar de buscador (bv) para proveedor / producto de los modales de Importaciones ───────────────
+let _provPend = null
+function _montarBuscadoresImp() {
+  const prov = ['newProvId', 'editProvId', 'newGuiaProveedorSelector']
+  for (const id of prov) { const el = document.getElementById(id); if (el) convertirEnBuscador(el, { placeholder: 'Buscar proveedor por nombre o RUC…', alCrearNuevo: { label: 'Nuevo contacto', onClick: () => { _provPend = id; abrirModalContacto({ roles: ['proveedor'] }) } } }) }
+  for (const id of ['newDetalleProducto', 'editDetalleProducto']) { const el = document.getElementById(id); if (el) convertirEnBuscador(el, { placeholder: 'Buscar producto…' }) }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _montarBuscadoresImp); else _montarBuscadoresImp()
+window.addEventListener('contacto-guardado', e => {
+  const c = e.detail?.contacto, el = _provPend && document.getElementById(_provPend); _provPend = null
+  if (!el || !c?.id || c._eliminado) return
+  if (![...el.options].some(o => o.value === String(c.id))) el.insertAdjacentHTML('beforeend', `<option value="${c.id}">${(c.nombre || c.razon_social || '').replace(/</g, '&lt;')}</option>`)
+  el.value = String(c.id); el.dispatchEvent(new Event('change', { bubbles: true }))
+})

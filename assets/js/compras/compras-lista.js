@@ -6,9 +6,10 @@ import { declararEmpresaModal, badgeEmpresa, textoEmpresa } from '../empresa.js'
 // ============================================================================
 import { S } from './state.js'
 import { registrarColumnas, colStyle } from '../col-menu.js'
-import { getCompras, deleteCompra, getCompraDetalles, getLotesByCompraId, deleteLote, getItems, getItemById, getGuiasIngresoCompra, deleteGuiaIngresoCompra, getDetalleGuiasIngresoCompra, getKardexByCompra, deleteKardexMovimiento, getTipoDocumentosMap, getNombreTipoDocumentoSync, getCuentasPagarByCompra, deleteCuentaPagar, getTodosComprasAnticiposAplicados, getPagosProveedoresByCompra, getPagosProveedoresByCxP, deletePagoProveedor, ultimoErrorDelete } from '../supabase-data.js'
+import { getCompras, getCompraById, updateOrderCompra, deleteCompra, getCompraDetalles, getLotesByCompraId, deleteLote, getItems, getItemById, getGuiasIngresoCompra, deleteGuiaIngresoCompra, getDetalleGuiasIngresoCompra, getKardexByCompra, deleteKardexMovimiento, getTipoDocumentosMap, getNombreTipoDocumentoSync, getCuentasPagarByCompra, deleteCuentaPagar, getTodosComprasAnticiposAplicados, getPagosProveedoresByCompra, getPagosProveedoresByCxP, deletePagoProveedor, ultimoErrorDelete } from '../supabase-data.js'
 import { showToast, formatNumber } from '../helpers.js'
 import { menuAccionesFila } from '../main.js'
+import { badgeDetraccion, abrirModalDetraccion } from '../shared/detraccion.js'
 import { estaAnulado, badgeAnulado, ESTILO_FILA_ANULADA } from '../anulacion.js'
 import { esNota, signoDocumento, badgeTipoDocumento } from '../notas.js'
 import { getModuloConfig } from '../config-modulo.js'
@@ -107,6 +108,8 @@ function _valorOrdenCompra(c, campo) {
     default: return ''
   }
 }
+
+window.gestionarDetraccionCompra = (id) => abrirModalDetraccion(id, { alGuardar: () => renderCompras(true) })
 
 window.ordenarCompras = async function (campo) {
   if (_compSort.col === campo) {
@@ -256,7 +259,7 @@ export async function renderCompras(forzar = false) {
                 ? `${badgeTipoDocumento(c.tipo_comprobante)}${c.compra_referencia_id ? `<br><small style="color:var(--text-secondary);">ref. ${c.doc_referencia_serie || ''}-${c.doc_referencia_numero || ''}</small>` : ''}`
                 : (c.tipo_comprobante ? `${c.tipo_comprobante} - ${getNombreTipoDocumentoSync(c.tipo_comprobante)}` : '-')}</td>
           <td data-col-tabla="compras" data-col="total"${colStyle('compras','total')}><strong style="${signoDocumento(c.tipo_comprobante) < 0 ? 'color:var(--color-danger);' : ''}">${formatNumber((parseFloat(c.total) || 0) * signoDocumento(c.tipo_comprobante))} ${c.currency || 'PEN'}</strong></td>
-          <td data-col-tabla="compras" data-col="estado_pago"${colStyle('compras','estado_pago')}>${anulada ? badgeAnulado(c) : `<span class="badge badge-${badgePago}">${c.estado_pago || 'pendiente'}</span>`}</td>
+          <td data-col-tabla="compras" data-col="estado_pago"${colStyle('compras','estado_pago')}>${anulada ? badgeAnulado(c) : `<span class="badge badge-${badgePago}">${c.estado_pago || 'pendiente'}</span>${badgeDetraccion(c) ? '<br>' + badgeDetraccion(c) : ''}`}</td>
           <td data-col-tabla="compras" data-col="stock"${colStyle('compras','stock')}>${anulada ? '<span class="badge badge-secondary">—</span>' : badgeStock}${c.adjunto_url ? ' <span title="Tiene documento adjunto">📎</span>' : ''}</td>
           <td data-col-tabla="compras" data-col="acciones" class="col-acciones" style="text-decoration:none; opacity:1;${colStyle('compras','acciones') ? ' display:none;' : ''}">
             ${menuAccionesFila(anulada
@@ -266,6 +269,8 @@ export async function renderCompras(forzar = false) {
                     ? { label: 'Ver detalle', icono: '📋', onclick: `window.verDetalleNotaCompra(${c.id})` }
                     : { label: 'Ver detalle', icono: '📋', onclick: `window.editarCompra(${c.id})` },
                   { label: c.adjunto_url ? 'Ver/Reemplazar documento' : 'Adjuntar documento', icono: '📎', onclick: `window.abrirModalAdjuntoCompra(${c.id})` },
+                  ...(c.tipo_compra === 'servicio' && c.tipo_comprobante === '01'
+                    ? [{ label: c.detraccion_aplica ? 'Detracción (ver / editar)' : 'Detracción (¿aplica?)', icono: '🧾', onclick: `window.gestionarDetraccionCompra(${c.id})` }] : []),
                   ...(!esNota(c.tipo_comprobante) && !c.orden_compra_id && (c.tipo_comprobante === '91' || c.tipo_compra === 'importacion')
                     ? [{ label: 'Generar Proforma (PI)', icono: '📄', onclick: `window.irAGenerarProforma(${c.id})` }] : []),
                   { separador: true },
@@ -389,6 +394,7 @@ window.editarCompra = async function (id) {
 //      luego la compra (detalle_compras se borra solo por ON DELETE CASCADE).
 window.eliminarCompra = async function (id) {
   try {
+    const compraOC = (await getCompraById(id))?.orden_compra_id || null   // para devolver la OC a borrador
     const [detalles, lotes, todasLasGuias] = await Promise.all([
       getCompraDetalles(id),
       getLotesByCompraId(id),   // solo lotes que SIGUEN existiendo, vinculados a esta compra
@@ -545,6 +551,7 @@ window.eliminarCompra = async function (id) {
       return
     }
 
+    if (compraOC) await updateOrderCompra(compraOC, { status: 'borrador' })   // la OC se puede confirmar de nuevo
     _invalidarCacheCompras()
     showToast('Compra eliminada correctamente', 'success')
     await _cargarComprasConGuia(true)

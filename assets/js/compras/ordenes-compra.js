@@ -1,3 +1,4 @@
+import { espejoCxP } from '../shared/detraccion.js'
 import { ultimoErrorInsert, query } from '../supabase-client.js'
 import { registrarColumnas, colStyle } from '../col-menu.js'
 import { badgeEmpresa } from '../empresa.js'
@@ -374,113 +375,15 @@ window.ocDesdeCompra = async function (compraId) {
 }
 
 /**
- * Abre el modal "Confirmar Compra" pre-cargado con los datos de la OC.
- * El usuario completa tipo_documento, N° comprobante, y por cada producto
- * el N° de Lote (obligatorio) y N° de Partida (opcional). Al confirmar se
- * crea la compra + su detalle y se suma el stock directamente a Inventario
- * (el módulo de Contabilidad está en standby: no se genera asiento).
+ * Confirmar OC (2026-11-11): ya no hay modal propio. Abre el modal de Nueva
+ * Compra (Mercadería) con los datos de la OC; el N° de comprobante lo escribe
+ * el usuario (obligatorio). Al guardar se crea la compra enlazada
+ * (compras.orden_compra_id) y la OC pasa a 'confirmado'. El stock entra por la
+ * Guía de Remisión (lote/partida se piden allí). Ver compra-nueva.js.
  */
 window.confirmarOC = async function (id) {
   try {
-    const oc = await getOrderCompraById(id)
-    if (!oc) { showToast('Orden no encontrada', 'warning'); return }
-    if (oc.status === 'confirmado') { showToast('Esta OC ya fue confirmada', 'warning'); return }
-
-    const [prov, detallesRaw, categorias, marcas, partidas] = await Promise.all([
-      getContactById(oc.contact_id),
-      getOrderCompraDetalles(id),
-      getCategorias(),
-      getMarcas(),
-      getPartidas()
-    ])
-    const detalles = detallesRaw || []
-
-    // Cargar mapa de items
-    const itemIds = [...new Set(detalles.map(d => d.item_id))]
-    const itemsMap = {}
-    await Promise.all(itemIds.map(async iid => {
-      const item = await getItemById(iid)
-      if (item) itemsMap[iid] = item
-    }))
-    const catMap = {}; (categorias || []).forEach(c => { catMap[c.id] = c.nombre })
-    const marMap = {}; (marcas || []).forEach(m => { marMap[m.id] = m.nombre })
-
-    _ocContextConfirmar = { oc, prov, detalles, itemsMap }
-
-    // --- Llenar cabecera readonly ---
-    document.getElementById('cc-oc-numero').textContent = oc.numero || `OC-${oc.id}`
-    document.getElementById('cc-proveedor').textContent = prov?.nombre || '-'
-    document.getElementById('cc-moneda').textContent = oc.currency || 'PEN'
-
-    // --- Valores por defecto del formulario ---
-    const fechaCompra = oc.fecha || new Date().toISOString().split('T')[0]
-    document.getElementById('ccFecha').value = fechaCompra
-    document.getElementById('ccTipoCambio').value = (oc.currency === 'PEN') ? '1.000' : ''
-    document.getElementById('ccTipoPago').value = oc.tipo_pago || 'credito'
-
-    // Auto-carga TC COMPRA SBS si la OC es en USD (Art. 61° LIR)
-    if (oc.currency === 'USD') {
-      _autoFetchTCCompra(fechaCompra)
-    }
-    document.getElementById('ccDescripcion').value =
-      `Compra ${oc.numero || ''} - ${prov?.nombre || ''}`.trim()
-    document.getElementById('ccNumeroComprobante').value = ''
-
-    // --- Cargar select tipo_documento con el catálogo SUNAT ---
-    await cargarSelectTipoDocumentos('ccTipoDocumento', '01')
-
-    // --- Tabla de productos: categoría/marca informativos + lote/partida editables ---
-    let totalSubtotal = 0, totalIGV = 0, totalTotal = 0
-    let tableHtml = `
-      <table style="width:100%;">
-        <thead>
-          <tr>
-            <th>Producto</th>
-            <th>Categoría</th>
-            <th>Marca</th>
-            <th style="text-align:right;">Cantidad</th>
-            <th>U.M.</th>
-            <th style="text-align:right;">Precio Unit.</th>
-            <th style="text-align:right;">Total</th>
-            <th>N° Lote *</th>
-            <th>N° Partida</th>
-          </tr>
-        </thead>
-        <tbody>`
-
-    detalles.forEach((d, idx) => {
-      const item = itemsMap[d.item_id]
-      const nombre = item ? (item.nombre || item.name) : `#${d.item_id}`
-      const sub = parseFloat(d.subtotal || 0)
-      const igv = parseFloat(d.igv_monto || 0)
-      const tot = parseFloat(d.total || 0)
-      totalSubtotal += sub; totalIGV += igv; totalTotal += tot
-
-      const partidasItem = (partidas || []).filter(p => p.product_id === d.item_id)
-      const partidaOptions = '<option value="">-- Ninguna --</option>' +
-        partidasItem.map(p => `<option value="${p.id}">${p.numero_partida}</option>`).join('')
-
-      tableHtml += `<tr>
-        <td>${nombre}</td>
-        <td>${catMap[item?.categoria_id] || '-'}</td>
-        <td>${marMap[item?.marca_id] || '-'}</td>
-        <td style="text-align:right;">${(parseFloat(d.cantidad) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
-        <td>${d.unidad_medida || 'KG'}</td>
-        <td style="text-align:right;">${(parseFloat(d.precio_unitario) || 0).toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 6 })}</td>
-        <td style="text-align:right;"><strong>${tot.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></td>
-        <td><input type="text" id="cc-lote-${idx}" placeholder="Ej: L-${oc.numero || oc.id}-${idx+1}" style="min-width:130px;" required></td>
-        <td><select id="cc-partida-${idx}" style="min-width:120px;">${partidaOptions}</select></td>
-      </tr>`
-    })
-    tableHtml += '</tbody></table>'
-    document.getElementById('cc-detalle-productos').innerHTML = tableHtml
-
-    // --- Totales ---
-    document.getElementById('cc-subtotal').textContent = totalSubtotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    document.getElementById('cc-igv').textContent = totalIGV.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    document.getElementById('cc-total').textContent = totalTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-
-    openModal('modal-confirmar-compra')
+    await window.abrirNuevaCompraDesdeOC(id)
   } catch (error) {
     console.error('Error en confirmarOC:', error)
     showToast(error.message || 'Error al abrir confirmación de OC', 'danger')
@@ -530,6 +433,7 @@ export async function _crearCuentaPagarSiFactura(compra, userId, crono = null) {
       estado:             'pendiente',
       termino_pago_id:         crono?.terminoId ?? null,
       cronograma_personalizado: !!crono?.personalizado,
+      ...espejoCxP(compra),   // detracción (SQL 157): la CxP queda por el TOTAL y muestra la detracción pendiente
       created_by:         userId
     })
 
@@ -565,158 +469,6 @@ async function _guardarCuotasDeCxP(cxpId, crono) {
     }
   }
 }
-
-/**
- * Lee el formulario del modal-confirmar-compra, valida el N° de Lote de
- * cada producto (obligatorio), registra la compra + su detalle, crea/actualiza
- * los lotes (sumando stock directo a Inventario) y marca la OC como confirmada.
- * El módulo de Contabilidad está en standby: no se genera asiento contable.
- */
-window.ejecutarConfirmarCompra = async function () {
-  // 2026-09-25 (migración 57): confirmar una OC creaba lotes con stock SIN
-  // kardex. El tab de OC está en standby; si se reactiva, este flujo debe
-  // registrar la compra sin lote y dejar que el stock entre por la Guía de
-  // Remisión. Bloqueado por decisión de Luis.
-  showToast('Confirmar Órdenes de Compra está deshabilitado: registra la Compra y su Guía de Remisión.', 'warning')
-  return
-  // eslint-disable-next-line no-unreachable
-  try {
-    const user = await getCurrentUser()
-    if (!user) { showToast('Usuario no autenticado', 'danger'); return }
-    if (!_ocContextConfirmar) { showToast('No hay OC cargada', 'warning'); return }
-
-    const { oc, prov, detalles, itemsMap } = _ocContextConfirmar
-
-    const tipoDocumento  = document.getElementById('ccTipoDocumento')?.value?.trim()
-    const tipoCambioVal  = document.getElementById('ccTipoCambio')?.value
-    const fecha          = document.getElementById('ccFecha')?.value
-    const nroComprobante = document.getElementById('ccNumeroComprobante')?.value?.trim() || null
-    const descripcion    = document.getElementById('ccDescripcion')?.value?.trim() ||
-                           `Compra ${oc.numero || ''} - ${prov?.nombre || ''}`
-
-    if (!tipoDocumento) { showToast('Selecciona el tipo de documento', 'warning'); return }
-    if (!fecha)          { showToast('Ingresa la fecha', 'warning'); return }
-
-    // Validar N° de Lote por cada línea ANTES de escribir nada en la BD
-    const lineasLote = detalles.map((d, idx) => ({
-      detalle: d,
-      numeroLote: document.getElementById(`cc-lote-${idx}`)?.value?.trim() || '',
-      partidaId: parseInt(document.getElementById(`cc-partida-${idx}`)?.value || 0) || null
-    }))
-    const faltantes = lineasLote.filter(l => !l.numeroLote)
-    if (faltantes.length > 0) {
-      showToast(`Falta el N° de Lote en ${faltantes.length} producto(s). Es obligatorio para ingresar el stock.`, 'warning')
-      return
-    }
-
-    const moneda     = oc.currency || 'PEN'
-    // Solo USD convierte (blindaje 2026-10-05)
-    const tipoCambio = (moneda === 'USD' && tipoCambioVal) ? parseFloat(tipoCambioVal) : 1
-
-    const cantidadTotal = detalles.reduce((s, d) => s + (parseFloat(d.cantidad) || 0), 0) || 1
-    const subtotalC = parseFloat(oc.total_subtotal || 0)
-    const igvC      = parseFloat(oc.total_igv || 0)
-    const totalC    = parseFloat(oc.total_oc || 0)
-    const referencia = nroComprobante || oc.numero || `OC-${oc.id}`
-    const [serieC, numeroC] = (nroComprobante && nroComprobante.includes('-'))
-      ? nroComprobante.split(/-(.+)/)
-      : [null, referencia]
-
-    // 1. Registrar la compra (sin asiento_id: Contabilidad en standby)
-    const compra = await addCompra({
-      referencia,
-      tipo_referencia:        'orden_compra',
-      tipo_comprobante:       tipoDocumento,
-      serie:                  serieC,
-      numero:                 numeroC,
-      periodo_mes:            parseInt(fecha.slice(5, 7)),
-      periodo_ano:            parseInt(fecha.slice(0, 4)),
-      fecha_emision:          fecha,
-      fecha_recepcion:        fecha,
-      contact_id:             oc.contact_id,
-      proveedor_ruc:          prov?.nro_documento || '-',
-      proveedor_nombre:       prov?.nombre || '-',
-      tipo_compra:            'mercaderia',
-      descripcion,
-      cantidad:               cantidadTotal,
-      precio_unitario:        parseFloat((subtotalC / cantidadTotal).toFixed(6)) || 0,
-      base_imponible_gravada: subtotalC,
-      igv_gravado:            igvC,
-      subtotal:               subtotalC,
-      total:                  totalC,
-      currency:               moneda,
-      tipo_cambio:            tipoCambio,
-      estado_pago:            'pendiente',
-      asiento_id:             null,
-      created_by:             user.db_id
-    })
-
-    if (!compra?.id) {
-      showToast('No se pudo registrar la compra (¿referencia duplicada?)', 'danger')
-      return
-    }
-    await _crearCuentaPagarSiFactura(compra, user.db_id)
-
-    // 2. Detalle de la compra + 3. Lote por producto (suma stock a Inventario)
-    for (const { detalle: d, numeroLote, partidaId } of lineasLote) {
-      const item = itemsMap?.[d.item_id]
-
-      await addCompraDetalle({
-        compra_id:       compra.id,
-        item_id:         d.item_id || null,
-        descripcion:     item?.nombre || item?.name || d.descripcion || `Item #${d.item_id}`,
-        unidad_medida:   d.unidad_medida || 'KG',
-        cantidad:        parseFloat(d.cantidad) || 1,
-        precio_unitario: parseFloat(d.precio_unitario) || 0,
-        subtotal:        parseFloat(d.subtotal) || 0,
-        tipo_base:       'gravada',
-        igv_porcentaje:  18,
-        igv_monto:       parseFloat(d.igv_monto) || 0,
-        total_linea:     parseFloat(d.total) || 0
-      })
-
-      // Columnas reales de lotes: item_id, cantidad (no product_id/stock).
-      // cantidad_unidades (N° de bultos/cajas) no se pide en este flujo
-      // (OC en standby). lotes.cantidad_unidades es NOT NULL DEFAULT 0: va 0,
-      // no null (null pisaría el DEFAULT y Postgres rechazaría el insert).
-      // costo_unitario SIEMPRE va en soles (costo_unit_original x tipo_cambio);
-      // si la compra fue en USD, precio_unitario venía en USD y aquí se convierte.
-      const costoOriginal = parseFloat(d.precio_unitario) || 0
-      const costoPen = parseFloat((costoOriginal * tipoCambio).toFixed(6))
-      await addLote({
-        item_id:         d.item_id || null,
-        proveedor_id:    oc.contact_id,
-        numero_lote:     numeroLote,
-        numero_factura:  nroComprobante || null,
-        partida_id:      partidaId,
-        unidad_medida:   d.unidad_medida || 'KG',
-        costo_unitario:  costoPen,
-        moneda,
-        tipo_cambio:         tipoCambio,
-        costo_unit_original: costoOriginal,
-        costo_estado:    'definitivo',
-        cantidad:        parseFloat(d.cantidad) || 0,
-        cantidad_unidades: 0,
-        fecha_ingreso:   fecha,
-        compra_id:       compra.id,
-        created_by:      user.db_id
-      })
-    }
-
-    // Marcar OC como confirmada
-    await updateOrderCompra(oc.id, { status: 'confirmado' })
-
-    _ocContextConfirmar = null
-    closeModal('modal-confirmar-compra')
-    showToast('Compra confirmada: stock actualizado en Inventario', 'success')
-    await renderOrdenes()
-    await renderCompras(true)
-  } catch (error) {
-    console.error('Error en ejecutarConfirmarCompra:', error)
-    showToast(error.message || 'Error al confirmar la compra', 'danger')
-  }
-}
-
 
 // ════════════════════════════════════════════════════════════════════════════
 // OC DE IMPORTACIÓN (Proforma Invoice)
@@ -1007,7 +759,6 @@ window.guardarOC = async function () {
 
 let detallesOCEnCreacion = []
 let _detalleOCEditIdx = null   // índice de la línea que se está editando (null = agregando)
-let _ocContextConfirmar = null   // contexto para modal-confirmar-compra
 
 window.abrirModalDetalleDesdeCrearOC = async function () {
   try {

@@ -15,6 +15,19 @@
 import { getContacts, getContactById, addContact, updateContact, tiposDeContacto, errorDocumentoContacto } from '../supabase-data.js'
 import { attachConsultaDocumento, pintarBadgeSunat } from '../sunat-api.js'
 import { showToast } from '../helpers.js'
+import { catalogoDetraccion, tasaDe } from './detraccion.js'
+
+/** Sección Detracción del perfil: llena el selector con el catálogo SUNAT y carga los valores del contacto. */
+async function _poblarDetraccion(c) {
+  const sel = $('ctDetrCodigo'); if (!sel) return
+  const cat = await catalogoDetraccion()
+  sel.innerHTML = '<option value="">— Sin definir —</option>' + cat.map(t => `<option value="${t.codigo}">${t.codigo} · ${t.descripcion} (${Number(t.porcentaje)} %)</option>`).join('')
+  sel.value = c?.detraccion_codigo || ''
+  $('ctDetrPct').value = c?.detraccion_pct ?? ''
+  $('ctDetrQuien').value = c?.detraccion_paga_habitual || ''
+  $('ctDetrCuenta').value = c?.detraccion_cuenta_bn || ''
+  sel.onchange = () => { const t = tasaDe(cat, sel.value); if (t) $('ctDetrPct').value = t.porcentaje }
+}
 
 export const ROLES_CONTACTO = [
   { key: 'cliente',   label: 'Cliente',   plural: 'Clientes',    icono: '🛒' },
@@ -24,6 +37,7 @@ export const ROLES_CONTACTO = [
 ]
 
 let _tiene4ta = false
+let _tieneDetr = false
 let _editId = null
 let _rolesSel = new Set()
 let _rolesExtra = []        // roles fuera de los chips (empleado/otro): se conservan al guardar
@@ -149,6 +163,16 @@ function _asegurarModal() {
           <div class="form-group" style="margin:0;"><label>Constancia / referencia (Form. 1609)</label><input type="text" id="ct4taRef" maxlength="60" placeholder="Opcional"></div>
         </div>
         <label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" id="ctActivo" checked style="width:auto; flex:none; margin:0;"> Activo</label>
+        <div id="ctDetrBox" style="margin-top:8px; padding:8px 10px; border:1px solid var(--border-color); border-radius:var(--radius-md);" title="Detracción (SPOT): se usa al registrar compras de servicios de este proveedor. El modal de compra la consulta y la completa; aquí también se puede editar.">
+          <strong style="font-size:0.85rem;">🧾 Detracción (SPOT) — como proveedor</strong>
+          <div style="display:grid; grid-template-columns:2fr 0.7fr 1fr 1.5fr; gap:10px; margin-top:6px;">
+            <div class="form-group" style="margin:0;"><label>Código habitual de su servicio</label><select id="ctDetrCodigo"><option value="">— Sin definir —</option></select></div>
+            <div class="form-group" style="margin:0;"><label>%</label><input type="number" id="ctDetrPct" step="0.01" min="0" max="100"></div>
+            <div class="form-group" style="margin:0;"><label>¿Quién deposita?</label><select id="ctDetrQuien"><option value="">— Sin definir —</option><option value="proveedor">El proveedor</option><option value="nosotros">Nosotros</option></select></div>
+            <div class="form-group" style="margin:0;"><label>Cuenta de detracciones (Banco de la Nación)</label><input type="text" id="ctDetrCuenta" maxlength="40" placeholder="N° de cuenta"></div>
+          </div>
+        </div>
+
       </div>
     </form>
     <div class="modal-footer">
@@ -270,6 +294,8 @@ export async function abrirModalContacto({ id = null, roles = [] } = {}) {
   $('ctMaps').value = c?.ubicacion_maps || ''
   $('ctRetencion').checked = !!c?.sujeto_retencion
   $('ct4taAnio').value = c?.suspension_4ta_anio || ''; $('ct4taRef').value = c?.suspension_4ta_constancia || ''; _tiene4ta = !!c && 'suspension_4ta_anio' in c
+  _tieneDetr = !!c && 'detraccion_codigo' in c
+  _poblarDetraccion(c)
   $('ctActivo').checked = c ? c.activo !== false : true
   _pintarSunat(c || {})
   $('ctTipoDoc').dispatchEvent(new Event('change'))   // visibilidad bloque SUNAT + placeholder
@@ -340,7 +366,9 @@ window._ctGuardar = async () => {
     es_buen_contribuyente: _sunatBool('ctBuenContribSunat'),
     es_agente_retencion_sunat: _sunatBool('ctAgenteRetSunat'),
     // Renta 4ta (SQL 142): solo se envía si la columna existe o el usuario llenó el dato (así no rompe si falta el SQL)
-    ...((_tiene4ta || $('ct4taAnio').value) ? { suspension_4ta_anio: parseInt($('ct4taAnio').value) || null, suspension_4ta_constancia: ($('ct4taRef').value || '').trim() || null } : {})
+    ...((_tiene4ta || $('ct4taAnio').value) ? { suspension_4ta_anio: parseInt($('ct4taAnio').value) || null, suspension_4ta_constancia: ($('ct4taRef').value || '').trim() || null } : {}),
+    // Detracción (SQL 157): solo si la columna existe o el usuario llenó algo (no rompe si falta el SQL)
+    ...((_tieneDetr || $('ctDetrCodigo').value || $('ctDetrCuenta').value || $('ctDetrQuien').value) ? { detraccion_codigo: $('ctDetrCodigo').value || null, detraccion_pct: parseFloat($('ctDetrPct').value) || null, detraccion_paga_habitual: $('ctDetrQuien').value || null, detraccion_cuenta_bn: ($('ctDetrCuenta').value || '').trim() || null } : {})
   }
 
   if (btn) { btn.disabled = true; btn.textContent = 'Guardando...' }

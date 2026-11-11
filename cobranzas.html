@@ -232,6 +232,16 @@
                 </select>
               </div>
               <div class="reporte-filtro">
+                <label>🧾 Detracción</label>
+                <select id="cxp-filtro-detr" onchange="window.cargarCxP()">
+                  <option value="">Todas</option>
+                  <option value="pendiente">Por depositar</option>
+                  <option value="depositada">Depositadas</option>
+                  <option value="sin">Sin detracción</option>
+                </select>
+                <small id="cxp-detr-aviso" style="display:block; color:var(--text-secondary); font-size:0.72rem;"></small>
+              </div>
+              <div class="reporte-filtro">
                 <label>Emitidas desde</label>
                 <input type="date" id="cxp-filtro-desde" onchange="window.cargarCxP()">
               </div>
@@ -785,6 +795,7 @@
                   </select>
                 </div>
                 <div id="pago-compra-info" style="display:none; margin-top:10px; padding:12px 14px; background:var(--bg-secondary); border-radius:var(--radius-md); border-left:3px solid var(--color-info); font-size:0.88rem; line-height:1.6;"></div>
+                <div id="pago-detr-panel" style="display:none; margin-top:10px;"></div>
               </div>
 
               <!-- 2. DATOS DEL PAGO -->
@@ -794,7 +805,7 @@
                   <div class="form-group"><label>Fecha de Pago *</label><input type="date" id="pagoFecha" onchange="window._tcDefaultCP('pago')"></div>
                   <div class="form-group">
                     <label>Medio de Pago</label>
-                    <select id="pagoMedioPago">
+                    <select id="pagoMedioPago" onchange="window._tcDefaultCP('pago')">
                       <option value="transferencia">Transferencia</option>
                       <option value="cheque">Cheque</option>
                       <option value="efectivo">Efectivo</option>

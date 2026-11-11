@@ -2824,3 +2824,8 @@ body.sidebar-collapsed .sidebar .sidebar-tool { margin:0; }
 .bv-op:hover { background: var(--bg-tertiary, rgba(127,127,127,.12)); }
 .bv-op.sel { background: color-mix(in srgb, var(--color-info, #3b82f6) 18%, transparent); font-weight: 600; }
 .bv-vacio { color: var(--text-secondary); padding: 6px; }
+
+.bv-block { display: block; width: 100%; min-width: 0; }
+.bv-btn:disabled { opacity: .6; cursor: default; }
+.bv-nuevo { display: block; margin-top: 6px; padding: 7px 8px; text-align: center; border-top: 1px dashed var(--border-color); color: var(--color-info, #3b82f6); font-size: .85rem; font-weight: 600; text-decoration: none; }
+.bv-nuevo:hover { background: var(--bg-tertiary, rgba(127,127,127,.12)); border-radius: 4px; }

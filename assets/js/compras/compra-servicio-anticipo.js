@@ -12,6 +12,7 @@ import { _escCompras } from './buscadores.js'
 import { _detallesCompraEnCreacion, _tipoCompraActual } from './compra-nueva.js'
 import { renderCompras } from './compras-lista.js'
 import { _crearCuentaPagarSiFactura } from './ordenes-compra.js'
+import { montarDetraccion, guardarDetraccionCompra } from '../shared/detraccion.js'
 
 // ============================================================================
 // COMPRA DE SERVICIO / GASTO (sin producto, sin stock — ej: transporte, luz)
@@ -29,7 +30,28 @@ window.calcularCompraServicio = function () {
   if (igvEl)   igvEl.value   = igvMonto.toFixed(2)
   if (totalEl) totalEl.value = total.toFixed(2)
   if (esRH) window.calcularRetencion4ta?.(_rhEditada)
+  window._csDetrActualizar?.()
 }
+
+// ── Detracción (SPOT) — SQL 157. Caja embebida: detecta si corresponde y deja elegir código/%/monto (2026-11-11) ──
+let _csDetr = null
+async function _csDetrAsegurar() {
+  if (_csDetr) return _csDetr
+  const host = document.getElementById('csDetrHost'); if (!host) return null
+  _csDetr = await montarDetraccion(host, { prefijo: 'csd' })
+  for (const id of ['nqProveedor', 'nqMoneda', 'nqTipoCambio', 'nqFecha', 'csDescripcion', 'nqTipoComprobante'])
+    document.getElementById(id)?.addEventListener('change', () => window.calcularCompraServicio())
+  return _csDetr
+}
+window._csDetrActualizar = async function () {
+  const c = await _csDetrAsegurar(); if (!c) return
+  const g = id => document.getElementById(id)
+  await c.actualizar({ tipoCompra: 'servicio', tipoComprobante: g('nqTipoComprobante')?.value || '01', igvMonto: parseFloat(g('csIGVMonto')?.value || 0),
+    total: parseFloat(g('csTotal')?.value || 0), moneda: g('nqMoneda')?.value || 'PEN', tc: parseFloat(g('nqTipoCambio')?.value || 0) || 1,
+    proveedorId: parseInt(g('nqProveedor')?.value || 0) || null, texto: g('csDescripcion')?.value || '' })
+}
+window._csDetrReiniciar = function () { _csDetr = null; const h = document.getElementById('csDetrHost'); if (h) h.innerHTML = '' }
+
 
 // ── Recibo por Honorarios: retención de 4ta categoría (2026-11-07) ───────────
 // Regla: 8% si el recibo supera S/ 1,500 (por recibo, no acumulado) y el proveedor no tiene suspensión vigente (Form. 1609).
@@ -126,6 +148,10 @@ window.guardarCompraServicio = async function () {
     const total    = parseFloat(document.getElementById('csTotal')?.value || 0)
 
     const retencionRH = tipoComprobante === '02' ? (parseFloat(document.getElementById('csRetencion4ta')?.value || 0) || 0) : 0
+    // Detracción: se valida ANTES de crear nada (si falta el código/monto, no se registra a medias)
+    await window._csDetrActualizar?.()
+    const detr = (_csDetr && tipoComprobante === '01') ? _csDetr.leer() : null
+    if (detr?.error) { showToast(detr.error, 'warning'); return }
     const prov = await getContactById(contactId)
     // Si el usuario dejó el N° de Comprobante (campo ahora compartido con
     // Mercadería/Anticipo), se usa igual que allá; si no, se mantiene el
@@ -164,6 +190,7 @@ window.guardarCompraServicio = async function () {
       estado_pago:            'pendiente',
       asiento_id:             null,
       ...(tipoComprobante === '02' ? { retencion_4ta: retencionRH, neto_pagado: parseFloat((total - retencionRH).toFixed(2)) } : {}),
+      ...(detr?.valores?.detraccion_aplica ? detr.valores : {}),
       created_by:             user.db_id
     })
 
@@ -200,6 +227,10 @@ window.guardarCompraServicio = async function () {
       }
     }
 
+    if (detr?.valores?.detraccion_aplica && detr.perfilPatch && Object.keys(detr.perfilPatch).length) {
+      try { await guardarDetraccionCompra({ compraId: compra.id, valores: detr.valores, perfilPatch: detr.perfilPatch, contactId }) } catch (e) { console.warn('perfil detracción', e) }
+    }
+    window._csDetrReiniciar?.()
     showToast('Compra de servicio registrada exitosamente', 'success')
     // Modo embebido (Tesorería): avisa qué compra y CxP nacieron para vincularlas al gasto
     window.dispatchEvent(new CustomEvent('zv-compra-guardada', { detail: { compraId: compra.id, cxpId: cxpServicio?.id || null } }))

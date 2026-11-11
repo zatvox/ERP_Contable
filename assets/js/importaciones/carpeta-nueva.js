@@ -358,6 +358,7 @@ window.abrirModalNuevaCarpeta = async function () {
 
   if (!_contactos.length) _contactos = (await getContacts()) || []
   const prov = document.getElementById('cnProveedor')
+  if (prov && !prov.dataset.bv) { prov.dataset.bv = '1'; _bvProv(prov) }
   if (prov) {
     prov.innerHTML = '<option value="">-- Selecciona --</option>' +
       _contactos.map(c => `<option value="${c.id}">${c.nombre}${c.pais && c.pais !== 'Perú' ? ' · ' + c.pais : ''}</option>`).join('')
@@ -531,3 +532,16 @@ window.crearCarpetaImportacion = async function () {
 }
 
 export default { abrirModalNuevaCarpeta: window.abrirModalNuevaCarpeta, getComprasSinCarpeta, getOCsImportacion }
+
+let _cnPend = false
+function _bvProv(prov) {
+  import('../shared/buscador-vivo.js').then(async m => {
+    const { abrirModalContacto } = await import('../shared/contacto-modal.js')
+    m.convertirEnBuscador(prov, { placeholder: 'Buscar proveedor por nombre o RUC…', alCrearNuevo: { label: 'Nuevo contacto', onClick: () => { _cnPend = true; abrirModalContacto({ roles: ['proveedor'] }) } } })
+  })
+}
+window.addEventListener('contacto-guardado', e => {
+  const c = e.detail?.contacto, el = document.getElementById('cnProveedor'); if (!_cnPend || !el || !c?.id) return; _cnPend = false
+  if (![...el.options].some(o => o.value === String(c.id))) el.insertAdjacentHTML('beforeend', `<option value="${c.id}">${String(c.nombre || '').replace(/</g, '&lt;')}</option>`)
+  el.value = String(c.id)
+})

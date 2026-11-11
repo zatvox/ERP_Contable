@@ -21,7 +21,7 @@ import { getTipoCambioDia } from '../sunat-api.js'
 import { crearLineaCosto } from './costos-ledger.js'
 import { getContacts } from '../supabase-data.js'
 import { MONTOS_FIJOS_PERCEPCION, PERCEPCION_NORMA } from './percepcion-montos-fijos.js'
-import { convertirEnBuscador, refrescarBuscador } from '../buscador-select.js'
+import { convertirEnBuscador, refrescarBuscador } from '../shared/buscador-vivo.js'
 import { abrirModalContacto } from '../shared/contacto-modal.js'
 
 const $ = id => document.getElementById(id)

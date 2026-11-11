@@ -11,6 +11,7 @@ import { getComprasPage, getCompraById, getCompraDetalles, getLoteById, getLotes
 import { ASIENTOS_AUTO_COMPRAS_ACTIVO } from '../config-asientos-auto.js'
 import { showToast, formatQty } from '../helpers.js'
 import { convertirEnBuscador, refrescarBuscador } from '../buscador-select.js'
+import { buscadorContacto } from '../shared/buscador-vivo.js'
 import { _invalidarCacheCompras } from './anulacion.js'
 import { _escCompras } from './buscadores.js'
 import { renderCompras } from './compras-lista.js'
@@ -1150,6 +1151,18 @@ window.ngToggleImp = function () {
   const c = _g('ngImpCampos'); if (c) c.style.display = on ? '' : 'none'
 }
 
+let _ngTransp = null
+/** Transportista = contacto del sistema (buscador estándar + «＋ Nuevo contacto»). El nombre/RUC se copian a los inputs. */
+async function _ngMontarTransportista() {
+  const nom = _g('ngITransp'), ruc = _g('ngITranspRuc'); if (!nom) return
+  let host = _g('ngITranspBv')
+  if (!host) { host = document.createElement('div'); host.id = 'ngITranspBv'; nom.parentNode.insertBefore(host, nom); nom.style.display = 'none' }
+  const aplicar = c => { nom.value = c ? (c.nombre || '') : ''; if (c) ruc.value = c.nro_documento || ''; }
+  _ngTransp = await buscadorContacto(host, { roles: null, rolNuevo: 'proveedor', placeholder: 'Buscar transportista por nombre o RUC…', onChange: aplicar })
+  _ngTransp.setPorRuc(ruc.value, nom.value)
+}
+window.ngTranspSync = () => _ngTransp?.setPorRuc(_g('ngITranspRuc')?.value, _g('ngITransp')?.value)
+
 async function _ngPrepararImp(compra) {
   const wrap = _g('ngImpWrap'); if (!wrap) return
   const imp = _esImportacion(compra)
@@ -1157,13 +1170,14 @@ async function _ngPrepararImp(compra) {
   const chk = _g('ngEsImp'); if (chk) chk.checked = imp
   window.ngToggleImp()
   if (!imp) return
+  await _ngMontarTransportista()
   // Autocompletar con el último traslado de la misma carpeta (mismo contenedor, precinto, partida…): editable.
   try {
     const previas = ((await _qImp('guias_remision', compra.carpeta_importacion_id ? { carpeta_importacion_id: compra.carpeta_importacion_id } : {})) || [])
       .filter(r => !compra.carpeta_importacion_id || r.carpeta_importacion_id === compra.carpeta_importacion_id).sort((x, y) => y.id - x.id)
     const r = previas[0]; if (!r) return
     const set = (id, v) => { const el = _g(id); if (el && !el.value && v != null) el.value = v }
-    set('ngITransp', r.transportista_nombre); set('ngITranspRuc', r.transportista_ruc); set('ngIPlaca', r.placa)
+    set('ngITransp', r.transportista_nombre); set('ngITranspRuc', r.transportista_ruc); set('ngIPlaca', r.placa); window.ngTranspSync()
     set('ngIConductor', r.conductor); set('ngILicencia', r.conductor_licencia); set('ngICont', r.contenedor_nro)
     set('ngIPrec', r.precinto); set('ngIPartida', r.punto_partida); set('ngIDestino', r.lugar_destino)
   } catch (e) { console.warn('autocompletar traslado', e) }

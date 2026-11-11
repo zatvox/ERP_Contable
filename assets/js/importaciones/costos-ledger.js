@@ -20,7 +20,7 @@
 import { supabase, insert, update, deleteRecord, query, ultimoErrorInsert, esperarContextoEmpresa } from '../supabase-client.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { showToast, formatNumber, fechaDMY, pintarDocumentoContacto } from '../helpers.js'
-import { convertirEnBuscador, refrescarBuscador } from '../buscador-select.js'
+import { convertirEnBuscador, refrescarBuscador } from '../shared/buscador-vivo.js'
 import { abrirModalContacto } from '../shared/contacto-modal.js'
 import { getSuppliers, addCuentaPagar, subirAdjuntos, getAdjuntos, getUrlAdjunto,
          eliminarAdjuntosDe, validarArchivoAdjunto, getConteoAdjuntos } from '../supabase-data.js'
