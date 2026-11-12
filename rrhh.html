@@ -8,7 +8,7 @@
   <title>JHIRO ERP - RRHH</title>
   <link rel="stylesheet" href="assets/css/styles.css">
   <link rel="stylesheet" href="assets/css/modal-moderno.css">
-  <link rel="stylesheet" href="assets/css/rrhh.css?v=3">
+  <link rel="stylesheet" href="assets/css/rrhh.css?v=10">
 </head>
 <body class="ui-moderna">
   <div class="app-container">
@@ -100,54 +100,85 @@
       <div id="empAviso" class="rr-aviso" style="display:none;"></div>
       <div class="rr-modal-grid">
         <div class="rr-col-form">
+          <nav class="emp-pasos" id="empPasos">
+            <button type="button" data-paso="1" onclick="window.empPaso(1)"><b>1</b> Persona</button>
+            <button type="button" data-paso="2" onclick="window.empPaso(2)"><b>2</b> Contrato</button>
+            <button type="button" data-paso="3" onclick="window.empPaso(3)"><b>3</b> Horario</button>
+            <button type="button" data-paso="4" onclick="window.empPaso(4)"><b>4</b> <span id="empPasoTit4">Pensión</span></button>
+          </nav>
 
-          <strong class="rr-sec">1 · Persona y empresa</strong>
-          <div class="rr-fila" style="grid-template-columns:2fr 1fr;">
-            <div class="form-group"><label>Persona (contacto) *</label>
-              <select id="empContacto" onchange="window.empAlElegirPersona()"><option value="">— Elige una persona —</option></select></div>
-            <div class="form-group"><label>Empresa *</label><select id="empEmpresa" onchange="window.empAlCambiarEmpresa()"></select></div>
-          </div>
-          <div id="empPersonaInfo" class="rr-chip-info"></div>
-
-          <strong class="rr-sec">2 · Contrato</strong>
-          <div class="rr-fila" style="grid-template-columns:repeat(3,1fr);">
-            <div class="form-group"><label>Vínculo *</label>
-              <select id="empVinculo" onchange="window.empAlCambiarVinculo()">
-                <option value="planilla">En planilla</option>
-                <option value="rh_prestador">Prestador (Recibo por Honorarios)</option>
-              </select></div>
-            <div class="form-group"><label>Cargo(s)</label><input type="text" id="empCargo"></div>
-            <div class="form-group"><label>Fecha de ingreso</label><input type="date" id="empIngreso"></div>
-            <div class="form-group"><label id="empSueldoLbl">Sueldo mensual *</label><input type="number" id="empSueldo" step="0.01" min="0" placeholder="0.00" oninput="window.empResumen()"></div>
-            <div class="form-group"><label>Sede</label><select id="empSede"><option value="">—</option></select></div>
-            <div class="form-group"><label>Acceso al sistema</label><select id="empUsuario" onchange="window.empResumen()"><option value="">Sin cuenta</option></select></div>
-          </div>
-          <small class="rr-nota" style="padding:0;">Una persona puede trabajar en varias empresas: se registra <strong>una ficha por empresa</strong> (cada una con su cargo, sueldo y horario). Elige uno o varios cargos por área (puedes escribir uno nuevo en el buscador).</small>
-
-          <div id="empBloquePlanilla">
-            <strong class="rr-sec">3 · Pensión y planilla</strong>
-            <div class="rr-fila" style="grid-template-columns:repeat(4,1fr);">
-              <div class="form-group"><label>Sistema de pensiones</label>
-                <select id="empPension" onchange="window.empAlCambiarPension()">
-                  <option value="onp">ONP</option><option value="afp">AFP</option><option value="sin_aporte">Sin aporte</option>
-                </select></div>
-              <div class="form-group emp-afp"><label>AFP</label><select id="empAfp" onchange="window.empResumen()"><option value="">—</option></select></div>
-              <div class="form-group emp-afp"><label>Comisión</label>
-                <select id="empComision" onchange="window.empResumen()"><option value="flujo">Sobre flujo</option><option value="mixta">Mixta</option></select></div>
-              <div class="form-group emp-afp"><label>CUSPP</label><input type="text" id="empCuspp" placeholder="Opcional"></div>
-              <div class="form-group"><label>Asignación familiar</label>
-                <select id="empAsigFam" onchange="window.empResumen()"><option value="0">No</option><option value="1">Sí (hijos menores)</option></select></div>
+          <!-- PASO 1 · Persona, empresa y cuenta -->
+          <section class="emp-paso" data-paso="1">
+            <div class="rr-fila" style="grid-template-columns:2fr 1fr;">
+              <div class="form-group"><label>Persona (contacto) *</label>
+                <select id="empContacto" onchange="window.empAlElegirPersona()"><option value="">— Elige una persona —</option></select></div>
+              <div class="form-group"><label>Empresa *</label><select id="empEmpresa" onchange="window.empAlCambiarEmpresa()"></select>
+                <button type="button" id="empBtnCambiarEmpresa" class="btn btn-secondary btn-small" style="display:none; margin-top:6px;" onclick="window.empCambiarEmpresa()">🔁 Cambiar de empresa…</button></div>
             </div>
-          </div>
+            <div id="empPersonaInfo" class="rr-chip-info"></div>
+            <div class="form-group"><label>Cuenta de acceso al sistema</label>
+              <select id="empUsuario" onchange="window.empResumen()"><option value="">Sin cuenta</option></select>
+              <small class="rr-nota" style="padding:0;">Con cuenta, la persona marca su asistencia desde el botón «Marcar». Si el correo del contacto coincide con un usuario, se sugiere solo.</small></div>
+            <small class="rr-nota" style="padding:0;">Una persona puede trabajar en varias empresas: se registra <strong>una ficha por empresa</strong> (cada una con su cargo, sueldo y horario).</small>
+          </section>
 
-          <strong class="rr-sec">4 · Horario (alimenta la asistencia)</strong>
-          <div class="rr-fila" style="grid-template-columns:repeat(4,1fr);">
-            <div class="form-group"><label>Entrada</label><input type="time" id="empHoraEntrada" value="08:30"></div>
-            <div class="form-group"><label>Salida</label><input type="time" id="empHoraSalida" value="18:00"></div>
-            <div class="form-group"><label>Jornada (h)</label><input type="number" id="empJornada" value="8" step="0.5" min="1" max="12"></div>
-            <div class="form-group"><label>Tolerancia (min)</label><input type="number" id="empTolerancia" value="10" min="0" max="60"></div>
-          </div>
-          <div class="form-group"><label>Notas</label><input type="text" id="empNotas" placeholder="Opcional"></div>
+          <!-- PASO 2 · Contrato -->
+          <section class="emp-paso" data-paso="2" style="display:none;">
+            <div class="rr-fila" style="grid-template-columns:repeat(3,1fr);">
+              <div class="form-group"><label>Vínculo *</label>
+                <select id="empVinculo" onchange="window.empAlCambiarVinculo()">
+                  <option value="planilla">En planilla</option>
+                  <option value="rh_prestador">Prestador (Recibo por Honorarios)</option>
+                </select></div>
+              <div class="form-group"><label id="empSueldoLbl">Sueldo mensual *</label><input type="number" id="empSueldo" step="0.01" min="0" placeholder="0.00" oninput="window.empResumen()"></div>
+              <div class="form-group"><label>Fecha de ingreso</label><input type="date" id="empIngreso"></div>
+            </div>
+            <div class="form-group"><label>Cargo(s)</label><input type="text" id="empCargo">
+              <small class="rr-nota" style="padding:0;">Elige uno o varios cargos por área (puedes escribir uno nuevo en el buscador).</small></div>
+            <div class="rr-fila" style="grid-template-columns:1fr 2fr;">
+              <div class="form-group"><label>Sede</label><select id="empSede"><option value="">—</option></select></div>
+              <div class="form-group"><label>Notas</label><input type="text" id="empNotas" placeholder="Opcional"></div>
+            </div>
+          </section>
+
+          <!-- PASO 3 · Horario por día -->
+          <section class="emp-paso" data-paso="3" style="display:none;">
+            <div id="empAviso159" class="rr-aviso" style="display:none; background:rgba(245,158,11,.15);"></div>
+            <div class="hs-atajos"><span>Atajos:</span>
+              <button type="button" class="btn btn-secondary btn-small" onclick="window.empPreset('lv')">Lun–Vie</button>
+              <button type="button" class="btn btn-secondary btn-small" onclick="window.empPreset('ls')">Lun–Sáb</button>
+              <button type="button" class="btn btn-secondary btn-small" onclick="window.empPreset('lvs')">Lun–Vie + Sáb medio día</button></div>
+            <div class="rr-fila" style="grid-template-columns:repeat(4,1fr);">
+              <div class="form-group"><label>Entrada base</label><input type="time" id="empHoraEntrada" value="08:30" oninput="window.empBaseCambio()"></div>
+              <div class="form-group"><label>Salida base</label><input type="time" id="empHoraSalida" value="18:00" oninput="window.empBaseCambio()"></div>
+              <div class="form-group"><label>Almuerzo (min)</label>
+                <select id="empAlmuerzo" onchange="window.empHorarioCalc()"><option value="0">Sin almuerzo</option><option value="30">30</option><option value="45">45</option><option value="60">60</option><option value="90">90</option></select></div>
+              <div class="form-group"><label>Tolerancia (min)</label><input type="number" id="empTolerancia" value="10" min="0" max="60"></div>
+            </div>
+            <div class="hs-cab"><span>Día laborable</span><span>Entrada</span><span>Salida</span><span>Horas netas</span></div>
+            <div id="empSemana" class="hs-semana"></div>
+            <div id="empSemanaTot" class="rr-aviso"></div>
+            <input type="hidden" id="empJornada" value="8">
+          </section>
+
+          <!-- PASO 4 · Pensión y planilla (o pago, si es prestador) -->
+          <section class="emp-paso" data-paso="4" style="display:none;">
+            <div id="empBloqueRH" class="rr-aviso" style="display:none;">🧾 <strong>Prestador:</strong> se paga contra Recibo por Honorarios (4.ª categoría). No lleva AFP/ONP ni EsSalud de la empresa; el pago saldrá como egreso en Tesorería.</div>
+            <div id="empBloquePlanilla">
+              <div class="rr-fila" style="grid-template-columns:repeat(4,1fr);">
+                <div class="form-group"><label>Sistema de pensiones</label>
+                  <select id="empPension" onchange="window.empAlCambiarPension()">
+                    <option value="onp">ONP</option><option value="afp">AFP</option><option value="sin_aporte">Sin aporte</option>
+                  </select></div>
+                <div class="form-group emp-afp"><label>AFP</label><select id="empAfp" onchange="window.empResumen()"><option value="">—</option></select></div>
+                <div class="form-group emp-afp"><label>Comisión</label>
+                  <select id="empComision" onchange="window.empResumen()"><option value="flujo">Sobre flujo</option><option value="mixta">Mixta</option></select></div>
+                <div class="form-group emp-afp"><label>CUSPP</label><input type="text" id="empCuspp" placeholder="Opcional"></div>
+                <div class="form-group"><label>Asignación familiar</label>
+                  <select id="empAsigFam" onchange="window.empResumen()"><option value="0">No</option><option value="1">Sí (hijos menores)</option></select></div>
+              </div>
+            </div>
+          </section>
         </div>
 
         <aside class="rr-col-resumen">
@@ -156,7 +187,10 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="window.closeModal('modal-empleado')">Cancelar</button>
-        <button class="btn btn-primary" id="empBtnGuardar" onclick="window.guardarEmpleado()">💾 Guardar empleado</button>
+        <span style="flex:1;"></span>
+        <button class="btn btn-secondary" id="empBtnAtras" onclick="window.empPaso(window._empPasoActual() - 1)">← Atrás</button>
+        <button class="btn btn-primary" id="empBtnSig" onclick="window.empSiguiente()">Siguiente →</button>
+        <button class="btn btn-secondary" id="empBtnGuardar" onclick="window.guardarEmpleado()">💾 Guardar empleado</button>
       </div>
     </div>
   </div>
@@ -180,8 +214,11 @@
           <select id="nuevoRole">
             <option value="oficina">Oficina (administración y CRM)</option>
             <option value="vendedor">Vendedor (CRM: sus clientes y cotizaciones)</option>
-            <option value="admin" disabled>Administrador (solo desde la base de datos)</option>
-          </select></div>
+            <option value="contador">Contador</option>
+            <option value="almacen">Almacén</option>
+            <option value="admin">Administrador (acceso total)</option>
+          </select>
+          <small class="rr-nota" id="usuRolAyuda" style="padding:0;"></small></div>
         <div id="crear-usuario-error" class="rr-aviso" style="display:none; background:rgba(220,53,69,.1); color:var(--color-danger);"></div>
         <div id="crear-usuario-ok" class="rr-aviso" style="display:none;"></div>
       </div>
@@ -202,7 +239,11 @@
         <div id="asisQuien" style="font-size:0.92rem;"></div>
         <div class="rr-fila" style="grid-template-columns:1fr 1fr;">
           <div class="form-group"><label>Ingreso *</label><input type="time" id="asisEntrada"></div>
-          <div class="form-group"><label>Salida</label><input type="time" id="asisSalida"></div>
+          <div class="form-group"><label>Salida de labores</label><input type="time" id="asisSalida"></div>
+        </div>
+        <div class="rr-fila" style="grid-template-columns:1fr 1fr;">
+          <div class="form-group"><label>Salida a almuerzo</label><input type="time" id="asisAlmSalida"></div>
+          <div class="form-group"><label>Regreso de almuerzo</label><input type="time" id="asisAlmRegreso"></div>
         </div>
         <div class="form-group"><label>Motivo del cambio *</label><input type="text" id="asisMotivo" placeholder="Ej: olvidó marcar / se registró tarde / corrección"></div>
         <div id="asisAyuda" class="rr-aviso"></div>
@@ -237,6 +278,6 @@
   <script type="module" src="assets/js/supabase-data.js"></script>
   <script type="module" src="assets/js/helpers.js"></script>
   <script type="module" src="assets/js/main.js"></script>
-  <script type="module" src="assets/js/rrhh.js?v=8"></script>
+  <script type="module" src="assets/js/rrhh.js?v=12"></script>
 </body>
 </html>

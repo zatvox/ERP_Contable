@@ -20,6 +20,7 @@ import { initModuleNavDropdowns } from './main.js'
 import { empresasDisponibles, empresaTrabajo, badgeEmpresa } from './empresa.js'
 import { montarTabla, confirmarPequeno, esc as _esc } from './rrhh/tabla.js'
 import { montarSelectorCargos } from './rrhh/cargos.js'
+import { abrirModalMarcar } from './shared/asistencia-boton.js'
 import { convertirEnBuscador, refrescarBuscador } from './buscador-select.js'
 import './usuarios.js'
 
@@ -236,6 +237,8 @@ window.empAlCambiarEmpresa = function () { _llenarSedes(); window.empResumen() }
 window.empAlCambiarVinculo = function () {
   const rh = $('empVinculo').value === 'rh_prestador'
   $('empBloquePlanilla').style.display = rh ? 'none' : ''
+  $('empBloqueRH').style.display = rh ? '' : 'none'
+  $('empPasoTit4').textContent = rh ? 'Pago' : 'Pensión'
   $('empSueldoLbl').textContent = (rh ? 'Honorario mensual referencial' : 'Sueldo mensual') + ' *'
   window.empResumen()
 }
@@ -243,6 +246,121 @@ window.empAlCambiarPension = function () {
   const afp = $('empPension').value === 'afp'
   document.querySelectorAll('.emp-afp').forEach(el => { el.style.display = afp ? '' : 'none' })
   window.empResumen()
+}
+
+
+// ============================================================================
+// MODAL «NUEVO / EDITAR EMPLEADO» POR PASOS + HORARIO POR DÍA (SQL 159)
+// ============================================================================
+let _empPaso = 1
+window._empPasoActual = () => _empPaso
+const _STEP_DE = { empContacto: 1, empEmpresa: 1, empUsuario: 1, empVinculo: 2, empSueldo: 2, empIngreso: 2, empSemana: 3, empHoraEntrada: 3, empAfp: 4 }
+
+window.empPaso = function (n) {
+  _empPaso = Math.max(1, Math.min(4, Number(n) || 1))
+  document.querySelectorAll('#modal-empleado .emp-paso').forEach(el => { el.style.display = Number(el.dataset.paso) === _empPaso ? '' : 'none' })
+  document.querySelectorAll('#empPasos button').forEach(b => {
+    const k = Number(b.dataset.paso); b.classList.toggle('activo', k === _empPaso); b.classList.toggle('hecho', k < _empPaso)
+  })
+  const at = $('empBtnAtras'), sg = $('empBtnSig'), gd = $('empBtnGuardar')
+  if (at) at.style.visibility = _empPaso > 1 ? 'visible' : 'hidden'
+  if (sg) sg.style.display = _empPaso < 4 ? '' : 'none'
+  if (gd) gd.className = 'btn ' + (_empPaso === 4 ? 'btn-primary' : 'btn-secondary')
+}
+window.empSiguiente = function () {
+  const falta = []
+  if (_empPaso === 1) {
+    if (!$('empContacto').value && !_usuarioPendiente) falta.push('empContacto')
+    if (!$('empEmpresa').value) falta.push('empEmpresa')
+  }
+  if (_empPaso === 2 && !(parseFloat($('empSueldo').value || 0) > 0)) falta.push('empSueldo')
+  if (_empPaso === 3 && _horarioInvalido()) falta.push('empSemana')
+  if (falta.length) { _marcarInvalido(falta); showToast('Completa lo marcado en rojo para continuar', 'warning'); return }
+  window.empPaso(_empPaso + 1)
+}
+
+// ── Horario semanal ─────────────────────────────────────────────────────────
+const _DIAS = [[1, 'Lun'], [2, 'Mar'], [3, 'Mié'], [4, 'Jue'], [5, 'Vie'], [6, 'Sáb'], [0, 'Dom']]
+const _t2m = t => t ? Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5)) : null
+const _m2t = m => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0')
+const _filaSem = d => document.querySelector(`#empSemana .hs-fila[data-d="${d}"]`)
+
+function _pintarSemana(hs, marcarManuales = false) {
+  $('empSemana').innerHTML = _DIAS.map(([d, l]) => { const h = hs[d]; return `<div class="hs-fila${h ? '' : ' off'}" data-d="${d}">
+      <label class="hs-dia"><input type="checkbox" ${h ? 'checked' : ''} onchange="window.empDiaToggle(${d}, this.checked)"> ${l}</label>
+      <input type="time" class="hs-e" value="${h?.e || ''}" ${h ? '' : 'disabled'} oninput="window.empDiaEdit(${d})">
+      <input type="time" class="hs-s" value="${h?.s || ''}" ${h ? '' : 'disabled'} oninput="window.empDiaEdit(${d})">
+      <span class="hs-net">${h ? '' : 'Descanso'}</span></div>` }).join('')
+  if (marcarManuales) {          // al editar: los días distintos del horario base se respetan al cambiar la base
+    const be = $('empHoraEntrada').value, bs = $('empHoraSalida').value
+    document.querySelectorAll('#empSemana .hs-fila:not(.off)').forEach(f => { if (f.querySelector('.hs-e').value !== be || f.querySelector('.hs-s').value !== bs) f.dataset.manual = '1' })
+  }
+  window.empHorarioCalc()
+}
+function _leerSemana() {
+  const hs = {}
+  document.querySelectorAll('#empSemana .hs-fila').forEach(f => { if (f.querySelector('input[type=checkbox]').checked) hs[f.dataset.d] = { e: f.querySelector('.hs-e').value, s: f.querySelector('.hs-s').value } })
+  return hs
+}
+const _horarioInvalido = () => { const v = Object.values(_leerSemana()); return !v.length || v.some(h => !h.e || !h.s || _t2m(h.s) <= _t2m(h.e)) }
+
+window.empDiaToggle = function (d, on) {
+  const f = _filaSem(d); f.classList.toggle('off', !on)
+  f.querySelectorAll('input[type=time]').forEach(i => { i.disabled = !on; if (on && !i.value) i.value = i.classList.contains('hs-e') ? $('empHoraEntrada').value : $('empHoraSalida').value })
+  delete f.dataset.manual
+  window.empHorarioCalc()
+}
+window.empDiaEdit = function (d) { _filaSem(d).dataset.manual = '1'; window.empHorarioCalc() }
+window.empBaseCambio = function () {
+  document.querySelectorAll('#empSemana .hs-fila:not(.off)').forEach(f => {
+    if (f.dataset.manual !== '1') { f.querySelector('.hs-e').value = $('empHoraEntrada').value; f.querySelector('.hs-s').value = $('empHoraSalida').value }
+  })
+  window.empHorarioCalc()
+}
+window.empPreset = function (tipo) {
+  const e = $('empHoraEntrada').value || '08:30', s = $('empHoraSalida').value || '18:00'
+  const hs = {}; ;(tipo === 'ls' ? [1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5]).forEach(d => { hs[d] = { e, s } })
+  if (tipo === 'lvs') hs[6] = { e, s: _m2t(Math.min(_t2m(e) + 270, 24 * 60 - 1)) }      // sábado medio día = 4,5 h
+  _pintarSemana(hs)
+  if (tipo === 'lvs') _filaSem(6).dataset.manual = '1'
+}
+// Horas netas por día = salida − entrada − almuerzo (el almuerzo solo se descuenta en días de más de 5 h)
+window.empHorarioCalc = function () {
+  const alm = Number($('empAlmuerzo').value || 0)
+  let tot = 0, n = 0
+  document.querySelectorAll('#empSemana .hs-fila').forEach(f => {
+    const span = f.querySelector('.hs-net')
+    if (!f.querySelector('input[type=checkbox]').checked) { span.textContent = 'Descanso'; span.className = 'hs-net'; return }
+    const t = _t2m(f.querySelector('.hs-s').value) - _t2m(f.querySelector('.hs-e').value)
+    if (!(t > 0)) { span.textContent = '⚠ revisa'; span.className = 'hs-net mal'; return }
+    const m = Math.max(t - (t > 300 ? alm : 0), 0)
+    span.textContent = _fmtDur(m); span.className = 'hs-net'; tot += m; n++
+  })
+  $('empJornada').value = n ? (Math.round(tot / n / 60 * 2) / 2) : 8
+  const box = $('empSemanaTot')
+  box.innerHTML = n ? `📅 <strong>${n} día(s)</strong> · jornada semanal <strong>${_fmtDur(tot)}</strong> · promedio ${_fmtDur(Math.round(tot / n))}/día${alm ? ` · almuerzo de ${alm} min descontado` : ''}${tot > 48 * 60 ? ' · <strong style="color:var(--color-warning);">⚠ supera las 48 h semanales (tope legal)</strong>' : ''}`
+    : '⚠ Marca al menos un día laborable.'
+  window.empResumen()
+}
+function _textoHorario(hs) {
+  const orden = [1, 2, 3, 4, 5, 6, 0], lab = Object.fromEntries(_DIAS), grupos = []
+  orden.forEach(d => { const h = hs[d]; if (!h || !h.e || !h.s) return; const k = h.e + '–' + h.s; const g = grupos.find(x => x.k === k); g ? g.i.push(orden.indexOf(d)) : grupos.push({ k, i: [orden.indexOf(d)] }) })
+  return grupos.map(g => {
+    const partes = []; let i = 0
+    while (i < g.i.length) { let j = i; while (j + 1 < g.i.length && g.i[j + 1] === g.i[j] + 1) j++; partes.push(i === j ? lab[orden[g.i[i]]] : lab[orden[g.i[i]]] + '–' + lab[orden[g.i[j]]]); i = j + 1 }
+    return partes.join(', ') + ' ' + g.k
+  }).join(' · ') || '—'
+}
+
+let _hay159
+function _checar159() {
+  if (_hay159 !== undefined) return
+  _hay159 = null
+  supabase.from('empleados').select('horario_semanal').limit(1).then(r => {
+    _hay159 = !r.error
+    const a = $('empAviso159')
+    if (a && !_hay159) { a.style.display = ''; a.textContent = '⚠ Falta ejecutar el SQL 159_rrhh_horario_semanal.sql: hasta entonces el horario por día no se guarda (solo la hora base).' }
+  })
 }
 
 // Al elegir persona: muestra sus datos, avisa si ya trabaja en otra empresa y (si es ficha nueva)
@@ -286,6 +404,7 @@ window.abrirModalEmpleado = function (id = null, usuarioId = null) {
   refrescarBuscador('empContacto')
   $('empEmpresa').value = e?.empresa_id || empresaTrabajo() || ''
   $('empEmpresa').disabled = !!e
+  $('empBtnCambiarEmpresa').style.display = e ? '' : 'none'      // en una ficha existente la empresa se cambia con el asistente (mover / transferir)
   _llenarSedes()
   $('empVinculo').value = e?.vinculo || 'planilla'
   $('empCargo').value = e?.cargo || ''
@@ -298,10 +417,11 @@ window.abrirModalEmpleado = function (id = null, usuarioId = null) {
   $('empComision').value = e?.tipo_comision_afp || 'flujo'
   $('empCuspp').value = e?.cuspp || ''
   $('empAsigFam').value = e?.asignacion_familiar ? '1' : '0'
-  $('empHoraEntrada').value = (e?.hora_entrada || '08:30').slice(0, 5)
-  $('empHoraSalida').value = (e?.hora_salida || '18:00').slice(0, 5)
-  $('empJornada').value = e?.jornada_horas ?? 8
+  const _be = (e?.hora_entrada || '08:30').slice(0, 5), _bs = (e?.hora_salida || '18:00').slice(0, 5)
+  $('empHoraEntrada').value = _be; $('empHoraSalida').value = _bs
+  $('empAlmuerzo').value = String(e?.almuerzo_min ?? 60)
   $('empTolerancia').value = e?.tolerancia_min ?? 10
+  _pintarSemana(e?.horario_semanal ? { ...e.horario_semanal } : _semanaLV(_be, _bs), !!e)
   $('empUsuario').value = e?.user_id || u?.id || ''
   $('empNotas').value = e?.notas || ''
   document.querySelectorAll('#modal-empleado .invalido').forEach(x => x.classList.remove('invalido'))
@@ -310,6 +430,9 @@ window.abrirModalEmpleado = function (id = null, usuarioId = null) {
   else if (u && c) { av.style.display = ''; av.innerHTML = `✔ Se encontró el contacto <strong>${_esc(c.nombre)}</strong> y se usará (sin duplicar). Verifica que sea la misma persona; si no, elige otra en «Persona».` }
   else av.style.display = 'none'
   window.empAlCambiarVinculo(); window.empAlCambiarPension(); window.empAlElegirPersona()
+  _checar159()
+  { const a = $('empAviso159'); if (a) a.style.display = _hay159 === false ? '' : 'none' }
+  window.empPaso(1)
   window.openModal('modal-empleado')
 }
 
@@ -355,6 +478,7 @@ window.empResumen = function () {
       <div>Régimen laboral de la empresa: <strong>${_esc(REGIMENES[reg] || reg)}</strong></div>
       <div>Persona: ${c ? '✔ ' + _esc(c.nombre) : '—'}</div>
       <div>Acceso: ${u ? '✔ ' + _esc(u.email) : 'sin cuenta'}</div>
+      <div>Horario: ${_esc(_textoHorario(_leerSemana()))}</div>
       <div style="margin-top:6px;">Los vales de caja del mes se descontarán completos en la siguiente planilla.</div>
     </div>`
 }
@@ -373,11 +497,64 @@ window.empNuevaPersona = async function () {
   abrirModalContacto({ roles: ['empleado'] })
 }
 
+// ── Cambiar de empresa: MOVER (corregir un error) o TRANSFERIR (cambio real de empleador) — SQL 160 ──
+window.empCambiarEmpresa = async function () {
+  const id = Number($('empId').value || 0); const e = _empleados.find(x => x.id === id); if (!e) return
+  const nombre = _contactoById(e.contact_id)?.nombre || '—'
+  const origen = _empresasCfg.find(x => x.id === e.empresa_id)
+  const destinos = _empresasCfg.filter(x => x.id !== e.empresa_id)
+  if (!destinos.length) { showToast('No hay otra empresa a la cual cambiarla', 'warning'); return }
+  const { count } = await supabase.from('asistencias').select('id', { count: 'exact', head: true }).eq('empleado_id', id)
+  const hoy = _asisHoy || new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Lima' })
+  const m = document.createElement('div'); m.className = 'modal show'; m.style.zIndex = 3100
+  m.innerHTML = `<div class="modal-content ui-moderna" style="width:min(94vw,500px); max-width:min(94vw,500px); padding:20px;">
+    <h3 style="margin:0 0 4px;">🔁 Cambiar de empresa</h3>
+    <p style="margin:0 0 12px; color:var(--text-secondary); font-size:0.9rem;"><strong>${_esc(nombre)}</strong> · hoy en <strong>${_esc(origen?.nombre_comercial || '')}</strong> · ${count || 0} asistencia(s) registrada(s)</p>
+    <div class="form-group"><label>Empresa destino *</label><select id="ceDestino">${destinos.map(d => `<option value="${d.id}">${_esc(d.nombre_comercial)}</option>`).join('')}</select></div>
+    <div class="form-group" style="margin-top:10px;"><label>¿Qué pasó?</label>
+      <label class="ce-op"><input type="radio" name="ceModo" value="mover" checked> <span><strong>Se registró en la empresa equivocada</strong><br><small>Se mueve la ficha con todas sus asistencias, marcas e historial. Nada queda en la empresa de origen.</small></span></label>
+      <label class="ce-op"><input type="radio" name="ceModo" value="transferir"> <span><strong>Cambió de empleador</strong><br><small>La ficha actual se cesa (su historial se queda aquí) y se crea una ficha nueva en el destino con los mismos datos.</small></span></label></div>
+    <div class="form-group" id="ceFechaBox" style="display:none;"><label>Fecha de ingreso a la nueva empresa *</label><input type="date" id="ceFecha" value="${hoy}"></div>
+    <div class="form-group"><label>Motivo *</label><input type="text" id="ceMotivo" placeholder="Ej: error al registrar / pasó a planilla de Benji"></div>
+    <div id="ceAviso" class="rr-aviso" style="margin:0 0 10px; display:none;"></div>
+    <div style="display:flex; gap:8px; justify-content:flex-end;">
+      <button class="btn btn-secondary btn-small" id="ceNo">Cancelar</button><button class="btn btn-primary btn-small" id="ceSi">Cambiar empresa</button></div></div>`
+  document.body.appendChild(m)
+  const cerrar = () => m.remove()
+  m.querySelector('#ceNo').onclick = cerrar; m.addEventListener('click', ev => { if (ev.target === m) cerrar() })
+  const aviso = (t) => { const a = m.querySelector('#ceAviso'); a.style.display = t ? '' : 'none'; a.innerHTML = t || '' }
+  const modo = () => m.querySelector('input[name=ceModo]:checked').value
+  const refrescar = () => {
+    m.querySelector('#ceFechaBox').style.display = modo() === 'transferir' ? '' : 'none'
+    const dest = Number(m.querySelector('#ceDestino').value)
+    const dup = _empleados.find(x => x.contact_id === e.contact_id && x.empresa_id === dest)
+    const dd = _empresasCfg.find(x => x.id === dest)?.nombre_comercial
+    aviso(dup ? `⚠ ${_esc(nombre)} ya tiene una ficha en ${_esc(dd)} (${_esc(dup.estado)}). Edita o reactiva esa ficha en vez de cambiar esta.` : '')
+    m.querySelector('#ceSi').disabled = !!dup
+  }
+  m.querySelectorAll('input[name=ceModo], #ceDestino').forEach(i => i.addEventListener('change', refrescar)); refrescar()
+  m.querySelector('#ceSi').onclick = async () => {
+    const motivo = m.querySelector('#ceMotivo').value.trim(), dest = Number(m.querySelector('#ceDestino').value), fecha = m.querySelector('#ceFecha').value
+    if (motivo.length < 3) { m.querySelector('#ceMotivo').classList.add('invalido'); showToast('Escribe el motivo', 'warning'); return }
+    if (modo() === 'transferir' && !fecha) { m.querySelector('#ceFecha').classList.add('invalido'); return }
+    const b = m.querySelector('#ceSi'); b.disabled = true
+    const { data, error } = modo() === 'mover'
+      ? await supabase.rpc('rrhh_empleado_mover_empresa', { p_empleado_id: id, p_empresa_id: dest, p_motivo: motivo })
+      : await supabase.rpc('rrhh_empleado_transferir', { p_empleado_id: id, p_empresa_id: dest, p_fecha: fecha, p_motivo: motivo })
+    if (error) { b.disabled = false; aviso('⚠ ' + _esc(/does not exist|schema cache/.test(error.message) ? 'Falta ejecutar el SQL 160_rrhh_cambiar_empresa.sql' : error.message)); return }
+    cerrar(); window.closeModal('modal-empleado')
+    showToast(modo() === 'mover' ? `Ficha movida a ${data.a} (${data.asistencias_movidas} asistencias) ✔` : `Transferido a ${data.a}: ficha nueva creada y la anterior cesada ✔`, 'success', 7000)
+    _empleados = (await supabase.from('empleados').select('*').order('id')).data || _empleados
+    await window.cargarEmpleados?.()
+  }
+}
+
 // ── Guardar / cesar / reactivar / eliminar ──────────────────────────────────
 const _marcarInvalido = (ids) => {
   document.querySelectorAll('#modal-empleado .invalido').forEach(x => x.classList.remove('invalido'))
   ids.forEach(id => $(id)?.classList.add('invalido'))
-  $(ids[0])?.focus()
+  const _st = _STEP_DE[ids[0]]; if (_st && _st !== _empPaso) window.empPaso(_st)
+  $(ids[0])?.focus?.()
 }
 
 window.guardarEmpleado = async function () {
@@ -394,10 +571,13 @@ window.guardarEmpleado = async function () {
   if (!empresaId) faltan.push('empEmpresa')
   if (!(sueldo > 0)) faltan.push('empSueldo')
   if (planilla && pension === 'afp' && !$('empAfp').value) faltan.push('empAfp')
+  if (_horarioInvalido()) faltan.push('empSemana')
   if (faltan.length) { _marcarInvalido(faltan); showToast('Completa los campos marcados en rojo (*)', 'warning'); return }
   if (contactId && _empleados.find(e => e.contact_id === contactId && e.empresa_id === empresaId && e.id !== id)) {
     _marcarInvalido(['empContacto']); showToast('Esa persona ya tiene ficha en esa empresa', 'warning'); return
   }
+  const hs = _leerSemana()
+  const primerDia = hs[[1, 2, 3, 4, 5, 6, 0].find(d => hs[d])] || { e: '08:30', s: '18:00' }
   const btn = $('empBtnGuardar'); btn.disabled = true
   try {
     // 1) Contacto: se reutiliza o se crea solo (rol «empleado») — nunca se duplica
@@ -418,9 +598,9 @@ window.guardarEmpleado = async function () {
       afp_id: planilla && pension === 'afp' ? Number($('empAfp').value) : null,
       tipo_comision_afp: planilla && pension === 'afp' ? $('empComision').value : null,
       cuspp: planilla && pension === 'afp' ? ($('empCuspp').value.trim() || null) : null,
-      hora_entrada: $('empHoraEntrada').value || '08:30',
-      hora_salida: $('empHoraSalida').value || '18:00',
+      hora_entrada: primerDia.e, hora_salida: primerDia.s,
       jornada_horas: parseFloat($('empJornada').value || 8),
+      ...(_hay159 === false ? {} : { horario_semanal: hs, almuerzo_min: Number($('empAlmuerzo').value || 0) }),
       tolerancia_min: parseInt($('empTolerancia').value || 10),
       notas: $('empNotas').value.trim() || null,
       updated_at: new Date().toISOString()
@@ -529,6 +709,8 @@ window.cargarUsuarios = async function (recargar = true) {
       const esYo = String(u.email).toLowerCase() === yo
       return [
         { icono: '✏️', label: 'Editar', onclick: `window.abrirModalUsuario(${u.id})` },
+        !esYo && u.active && u.role !== 'admin' ? { icono: '🛡️', label: 'Dar rol Administrador', onclick: `window.usuarioCambiarRol(${u.id}, 'admin', ${JSON.stringify(u.nombre || u.email).replace(/"/g, '&quot;')}, '${u.role || ''}')` } : null,
+        !esYo && u.role === 'admin' ? { icono: '🛡️', label: 'Quitar rol Administrador', onclick: `window.usuarioCambiarRol(${u.id}, 'oficina', ${JSON.stringify(u.nombre || u.email).replace(/"/g, '&quot;')}, 'admin')` } : null,
         !tieneFicha && u.active ? { icono: '📝', label: 'Completar datos (ficha)', onclick: `window.irCompletarFicha(${u.id})` } : null,
         !esYo ? (u.active ? { icono: '⏸', label: 'Desactivar acceso', onclick: `window.activarUsuario(${u.id}, false)` } : { icono: '▶', label: 'Reactivar acceso', onclick: `window.activarUsuario(${u.id}, true)` }) : null,
         !esYo ? { separador: true } : null,
@@ -647,20 +829,53 @@ window.rrhhGuardarAfp = async function (id, campo, valor) {
 const _hmLima = iso => iso ? new Date(iso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Lima' }) : ''
 const _minLima = iso => { const [h, m] = _hmLima(iso).split(':').map(Number); return h * 60 + m }
 
-let _asisFecha = null            // null = hoy (Lima)
+let _asisFecha = null            // null = hoy (Lima). En semana/mes es la fecha de referencia
 let _asisHoy = null
 let _asisFilas = []
+let _asisVista = 'dia'           // 'dia' | 'semana' | 'mes'
 window.cargarAsistenciaHoy = () => { _asisFecha = null; return window.cargarAsistencia() }
 
 const _hhmm = iso => iso ? _hmLima(iso) : ''
 const _difMin = (a, b) => Math.round((new Date(b) - new Date(a)) / 60000)
 const _fmtDur = min => `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, '0')}m`
 const _sumaDias = (f, d) => { const x = new Date(f + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + d); return x.toISOString().slice(0, 10) }
+const _sumaMeses = (f, n) => { const x = new Date(f + 'T12:00:00Z'); x.setUTCDate(1); x.setUTCMonth(x.getUTCMonth() + n); return x.toISOString().slice(0, 10) }
+const _DOW = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
+const _MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+const _dowDe = f => new Date(f + 'T12:00:00Z').getUTCDay()
+const _dd = f => f.slice(8, 10) + '/' + f.slice(5, 7)
+
+function _rangoAsis(anchor, vista) {
+  if (vista === 'dia') return { desde: anchor, hasta: anchor }
+  if (vista === 'semana') { const dow = (_dowDe(anchor) + 6) % 7; return { desde: _sumaDias(anchor, -dow), hasta: _sumaDias(anchor, 6 - dow) } }
+  const d = new Date(anchor + 'T12:00:00Z'), y = d.getUTCFullYear(), m = d.getUTCMonth()
+  return { desde: new Date(Date.UTC(y, m, 1, 12)).toISOString().slice(0, 10), hasta: new Date(Date.UTC(y, m + 1, 0, 12)).toISOString().slice(0, 10) }
+}
+const _listaDias = (desde, hasta) => { const a = []; for (let f = desde; f <= hasta; f = _sumaDias(f, 1)) a.push(f); return a }
+
+// Minutos trabajados netos = salida − ingreso − almuerzo (solo si hay salida de labores)
+const _netoMin = (a, marcas) => {
+  if (!a?.entrada || !a?.salida) return null
+  let t = _difMin(a.entrada, a.salida)
+  const s = (marcas || []).find(m => m.tipo === 'almuerzo_salida'), r = (marcas || []).find(m => m.tipo === 'almuerzo_regreso')
+  if (s && r) t -= _difMin(s.hora, r.hora)
+  return Math.max(t, 0)
+}
+const _hm2min = h => Number(h.slice(0, 2)) * 60 + Number(h.slice(3, 5))
+const _semanaLV = (ent, sal) => Object.fromEntries([1, 2, 3, 4, 5].map(d => [d, { e: ent, s: sal }]))
+// Horario del empleado en una fecha: {e,s} o null si ese día es de descanso. Sin SQL 159: Lun–Vie con su hora de entrada/salida.
+const _horDia = (e, fecha) => (e.horario_semanal || _semanaLV(e.hora_entrada.slice(0, 5), e.hora_salida.slice(0, 5)))[String(_dowDe(fecha))] || null
+const _tardeMin = (e, a) => { if (!a?.entrada) return null; const h = _horDia(e, a.fecha); return h ? _minLima(a.entrada) - (_hm2min(h.e) + e.tolerancia_min) : null }
+
+window.asisVista = function (v) { _asisVista = v; return window.cargarAsistencia() }
+window.asisIrDia = function (f) { _asisVista = 'dia'; _asisFecha = f === _asisHoy ? null : f; return window.cargarAsistencia(); }
 
 window.asisFecha = function (v) {
   if (v === 'hoy') _asisFecha = null
-  else if (v === -1 || v === 1) _asisFecha = _sumaDias(_asisFecha || _asisHoy, v)
-  else if (v) _asisFecha = v
+  else if (v === -1 || v === 1) {
+    const base = _asisFecha || _asisHoy
+    _asisFecha = _asisVista === 'dia' ? _sumaDias(base, v) : _asisVista === 'semana' ? _sumaDias(base, 7 * v) : _sumaMeses(base, v)
+  } else if (v) _asisFecha = v
   if (_asisFecha && _asisHoy && _asisFecha > _asisHoy) _asisFecha = null      // no hay futuro
   return window.cargarAsistencia()
 }
@@ -671,45 +886,69 @@ window.cargarAsistencia = async function () {
   _asisHoy = reloj.fecha_lima
   const fecha = _asisFecha || _asisHoy
   const esHoy = fecha === _asisHoy
-  const [emps, asis, cts] = await Promise.all([
+  const { desde, hasta } = _rangoAsis(fecha, _asisVista)
+  const [emps, asis, mar, cts] = await Promise.all([
     supabase.from('empleados').select('*').order('id'),
-    supabase.from('asistencias').select('*').eq('fecha', fecha),
+    supabase.from('asistencias').select('*').gte('fecha', desde).lte('fecha', hasta),
+    supabase.from('asistencia_marcas').select('*').gte('fecha', desde).lte('fecha', hasta).order('hora'),
     getContacts()
   ])
   if (emps.error || asis.error) return _errTabla('card-asis', (emps.error || asis.error).message)
+  const sin158 = !!mar.error         // sin SQL 158 la pantalla sigue funcionando (solo ingreso/salida)
   _contactos = cts || _contactos
-  const porEmp = Object.fromEntries((asis.data || []).map(a => [a.empleado_id, a]))
-  // Se listan los activos (que ya habían ingresado ese día) y cualquiera que tenga marcación ese día
+  const marcasPorAsis = {}
+  ;(mar.data || []).forEach(m => { (marcasPorAsis[m.asistencia_id] ||= []).push(m) })
+  const porEmpDia = {}
+  ;(asis.data || []).forEach(a => { (porEmpDia[a.empleado_id] ||= {})[a.fecha] = a })
+
+  // Se listan los activos (que ya habían ingresado) y cualquiera que tenga marcación en el periodo
   const filas = (emps.data || [])
-    .filter(e => porEmp[e.id] || (e.estado === 'activo' && (!e.fecha_ingreso || e.fecha_ingreso <= fecha)))
-    .map(e => ({ e, a: porEmp[e.id], c: _contactoById(e.contact_id) }))
+    .filter(e => porEmpDia[e.id] || (e.estado === 'activo' && (!e.fecha_ingreso || e.fecha_ingreso <= hasta) && (!e.fecha_cese || e.fecha_cese >= desde)))
+    .map(e => {
+      const dias = porEmpDia[e.id] || {}
+      const a = dias[fecha]
+      return { e, c: _contactoById(e.contact_id), dias, a, marcas: a ? (marcasPorAsis[a.id] || []) : [], marcasPorAsis }
+    })
   _asisFilas = filas
-  const tarde = f => f.a?.entrada ? _minLima(f.a.entrada) - (Number(f.e.hora_entrada.slice(0, 2)) * 60 + Number(f.e.hora_entrada.slice(3, 5)) + f.e.tolerancia_min) : null
+
+  const toggle = ['dia', 'semana', 'mes'].map(v => `<button class="btn ${_asisVista === v ? 'btn-primary' : 'btn-secondary'} btn-small" onclick="window.asisVista('${v}')">${{ dia: 'Día', semana: 'Semana', mes: 'Mes' }[v]}</button>`).join('')
+  const finActual = hasta >= _asisHoy
+  const botones = `<span style="display:inline-flex; gap:4px; margin-right:8px;">${toggle}</span>
+      <button class="btn btn-secondary btn-small" onclick="window.asisFecha(-1)" title="Anterior">‹</button>
+      <input type="date" value="${fecha}" max="${_asisHoy}" onchange="window.asisFecha(this.value)" style="width:auto;">
+      <button class="btn btn-secondary btn-small" onclick="window.asisFecha(1)" title="Siguiente" ${finActual ? 'disabled' : ''}>›</button>
+      ${esHoy && _asisVista === 'dia' ? '' : '<button class="btn btn-secondary btn-small" onclick="window.asisFecha(\'hoy\')">Hoy</button>'}
+      <button class="btn btn-secondary btn-small" onclick="window.cargarAsistencia()">↺</button>`
+  const avisoSql = sin158 ? '<p class="rr-nota" style="color:var(--color-warning);">⚠ Falta ejecutar el SQL 158_rrhh_marcas_almuerzo.sql: hasta entonces solo se registran ingreso y salida.</p>' : ''
+
+  if (_asisVista === 'dia') return _tablaAsisDia({ filas, fecha, esHoy, reloj, botones, avisoSql })
+  return _tablaAsisPeriodo({ filas, desde, hasta, botones, avisoSql, compacto: _asisVista === 'mes' })
+}
+
+function _tablaAsisDia({ filas, fecha, esHoy, reloj, botones, avisoSql }) {
   const marcados = filas.filter(f => f.a?.entrada).length
+  const almDe = f => ({ s: f.marcas.find(m => m.tipo === 'almuerzo_salida'), r: f.marcas.find(m => m.tipo === 'almuerzo_regreso') })
   montarTabla('card-asis', {
     nombre: 'rrhh-asistencia', titulo: `🕐 Asistencia · ${fechaDMY(fecha)}${esHoy ? ' (hoy)' : ''} <small style="color:var(--text-secondary); font-weight:normal;">· ${marcados}/${filas.length} marcaron${esHoy ? ' · ' + _esc(reloj.lima.slice(11, 16)) + ' (Lima)' : ''}</small>`,
-    placeholder: 'Buscar persona o empresa…',
-    botones: `<button class="btn btn-secondary btn-small" onclick="window.asisFecha(-1)" title="Día anterior">‹</button>
-      <input type="date" value="${fecha}" max="${_asisHoy}" onchange="window.asisFecha(this.value)" style="width:auto;">
-      <button class="btn btn-secondary btn-small" onclick="window.asisFecha(1)" title="Día siguiente" ${esHoy ? 'disabled' : ''}>›</button>
-      ${esHoy ? '' : '<button class="btn btn-secondary btn-small" onclick="window.asisFecha(\'hoy\')">Hoy</button>'}
-      <button class="btn btn-secondary btn-small" onclick="window.cargarAsistencia()">↺</button>`,
-    sub: `<p class="rr-nota" style="padding:0;">${esHoy ? 'Quien tiene cuenta marca con el botón de la cabecera (hora del servidor, Lima). ' : ''}Con el menú ⋮ de cada fila puedes <strong>registrar o corregir</strong> la marcación (también de días anteriores, hasta 31 días), quitar solo la salida o eliminarla. Todo cambio pide un <strong>motivo</strong> y queda en el historial.</p>`,
+    placeholder: 'Buscar persona o empresa…', botones,
+    sub: `${avisoSql}<p class="rr-nota" style="padding:0;">${esHoy ? 'Quien tiene cuenta marca con el botón de la cabecera (hora del servidor, Lima). ' : ''}Con el menú ⋮ de cada fila puedes <strong>registrar o corregir</strong> la marcación (también de días anteriores, hasta 31 días), quitar solo la salida o eliminarla. Todo cambio pide un <strong>motivo</strong> y queda en el historial.</p>`,
     sort: { col: 'nombre', dir: 'asc' }, filas, vacio: 'No hay empleados para esta fecha.',
     cols: [
       { key: 'empresa', label: 'Empresa', val: f => _empresasCfg.find(x => x.id === f.e.empresa_id)?.nombre_comercial || '', html: f => badgeEmpresa(f.e.empresa_id) },
       { key: 'nombre', label: 'Nombre', val: f => (f.c?.nombre || '').toLowerCase(), html: f => `<span class="rr-avatar">${_esc(_iniciales(f.c?.nombre))}</span><strong>${_esc(f.c?.nombre || '—')}</strong>${f.e.vinculo === 'rh_prestador' ? ' <span class="badge badge-info">RH</span>' : ''}${f.e.estado !== 'activo' ? ' <span class="badge badge-danger">cesado</span>' : ''}` },
       { key: 'cuenta', label: 'Cuenta', oculta: true, val: f => f.e.user_id ? 0 : 1, html: f => f.e.user_id ? 'Con cuenta' : 'Sin cuenta' },
-      { key: 'horario', label: 'Horario', val: f => f.e.hora_entrada, html: f => `${f.e.hora_entrada.slice(0, 5)} – ${f.e.hora_salida.slice(0, 5)}` },
+      { key: 'horario', label: 'Horario', val: f => _horDia(f.e, fecha)?.e || 'zz', html: f => { const h = _horDia(f.e, fecha); return h ? `${h.e} – ${h.s}` : '<span class="badge badge-secondary">Descanso</span>' } },
       { key: 'ingreso', label: 'Ingreso', val: f => f.a?.entrada || '', html: f => (_hhmm(f.a?.entrada) || '—') + (f.a?.origen_entrada === 'admin' ? ' <small title="Registrado/editado por el administrador">(admin)</small>' : '') },
+      { key: 'almuerzo', label: 'Almuerzo', val: f => almDe(f).s?.hora || '', html: f => { const { s, r } = almDe(f); return !s ? GUION : r ? `${_hhmm(s.hora)} – ${_hhmm(r.hora)} <small>(${_difMin(s.hora, r.hora)} min)</small>` : `${_hhmm(s.hora)} – <span class="badge badge-warning">en almuerzo</span>` } },
       { key: 'salida', label: 'Salida', val: f => f.a?.salida || '', html: f => (_hhmm(f.a?.salida) || '—') + (f.a?.origen_salida === 'admin' ? ' <small title="Registrado/editado por el administrador">(admin)</small>' : '') },
-      { key: 'horas', label: 'Horas', der: true, val: f => f.a?.entrada && f.a?.salida ? _difMin(f.a.entrada, f.a.salida) : -1, html: f => f.a?.entrada && f.a?.salida ? _fmtDur(_difMin(f.a.entrada, f.a.salida)) : GUION },
-      { key: 'estado', label: 'Estado', val: f => f.a?.entrada ? (tarde(f) > 0 ? 1 : 0) : 2, html: f => {
+      { key: 'horas', label: 'Horas netas', der: true, val: f => _netoMin(f.a, f.marcas) ?? -1, html: f => { const n = _netoMin(f.a, f.marcas); return n == null ? GUION : _fmtDur(n) } },
+      { key: 'otras', label: 'Otras marcas', oculta: true, val: f => f.marcas.filter(m => m.tipo === 'otro').length, html: f => f.marcas.filter(m => m.tipo === 'otro').map(m => `${_hhmm(m.hora)} ${_esc(m.nota || '')}`).join('<br>') || GUION },
+      { key: 'estado', label: 'Estado', val: f => f.a?.entrada ? (_tardeMin(f.e, f.a) > 0 ? 1 : 0) : 2, html: f => {
           if (!f.a?.entrada) return '<span class="badge badge-secondary">Sin marcar</span>'
-          const t = tarde(f)
+          const t = _tardeMin(f.e, f.a)
           let h = t > 0 ? `<span class="badge badge-warning">Tardanza ${t} min</span>` : '<span class="badge badge-success">A tiempo</span>'
           if (f.a.salida) {
-            const sched = Number(f.e.hora_salida.slice(0, 2)) * 60 + Number(f.e.hora_salida.slice(3, 5)), real = _minLima(f.a.salida)
+            const hd = _horDia(f.e, fecha), sched = _hm2min(hd ? hd.s : f.e.hora_salida.slice(0, 5)), real = _minLima(f.a.salida)
             h += real - sched >= 15 ? ` <span class="badge badge-info">+${_fmtDur(real - sched)} extra</span>`
               : sched - real >= 15 ? ' <span class="badge badge-warning">Salida anticipada</span>' : ' <span class="badge badge-info">Jornada completa</span>'
           }
@@ -717,8 +956,7 @@ window.cargarAsistencia = async function () {
           return h } }
     ],
     acciones: f => [
-      esHoy && !f.a?.entrada ? { icono: '🟢', label: 'Marcar ingreso ahora', onclick: `window.rrhhMarcar(${f.e.id}, 'entrada')` } : null,
-      esHoy && f.a?.entrada && !f.a.salida ? { icono: '🔴', label: 'Marcar salida ahora', onclick: `window.rrhhMarcar(${f.e.id}, 'salida')` } : null,
+      esHoy && f.e.estado === 'activo' && !f.a?.salida ? { icono: '🕐', label: 'Marcar ahora…', onclick: `window.rrhhMarcar(${f.e.id})` } : null,
       { icono: '✏️', label: f.a ? 'Editar marcación' : 'Registrar marcación (con horas)', onclick: `window.asisEditar(${f.e.id})` },
       f.a?.salida ? { icono: '↩', label: 'Quitar salida', onclick: `window.asisEliminar(${f.a.id}, 'salida')` } : null,
       f.a ? { separador: true } : null,
@@ -729,6 +967,68 @@ window.cargarAsistencia = async function () {
   })
 }
 
+// Grilla empleados × días (semana o mes). Clic en una celda → abre ese día.
+// Falta = día L–V pasado, dentro del periodo laboral del empleado, sin marcación. Sábado y domingo no cuentan como falta.
+function _tablaAsisPeriodo({ filas, desde, hasta, botones, avisoSql, compacto }) {
+  const dias = _listaDias(desde, hasta)
+  const titulo = compacto
+    ? `${_MESES[Number(desde.slice(5, 7)) - 1]} ${desde.slice(0, 4)}`
+    : `Semana ${_dd(desde)} – ${_dd(hasta)}/${hasta.slice(0, 4)}`
+  const celda = (f, d) => {
+    const a = f.dias[d], dow = _dowDe(d)
+    const link = (txt, tip, color) => `<a href="#" onclick="window.asisIrDia('${d}'); return false;" title="${_esc(tip)}" style="text-decoration:none; ${color ? 'color:' + color + ';' : ''}">${txt}</a>`
+    if (!a) {
+      if (d > _asisHoy || (f.e.fecha_ingreso && d < f.e.fecha_ingreso) || (f.e.fecha_cese && d > f.e.fecha_cese)) return ''
+      if (!_horDia(f.e, d)) return '<span style="opacity:.35">·</span>'      // día de descanso del empleado
+      return link('✖', 'Sin marcación (falta)', 'var(--color-danger)')
+    }
+    const t = _tardeMin(f.e, a), marcas = f.marcasPorAsis[a.id] || [], neto = _netoMin(a, marcas)
+    const tip = `${_hhmm(a.entrada)} – ${_hhmm(a.salida) || 'sin salida'}${neto != null ? ' · ' + _fmtDur(neto) + ' netas' : ''}${t > 0 ? ' · tardanza ' + t + ' min' : ''}`
+    const color = t > 0 ? 'var(--color-warning)' : 'var(--color-success)'
+    if (compacto) return link(t > 0 ? '⏰' : '✔', tip, color)
+    return link(`${_hhmm(a.entrada)}–${a.salida ? _hhmm(a.salida) : '…'}`, tip, color)
+  }
+  const totales = f => {
+    let min = 0, tard = 0, falt = 0, pres = 0
+    dias.forEach(d => {
+      const a = f.dias[d], dow = _dowDe(d)
+      if (a) { pres++; const n = _netoMin(a, f.marcasPorAsis[a.id] || []); if (n) min += n; if (_tardeMin(f.e, a) > 0) tard++ }
+      else if (d < _asisHoy && _horDia(f.e, d) && !(f.e.fecha_ingreso && d < f.e.fecha_ingreso) && !(f.e.fecha_cese && d > f.e.fecha_cese)) falt++
+    })
+    return { min, tard, falt, pres }
+  }
+  const colsDias = dias.map((d, i) => ({
+    key: compacto ? 'd' + d.slice(8) : 'w' + i, label: compacto ? d.slice(8) : `${_DOW[_dowDe(d)]} ${d.slice(8)}`, ancho: compacto ? '34px' : undefined,
+    val: f => f.dias[d]?.entrada ? _minLima(f.dias[d].entrada) : (_dowDe(d) === 0 ? -2 : -1),
+    html: f => celda(f, d)
+  }))
+  const totFaltas = filas.reduce((s, f) => s + totales(f).falt, 0), totTard = filas.reduce((s, f) => s + totales(f).tard, 0)
+  montarTabla('card-asis', {
+    nombre: 'rrhh-asistencia-' + (compacto ? 'mes' : 'semana'), claseTabla: 'rr-grid' + (compacto ? ' rr-grid-mes' : ''),
+    titulo: `🕐 Asistencia · ${titulo} <small style="color:var(--text-secondary); font-weight:normal;">· ${filas.length} empleados · ${totTard} tardanzas · ${totFaltas} faltas</small>`,
+    placeholder: 'Buscar persona o empresa…', botones,
+    sub: `${avisoSql}<p class="rr-nota" style="padding:0;">${compacto ? '✔ a tiempo · ⏰ tardanza · ✖ falta (día laborable sin marcación) · · descanso. ' : 'Verde = a tiempo, ámbar = tardanza, ✖ = falta (día laborable sin marcación), · = descanso. '}Pasa el cursor para ver el detalle y haz clic en una celda para abrir ese día y corregirlo. Las horas son netas (sin almuerzo).</p>`,
+    sort: { col: 'nombre', dir: 'asc' }, filas, vacio: 'No hay empleados para este periodo.',
+    cols: [
+      { key: 'empresa', label: 'Empresa', val: f => _empresasCfg.find(x => x.id === f.e.empresa_id)?.nombre_comercial || '', html: f => badgeEmpresa(f.e.empresa_id) },
+      { key: 'nombre', label: 'Nombre', val: f => (f.c?.nombre || '').toLowerCase(), html: f => `<span class="rr-avatar">${_esc(_iniciales(f.c?.nombre))}</span><strong>${_esc(f.c?.nombre || '—')}</strong>${f.e.vinculo === 'rh_prestador' ? ' <span class="badge badge-info">RH</span>' : ''}${f.e.estado !== 'activo' ? ' <span class="badge badge-danger">cesado</span>' : ''}` },
+      ...colsDias,
+      { key: 'tot_dias', label: 'Días', der: true, val: f => totales(f).pres, html: f => totales(f).pres },
+      { key: 'tot_horas', label: 'Horas netas', der: true, val: f => totales(f).min, html: f => totales(f).min ? _fmtDur(totales(f).min) : GUION },
+      { key: 'tot_tard', label: 'Tardanzas', der: true, val: f => totales(f).tard, html: f => totales(f).tard ? `<span class="badge badge-warning">${totales(f).tard}</span>` : '0' },
+      { key: 'tot_falt', label: 'Faltas', der: true, val: f => totales(f).falt, html: f => totales(f).falt ? `<span class="badge badge-danger">${totales(f).falt}</span>` : '0' }
+    ],
+    acciones: f => [
+      { icono: '📅', label: 'Ver hoy', onclick: `window.asisIrDia('${_asisHoy}')` },
+      { icono: '👤', label: 'Editar ficha', onclick: `window.irATabRRHH('empleados'); setTimeout(() => window.abrirModalEmpleado(${f.e.id}), 300)` }
+    ]
+  })
+}
+
+window.addEventListener('asistencia:marcada', () => {
+  if (document.getElementById('tab-asistencia')?.classList.contains('active')) window.cargarAsistencia()
+})
+
 // ── Editar / registrar marcación (solo admin; motivo obligatorio) ───────────
 window.asisEditar = function (empleadoId) {
   window.cerrarMenuAcciones?.()
@@ -737,9 +1037,13 @@ window.asisEditar = function (empleadoId) {
   $('asisEmpId').value = empleadoId
   $('asisFechaVal').value = fecha
   $('asisTitulo').textContent = f.a ? 'Editar marcación' : 'Registrar marcación'
-  $('asisQuien').innerHTML = `<strong>${_esc(f.c?.nombre || '—')}</strong> · ${fechaDMY(fecha)} · horario ${f.e.hora_entrada.slice(0, 5)}–${f.e.hora_salida.slice(0, 5)}`
-  $('asisEntrada').value = f.a?.entrada ? _hhmm(f.a.entrada) : f.e.hora_entrada.slice(0, 5)
+  $('asisQuien').innerHTML = `<strong>${_esc(f.c?.nombre || '—')}</strong> · ${fechaDMY(fecha)} · horario ${_horDia(f.e, fecha) ? _horDia(f.e, fecha).e + '–' + _horDia(f.e, fecha).s : 'descanso'}`
+  $('asisEntrada').value = f.a?.entrada ? _hhmm(f.a.entrada) : (_horDia(f.e, fecha)?.e || f.e.hora_entrada.slice(0, 5))
   $('asisSalida').value = f.a?.salida ? _hhmm(f.a.salida) : ''
+  const _alS = (f.marcas || []).find(m => m.tipo === 'almuerzo_salida'), _alR = (f.marcas || []).find(m => m.tipo === 'almuerzo_regreso')
+  $('asisAlmSalida').value = _alS ? _hhmm(_alS.hora) : ''
+  $('asisAlmRegreso').value = _alR ? _hhmm(_alR.hora) : ''
+  $('asisAlmSalida').dataset.orig = $('asisAlmSalida').value; $('asisAlmRegreso').dataset.orig = $('asisAlmRegreso').value
   $('asisMotivo').value = ''
   ;['asisEntrada', 'asisMotivo'].forEach(i => $(i).classList.remove('invalido'))
   $('asisAyuda').innerHTML = f.a ? `Marcación actual: ${_hhmm(f.a.entrada) || '—'} → ${_hhmm(f.a.salida) || 'sin salida'}. Se guarda el valor anterior en el historial.`
@@ -752,13 +1056,22 @@ window.asisGuardar = async function () {
   const faltan = []
   if (!ent) faltan.push('asisEntrada')
   if (motivo.length < 3) faltan.push('asisMotivo')
-  ;['asisEntrada', 'asisMotivo'].forEach(i => $(i).classList.remove('invalido'))
+  ;['asisEntrada', 'asisMotivo', 'asisSalida', 'asisAlmSalida', 'asisAlmRegreso'].forEach(i => $(i).classList.remove('invalido'))
   if (faltan.length) { faltan.forEach(i => $(i).classList.add('invalido')); showToast('Completa la hora de ingreso y el motivo', 'warning'); return }
   if (sal && sal < ent) { $('asisSalida').classList.add('invalido'); showToast('La salida no puede ser anterior al ingreso', 'warning'); return }
+  const alS = $('asisAlmSalida').value, alR = $('asisAlmRegreso').value
+  const alCambio = alS !== ($('asisAlmSalida').dataset.orig || '') || alR !== ($('asisAlmRegreso').dataset.orig || '')
+  if (alR && !alS) { $('asisAlmSalida').classList.add('invalido'); showToast('Falta la hora de salida a almuerzo', 'warning'); return }
+  if (alS && alS < ent) { $('asisAlmSalida').classList.add('invalido'); showToast('El almuerzo no puede empezar antes del ingreso', 'warning'); return }
+  if (alS && alR && alR <= alS) { $('asisAlmRegreso').classList.add('invalido'); showToast('El regreso debe ser posterior a la salida a almuerzo', 'warning'); return }
   const btn = $('asisBtnGuardar'); btn.disabled = true
   const { error } = await supabase.rpc('rrhh_asistencia_editar', { p_empleado_id: Number($('asisEmpId').value), p_fecha: $('asisFechaVal').value, p_entrada: ent, p_salida: sal || null, p_motivo: motivo })
+  if (error) { btn.disabled = false; showToast(/does not exist|schema cache/.test(error.message) ? 'Falta ejecutar el SQL 137_rrhh_asistencia_edicion.sql' : error.message, 'danger'); return }
+  if (alCambio) {
+    const r2 = await supabase.rpc('rrhh_asistencia_almuerzo', { p_empleado_id: Number($('asisEmpId').value), p_fecha: $('asisFechaVal').value, p_salida: alS || null, p_regreso: alR || null, p_motivo: motivo })
+    if (r2.error) { btn.disabled = false; window.cargarAsistencia(); showToast('Ingreso/salida guardados, pero el almuerzo no: ' + (/does not exist|schema cache/.test(r2.error.message) ? 'falta ejecutar el SQL 158' : r2.error.message), 'warning', 7000); return }
+  }
   btn.disabled = false
-  if (error) { showToast(/does not exist|schema cache/.test(error.message) ? 'Falta ejecutar el SQL 137_rrhh_asistencia_edicion.sql' : error.message, 'danger'); return }
   showToast('Marcación guardada ✔', 'success'); window.closeModal('modal-asistencia'); window.cargarAsistencia()
 }
 
@@ -779,11 +1092,11 @@ window.asisEliminar = async function (asistenciaId, parte) {
   showToast(parte === 'salida' ? 'Salida quitada' : 'Marcación eliminada', 'success'); window.cargarAsistencia()
 }
 
-window.rrhhMarcar = async function (empleadoId, tipo) {
-  const { data, error } = await supabase.rpc('rrhh_marcar', { p_empleado_id: empleadoId, p_tipo: tipo })
-  if (error) { showToast(error.message || 'No se pudo marcar', 'danger'); return }
-  showToast(`${tipo === 'entrada' ? 'Ingreso' : 'Salida'} registrado a las ${data.hora_lima} (Lima) ✔`, 'success')
-  window.cargarAsistencia()
+window.rrhhMarcar = function (empleadoId) {
+  window.cerrarMenuAcciones?.()
+  const f = _asisFilas.find(x => x.e.id === empleadoId); if (!f) return
+  abrirModalMarcar({ empleado_id: f.e.id, nombre: f.c?.nombre, tipo_documento: f.c?.tipo_documento, nro_documento: f.c?.nro_documento,
+    entrada: f.a?.entrada, salida: f.a?.salida, marcas: f.marcas || [], hora_entrada: f.e.hora_entrada, hora_salida: f.e.hora_salida, horario_semanal: f.e.horario_semanal })
 }
 
 // PRUEBA OBLIGATORIA: la hora que guarda el sistema debe calzar con la de Lima.

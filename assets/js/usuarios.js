@@ -9,6 +9,8 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_CONFIG } from './config.js'
 import { supabase, update } from './supabase-client.js'
 import { showToast } from './helpers.js'
+import { getCurrentUser } from './auth-supabase.js'
+import { confirmarPequeno } from './rrhh/tabla.js'
 
 const $ = id => document.getElementById(id)
 const _esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
@@ -32,8 +34,15 @@ window.abrirModalUsuario = async function (id = null) {
   $('nuevoNombre').value = u?.nombre || ''
   $('nuevoEmail').value = u?.email || ''; $('nuevoEmail').disabled = !!u
   $('nuevoPassword').value = ''; $('usuGrpPass').style.display = u ? 'none' : ''
-  $('nuevoRole').value = u?.role === 'admin' ? 'admin' : (u?.role || 'oficina')
-  $('nuevoRole').disabled = u?.role === 'admin'      // el rol admin solo se toca en la base de datos
+  $('nuevoRole').value = u?.role || 'oficina'
+  $('usuId').dataset.rolOrig = u?.role || ''
+  const yo = String(getCurrentUser()?.email || '').toLowerCase()
+  const esYo = !!u && String(u.email).toLowerCase() === yo
+  $('nuevoRole').disabled = esYo                     // no puedes quitarte tu propio rol de administrador
+  const optAdmin = $('nuevoRole').querySelector('option[value="admin"]'); if (optAdmin) optAdmin.disabled = !u   // un usuario nuevo se crea sin admin; se promueve después
+  $('usuRolAyuda').textContent = esYo ? 'Tu propio rol no se puede cambiar desde aquí (así nunca te quedas sin administrador).'
+    : u ? (u.role === 'admin' ? 'Si lo cambias, pierde el acceso de administrador (siempre debe quedar uno activo).' : 'Administrador = acceso total: sueldos, planilla, tesorería, usuarios y roles de todas las empresas.')
+    : 'Crea el usuario y luego, desde «Editar», puedes darle rol Administrador.'
   window.openModal('modal-usuario')
 }
 
@@ -54,9 +63,12 @@ window.guardarUsuario = async function () {
   try {
     if (id) {
       const cambios = { nombre }
-      if (!$('nuevoRole').disabled) cambios.role = role
       if (!await update('users', id, cambios)) throw new Error('no se pudo guardar')
-      showToast('Usuario actualizado ✔', 'success')
+      const rolOrig = $('usuId').dataset.rolOrig
+      if (!$('nuevoRole').disabled && role !== rolOrig) {
+        const okRol = await window.usuarioCambiarRol(id, role, nombre, rolOrig)
+        if (!okRol) { await window.cargarUsuarios?.(); window.closeModal('modal-usuario'); return }   // el nombre sí quedó guardado
+      } else showToast('Usuario actualizado ✔', 'success')
     } else {
       const temp = createClient(SUPABASE_CONFIG.URL, SUPABASE_CONFIG.ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } })
       const { data, error } = await temp.auth.signUp({ email, password, options: { data: { nombre, role } } })
@@ -87,3 +99,24 @@ window.cambiarPasswordPropia = async function () {
 }
 
 window.togglePassword = function () { const i = $('nuevoPassword'); i.type = i.type === 'password' ? 'text' : 'password' }
+
+
+// Dar / quitar rol (también lo usa el menú ⋮ de la tabla). Las reglas viven en el servidor: rrhh_usuario_rol (SQL 159).
+const _ROL_TXT = { admin: 'Administrador', oficina: 'Oficina', vendedor: 'Vendedor', contador: 'Contador', almacen: 'Almacén', user: 'Usuario' }
+window.usuarioCambiarRol = async function (id, rol, nombre, rolAnterior = '') {
+  window.cerrarMenuAcciones?.()
+  const toca = rol === 'admin' || rolAnterior === 'admin'
+  if (toca) {
+    const dar = rol === 'admin'
+    const r = await confirmarPequeno({
+      titulo: dar ? 'Dar rol Administrador' : 'Quitar rol Administrador', okLabel: dar ? 'Sí, dar acceso total' : 'Quitar administrador', peligro: dar,
+      texto: dar ? `<strong>${_esc(nombre)}</strong> podrá ver y editar <strong>todo</strong>: sueldos, planilla, tesorería, usuarios y roles de todas las empresas. ¿Continuar?`
+                 : `<strong>${_esc(nombre)}</strong> pasará a «${_esc(_ROL_TXT[rol] || rol)}» y perderá el acceso de administrador.` })
+    if (!r.ok) return false
+  }
+  const { error } = await supabase.rpc('rrhh_usuario_rol', { p_user_id: id, p_rol: rol })
+  if (error) { showToast(/does not exist|schema cache/.test(error.message) ? 'Falta ejecutar el SQL 159_rrhh_horario_semanal.sql' : error.message, 'danger'); return false }
+  showToast(`Rol de ${nombre}: ${_ROL_TXT[rol] || rol} ✔`, 'success')
+  await window.cargarUsuarios?.()
+  return true
+}

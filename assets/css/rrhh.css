@@ -53,3 +53,52 @@
 .rr-resumen td:last-child { white-space:nowrap !important; width:40%; text-align:right; padding-left:8px !important; }
 .rr-resumen tr.tot td { border-top:1px solid var(--border-color) !important; padding-top:6px !important; }
 .rr-resumen td[colspan] { white-space:normal !important; width:auto; text-align:left !important; padding-left:0 !important; }
+
+/* Grilla de asistencia semanal / mensual */
+.rr-grid th, .rr-grid td { padding:8px 6px; }
+.rr-grid td:not(:first-child):not(:nth-child(2)), .rr-grid th:not(:first-child):not(:nth-child(2)) { text-align:center; }
+.rr-grid td a { display:inline-block; padding:2px 4px; border-radius:6px; font-variant-numeric:tabular-nums; font-weight:600; }
+.rr-grid td a:hover { background:var(--bg-tertiary); }
+.rr-grid-mes th, .rr-grid-mes td { padding:7px 2px; min-width:26px; font-size:0.82rem; }
+.rr-grid-mes td a { padding:2px 2px; font-size:1rem; }
+.rr-grid td:nth-child(2), .rr-grid th:nth-child(2) { white-space:nowrap; max-width:230px; overflow:hidden; text-overflow:ellipsis; position:sticky; left:0; z-index:2; background:var(--bg-primary); }
+.rr-grid-mes .rp-orden-hint { display:none; }
+.rr-grid-mes th { font-size:0.76rem; padding:7px 1px; }
+.rr-grid th:nth-last-child(-n+5), .rr-grid td:nth-last-child(-n+5) { white-space:nowrap; }
+.rr-grid-mes th:nth-child(n+3):nth-last-child(n+6), .rr-grid-mes td:nth-child(n+3):nth-last-child(n+6) { min-width:0; width:28px; }
+.rr-grid .rr-avatar { display:none; }
+/* Especificidad extra: las reglas globales de tabla pisaban el padding de la grilla */
+#card-asis table.rr-grid th, #card-asis table.rr-grid td { padding:8px 7px !important; }
+#card-asis table.rr-grid-mes th, #card-asis table.rr-grid-mes td { padding:7px 1px !important; }
+#card-asis table.rr-grid th:nth-child(1), #card-asis table.rr-grid td:nth-child(1),
+#card-asis table.rr-grid th:nth-child(2), #card-asis table.rr-grid td:nth-child(2),
+#card-asis table.rr-grid th:nth-last-child(-n+5), #card-asis table.rr-grid td:nth-last-child(-n+5) { padding-left:8px !important; padding-right:8px !important; }
+
+/* Modal de empleado por pasos + horario por día */
+.emp-pasos { display:flex; gap:6px; margin:0 0 16px; padding:4px; border-radius:12px; background:var(--bg-secondary); border:1px solid var(--border-color); }
+.emp-pasos button { flex:1; display:flex; align-items:center; justify-content:center; gap:8px; padding:9px 8px; border:0; border-radius:9px; background:transparent; color:var(--text-secondary); font-weight:600; font-size:0.9rem; cursor:pointer; }
+.emp-pasos button b { display:inline-flex; width:22px; height:22px; border-radius:50%; align-items:center; justify-content:center; background:var(--bg-tertiary); font-size:0.78rem; }
+.emp-pasos button.hecho b { background:rgba(16,185,129,.25); color:var(--color-success); }
+.emp-pasos button.activo { background:var(--bg-primary); color:var(--text-primary); box-shadow:0 1px 4px rgba(0,0,0,.25); }
+.emp-pasos button.activo b { background:var(--color-info); color:#fff; }
+.emp-paso { min-height:300px; display:flex; flex-direction:column; gap:12px; }
+.hs-atajos { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:0.85rem; color:var(--text-secondary); }
+.hs-cab, .hs-fila { display:grid; grid-template-columns:110px 1fr 1fr 120px; gap:10px; align-items:center; }
+.hs-cab { font-size:0.76rem; text-transform:uppercase; color:var(--text-secondary); padding:0 8px; margin-bottom:-6px; }
+.hs-semana { display:flex; flex-direction:column; gap:6px; }
+.hs-fila { padding:6px 8px; border-radius:10px; border:1px solid var(--border-color); background:var(--bg-secondary); }
+.hs-fila.off { opacity:.55; }
+.hs-fila input[type=time] { width:100%; }
+.hs-dia { display:flex; align-items:center; gap:8px; font-weight:600; margin:0; text-transform:none; cursor:pointer; }
+.hs-net { font-variant-numeric:tabular-nums; color:var(--text-secondary); font-size:0.88rem; text-align:right; }
+.hs-net.mal { color:var(--color-danger); font-weight:600; }
+@media (max-width:620px) { .hs-cab, .hs-fila { grid-template-columns:90px 1fr 1fr; } .hs-net { display:none; } .emp-pasos button { font-size:0.78rem; gap:4px; } }
+.hs-fila label.hs-dia { display:flex; align-items:center; justify-content:flex-start; gap:8px; margin:0; font-size:0.95rem; font-weight:600; text-transform:none; letter-spacing:0; }
+.hs-fila label.hs-dia input { width:auto; margin:0; }
+
+.ce-op { display:flex; gap:10px; align-items:flex-start; padding:9px 10px; margin:6px 0 0; border:1px solid var(--border-color); border-radius:10px; background:var(--bg-secondary); cursor:pointer; text-transform:none; font-size:0.9rem; font-weight:400; letter-spacing:0; }
+.ce-op input { width:auto; margin-top:3px; }
+.ce-op small { color:var(--text-secondary); }
+.form-group label.ce-op, .form-group label.ce-op strong, .form-group label.ce-op small { text-transform:none; letter-spacing:0; }
+.form-group label.ce-op { font-size:0.92rem; font-weight:400; color:var(--text-primary); }
+.form-group label.ce-op small { font-size:0.82rem; color:var(--text-secondary); font-weight:400; }

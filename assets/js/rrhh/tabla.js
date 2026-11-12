@@ -16,8 +16,10 @@ export const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;'
 export function montarTabla(cardId, cfg) {
   const card = document.getElementById(cardId); if (!card) return
   let st = _inst[cardId]
+  // Misma tarjeta con otro juego de columnas (p. ej. Asistencia Día → Semana → Mes): se rearma el armazón y se registran sus columnas
+  if (st && st.nombre !== cfg.nombre) { delete _inst[cardId]; st = null }
   if (!st) {
-    st = _inst[cardId] = { sort: cfg.sort || { col: cfg.cols[0].key, dir: 'asc' }, q: '' }
+    st = _inst[cardId] = { nombre: cfg.nombre, sort: cfg.sort || { col: cfg.cols[0].key, dir: 'asc' }, q: '' }
     registrarColumnas(cfg.nombre, [...cfg.cols.map(c => ({ key: c.key, label: c.label, oculta: c.oculta })), ...(cfg.acciones ? [{ key: 'acciones', label: 'Acciones' }] : [])])
     card.innerHTML = `
       ${colMenuHtml(cfg.nombre, `${cardId}-cm`, `${cardId}-cm-dd`)}
@@ -59,7 +61,7 @@ function _pintar(id) {
     return `<th data-col-tabla="${cfg.nombre}" data-col="${c.key}" style="cursor:pointer; user-select:none; white-space:nowrap;${c.der ? ' text-align:right;' : ''}${colStyle(cfg.nombre, c.key) ? ' display:none;' : ''}" onclick="window._rrTabla('${id}','sort','${c.key}')">${c.label}${fl}</th>`
   }
   const td = (c, f) => `<td data-col-tabla="${cfg.nombre}" data-col="${c.key}" style="${c.der ? 'text-align:right;' : ''}${colStyle(cfg.nombre, c.key) ? ' display:none;' : ''}">${c.html(f)}</td>`
-  cuerpo.innerHTML = `<table><thead><tr>${cfg.cols.map(th).join('')}${cfg.acciones ? `<th data-col-tabla="${cfg.nombre}" data-col="acciones" style="width:60px;${colStyle(cfg.nombre, 'acciones') ? ' display:none;' : ''}">Acciones</th>` : ''}</tr></thead>
+  cuerpo.innerHTML = `<table${cfg.claseTabla ? ` class="${cfg.claseTabla}"` : ''}><thead><tr>${cfg.cols.map(th).join('')}${cfg.acciones ? `<th data-col-tabla="${cfg.nombre}" data-col="acciones" style="width:60px;${colStyle(cfg.nombre, 'acciones') ? ' display:none;' : ''}">Acciones</th>` : ''}</tr></thead>
     <tbody>${filas.map(f => `<tr style="${cfg.estiloFila ? cfg.estiloFila(f) : ''}" ${cfg.dobleClic ? `ondblclick="${cfg.dobleClic(f)}"` : ''}>${cfg.cols.map(c => td(c, f)).join('')}${cfg.acciones ? `<td data-col-tabla="${cfg.nombre}" data-col="acciones" class="col-acciones"${colStyle(cfg.nombre, 'acciones')}>${menuAccionesFila(cfg.acciones(f))}</td>` : ''}</tr>`).join('')}</tbody></table>
     <div style="padding:8px 16px; color:var(--text-secondary); font-size:0.82rem;">${filas.length} registro(s)</div>`
 }
