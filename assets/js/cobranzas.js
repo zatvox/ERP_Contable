@@ -11,6 +11,7 @@ import { getCurrentUser } from './auth-supabase.js'
 import { supabase, empresaTrabajoCtx } from './supabase-client.js'
 import { miniaturaArchivoHTML, pintarMiniaturaArchivo } from './shared/adj-preview.js'
 import { tabularDetalle, dtInsignia } from './shared/detalle-tabs.js'
+import { montarConexiones } from './shared/detalle-conectado.js'
 import { vincularTCaFecha, marcarTC } from './shared/tc-fecha.js'
 import { getTipoCambioDia } from './sunat-api.js'
 import { badgeDetraccion, abrirModalDetraccion } from './shared/detraccion.js'
@@ -3494,6 +3495,8 @@ window.verDetalleCP = async function(tipo, id) {
       mapa: { 'Recibo': ['🧾', 'Recibo'], 'Documento': ['📄', 'Documento'], 'Asiento': ['📒', 'Asiento'], 'Movimiento': ['🏦', 'Banco'] },
       unir: ['Cuotas'],
     })
+    body.insertAdjacentHTML('afterbegin', '<div class="dc-host"></div>')
+    montarConexiones(body.firstElementChild, tipo, id)
   } catch (e) {
     console.error('verDetalleCP:', e)
     body.innerHTML = `<p style="color:var(--color-danger);">Error: ${_esc(e.message)}</p>`

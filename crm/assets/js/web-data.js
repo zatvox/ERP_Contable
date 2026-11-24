@@ -14,36 +14,23 @@ const ls = {
   set: (k, v) => { try { localStorage.setItem(k, v) } catch { /* sin storage */ } },
 }
 
-// ---------- contexto: empresa activa + sesión interna ----------
+// ---------- contexto: empresa del catálogo (por código público, sin sesión interna) ----------
+// El visitante entra con ?c=<código>. Sin código válido no se muestra ninguna empresa
+// (no hay lista pública de empresas ni accesos al ERP desde aquí).
 let ctx = null
 export async function initCtx() {
   if (ctx) return ctx
-  const { data, error } = await supabase.rpc('crm_empresas_publicas')
-  if (error) console.error('[CRM] empresas:', error.message)
-  let empresas = data || []
-
-  // sesión interna (si entró desde el ERP comparte la sesión)
-  let staff = null
-  try {
-    const { data: { session } } = await supabase.auth.getSession()
-    if (session) {
-      const { data: u } = await supabase.from('users').select('id, nombre, role, active').eq('auth_id', session.user.id).maybeSingle()
-      if (u && u.active !== false && ['admin', 'oficina', 'vendedor'].includes(u.role)) staff = u
-    }
-  } catch { /* anónimo */ }
-
-  // el personal ve TODAS las empresas, aunque aún no publiquen nada
-  if (staff) {
-    const { data: todas } = await supabase.from('empresa_config').select('id, codigo, nombre_comercial, color').order('id')
-    const ids = new Set(empresas.map(e => e.id))
-    ;(todas || []).forEach(e => { if (!ids.has(e.id)) empresas.push({ ...e, whatsapp: null, titulo: null, mensaje: null, mostrar_precios: true, igv_incluido: true, moneda_precio: 'PEN', cuentas_bancarias: [] }) })
-    empresas.sort((a, b) => a.id - b.id)
+  const qs = new URLSearchParams(location.search)
+  const slug = (qs.get('c') || ls.get('crm_c') || '').trim()
+  let emp = null
+  if (slug) {
+    const { data, error } = await supabase.rpc('crm_empresa_publica', { p_slug: slug })
+    if (error) console.error('[Catálogo]', error.message)
+    emp = (Array.isArray(data) ? data[0] : data) || null
   }
-
-  const q = Number(new URLSearchParams(location.search).get('emp')) || Number(ls.get('crm_emp')) || null
-  const emp = empresas.find(e => e.id === q) || empresas[0] || null
-  if (emp) ls.set('crm_emp', String(emp.id))
-  ctx = { empresas, emp, staff }
+  if (emp) { ls.set('crm_c', slug); ls.set('crm_emp', String(emp.id)) }
+  else { ls.set('crm_c', ''); ls.set('crm_emp', '') }
+  ctx = { empresas: emp ? [emp] : [], emp, staff: null }
   return ctx
 }
 export const getCtx = () => ctx

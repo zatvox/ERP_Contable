@@ -22,6 +22,7 @@
         <li><a href="crm.html" data-page="crm">&#129309; CRM</a></li>
         <li><a href="cobranzas.html" data-page="cobranzas">&#128176; Cobranza y pagos</a></li>
         <li><a href="tesoreria.html" data-page="tesoreria">&#128179; Tesorería</a></li>
+        <li><a href="tareas.html" data-page="tareas">&#9989; Tareas</a></li>
         <li data-solo-admin><a href="rrhh.html" class="active" data-page="rrhh">&#128101; RRHH</a></li>
         <li><a href="costeo-importaciones.html" data-page="costeo">&#128674; Carpetas Importación</a></li>
         <li><a href="contabilidad.html" data-page="contabilidad">&#128209; Contabilidad</a></li>
@@ -132,6 +133,12 @@
                 </select></div>
               <div class="form-group"><label id="empSueldoLbl">Sueldo mensual *</label><input type="number" id="empSueldo" step="0.01" min="0" placeholder="0.00" oninput="window.empResumen()"></div>
               <div class="form-group"><label>Fecha de ingreso</label><input type="date" id="empIngreso"></div>
+            </div>
+            <div class="rr-fila" style="grid-template-columns:2fr 1fr; align-items:end;">
+              <div class="form-group"><label>Área (para Tareas)</label><input type="text" id="empArea" list="empAreasLista" placeholder="Ej: Contabilidad, Ventas, Almacén…" maxlength="60"><datalist id="empAreasLista"></datalist>
+                <small class="rr-nota" style="padding:0;">Define quién ve las tareas de esa área. Elige una existente para no duplicar.</small></div>
+              <div class="form-group"><label class="ce-op" style="display:flex; gap:8px; align-items:center;"><input type="checkbox" id="empJefeArea" style="width:auto;"> Jefe de área</label>
+                <small class="rr-nota" style="padding:0;">Ve y reparte las tareas de su área.</small></div>
             </div>
             <div class="form-group"><label>Cargo(s)</label><input type="text" id="empCargo">
               <small class="rr-nota" style="padding:0;">Elige uno o varios cargos por área (puedes escribir uno nuevo en el buscador).</small></div>
@@ -278,6 +285,6 @@
   <script type="module" src="assets/js/supabase-data.js"></script>
   <script type="module" src="assets/js/helpers.js"></script>
   <script type="module" src="assets/js/main.js"></script>
-  <script type="module" src="assets/js/rrhh.js?v=12"></script>
+  <script type="module" src="assets/js/rrhh.js?v=13"></script>
 </body>
 </html>

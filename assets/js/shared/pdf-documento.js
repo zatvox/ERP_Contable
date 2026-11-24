@@ -80,7 +80,7 @@ export function numeroALetras(monto, moneda = 'PEN') {
  *  ventana ni diálogo de impresión). html2canvas + jsPDF, mismas librerías
  *  que el estado de cuenta. Si el contenido pasa de una hoja, se corta en
  *  varias páginas y la firma "by: ZatVox" se repite en cada una. */
-export async function descargarPDFDesdeHTML(html, nombreArchivo) {
+export async function descargarPDFDesdeHTML(html, nombreArchivo, opts = {}) {   // opts.numerar = texto de pie → «texto · Página X de Y»
   const ifr = document.createElement('iframe')
   ifr.style.cssText = 'position:fixed; left:-10000px; top:0; width:794px; height:1123px; border:0; visibility:hidden;'
   document.body.appendChild(ifr)
@@ -134,6 +134,14 @@ export async function descargarPDFDesdeHTML(html, nombreArchivo) {
         pdf.text('by: ZV', W - 10.6, 6, { align: 'right' })
       }
       y = fin; pag++
+    }
+    if (opts.numerar) {   // pie con numeración en todas las hojas (solo si se pide)
+      const n = pdf.getNumberOfPages()
+      for (let i = 1; i <= n; i++) {
+        pdf.setPage(i); pdf.setFont('helvetica', 'normal').setFontSize(7.5).setTextColor(107, 114, 128)
+        pdf.text(String(opts.numerar), 10.6, H - 4.5)
+        pdf.text(`Página ${i} de ${n}`, W - 10.6, H - 4.5, { align: 'right' })
+      }
     }
     pdf.save(nombreArchivo)
     showToast('PDF descargado ✅', 'success')

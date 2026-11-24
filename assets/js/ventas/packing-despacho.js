@@ -58,6 +58,7 @@ export function htmlDespacho() {
       <span class="pk-desp-chip" id="pkDespChip">Define quién lleva la mercadería</span>
     </div>
     <div class="pk-desp-aviso" id="pkDespAviso" hidden></div>
+    <button type="button" class="pk-desp-ayuda" id="pkDespAyuda" hidden onclick="window._pkDespAvisoVer()" title="Despacho pendiente — ver detalle">?</button>
     <div class="pk-desp-cuerpo" id="pkDespCuerpo" hidden>
       <label class="pk-desp-chk full">
         <input type="checkbox" id="pkDespUsaCli" onchange="window._pkDespUsaCli()">
@@ -163,12 +164,18 @@ export function pendientesDespacho() {
   if (!_$('pkDespMaps').value.trim()) f.push('link de Google Maps')
   return f
 }
+let _avisoTimer = null
+let _avisoMin = false          // true = ya se encogió al botón "?"
 function _pintarAviso() {
-  const el = _$('pkDespAviso'); if (!el) return
+  const el = _$('pkDespAviso'), btn = _$('pkDespAyuda'); if (!el) return
   const f = pendientesDespacho()
-  el.hidden = !f.length
   if (f.length) el.innerHTML = `⚠ <b>Despacho pendiente:</b> falta ${f.join(', ')}. Puedes guardar así y completarlo después en el PK o en la factura, <b>pero es obligatorio antes de emitir la guía de despacho.</b>`
+  if (!f.length) { el.hidden = true; if (btn) btn.hidden = true; clearTimeout(_avisoTimer); _avisoTimer = null; return }
+  // A los 30 s el aviso se encoge a un botón "?" en la esquina de la sección
+  el.hidden = _avisoMin; if (btn) btn.hidden = !_avisoMin
+  if (!_avisoMin && !_avisoTimer) _avisoTimer = setTimeout(() => { _avisoTimer = null; _avisoMin = true; _pintarAviso() }, 30000)
 }
+window._pkDespAvisoVer = () => { _avisoMin = false; clearTimeout(_avisoTimer); _avisoTimer = null; _pintarAviso() }
 
 async function _cargarDistritos() {
   if (_distritos) return
@@ -186,6 +193,7 @@ export async function iniciarDespacho(pk, { empresaId = null } = {}) {
   _manual = !!pk?.despacho_costo_manual
   _ultGan = null
   _pvPedidos = new Set()
+  _avisoMin = false; clearTimeout(_avisoTimer); _avisoTimer = null
   _$('pkDespTermino').value = pk?.termino_despacho || ''
   _$('pkDespUsaCli').checked = pk ? pk.despacho_usa_dir_cliente !== false : true
   _$('pkDespDir').value = pk?.despacho_direccion || ''

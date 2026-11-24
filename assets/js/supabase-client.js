@@ -262,14 +262,18 @@ function _interpretarErrorInsert(error, tabla) {
   return { codigo, tabla, mensaje: error?.message || 'error desconocido' }
 }
 
+let _ultimoErrorUpdate = null
+export function ultimoErrorUpdate() { return _ultimoErrorUpdate }
+
 export async function update(table, id, data) {
   _enVuelo.clear()
+  _ultimoErrorUpdate = null
   await esperarContextoEmpresa()
   try {
     // Nunca enviar 'id' ni 'created_at' en el payload: las PK son GENERATED ALWAYS (error 428C9)
     const { id: _omit, created_at: _omit2, ...clean } = data || {}
     const { data: result, error } = await supabase.from(table).update(clean).eq('id', id).select()
-    if (error) { console.error(`Error updating ${table}:`, error); return null }
+    if (error) { console.error(`Error updating ${table}:`, error); _ultimoErrorUpdate = _interpretarErrorInsert(error, table); return null }
     return result ? result[0] : 'sin resultado'
   } catch (e) { console.error('Error en update:', e); return null }
 }

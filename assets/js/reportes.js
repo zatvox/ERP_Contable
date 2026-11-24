@@ -15,6 +15,8 @@
 // ============================================================================
 
 import { formatNumber, formatQty, showToast } from './helpers.js'
+import { renderTablaReporte, enlazarTabla, construirArbol, filasVisibles, matrizCruzada } from './shared/arbol-reporte.js'
+import { analizar } from './shared/observaciones-reporte.js'
 
 // ============================================================================
 // VISTA GUARDADA POR USUARIO (2026-10-06, SQL 69_preferencias_reporte.sql)
@@ -59,6 +61,8 @@ function _estadoDesdeVista(config, v, base) {
     ordenKey: v.ordenKey ?? base.ordenKey,
     ordenDir: v.ordenDir || base.ordenDir,
     limite:   v.limite ?? base.limite,
+    vista: ['arbol', 'cruzada', 'plana'].includes(v.vista) ? v.vista : base.vista, nivelAbierto: v.nivelAbierto ?? base.nivelAbierto, exc: { ...(v.exc || {}) },
+    pesa: !!v.pesa, soloAlertas: false, medCruz: v.medCruz && meds.has(v.medCruz) ? v.medCruz : null,
     gran:     { ...base.gran, ...(v.gran || {}) }
   }
 }
@@ -369,6 +373,7 @@ export function crearReporte(containerId, config) {
     ordenKey: config.orden?.key || null,
     ordenDir: config.orden?.dir || 'desc',
     limite:   config.limite || 0,
+    vista: 'arbol', nivelAbierto: 0, exc: {}, pesa: false, soloAlertas: false, medCruz: null,
     gran:     Object.fromEntries((config.dimensiones || []).filter(d => d.tipo === 'fecha').map(d => [d.key, d.granularidad || 'mes']))
   }
   const vista = _vistas.get(id)
@@ -391,6 +396,7 @@ export function crearReporte(containerId, config) {
           <button class="btn btn-secondary btn-small" data-rp-accion="guardar-vista" data-rp-id="${id}" title="Guarda filtros, fechas, agrupación, columnas y orden: el reporte abrirá siempre así (solo para tu usuario)">⭐ ${vista ? 'Actualizar vista' : 'Guardar vista'}</button>
           ${vista ? `<button class="btn btn-secondary btn-small" data-rp-accion="quitar-vista" data-rp-id="${id}" title="Borra la vista guardada y vuelve al diseño original del reporte">✕ Quitar vista</button>` : ''}
           <button class="btn btn-secondary btn-small" data-rp-accion="excel" data-rp-id="${id}">⬇ Excel</button>
+          <button class="btn btn-secondary btn-small" data-rp-accion="imprimir" data-rp-id="${id}" title="Imprimir este reporte en PDF: tú eliges qué secciones incluir">🖨️ Imprimir PDF</button>
           <button class="btn btn-secondary btn-small" data-rp-accion="limpiar" data-rp-id="${id}" title="${vista ? 'Vuelve a tu vista guardada' : 'Vuelve al diseño original del reporte'}">↺ Limpiar</button>
         </div>
       </div>
@@ -403,18 +409,18 @@ export function crearReporte(containerId, config) {
           </div>`).join('')}
 
         <div class="reporte-filtro">
-          <label>Agrupar por</label>
+          <label>Agrupar por <span class="rp-ayuda">· cada chip es un nivel · arrastra para cambiar el orden</span></label>
           <div class="reporte-chips" id="rp-dims-${id}">
             ${config.dimensiones.map(d => d.tipo === 'fecha' ? `
-              <span role="button" tabindex="0" class="reporte-chip ${estado.agrupar.includes(d.key) ? 'on' : ''}"
-                    data-rp-dim="${_esc(d.key)}" data-rp-id="${id}" style="display:inline-flex; align-items:center; gap:6px;">${_esc(d.label)}
+              <span role="button" tabindex="0" class="reporte-chip ${estado.agrupar.includes(d.key) ? 'on' : ''}" draggable="true"
+                    data-rp-dim="${_esc(d.key)}" data-rp-id="${id}" style="display:inline-flex; align-items:center; gap:6px;">${estado.agrupar.includes(d.key) ? `<b class="rp-ord">${estado.agrupar.indexOf(d.key) + 1}</b>` : ''}${_esc(d.label)}
                 <select class="reporte-chip-gran" data-rp-gran="${_esc(d.key)}" title="Agrupar la fecha por"
                         onclick="event.stopPropagation()" onmousedown="event.stopPropagation()"
                         style="width:auto; padding:1px 4px; font-size:0.78rem; border-radius:6px; background:var(--bg-primary); color:var(--text-primary); border:1px solid var(--border-color);">
                   ${Object.entries(_GRAN).map(([v, l]) => `<option value="${v}" ${(estado.gran?.[d.key] || d.granularidad || 'mes') === v ? 'selected' : ''}>${l}</option>`).join('')}
                 </select></span>` : `
-              <button type="button" class="reporte-chip ${estado.agrupar.includes(d.key) ? 'on' : ''}"
-                      data-rp-dim="${_esc(d.key)}" data-rp-id="${id}">${_esc(d.label)}</button>`).join('')}
+              <button type="button" class="reporte-chip ${estado.agrupar.includes(d.key) ? 'on' : ''}" draggable="true"
+                      data-rp-dim="${_esc(d.key)}" data-rp-id="${id}">${estado.agrupar.includes(d.key) ? `<b class="rp-ord">${estado.agrupar.indexOf(d.key) + 1}</b>` : ''}${_esc(d.label)}</button>`).join('')}
           </div>
         </div>
 
@@ -514,14 +520,15 @@ export function refrescarReporte(id) {
       : ''
   }
 
-  // --- Tabla
+  // --- Tabla: Árbol / Cruzada / Plana (ver shared/arbol-reporte.js)
   const tCont = document.getElementById(`rp-tabla-${id}`)
   if (tCont) {
     if (filtrados.length === 0) {
       tCont.innerHTML = `<p class="reporte-vacio">Sin datos para los filtros seleccionados.</p>`
     } else {
-      const filasMostrar = estado.limite > 0 ? grupos.slice(0, estado.limite) : grupos
-      tCont.innerHTML = `
+      const plana = () => {
+        const filasMostrar = estado.limite > 0 ? grupos.slice(0, estado.limite) : grupos
+        return `
         <table>
           <thead>
             <tr>
@@ -552,14 +559,11 @@ export function refrescarReporte(id) {
             </tr>
           </tfoot>
         </table>`
-      tCont.querySelectorAll('[data-rp-orden]').forEach(th => {
-        th.addEventListener('click', () => {
-          const k = th.getAttribute('data-rp-orden')
-          if (estado.ordenKey === k) estado.ordenDir = estado.ordenDir === 'asc' ? 'desc' : 'asc'
-          else { estado.ordenKey = k; estado.ordenDir = k === '_etiqueta' ? 'asc' : 'desc' }
-          refrescarReporte(id)
-        })
-      })
+      }
+      const ctx = _ctxReporte(id, filtrados, medidasUsar)
+      const r = renderTablaReporte(ctx, plana)
+      tCont.innerHTML = r.html ?? plana()
+      enlazarTabla(tCont, ctx, r.arbol, () => refrescarReporte(id))
     }
   }
 
@@ -573,7 +577,12 @@ export function refrescarReporte(id) {
     }
     if (vis) gCont.innerHTML = vis
     else if (config.grafico === false || grupos.length === 0 || estado.agrupar.length === 0) gCont.innerHTML = ''
-    else gCont.innerHTML = _barras(grupos.slice(0, 12), medidasUsar[0])
+    else {
+      const base = estado.agrupar.length > 1 && (estado.vista || 'arbol') !== 'plana'
+        ? agrupar(filtrados, [estado.agrupar.find(k => !_esFechaDim(config, k)) || estado.agrupar[0]], medidasUsar, _resolverDims(config, estado)).sort((a, b) => (b[medidasUsar[0].key] || 0) - (a[medidasUsar[0].key] || 0))
+        : grupos
+      gCont.innerHTML = _barras(base.slice(0, 12), medidasUsar[0])
+    }
   }
 }
 
@@ -726,7 +735,7 @@ function _bindEventos(id) {
         // Elegir granularidad implica querer agrupar por esa fecha
         if (!estado.agrupar.includes(k)) {
           estado.agrupar.push(k)
-          sel.closest('[data-rp-dim]')?.classList.add('on')
+          estado.exc = {}; crearReporte(reg.containerId, config); return
         }
         refrescarReporte(id)
       })
@@ -737,8 +746,18 @@ function _bindEventos(id) {
         const k = btn.getAttribute('data-rp-dim')
         const i = estado.agrupar.indexOf(k)
         if (i >= 0) estado.agrupar.splice(i, 1); else estado.agrupar.push(k)
-        btn.classList.toggle('on')
-        refrescarReporte(id)
+        estado.exc = {}; crearReporte(reg.containerId, config)
+      })
+      // Arrastrar y soltar: cambia el ORDEN de los niveles (solo entre chips activos)
+      btn.addEventListener('dragstart', ev => { ev.dataTransfer.setData('text/plain', btn.getAttribute('data-rp-dim')); ev.dataTransfer.effectAllowed = 'move' })
+      btn.addEventListener('dragover', ev => { if (estado.agrupar.includes(btn.getAttribute('data-rp-dim'))) { ev.preventDefault(); btn.classList.add('rp-drop') } })
+      btn.addEventListener('dragleave', () => btn.classList.remove('rp-drop'))
+      btn.addEventListener('drop', ev => {
+        ev.preventDefault(); btn.classList.remove('rp-drop')
+        const de = ev.dataTransfer.getData('text/plain'), a = btn.getAttribute('data-rp-dim')
+        if (!de || de === a || !estado.agrupar.includes(de) || !estado.agrupar.includes(a)) return
+        estado.agrupar.splice(estado.agrupar.indexOf(de), 1); estado.agrupar.splice(estado.agrupar.indexOf(a), 0, de)
+        estado.exc = {}; crearReporte(reg.containerId, config)
       })
     })
 
@@ -755,7 +774,7 @@ function _bindEventos(id) {
         const req = config.medidas.find(m => m.key === k)?.requiereDim
         if (i < 0 && req && !estado.agrupar.includes(req)) {
           estado.agrupar.push(req)
-          cajaFiltros.querySelector(`[data-rp-dim="${req}"]`)?.classList.add('on')
+          estado.exc = {}; crearReporte(reg.containerId, config); return
         }
         refrescarReporte(id)
       })
@@ -767,6 +786,7 @@ function _bindEventos(id) {
       const accion = btn.getAttribute('data-rp-accion')
       if (accion === 'csv')     exportarCSV(id)
       if (accion === 'excel')   exportarExcel(id)
+      if (accion === 'imprimir') imprimirReporte(id)
       if (accion === 'guardar-vista') _guardarVista(id)
       if (accion === 'quitar-vista')  _quitarVista(id)
       if (accion === 'limpiar') {
@@ -957,4 +977,116 @@ function _inyectarBotonStats() {
 if (typeof document !== 'undefined') {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _inyectarBotonStats)
   else _inyectarBotonStats()
+}
+
+
+// ============================================================================
+// CONTEXTO DE LA TABLA + IMPRIMIR PDF (2026-11-23)
+// ============================================================================
+const _esFechaDim = (config, k) => (config.dimensiones || []).find(d => d.key === k)?.tipo === 'fecha'
+
+function _ctxReporte(id, filtrados, medidas) {
+  const reg = _registro.get(id), { config, estado } = reg
+  return { config, estado, filtrados, medidas, resolver: _resolverDims(config, estado), calc: calcularMedidas, fmt: formatearMedida,
+    valorOrd: _valorOrdenable, labelDim: k => _labelDim(config, k, estado), colorMedida: _colorMedida, csv: descargarCSV }
+}
+
+function _imagenBarras(items) {
+  const W = 940, rowH = 30, padL = 260, padR = 140, top = 14, H = top + items.length * rowH + 10
+  const cv = document.createElement('canvas'); cv.width = W * 2; cv.height = H * 2
+  const g = cv.getContext('2d'); g.scale(2, 2); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.font = '12px Arial'
+  const max = Math.max(...items.map(x => Math.abs(x.v)), 1e-9)
+  items.forEach((x, i) => {
+    const y = top + i * rowH; let t = x.l
+    g.textAlign = 'right'; g.fillStyle = '#374151'
+    while (g.measureText(t).width > padL - 14 && t.length > 4) t = t.slice(0, -2)
+    g.fillText(t === x.l ? t : t + '…', padL - 8, y + 18)
+    const w = Math.max(2, (W - padL - padR) * Math.abs(x.v) / max)
+    g.fillStyle = x.v < 0 ? '#dc2626' : '#3b82f6'; g.fillRect(padL, y + 5, w, 18)
+    g.textAlign = 'left'; g.fillStyle = '#111827'; g.fillText(x.t, padL + w + 6, y + 18)
+  })
+  return cv.toDataURL('image/png')
+}
+
+async function imprimirReporte(id) {
+  const reg = _registro.get(id); if (!reg) return
+  const { abrirImprimirReporte } = await import('./shared/imprimir-reporte.js')
+  const { config, estado } = reg
+  const filtrados = aplicarFiltros(config.datos || [], config.filtros || [], estado.filtros)
+  const ms = config.medidas.filter(m => estado.medidas.includes(m.key)), medidas = ms.length ? ms : config.medidas
+  const c = _ctxReporte(id, filtrados, medidas), M0 = medidas[0], res = c.resolver
+  const grupos = agrupar(filtrados, estado.agrupar, medidas, res)
+  const dimR = estado.agrupar.find(k => !_esFechaDim(config, k)) || estado.agrupar[0]
+  const rank = dimR ? agrupar(filtrados, [dimR], medidas, res).sort((a, b) => (b[M0.key] || 0) - (a[M0.key] || 0)) : []
+  const sinHtml = h => String(h ?? '').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&')
+  const vistaTxt = { arbol: 'Árbol', cruzada: 'Cruzada', plana: 'Plana' }[estado.vista || 'arbol']
+
+  abrirImprimirReporte({
+    id: 'rp_' + id, titulo: config.titulo || 'Reporte', pregunta: config.descripcion || '', modulo: '',
+    filtros: () => {
+      const f = []
+      ;(config.filtros || []).forEach(fl => {
+        let v = estado.filtros[fl.key]
+        if (v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length) || /^(todos?|all)$/i.test(String(v))) return
+        const nom = x => { const o = (fl.opciones || []).find(o => String(typeof o === 'object' ? o.value : o) === String(x)); return o ? (typeof o === 'object' ? (o.label ?? o.value) : o) : x }
+        if (Array.isArray(v)) { const l = v.map(nom); f.push(`${fl.label}: ${l.slice(0, 3).join(', ')}${l.length > 3 ? ` (+${l.length - 3})` : ''}`) }
+        else if (typeof v === 'object') { if (v.desde || v.hasta) f.push(`${fl.label}: ${String(v.desde || 'inicio').split('-').reverse().join('/')} → ${String(v.hasta || 'hoy').split('-').reverse().join('/')}`) }
+        else f.push(`${fl.label}: ${nom(v)}`)
+      })
+      if (estado.agrupar.length) f.push('Agrupado por: ' + estado.agrupar.map(k => _labelDim(config, k, estado)).join(' ▸ '))
+      f.push('Vista: ' + vistaTxt)
+      return f
+    },
+    kpis: () => {
+      const k = config.kpis ? config.kpis(filtrados, grupos) : null
+      if (k && k.length) return k.map(x => ({ label: x.label, texto: sinHtml(x.texto ?? formatearMedida(x.valor, x.formato)), sub: x.sub || '' }))
+      const t = calcularMedidas(filtrados, medidas)
+      return medidas.slice(0, 4).map(m => ({ label: m.label, texto: formatearMedida(t[m.key], m.formato) }))
+    },
+    hallazgos: () => {
+      const out = [], pos = rank.map(g => Math.max(0, g[M0.key] || 0)), tot = pos.reduce((s, v) => s + v, 0)
+      if (rank.length && tot > 0) {
+        out.push(`⭐ ${rank[0]._etiqueta} lidera en ${M0.label} con ${formatearMedida(rank[0][M0.key], M0.formato)} (${(pos[0] / tot * 100).toFixed(1)} % del total).`)
+        let acc = 0, n = 0; for (const v of pos) { acc += v; n++; if (acc / tot >= .8) break }
+        if (rank.length >= 3) out.push(`🎯 ${n} de ${rank.length} ${_labelDim(config, dimR, estado).toLowerCase()} generan el 80 % de ${M0.label}.`)
+      }
+      out.push(`📄 ${filtrados.length.toLocaleString('en-US')} registro(s) agrupados en ${grupos.length.toLocaleString('en-US')} combinación(es).`)
+      return out
+    },
+    graficos: [{ id: 'barras', nombre: dimR ? `Ranking por ${_labelDim(config, dimR, estado).toLowerCase()}` : 'Ranking', detalle: M0.label + ' · top 12', ok: rank.length > 0, actual: true,
+      img: async () => _imagenBarras(rank.slice(0, 12).map(g => ({ l: g._etiqueta, v: g[M0.key] || 0, t: formatearMedida(g[M0.key], M0.formato) }))) }],
+    tabla: ({ filas }) => {
+      const tot = calcularMedidas(filtrados, medidas), cap = filas > 0 ? filas : Infinity, vista = estado.vista || 'arbol'
+      const fmt = (v, m) => formatearMedida(v, m.formato)
+      if (vista === 'cruzada') {
+        const X = matrizCruzada(c, 8)
+        if (X) return { cab: [`${_labelDim(config, X.kr, estado)} \\ ${_labelDim(config, X.kc, estado)}`, ...X.colKeys.map(k => String(k).replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, '$3/$2/$1')), 'Total'],
+          filas: X.filas.slice(0, cap).map(f => ({ c: [f.label, ...f.celdas.map(x => (x.v ? fmt(x.v, X.M) : '·')), fmt(f.tot, X.M)] })),
+          total: ['TOTAL', ...X.colTot.map(x => fmt(x.v, X.M)), fmt(X.grand.v, X.M)],
+          nota: `Medida: ${X.M.label}.${X.totalCols > X.colKeys.length ? ` Solo se imprimen las ${X.colKeys.length} primeras de ${X.totalCols} columnas.` : ''}` }
+      }
+      if (vista === 'arbol' && estado.agrupar.length) {
+        const vis = filasVisibles(c, construirArbol(c)), lim = vis.slice(0, cap)
+        return { cab: [estado.agrupar.map(k => _labelDim(config, k, estado)).join(' ▸ '), 'N°', ...medidas.map(m => m.label)],
+          filas: lim.map(f => f.resto ? { c: [`… ${f.resto.n} grupo(s) menores (${f.resto.pct.toFixed(1)} %)`, '', ...medidas.map(() => '')], n: f.nivel }
+            : { c: [f.n.label, String(f.n.filas.length), ...medidas.map(m => fmt(f.n.vals[m.key], m))], n: f.n.nivel, b: f.n.nivel === 0 && !!f.n.hijos }),
+          total: ['TOTAL', String(filtrados.length), ...medidas.map(m => fmt(tot[m.key], m))],
+          nota: vis.length > lim.length ? `Se imprimen ${lim.length} de ${vis.length} filas visibles. Abre/cierra niveles en pantalla para elegir el detalle.` : 'Se imprime el árbol tal como lo tienes abierto en pantalla.' }
+      }
+      const ok = estado.ordenKey && estado.ordenKey !== '_etiqueta' ? estado.ordenKey : M0.key
+      const ord = [...grupos].sort((a, b) => estado.ordenKey === '_etiqueta' ? String(a._etiqueta).localeCompare(String(b._etiqueta), 'es', { numeric: true }) : ((b[ok] ?? 0) - (a[ok] ?? 0)))
+      return { cab: [estado.agrupar.length ? estado.agrupar.map(k => _labelDim(config, k, estado)).join(' ▸ ') : 'Total', 'N°', ...medidas.map(m => m.label)],
+        filas: ord.slice(0, cap).map(g => ({ c: [String(g._etiqueta).replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, '$3/$2/$1'), String(g._filas.length), ...medidas.map(m => fmt(g[m.key], m))] })),
+        total: ['TOTAL', String(filtrados.length), ...medidas.map(m => fmt(tot[m.key], m))],
+        nota: ord.length > cap ? `Se imprimen ${cap} de ${ord.length} filas; los totales incluyen todas.` : '' }
+    },
+    observaciones: () => {
+      const kf = estado.agrupar.find(k => _esFechaDim(config, k)); let series = []
+      if (kf) series = agrupar(filtrados, [kf], [M0], res).sort((a, b) => { const va = _valorOrdenable(a._etiqueta), vb = _valorOrdenable(b._etiqueta); return typeof va === 'number' && typeof vb === 'number' ? va - vb : String(a._etiqueta).localeCompare(String(b._etiqueta)) }).map(g => ({ label: g._etiqueta, v: g[M0.key] || 0 }))
+      const t = calcularMedidas(filtrados, medidas)
+      return analizar({ medida: M0, total: t[M0.key], series, ranking: rank.map(g => ({ k: g._etiqueta, v: g[M0.key] || 0 })), dimLabel: dimR ? _labelDim(config, dimR, estado) : '',
+        medidas: medidas.map(m => ({ label: m.label, valor: t[m.key], formato: m.formato })), registros: filtrados.length,
+        sinDato: dimR ? filtrados.filter(f => res(f, dimR) === '(sin dato)').length : 0, campoSinDato: dimR ? _labelDim(config, dimR, estado) : '' })
+    }
+  })
 }

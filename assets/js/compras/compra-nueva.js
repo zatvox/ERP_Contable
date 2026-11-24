@@ -15,6 +15,7 @@ import { _aplicarAnticiposSeleccionados, _cargarAnticiposDisponiblesProveedor } 
 import { renderCompras } from './compras-lista.js'
 import { _crearCuentaPagarSiFactura, cargarItemsSelectDetalle, renderOrdenes } from './ordenes-compra.js'
 import { refrescarBuscador } from '../buscador-select.js'
+import { poblarTodosIGV } from '../shared/igv-tipos.js'
 
 // ============================================================================
 // ADJUNTO DE COMPRA — 1 documento (PDF/JPEG/PNG) por compra. Pensado para
@@ -119,6 +120,7 @@ function _modoOC(oc) {
  * antiguos abrirModalNuevaCompraMercaderia/abrirModalCompraServicio, hoy
  * fusionados en un solo modal con selector de Tipo (2026-09-07). */
 window.abrirModalNuevaCompra = function () {
+  poblarTodosIGV()   // tipos de IGV vigentes en Configuración
   _modoOC(null)
   _detallesCompraEnCreacion = []
   _totalesCompraManual = false

@@ -14,7 +14,7 @@ import { supabase, empresasActivasCtx, empresaTrabajoCtx } from '../supabase-cli
 import { getCurrentUser } from '../auth-supabase.js'
 
 const _esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
-let _btn = null, _panel = null, _guardados = [], _calculados = [], _timer = null
+let _btn = null, _panel = null, _guardados = [], _calculados = [], _tareas = [], _timer = null
 
 function _cargarCss() {
   if (document.getElementById('css-campanita')) return
@@ -59,13 +59,15 @@ const _refrescarLuego = () => { clearTimeout(_timer); _timer = setTimeout(_carga
 async function _cargar() {
   try {
     const emps = (empresasActivasCtx() || []).map(Number).filter(Boolean)
-    const [g, c] = await Promise.all([
+    const [g, c, tk] = await Promise.all([
       supabase.from('notificaciones').select('*').is('leida_at', null).order('created_at', { ascending: false }).limit(40),
-      emps.length ? supabase.rpc('avisos_por_despachar', { p_empresas: emps }) : Promise.resolve({ data: [] })
+      emps.length ? supabase.rpc('avisos_por_despachar', { p_empresas: emps }) : Promise.resolve({ data: [] }),
+      supabase.rpc('tareas_avisos')            // SQL 161: te asignaron / venció / alguien te espera
     ])
+    _tareas = tk.error ? [] : (tk.data || [])
     _guardados = g.error ? [] : (g.data || [])
     _calculados = c.error ? [] : (c.data || [])
-    if (g.error && c.error) { _btn?.setAttribute('hidden', ''); return }   // SQL 136 sin correr: silencioso
+    if (g.error && c.error && tk.error) { _btn?.setAttribute('hidden', ''); return }   // SQL 136 sin correr: silencioso
     _btn?.removeAttribute('hidden')
     _pintar()
   } catch (e) { console.warn('campanita:', e.message) }
@@ -80,7 +82,7 @@ function _hace(iso) {
 
 function _pintar() {
   if (!_btn) return
-  const n = _guardados.length + _calculados.length
+  const n = _guardados.length + _calculados.length + _tareas.length
   const b = _btn.querySelector('.campanita-badge')
   b.textContent = n > 99 ? '99+' : n; b.hidden = !n
   _btn.classList.toggle('con-avisos', n > 0)
@@ -98,8 +100,12 @@ function _pintar() {
       <span class="camp-txt"><b>${_esc(a.cot_numero || a.numero)} · ${_esc(q || 'Cliente')}</b>
       <small>${_esc(a.ultima_factura || '')} ${msg} (${a.termino_despacho === 'recoge_cliente' ? 'recoge el cliente' : 'despacho'})</small><em>desde hace ${dias}</em></span></a>`
   }).join('')
-  _panel.querySelector('.camp-lista').innerHTML = (g || c)
-    ? `${g ? `<div class="camp-grupo">Avisos</div>${g}` : ''}${c ? `<div class="camp-grupo">Recordatorios amigables · por despachar</div>${c}` : ''}`
+  const ICO = { tarea_te_bloquea: '⏳', tarea_vencida: '🔥', tarea_asignada: '📌' }
+  const tk = _tareas.map(a => `<a class="camp-item ${a.tipo === 'tarea_vencida' || a.tipo === 'tarea_te_bloquea' ? 'alerta' : 'info'}" href="tareas.html">
+      <span class="camp-ico">${ICO[a.tipo] || '✅'}</span>
+      <span class="camp-txt"><b>${_esc(a.titulo)}</b><small>${_esc(a.detalle || '')}</small><em>${_hace(a.fecha)}</em></span></a>`).join('')
+  _panel.querySelector('.camp-lista').innerHTML = (g || c || tk)
+    ? `${tk ? `<div class="camp-grupo">Tareas</div>${tk}` : ''}${g ? `<div class="camp-grupo">Avisos</div>${g}` : ''}${c ? `<div class="camp-grupo">Recordatorios amigables · por despachar</div>${c}` : ''}`
     : '<div class="camp-vacio">Todo en orden por ahora 🎉</div>'
   _panel.querySelector('.camp-leer').hidden = !_guardados.length
 }

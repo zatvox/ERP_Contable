@@ -11,6 +11,7 @@ import { _renderTablaDetalleGuiaDespacho, _numGuiaDespacho, _prepararDestinoGuia
 import { _refrescarStockLoteEnVivo } from './helpers.js'
 import { _esc, _zonas } from './init.js'
 import { _guiaEstaVigente, _setEv, _valEv } from './ventas-editar.js'
+import { montarConexiones } from '../shared/detalle-conectado.js'
 import { prefillLlegada } from './guia-llegada.js'   // dirección de entrega (SQL 136)
 
 /**
@@ -121,6 +122,7 @@ window.verDetalleGuiaDespachoVenta = async function (id) {
     const btnEditar = document.getElementById('dgdBtnEditar')
     if (btnEditar) btnEditar.onclick = () => { window.closeModal('modal-detalle-guia-despacho'); window.editarGuiaDespachoVenta(id) }
 
+    montarConexiones('modal-detalle-guia-despacho', 'guia_despacho', id)
     window.openModal('modal-detalle-guia-despacho')
   } catch (e) {
     console.error('verDetalleGuiaDespachoVenta:', e)

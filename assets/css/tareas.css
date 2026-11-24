@@ -1,0 +1,37 @@
+/* tareas.css — Módulo Tareas. Usa las variables del tema del ERP (claro/oscuro). */
+.tk-head{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.tk-head-acc{display:flex;gap:8px;margin-left:auto}
+.tk-kpis{display:flex;gap:10px;flex-wrap:wrap}
+.tk-kpi{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-md,8px);padding:8px 16px;min-width:110px}
+.tk-kpi b{display:block;font-size:1.35rem;color:var(--text-primary)}.tk-kpi span{font-size:.75rem;color:var(--text-secondary)}
+.tk-kpi.rojo b{color:var(--color-danger)}.tk-kpi.ambar b{color:var(--color-warning)}.tk-kpi.verde b{color:var(--color-success)}
+.tk-tools{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:.85rem}
+.tk-tools input[type=search]{padding:7px 10px;border:1px solid var(--border-color);border-radius:6px;min-width:240px;background:var(--bg-primary);color:var(--text-primary)}
+.tk-chk{display:flex;gap:6px;align-items:center;color:var(--text-secondary)}.tk-link{margin-left:auto;font-size:.8rem}
+.tk-tabla{width:100%;border-collapse:collapse;font-size:.88rem}
+.tk-tabla th{text-align:left;font-size:.72rem;text-transform:uppercase;color:var(--text-secondary);padding:7px 8px;border-bottom:1px solid var(--border-color)}
+.tk-tabla td{padding:9px 8px;border-bottom:1px solid var(--border-color);vertical-align:top;color:var(--text-primary)}
+.tk-tabla tbody tr{cursor:pointer}.tk-tabla tbody tr:hover{background:var(--bg-secondary)}
+.tk-tabla small{display:block;color:var(--text-secondary);font-size:.74rem}
+.tk-tabla tr.atraso td:first-child{border-left:3px solid var(--color-danger)}.rojo{color:var(--color-danger)!important}
+.tk-chip{display:inline-block;padding:2px 9px;border-radius:12px;font-size:.74rem;background:var(--bg-tertiary,#e8ecf2);color:var(--text-primary)}
+.tk-chip.en_proceso{background:rgba(59,130,246,.18)}.tk-chip.hecha{background:rgba(34,197,94,.2)}.tk-chip.bloq{background:rgba(245,158,11,.22)}.tk-chip.en_revision{background:rgba(139,92,246,.2)}.tk-chip.anulada{opacity:.6}
+.tk-nuevo{background:var(--color-primary);color:#fff;font-size:.62rem;padding:1px 6px;border-radius:8px}
+.tk-vacio{padding:30px;text-align:center;color:var(--text-secondary)}
+.tk-modal{position:fixed;inset:0;background:rgba(15,23,42,.5);display:flex;align-items:center;justify-content:center;z-index:1000;padding:12px}
+.tk-card{background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-color);border-radius:12px;padding:20px;width:100%;max-height:90vh;overflow:auto;position:relative;box-shadow:var(--shadow-lg)}
+.tk-card h3{margin:0 0 10px}.tk-card h4{margin:14px 0 6px}
+.tk-card label{display:block;font-size:.82rem;margin:8px 0;color:var(--text-secondary)}
+.tk-card input,.tk-card select,.tk-card textarea{width:100%;padding:7px 9px;border:1px solid var(--border-color);border-radius:6px;font:inherit;box-sizing:border-box;margin-top:3px;background:var(--bg-primary);color:var(--text-primary)}
+.tk-x{position:absolute;right:10px;top:6px;border:0;background:none;font-size:24px;cursor:pointer;color:var(--text-secondary)}
+.fila{display:flex;gap:10px;align-items:flex-end}.fila>*{flex:1}
+.tk-acc{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}.tk-acc.wrap{flex-wrap:wrap;justify-content:flex-start}
+.tk-meta{display:flex;gap:12px;flex-wrap:wrap;font-size:.84rem;align-items:center;margin-bottom:8px}
+.tk-aviso{background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.4);padding:8px 10px;border-radius:8px;margin:8px 0;font-size:.84rem}
+.tk-bit{list-style:none;padding:0;margin:0;font-size:.84rem}.tk-bit li{padding:6px 0;border-bottom:1px solid var(--border-color)}.tk-bit small{color:var(--text-secondary);margin-right:6px}
+.tk-ayuda,.tk-ref{font-size:.78rem;color:var(--text-secondary)}
+.tk-toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1f2937;color:#fff;padding:10px 16px;border-radius:8px;z-index:2000;font-size:.84rem}.tk-toast.err{background:#b71c1c}
+.tk-dash{display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:10px 16px;margin:0 0 14px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-secondary);font-size:.88rem}
+.tk-dash b.rojo{color:var(--color-danger)}.tk-dash a{margin-left:auto}
+
+.tk-tools .tk-chk{white-space:nowrap;margin:0;display:flex}.tk-tools .tk-chk input{width:auto;margin:0}.tk-tools input[type=search]{flex:1;max-width:340px}

@@ -21,7 +21,8 @@ export function _activarBuscadoresCompras() {
     { id: 'newDetalleCompraProducto', placeholder: 'Escribe el producto o SKU...',             sinResultados: 'Sin productos' },
     { id: 'newDetalleOCProducto',     placeholder: 'Escribe el producto o SKU...',             sinResultados: 'Sin productos' },
     { id: 'loteProducto',             placeholder: 'Escribe el producto o SKU...',             sinResultados: 'Sin productos' },
-    { id: 'csCuentaGasto',            placeholder: 'Escribe la cuenta contable...',            sinResultados: 'Sin cuentas' }
+    { id: 'csCuentaGasto',            placeholder: 'Escribe la cuenta contable...',            sinResultados: 'Sin cuentas',
+      alCrearNuevo: { label: 'Nueva cuenta de gasto', onClick: () => import('./cuenta-gasto-nueva.js').then(() => window.abrirModalCuentaGasto?.()) } }
   ])
 }
 

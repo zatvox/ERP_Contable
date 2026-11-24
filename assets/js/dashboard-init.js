@@ -61,6 +61,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       onGuardar: () => { _cfg = getModuloConfig(MODULO); programarAutoRefresco(); showToast('Configuración guardada ✅', 'success') }
     })
 
+    import('./shared/tareas-resumen.js').then(m => m.montarResumenTareas('.content')).catch(() => {})
     await cargarDatos()
     window.refrescarDashboard()
     programarAutoRefresco()

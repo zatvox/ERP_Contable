@@ -3,6 +3,7 @@
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
 import { S } from './state.js'
+import { opcionesIGVHtml } from '../shared/igv-tipos.js'
 import { getCurrentUser } from '../auth-supabase.js'
 import { updateCompra, getCompraDetalles, updateCompraDetalle, getLoteById, deleteLote, getGuiasIngresoCompra, getDetalleGuiasIngresoCompra, deleteDetalleGuiaIngresoCompra, updateCuentaPagar, getLoteBultosByLote } from '../supabase-data.js'
 import { showToast } from '../helpers.js'
@@ -94,10 +95,7 @@ export function _pintarLineasEdicionCompra() {
       </td>
       <td>
         <select id="ecLineaTipo-${idx}" ${(S._ecModoVista || c.bloqueos.precios) ? 'disabled' : ''} onchange="window.onCambiarLineaPrecioEdicionCompra(${idx})">
-          <option value="18"${(d.igv_porcentaje == 18) ? ' selected' : ''}>18%</option>
-          <option value="18-inc" title="El Precio Unitario ya incluye el IGV: se extrae en vez de sumarse encima.">18% (incluido)</option>
-          <option value="10"${(d.igv_porcentaje == 10) ? ' selected' : ''}>10%</option>
-          <option value="0"${(!d.igv_porcentaje || d.igv_porcentaje == 0) ? ' selected' : ''}>0% — No gravada (factura del exterior)</option>
+          ${opcionesIGVHtml({ incluido: true, valor: String(parseFloat(d.igv_porcentaje) || 0) })}
         </select>
       </td>
       <td style="text-align:right;" id="ecLineaSubtotal-${idx}">${parseFloat(d.subtotal || 0).toFixed(2)}</td>

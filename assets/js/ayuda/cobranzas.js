@@ -1,0 +1,22 @@
+import { E } from '../shared/ayuda.js'
+const T = t => `.module-nav .tab-btn[data-tab="${t}"]`
+export default [
+  E('cob.cxc', T('cxc'), 'Cuentas por Cobrar', 'Lo que tus clientes te deben: una fila por comprobante, con saldo, vencimiento y estado.',
+    ['• **Saldo** = total del comprobante − cobros − retenciones − notas de crédito.', '• Las filas en rojo suave están **vencidas**.', '• Un comprobante anulado no genera deuda (sale tachado).', '## Cómo cobrar', 'Usa **+ Registrar Cobro** para un comprobante o **Cobro masivo** si un solo depósito paga varios comprobantes.'], { q: true }),
+  E('cob.cobros', T('cobros'), 'Cobros registrados', 'Historial de cada cobro: fecha, medio, cuenta de destino y comprobantes que pagó.', ['Aquí puedes revisar o adjuntar el voucher de un cobro. Un cobro masivo aparece marcado con su lote.'], { q: true }),
+  E('cob.letras', T('letras'), 'Letras', 'Letras de cambio por cobrar o por pagar: se generan desde un comprobante con término de pago en cuotas.', ['Puedes **unificar** varias letras o **refinanciar** una. Al pagarla, se registra como cobro (o pago) como cualquier otro.'], { q: true }),
+  E('cob.recibos', T('recibos'), 'Recibos de cobranza', 'Los recibos físicos de cobranza numerados, para cuadrar con el cobrador.', ['Escribe el N° del recibo y presiona **Enter** para ligarlo al cobro.'], { q: true }),
+  E('cob.ret', T('retenciones'), 'Retenciones de IGV', 'IGV que tus clientes te retuvieron al pagar. Se descuenta de tu IGV del periodo.', ['• **Registrar comprobante de retención (CRE)**: carga el comprobante que te entregó el cliente.', '• **Aplicar deducción a IGV del periodo**: toma las retenciones del periodo y las descuenta en el cálculo de IGV.', 'Sin el comprobante, la retención queda pendiente de sustento.'], { q: true }),
+  E('cob.cxp', T('cxp'), 'Cuentas por Pagar', 'Lo que tú debes a proveedores: una fila por compra con saldo y vencimiento.', ['Si el proveedor está sujeto a **detracción**, el filtro 🧾 Detracción te muestra cuáles faltan depositar. **+ Registrar Pago** abre el pago al proveedor.'], { q: true }),
+  E('cob.pagos', T('pagos-prov'), 'Pagos registrados', 'Historial de los pagos hechos a proveedores, con su cuenta y comprobante.', null, { q: true }),
+  E('cob.reportes', T('reportes'), 'Reportes de cobranza y pagos', 'Antigüedad de deudas, estado de cuenta, flujo proyectado y más.', ['• **Antigüedad CxC/CxP**: agrupa las deudas por días de atraso.', '• **Flujo proyectado**: cuánto entra y sale en las próximas semanas según vencimientos.', '• **Estado de cuenta**: el detalle de un cliente o proveedor.'], { q: true }),
+  E('cob.f.estado', '#cxc-filtro-estado, #cxp-filtro-estado, #let-filtro-estado', 'Filtro Estado', 'Pendiente, parcial o pagado: filtra por cuánto falta cobrar o pagar.', null, { q: true }),
+  E('cob.f.venc', '#cxc-filtro-venc', 'Filtro Vencimiento', 'Muestra solo lo vencido, lo que vence pronto o lo que está al día.', null, { q: true }),
+  E('cob.f.moneda', '#cxc-filtro-moneda, #cxp-filtro-moneda', 'Filtro Moneda', 'Soles o dólares. Los totales no mezclan monedas.', null, { q: true }),
+  E('cob.f.fechas', '#cxc-filtro-desde, #cxp-filtro-desde', 'Emitidas desde / hasta', 'Limita la lista por fecha de **emisión** del comprobante (no por fecha de vencimiento).', null, { q: true }),
+  E('cob.f.detr', '#cxp-filtro-detr', 'Filtro Detracción', 'Ve solo las compras con detracción pendiente de depositar al proveedor/SUNAT.', null, { q: true }),
+  E('cob.b.masivo', 'button', 'Cobro masivo', 'Un solo depósito que paga varios comprobantes: repártelo y queda todo conciliado.', ['Elige el cliente, ingresa el monto depositado y el sistema aplica el pago a los comprobantes pendientes. Queda un **lote** para rastrearlo.'], { txt: 'Cobro masivo' }),
+  E('cob.b.cobro', 'button', 'Registrar cobro', 'Registra que un cliente pagó (total o parcial) un comprobante.', ['Indica fecha, medio de pago, cuenta de destino y moneda. Si cobras en otra moneda, el sistema usa el **tipo de cambio** (botón «Del día»).'], { txt: '+ Registrar Cobro' }),
+  E('cob.b.pago', 'button', 'Registrar pago', 'Registra un pago a proveedor y descuenta su saldo.', ['Si el proveedor tiene detracción, esa parte se paga/deposita aparte; el sistema lo avisa.'], { txt: '+ Registrar Pago' }),
+  E('cob.b.csv', 'button', 'Exportar CSV', 'Descarga lo que ves en la tabla (con los filtros aplicados) para abrirlo en Excel.', null, { txt: '⬇ CSV' }),
+]

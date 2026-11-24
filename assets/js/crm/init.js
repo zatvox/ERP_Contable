@@ -2,7 +2,7 @@
 import { showToast } from '../helpers.js'
 import { initModuleNavDropdowns } from '../main.js'
 import { empresaTrabajo, contextoEmpresaListo } from '../empresa.js'
-import { empresasActivasCtx } from '../supabase-client.js'
+import { empresasActivasCtx, supabase } from '../supabase-client.js'
 import * as D from './crm-data.js'
 import * as U from './crm-ui.js'
 
@@ -12,6 +12,16 @@ const vista = n => $('#crm-' + n)
 let yo = null, emp = null, tab = 'cot', timer = null
 const S = { fEst: '', fQ: '', fMias: false, dias: null }
 const fail = (e) => showToast(e?.message || String(e), 'error')
+
+// Catálogo público: se abre con el código (slug) de la empresa activa, nunca con su id (SQL 162)
+document.addEventListener('click', async e => {
+  const a = e.target.closest('a[href="crm/index.html"], a[data-cat-publico]'); if (!a) return
+  e.preventDefault()
+  const id = emp || await esperarEmpresa()
+  const { data, error } = await supabase.from('empresa_config').select('slug').eq('id', id).maybeSingle()
+  if (error || !data?.slug) { showToast('Corre el SQL 162 para generar el enlace público del catálogo', 'warning', 6000); return }
+  window.open(`crm/index.html?c=${encodeURIComponent(data.slug)}`, '_blank', 'noopener')
+}, true)
 
 async function esperarEmpresa() {
   for (let i = 0; i < 50 && !contextoEmpresaListo(); i++) await new Promise(r => setTimeout(r, 100))

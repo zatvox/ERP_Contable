@@ -42,6 +42,14 @@ const DEFAULTS = {
   },
   compras: {
     igvDefault:         18,
+    // Tipos de IGV de los selectores de Compras (editables en Configuración).
+    // % aplicado = igv + ipm. 2026 (Ley 32387): 18% = IGV 15.5 + IPM 2.5.
+    tiposIGV: [
+      { etiqueta: '18%',                                              igv: 15.5, ipm: 2.5, incluido: false, activo: true },
+      { etiqueta: '18% (incluido)',                                   igv: 15.5, ipm: 2.5, incluido: true,  activo: true },
+      { etiqueta: '10.5% — MYPE restaurantes/hoteles (8% IGV + 2.5% IPM)', igv: 8, ipm: 2.5, incluido: false, activo: true },
+      { etiqueta: '0% — Exonerado / No gravada (exterior)',           igv: 0,    ipm: 0,   incluido: false, activo: true }
+    ],
     // La mayoría de las compras son importadas: USD por defecto. El campo de
     // Tipo de Cambio aparece de entrada y solo se oculta al elegir PEN.
     monedaDefault:      'USD',
@@ -257,7 +265,10 @@ const CAMPOS_POR_MODULO = {
   ],
   compras: [
     SEP('Documentos'),
-    { key: 'igvDefault',         label: 'IGV % por defecto', tipo: 'number', hint: 'Precargado al agregar una línea nueva (sigue siendo editable).' },
+    { key: 'igvDefault',         label: 'IGV % por defecto', tipo: 'number', hint: 'Precargado al agregar una línea nueva (sigue siendo editable). Debe existir en la lista de tipos de IGV.' },
+    { key: 'tiposIGV',           label: 'Tipos de IGV', tipo: 'lista-igv' },
+    SEP('Plan de cuentas'),
+    { key: '_cuentasGasto',      label: 'Cuentas de gasto', tipo: 'cuentas-gasto' },
     { key: 'monedaDefault',      label: 'Moneda por defecto', tipo: 'select', opciones: ['PEN', 'USD'] },
     { key: 'serieFacturaCompra', label: 'Serie sugerida al registrar factura', tipo: 'text' },
     SEP('Cuentas por pagar'),
@@ -363,6 +374,69 @@ const CAMPOS_POR_MODULO = {
   ]
 }
 
+
+// ----------------------------------------------------------------------------
+// Lista editable "Tipos de IGV" (Compras). % aplicado = IGV + IPM.
+// ----------------------------------------------------------------------------
+function _filaIgvHtml(t = {}) {
+  const tot = (parseFloat(t.igv) || 0) + (parseFloat(t.ipm) || 0)
+  return `<tr>
+    <td><input type="text" class="igv-et" value="${_esCfg(t.etiqueta ?? '')}" placeholder="Ej: 18%" style="width:100%; min-width:220px;"></td>
+    <td><input type="number" class="igv-igv" value="${t.igv ?? 0}" min="0" max="100" step="any" style="width:76px;" oninput="window._cfgIgvTotal(this)"></td>
+    <td><input type="number" class="igv-ipm" value="${t.ipm ?? 0}" min="0" max="100" step="any" style="width:76px;" oninput="window._cfgIgvTotal(this)"></td>
+    <td class="igv-tot" style="text-align:right; font-weight:600; white-space:nowrap;">${Math.round(tot * 10000) / 10000}%</td>
+    <td style="text-align:center;"><input type="checkbox" class="igv-inc" ${t.incluido ? 'checked' : ''}></td>
+    <td style="text-align:center;"><input type="checkbox" class="igv-act" ${t.activo !== false ? 'checked' : ''}></td>
+    <td><button type="button" class="btn btn-small btn-danger" onclick="this.closest('tr').remove()" title="Quitar">✕</button></td>
+  </tr>`
+}
+
+function _listaIgvHtml(id, lista) {
+  const filas = (Array.isArray(lista) ? lista : []).map(_filaIgvHtml).join('')
+  return `
+    <div class="cfg-fila" style="display:block;">
+      <div class="cfg-fila-texto" style="margin-bottom:8px;">
+        <label>Tipos de IGV</label>
+        <div class="cfg-hint">Son las opciones que aparecen en "IGV (%)" en Nueva compra, OC, servicios, anticipos, edición de compras y gastos de importación. Si SUNAT cambia una tasa, edita la fila (o agrega una nueva y desactiva la anterior: <strong>recomendado</strong>, así queda claro desde cuándo rige). El % aplicado es IGV + IPM. Los documentos ya registrados no cambian. Pulsa <strong>Guardar</strong> al terminar.</div>
+      </div>
+      <div style="overflow-x:auto;">
+        <table id="${id}" style="width:100%;">
+          <thead><tr><th>Nombre en la lista</th><th>IGV %</th><th>IPM %</th><th style="text-align:right;">% aplicado</th><th title="El precio unitario ya incluye el IGV">IGV incluido</th><th>Activo</th><th></th></tr></thead>
+          <tbody>${filas}</tbody>
+        </table>
+      </div>
+      <button type="button" class="btn btn-secondary btn-small" style="margin-top:8px;" onclick="window._cfgIgvAgregar('${id}')">+ Agregar tipo</button>
+    </div>`
+}
+
+window._cfgIgvAgregar = function (id) {
+  const tb = document.querySelector(`#${id} tbody`)
+  if (tb) tb.insertAdjacentHTML('beforeend', _filaIgvHtml({ etiqueta: '', igv: 0, ipm: 0, incluido: false, activo: true }))
+}
+window._cfgIgvTotal = function (el) {
+  const tr = el.closest('tr')
+  const t = (parseFloat(tr.querySelector('.igv-igv').value) || 0) + (parseFloat(tr.querySelector('.igv-ipm').value) || 0)
+  tr.querySelector('.igv-tot').textContent = Math.round(t * 10000) / 10000 + '%'
+}
+
+/** Lee y valida la lista del formulario. Devuelve { lista } o { error }. */
+function _leerListaIGV(id) {
+  const filas = [...document.querySelectorAll(`#${id} tbody tr`)]
+  const lista = filas.map(tr => ({
+    etiqueta: tr.querySelector('.igv-et').value.trim(),
+    igv: parseFloat(tr.querySelector('.igv-igv').value) || 0,
+    ipm: parseFloat(tr.querySelector('.igv-ipm').value) || 0,
+    incluido: tr.querySelector('.igv-inc').checked,
+    activo: tr.querySelector('.igv-act').checked
+  }))
+  if (lista.some(t => !t.etiqueta)) return { error: 'Cada tipo de IGV necesita un nombre.' }
+  if (lista.some(t => t.igv < 0 || t.ipm < 0 || t.igv + t.ipm > 100)) return { error: 'IGV e IPM deben estar entre 0 y 100 (suma máxima 100).' }
+  if (!lista.some(t => t.activo && !t.incluido)) return { error: 'Debe quedar al menos un tipo de IGV activo (sin "incluido").' }
+  const claves = lista.filter(t => t.activo).map(t => Math.round((t.igv + t.ipm) * 10000) + (t.incluido ? 'i' : ''))
+  if (new Set(claves).size !== claves.length) return { error: 'Hay dos tipos activos con el mismo % (y mismo "incluido"): desactiva uno.' }
+  return { lista }
+}
+
 // ============================================================================
 // RENDER — formulario de Configuración
 // ============================================================================
@@ -372,6 +446,8 @@ function _campoHtml(modulo, campo, valorActual) {
     return `<div class="cfg-separador">${campo.label}</div>`
   }
   const id = `cfg-${modulo}-${campo.key}`
+  if (campo.tipo === 'lista-igv') return _listaIgvHtml(id, valorActual)
+  if (campo.tipo === 'cuentas-gasto') return `<div class="cfg-fila" style="display:block;"><div class="cfg-fila-texto" style="margin-bottom:8px;"><label>${campo.label}</label><div class="cfg-hint">Alimenta el selector "Cuenta de gasto" de Compras de servicio. Crea aquí cuentas nuevas respetando el plan contable.</div></div><div id="${id}">Cargando…</div></div>`
   let input = ''
   if (campo.tipo === 'select') {
     input = `<select id="${id}">${campo.opciones.map(o => {
@@ -514,6 +590,8 @@ export function renderConfiguracionTab(modulo, containerId, opciones = {}) {
     </div>`
 
   _bindConfig(modulo, campos, opciones.onGuardar)
+  campos.filter(c => c.tipo === 'cuentas-gasto').forEach(c =>
+    import('./compras/cuenta-gasto-nueva.js').then(m => m.montarCuentasGastoConfig(`cfg-${modulo}-${c.key}`)).catch(e => console.warn('cuentas de gasto:', e)))
   if (incluirApariencia) _bindConfig('apariencia', CAMPOS_APARIENCIA, () => aplicarApariencia())
 
   const btnCache = document.getElementById(`btnLimpiarCache-${modulo}`)
@@ -556,8 +634,15 @@ function _bindConfig(modulo, campos, onGuardar) {
   if (btn) {
     btn.addEventListener('click', () => {
       const data = {}
+      let errorLista = null
       campos.forEach(c => {
         if (c.tipo === 'separador') return
+        if (c.tipo === 'cuentas-gasto') return
+        if (c.tipo === 'lista-igv') {
+          const r = _leerListaIGV(`cfg-${modulo}-${c.key}`)
+          if (r.error) errorLista = r.error; else data[c.key] = r.lista
+          return
+        }
         const el = document.getElementById(`cfg-${modulo}-${c.key}`)
         if (!el) return
         if (c.tipo === 'checkbox') data[c.key] = el.checked
@@ -565,7 +650,9 @@ function _bindConfig(modulo, campos, onGuardar) {
         else if (c.tipo === 'select') data[c.key] = isNaN(parseFloat(el.value)) ? el.value : parseFloat(el.value)
         else data[c.key] = el.value
       })
+      if (errorLista) { alert(errorLista); return }
       guardarModuloConfig(modulo, data)
+      if (data.tiposIGV) window.dispatchEvent(new CustomEvent('zv-igv-tipos-cambiado'))
       aplicarApariencia()
       const msg = document.getElementById(`config-guardado-msg-${modulo}`)
       if (msg) { msg.style.display = 'inline'; setTimeout(() => { msg.style.display = 'none' }, 2500) }

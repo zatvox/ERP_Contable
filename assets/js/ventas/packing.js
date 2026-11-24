@@ -18,7 +18,7 @@ import { getTerminosPago, getContactById, subirAdjuntos, validarArchivoAdjunto, 
 import { supabase, insert, update, deleteRecord , empresaTrabajoCtx } from '../supabase-client.js'
 import { showToast, formatNumber, pintarDocumentoContacto } from '../helpers.js'
 import { convertirEnBuscador, refrescarBuscador } from '../buscador-select.js'
-import { serieDefault, siguienteCorrelativo, formatearNumero, registrarUsoSerie } from '../series.js'
+import { serieDefault, siguienteCorrelativo, formatearNumero, registrarUsoSerie, getSerie } from '../series.js'
 import { _nombreCliente, _nombreVendedor, _stockTotalPorItem, _refrescarStockLoteEnVivo, calcLineaIGV, tipoIGVUI, precioUI, NOMBRE_TIPO_IGV } from './helpers.js'
 import { menuAccionesFila } from '../main.js'
 import { registrarPesaje, cargarPesaje, sugerirPesoPlaceholder, pintarPanelStock } from './linea-pesaje.js'
@@ -30,6 +30,7 @@ import { descargarPDFDesdeHTML as _descargarPDFDesdeHTML, cuentasDepositoPDF, cs
 // Despacho + PV de lista + efecto de margen (SQL 136) y campanita de avisos (2026-11-05)
 import { htmlDespacho, ATR_PANEL_GAN, HTML_GAN_EXTRA, HTML_PV_HINT, iniciarDespacho, validarDespacho, pendientesDespacho, leerDespacho, alCambiarLineas, pintarPistaPV, lineasBajoPV, pintarGanancia } from './packing-despacho.js'
 import { crearAviso, resolverAviso, urlConBusqueda } from '../shared/campanita.js'
+import { montarConexiones } from '../shared/detalle-conectado.js'
 
 // Datos del emisor para el PDF (mismos del PDF de Odoo). Logo: assets/img/logo-jhiro.png
 const EMPRESA = {
@@ -472,6 +473,7 @@ window.filtrarPacking = function () {
         : (p.venta_id ? _esc(_pkVentasMap.get(p.venta_id) || '#' + p.venta_id) : '—')}</td>
       <td class="col-acciones" data-col-tabla="packing" data-col="acciones"${_cs('acciones')}>${menuAccionesFila([
         esCot ? { icono: '✅', label: 'Confirmar → asignar N° PK', onclick: `window.confirmarCotizacionPK(${p.id})` } : null,
+        (['borrador', 'enviado'].includes(p.estado) && !p.venta_id && !p._facturas?.length) ? { icono: '↩️', label: 'Devolver a cotización', onclick: `window.devolverACotizacionPK(${p.id})` } : null,
         (abierto && !esCot) ? { icono: '🧾', label: 'Facturar', onclick: `window.facturarPacking(${p.id})` } : null,
         { icono: abierto ? '✏️' : '👁', label: abierto ? 'Editar' : 'Ver detalle', onclick: `window.abrirModalPacking(${p.id})` },
         { icono: '📑', label: 'Duplicar', onclick: `window.duplicarPacking(${p.id})` },   // cualquier estado, incluso anulado (2026-10-10)
@@ -1065,6 +1067,7 @@ window.abrirModalPacking = async function (id = null, opts = {}) {
     window._pkOnMoneda()
     // El modal dice de qué empresa es ESTE documento, no la del switch.
     declararEmpresaModal('modal-packing', pk?.empresa_id)
+    if (pk?.id) montarConexiones('modal-packing', 'packing', pk.id); else document.querySelector('#modal-packing .dc-host')?.remove()
     window.openModal('modal-packing')
     _pintarAdjuntosPK(pk?.id || null)
   } catch (e) { showToast('Error: ' + e.message, 'danger') }
@@ -1324,6 +1327,46 @@ window.confirmarCotizacionPK = async function (id) {
     showToast(`${cot.numero} confirmada → ${ok.numero} ✅`, 'success', 6000)
     await renderPacking(true)
   } catch (e) { showToast('Error al confirmar: ' + e.message, 'danger', 8000) }
+}
+
+// ─── Devolver PK → cotización (2026-11-12) ─────────────────────────────────
+// Solo PK sin facturar (borrador/enviado). Quita su N° de PK (correlativo NULL)
+// y vuelve a 'cotizacion' con su COT original (o uno nuevo). Si era el ÚLTIMO
+// N° emitido de la serie, el contador baja para que el número se reutilice;
+// si no, queda un hueco (como con cualquier N° anulado).
+window.devolverACotizacionPK = async function (id) {
+  if (!await exigirEmpresaDeTrabajo('packing', id, 'El PK')) return
+  try {
+    const pk = (await supabase.from('packing').select('*').eq('id', id).single()).data
+    if (!pk) { showToast('PK no encontrado', 'warning'); return }
+    if (!['borrador', 'enviado'].includes(pk.estado)) { showToast(`Solo se devuelve un PK sin facturar (está en "${(ESTADOS[pk.estado] || [pk.estado])[0]}")`, 'warning'); return }
+    const { data: vs } = await supabase.from('ventas').select('id, estado, comprobante_anulado, estado_comprobante').eq('packing_id', id)
+    if ((vs || []).some(v => !estaAnulado(v))) { showToast('Este PK tiene una factura vigente: no se puede devolver a cotización', 'warning'); return }
+    let cotN = parseInt(pk.cot_correlativo) || null
+    if (!confirm(`¿Devolver ${pk.numero} a cotización?\n\n• Se borra su N° de PK (${pk.numero}).\n• Vuelve a ser ${cotN ? _numeroCot(cotN) : 'una cotización con N° nuevo'} y podrás confirmarla después (tomará el siguiente N° libre).\n• Líneas, cliente, precios y despacho no cambian.`)) return
+    const camposCot = n => ({ correlativo: null, numero: _numeroCot(n), cot_correlativo: n, cot_numero: pk.cot_numero || _numeroCot(n), estado: 'cotizacion', updated_at: new Date().toISOString() })
+    let ok = null, errUlt = null
+    for (let intento = 0; intento < 5 && !ok; intento++) {
+      const n = cotN || ((await _maxCotPK()) + 1 + intento)
+      const { data, error } = await supabase.from('packing').update(camposCot(n)).eq('id', id).in('estado', ['borrador', 'enviado']).select().maybeSingle()
+      if (error) { errUlt = error; if (error.code === '23505' && !pk.cot_correlativo) { cotN = null; continue } break }
+      ok = data
+      if (!data) { showToast('El PK cambió mientras tanto (¿otro usuario?). Recarga la tabla.', 'warning'); await renderPacking(true); return }
+    }
+    if (!ok) throw new Error(errUlt?.message || 'No se pudo devolver a cotización')
+    // Contador de la serie: si era el último N°, se libera para reutilizarlo
+    try {
+      const s = await getSerie('PK', pk.serie)
+      if (s && parseInt(s.ultimo_correlativo) === parseInt(pk.correlativo)) {
+        const maxRest = await _maxCorrelativoPK(pk.serie)
+        const nuevoUlt = Math.max(maxRest, (parseInt(s.correlativo_inicial) || 1) - 1)
+        await update('series_documentos', s.id, { ultimo_correlativo: nuevoUlt, updated_at: new Date().toISOString() })
+        s.ultimo_correlativo = nuevoUlt   // la caché de series.js usa este mismo objeto
+      }
+    } catch (e) { console.warn('Contador serie PK:', e.message) }
+    showToast(`${pk.numero} devuelto a cotización → ${ok.numero} ↩️`, 'success', 6000)
+    await renderPacking(true)
+  } catch (e) { showToast('Error al devolver a cotización: ' + e.message, 'danger', 8000) }
 }
 
 // ─── Anular correlativo sin emitir (formato físico dañado) ───────────────────
@@ -1686,11 +1729,9 @@ export function numeroALetras(monto, moneda = 'PEN') {
   return `${partes.join(' ') || 'CERO'} ${mon} Y ${cent ? _menorMil(cent) : 'CERO'} CENTAVOS`
 }
 
-window.imprimirPacking = async function (id) {
-  try {
-    const pk = _pkLista.find(p => p.id === id)
-    if (!pk) return
-    showToast(`Generando PDF de ${pk.numero}…`, 'info', 2500)
+/** HTML del PDF del PK (lo usan la vista previa y la descarga) — 2026-11-12. */
+async function _htmlPDFPacking(pk, { cuentas = true } = {}) {
+  {
     const [lineas, cliente] = await Promise.all([_getDetalle(pk.id), getContactById(pk.contact_id)])
     if (!_pkTerminos.length) _pkTerminos = (await getTerminosPago()) || []
     const termino = _pkTerminos.find(t => t.id === pk.termino_pago_id)?.nombre || '—'
@@ -1700,7 +1741,8 @@ window.imprimirPacking = async function (id) {
     const E = await _emisorPK(pk)
     const C = E.color, CT = _textoSobre(C), C10 = _tinte(C, 0.10), C25 = _tinte(C, 0.25)
     const CTXT = CT === '#ffffff' ? C : '#111827'   // color de marca usable como TEXTO sobre blanco
-    const _cuentasPie = await cuentasDepositoPDF(pk.empresa_id, C)   // cuentas elegidas en el perfil de la empresa (SQL 147)
+    const _cuentasDisp = await cuentasDepositoPDF(pk.empresa_id, C)   // cuentas elegidas en el perfil de la empresa (SQL 147)
+    const _cuentasPie = cuentas ? _cuentasDisp : ''
     // Nombres EXACTOS de columnas según cómo se registraron los precios (sql/114)
     const nIncl = lineas.filter(l => l.igv_incluido).length
     const _pdfIGV = nIncl === 0
@@ -1758,10 +1800,88 @@ window.imprimirPacking = async function (id) {
   <p style="margin-top:18px;">Términos de pago: ${_esc(termino)}</p>
   ${_cuentasPie}
 </body></html>`
-    await _descargarPDFDesdeHTML(html, `${pk.numero}_${String(cliente?.nombre || '').replace(/[^\w]+/g, '_').slice(0, 40)}.pdf`)
+    return { html, nombre: `${pk.numero}_${String(cliente?.nombre || '').replace(/[^\w]+/g, '_').slice(0, 40)}.pdf`, hayCuentas: !!_cuentasDisp }
+  }
+}
+
+// ── PDF con vista previa (2026-11-12): modal con la hoja tal cual saldrá +
+//    casilla "Incluir cuentas para depósito" → Descargar. ─────────────────────
+let _pkPrev = null   // { pk, html, nombre, hayCuentas }
+function _asegurarModalPrevPDF() {
+  if (document.getElementById('modal-pk-pdf')) return
+  const d = document.createElement('div')
+  d.id = 'modal-pk-pdf'; d.className = 'modal'
+  d.innerHTML = `
+    <div class="modal-content" style="width:min(96vw, 900px); max-width:min(96vw, 900px); max-height:calc(100vh - 40px); display:flex; flex-direction:column;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="pkPdfTitulo">Vista previa</h3>
+        <button class="modal-close" onclick="window.closeModal('modal-pk-pdf')">&times;</button>
+      </div>
+      <div style="padding:10px 18px; display:flex; gap:16px; align-items:center; flex-wrap:wrap; border-bottom:1px solid var(--border-color);">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:0;">
+          <input type="checkbox" id="pkPdfCuentas" checked style="width:auto; margin:0;" onchange="window._pkPrevRefrescar()">
+          <span>Incluir <b>cuentas para depósito</b></span>
+        </label>
+        <small id="pkPdfCuentasInfo" style="color:var(--text-secondary);"></small>
+      </div>
+      <div style="flex:1; overflow:auto; background:#525659; padding:16px; min-height:300px;" id="pkPdfZona">
+        <div id="pkPdfHoja" style="margin:0 auto; background:#fff; box-shadow:0 4px 20px rgba(0,0,0,.4); transform-origin:top center;">
+          <iframe id="pkPdfFrame" title="Vista previa" style="width:794px; border:0; display:block; background:#fff;"></iframe>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeModal('modal-pk-pdf')">Cancelar</button>
+        <button class="btn btn-primary" id="pkPdfBtn" onclick="window._pkPrevDescargar()">⬇ Descargar PDF</button>
+      </div>
+    </div>`
+  document.body.appendChild(d)
+}
+
+async function _pkPrevPintar() {
+  const frame = document.getElementById('pkPdfFrame'), hoja = document.getElementById('pkPdfHoja'), zona = document.getElementById('pkPdfZona')
+  const r = await _htmlPDFPacking(_pkPrev.pk, { cuentas: document.getElementById('pkPdfCuentas').checked })
+  Object.assign(_pkPrev, r)
+  const chk = document.getElementById('pkPdfCuentas'), info = document.getElementById('pkPdfCuentasInfo')
+  chk.disabled = !r.hayCuentas
+  info.textContent = r.hayCuentas ? '' : 'Esta empresa no tiene cuentas marcadas (Perfil → Multiempresa → Cuentas para depósito).'
+  // Mismo lienzo que el PDF: 794 px de ancho con 38/40 px de margen
+  frame.srcdoc = r.html.replace('<body>', '<body style="margin:0; padding:38px 40px; background:#fff;">')
+  frame.onload = () => {
+    const alto = frame.contentDocument?.documentElement?.scrollHeight || 1123
+    frame.style.height = Math.max(alto, 400) + 'px'
+    const esc = Math.min(1, (zona.clientWidth - 32) / 794)
+    hoja.style.width = '794px'; hoja.style.transform = `scale(${esc})`
+    hoja.style.marginBottom = `${-(1 - esc) * Math.max(alto, 400)}px`
+  }
+}
+window._pkPrevRefrescar = () => _pkPrevPintar().catch(e => showToast('Error en la vista previa: ' + e.message, 'danger'))
+
+window.imprimirPacking = async function (id) {
+  try {
+    const pk = _pkLista.find(p => p.id === id)
+    if (!pk) return
+    _asegurarModalPrevPDF()
+    _pkPrev = { pk }
+    document.getElementById('pkPdfTitulo').textContent = `Vista previa — ${pk.numero}`
+    document.getElementById('pkPdfCuentas').checked = true
+    document.getElementById('pkPdfFrame').srcdoc = '<p style="font:14px Arial; padding:30px; color:#666;">Generando vista previa…</p>'
+    window.openModal('modal-pk-pdf')
+    await _pkPrevPintar()
+  } catch (e) { showToast('Error al generar PDF: ' + e.message, 'danger') }
+}
+
+window._pkPrevDescargar = async function () {
+  const btn = document.getElementById('pkPdfBtn')
+  if (!_pkPrev?.html || btn.disabled) return
+  btn.disabled = true; btn.textContent = 'Generando…'
+  try {
+    await _descargarPDFDesdeHTML(_pkPrev.html, _pkPrev.nombre)
+    const pk = _pkPrev.pk
+    window.closeModal('modal-pk-pdf')
     if (pk.estado === 'borrador') {
       await update('packing', pk.id, { estado: 'enviado', updated_at: new Date().toISOString() })
       await renderPacking(true)
     }
   } catch (e) { showToast('Error al generar PDF: ' + e.message, 'danger') }
+  finally { btn.disabled = false; btn.textContent = '⬇ Descargar PDF' }
 }

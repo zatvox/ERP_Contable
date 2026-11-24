@@ -21,3 +21,4 @@
 @media (prefers-reduced-motion: reduce) { .campanita-btn.con-avisos .campanita-ico { animation: none; } }
 
 .campanita-btn[hidden], .campanita-badge[hidden], .camp-leer[hidden] { display: none !important; }
+.campanita-btn > .ay-q { position: absolute; bottom: -5px; right: -5px; margin: 0; width: 15px; height: 15px; z-index: 1; }   /* (?) de ayuda como mini-insignia, no empuja la 🔔 (2026-11-23) */

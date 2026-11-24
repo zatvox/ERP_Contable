@@ -1,4 +1,5 @@
 import { espejoCxP } from '../shared/detraccion.js'
+import { poblarSelectIGV } from '../shared/igv-tipos.js'
 import { ultimoErrorInsert, query } from '../supabase-client.js'
 import { registrarColumnas, colStyle } from '../col-menu.js'
 import { badgeEmpresa } from '../empresa.js'
@@ -971,7 +972,7 @@ window.editarDetalleOC = async function (idx) {
     $('newDetalleOCPrecio').value = d.precio_unitario ?? ''
     const bruto = (parseFloat(d.cantidad) || 0) * (parseFloat(d.precio_unitario) || 0)
     $('newDetalleOCDescuento').value = d.descuento ?? (bruto > 0 ? Math.max(0, Math.round((1 - (parseFloat(d.subtotal) || 0) / bruto) * 10000) / 100) : 0)
-    $('newDetalleOCIGV').value = String(d.igv_porcentaje ?? 0)
+    poblarSelectIGV('newDetalleOCIGV', { valor: String(parseFloat(d.igv_porcentaje) || 0) })
     $('newDetalleOCPesoNeto').value = d.peso_neto ?? ''
     $('newDetalleOCPesoBruto').value = d.peso_bruto ?? ''
     $('newDetalleOCBultos').value = d.bultos ?? ''

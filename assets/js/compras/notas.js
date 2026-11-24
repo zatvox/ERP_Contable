@@ -8,6 +8,7 @@ import { showToast, formatNumber, formatQty } from '../helpers.js'
 import { camposAnulacion, estaAnulado } from '../anulacion.js'
 import { abrirModalNota, TIPO_NC, TIPO_ND, esNota, nombreTipoComprobante } from '../notas.js'
 import { getModuloConfig } from '../config-modulo.js'
+import { opcionesIGVHtml } from '../shared/igv-tipos.js'
 import { _invalidarCacheCompras } from './anulacion.js'
 import { _calcularMontosDetalleCompra } from './compra-nueva.js'
 import { renderCompras } from './compras-lista.js'
@@ -178,10 +179,7 @@ function _renderDetalleNotaCompra() {
       </td>
       <td style="width:130px; padding:8px 10px;">
         <select id="nccDet-${idx}-igv" style="width:100%;" disabled onchange="window.onCambiarLineaDetalleNotaCompra(${idx})">
-          <option value="18"${igvDefault === '18' ? ' selected' : ''}>18%</option>
-          <option value="18-inc" title="El precio unitario ya incluye el IGV.">18% (incluido)</option>
-          <option value="10"${igvDefault === '10' ? ' selected' : ''}>10%</option>
-          <option value="0"${igvDefault === '0' ? ' selected' : ''}>Exonerada</option>
+          ${opcionesIGVHtml({ incluido: true })}
         </select>
       </td>
       <td style="text-align:right; padding:8px 10px; font-weight:600;" id="nccDet-${idx}-total">0.00</td>

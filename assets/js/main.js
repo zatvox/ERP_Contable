@@ -574,6 +574,18 @@ if (document.readyState === 'loading') {
   iniciarCampanita()
 }
 
+// ❓ Ayuda contextual (?) — globito al pasar 1.5 s + panel derecho «Ver más» (SQL 162 opcional para votos)
+function iniciarAyuda() {
+  let intentos = 0
+  const revisar = () => {
+    if (getCurrentUser()) { import('./shared/ayuda.js').then(m => m.initAyuda()).catch(e => console.warn('ayuda:', e.message)); return }
+    if (++intentos < 30) setTimeout(revisar, 150)
+  }
+  revisar()
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciarAyuda)
+else iniciarAyuda()
+
 // ============================================================================
 // RRHH · R1 — Botón Ingreso/Salida en la cabecera (solo si el usuario es empleado)
 // ============================================================================

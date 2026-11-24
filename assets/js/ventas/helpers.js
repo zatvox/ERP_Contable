@@ -2,6 +2,7 @@
 // ventas/helpers.js — parte de ventas.js (reorganizado 2026-09-25, sin cambios de lógica)
 // Mapa completo de funciones: Claude outputs/glosario_funciones_erp.md
 // ============================================================================
+import { supabase } from '../supabase-client.js'
 import { S } from './state.js'
 import { getContactById, getLotes, getStockUbicaciones } from '../supabase-data.js'
 import { formatQty, pintarDocumentoContacto } from '../helpers.js'
@@ -154,7 +155,14 @@ export async function _nombreCliente(contactId) {
   const local = S._clientes.find(c => c.id === contactId)
   if (local) return local.razon_social || local.nombre || local.name || `ID ${contactId}`
   try {
-    const c = await getContactById(contactId)
+    let c = await getContactById(contactId)
+    // 2026-11-23: contacto creado en OTRA pestaña/página (el buscador vivo lo encuentra en la BD,
+    // pero el caché de esta pestaña es anterior) → se pide directo a la BD y se suma al caché.
+    if (!c) {
+      const { data } = await supabase.from('contacts').select('*').eq('id', contactId).maybeSingle()
+      c = data || null
+      if (c && Array.isArray(S._clientes) && !S._clientes.some(x => x.id === c.id)) S._clientes.push(c)
+    }
     return c?.razon_social || c?.nombre || c?.name || `ID ${contactId}`
   } catch { return `ID ${contactId}` }
 }

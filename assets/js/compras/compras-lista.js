@@ -16,6 +16,7 @@ import { getModuloConfig } from '../config-modulo.js'
 import { _invalidarCacheCompras } from './anulacion.js'
 import { _aplicarModoVistaEdicionCompra, _pintarLineasEdicionCompra } from './compras-editar.js'
 import { _cargarComprasConGuia } from './guias-ingreso-lista.js'
+import { montarConexiones } from '../shared/detalle-conectado.js'
 
 // ============================================================================
 // COMPRAS - Obteniendo desde Journal Entries (Asientos Contables) filtrando tipo_movimiento 'Compra' para mostrar en la pestaña de Compras
@@ -365,6 +366,7 @@ window.editarCompra = async function (id) {
 
     declararEmpresaModal('modal-editar-compra', c.empresa_id)
 
+    montarConexiones('modal-editar-compra', 'compra', c.id)
     window.openModal('modal-editar-compra')
   } catch (error) {
     console.error('Error en editarCompra:', error)

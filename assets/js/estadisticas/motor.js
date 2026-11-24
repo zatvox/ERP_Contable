@@ -8,6 +8,7 @@
 // ============================================================================
 import { _calcularMedidas, formatearMedida, nombreMes } from '../reportes.js'
 import { registrarColumnas, colMenuHtml, colStyle } from '../col-menu.js'
+import { analizar } from '../shared/observaciones-reporte.js'
 
 const PAL = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#14b8a6']
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
@@ -113,7 +114,9 @@ export function montar(host, config, meta = {}) {
   }
   E.vista = vistaDefault()
 
+  let _modoImpresion = false
   const tema = () => {
+    if (_modoImpresion) return { txt: '#111827', sec: '#4b5563', line: '#d1d5db', bg: '#ffffff' }
     const cs = getComputedStyle(document.body), g = n => cs.getPropertyValue(n).trim()
     return { txt: g('--text-primary') || '#e5e7eb', sec: g('--text-secondary') || '#94a3b8', line: g('--border-color') || '#334155', bg: g('--bg-secondary') || '#1e293b' }
   }
@@ -257,6 +260,7 @@ export function montar(host, config, meta = {}) {
         <div class="zs-ms-b"><input type="search" placeholder="Buscar…" class="zs-ms-q"><div class="zs-ms-a"><button type="button" data-a="none">Ninguno</button><button type="button" data-a="all">Todos</button></div>
         <div class="zs-ms-l">${opcionesDim[k].slice(0, 200).map(([v, n]) => `<label><input type="checkbox" value="${esc(v)}"><span>${esc(etiqueta(v))}</span><small>${n}</small></label>`).join('')}</div></div></details>`).join('')}
       <button type="button" class="zs-btn" id="zsLimpiar" title="Quitar búsqueda y filtros">↺ Limpiar</button>
+      <button type="button" class="zs-btn" id="zsImprimir" title="Imprimir este reporte en PDF: tú eliges qué secciones incluir">🖨️ Imprimir PDF</button>
     </div>
     <div class="zs-kpis" id="zsKpis"></div>
     <div class="zs-ins" id="zsIns"></div>
@@ -397,6 +401,78 @@ export function montar(host, config, meta = {}) {
     const body = arr.map(g => [g.label, ...meds.map(m => g.vals[m.key] ?? 0)])
     const csv = [head, ...body].map(f => f.map(c => { const s = String(c ?? ''); return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }).join(';')).join('\n')
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })); a.download = `${idRep}.csv`; a.click()
+  })
+  // ── Imprimir PDF: «foto» del reporte tal como está filtrado (ver shared/imprimir-reporte.js) ──────────
+  const txtPlano = h => { const d = document.createElement('div'); d.innerHTML = h; return d.textContent }
+  const imagenVista = async (v, rows) => {
+    const M = medida(E.medida), vistaPrev = E.vista, ant = _modoImpresion
+    _modoImpresion = true; E.vista = v
+    let div = null, ch = null
+    try {
+      const opt = opcionGrafico(rows); if (!opt) return null
+      opt.animation = false; opt.dataZoom = []; opt.backgroundColor = '#ffffff'
+      if (opt.grid && !Array.isArray(opt.grid)) opt.grid = { ...opt.grid, bottom: Math.min(opt.grid.bottom || 40, 64) }
+      div = document.createElement('div'); div.style.cssText = `position:fixed;left:-12000px;top:0;width:940px;height:${v === 'calor' ? 560 : v === 'dona' ? 340 : 360}px;`
+      document.body.appendChild(div); ch = window.echarts.init(div, null, { renderer: 'canvas' }); ch.setOption(opt, true)
+      return ch.getDataURL({ pixelRatio: 2, backgroundColor: '#ffffff' })
+    } finally { if (ch) ch.dispose(); if (div) div.remove(); E.vista = vistaPrev; _modoImpresion = ant }
+  }
+  const textoFiltros = () => {
+    const f = []
+    if (E.desde || E.hasta) f.push(`Período: ${(E.desde || 'inicio').split('-').reverse().join('/')} → ${(E.hasta || 'hoy').split('-').reverse().join('/')}`)
+    else f.push('Período: todo el historial')
+    if (E.buscar) f.push(`Búsqueda: «${E.buscar}»`)
+    Object.entries(E.sel).forEach(([k, st]) => { if (st.size) { const l = [...st].map(etiqueta); f.push(`${dimLabel(k)}: ${l.slice(0, 3).join(', ')}${l.length > 3 ? ` (+${l.length - 3})` : ''}`) } })
+    const M = medida(E.medida); if (M) f.push(`Medida: ${M.label}`)
+    if (dimCat()) f.push(`Agrupado por: ${dimLabel(esDimFecha(E.dim) ? E.dim : dimCat())}`)
+    return f
+  }
+  const kpisImpresion = rows => {
+    const act = kpisDe(rows), prevW = ventanaPrev(), prev = prevW ? kpisDe(filtrar(prevW)) : null
+    return act.lista.map((k, i) => {
+      let delta = null
+      if (prev && prev.lista[i] && prev.lista[i].label === k.label) {
+        const a = num(k.valor), b = num(prev.lista[i].valor)
+        if (b) { const p = (a - b) / Math.abs(b) * 100, sube = p >= 0; delta = { txt: `${sube ? '▲' : '▼'} ${Math.abs(p).toFixed(1)} % vs período anterior`, mala: MALAS_SUBEN.test(k.label) ? sube : !sube } }
+      }
+      return { label: k.label, texto: fmt(k.valor, k.formato), delta, valor: k.valor, formato: k.formato }
+    })
+  }
+  const observacionesImpresion = rows => {
+    const M = medida(E.medida), dk = dimCat(), R = dk ? ranking(rows, dk, M) : []
+    let P = periodos(rows, M)
+    if (E.gran === 'mes' && P.length > 1) {   // rellena meses vacíos para detectar huecos
+      const mp = new Map(P.map(p => [p.k, p])), out = []
+      let [y, m] = P[0].k.split('-').map(Number); const fin = P[P.length - 1].k
+      for (let g = 0; g < 240; g++) { const k = `${y}-${String(m).padStart(2, '0')}`; out.push(mp.get(k) || { k, label: etiqueta(k), v: 0 }); if (k >= fin) break; m++; if (m > 12) { m = 1; y++ } }
+      P = out
+    }
+    return analizar({
+      medida: M, total: val(M, rows), series: P.map(p => ({ label: p.label, v: p.v })), ranking: R.map(x => ({ k: etiqueta(x.k), v: x.v })), dimLabel: dk ? dimLabel(dk) : '',
+      medidas: meds.map(m => ({ label: m.label, valor: val(m, rows), formato: m.formato })), registros: rows.length,
+      sinDato: dk ? rows.filter(r => claveDim(r, dk) === '(sin dato)').length : 0, campoSinDato: dk ? dimLabel(dk) : '',
+      sinFecha: campoFecha ? rows.filter(r => !/^\d{4}-\d{2}/.test(String(r[campoFecha] || ''))).length : 0
+    })
+  }
+  $('zsImprimir').addEventListener('click', async () => {
+    const { abrirImprimirReporte } = await import('../shared/imprimir-reporte.js')
+    const rows = filtrar(), ok = vistasOk(), hayChart = hayEcharts()
+    abrirImprimirReporte({
+      id: 'est_' + idRep, titulo: meta.nombre || config.titulo || 'Reporte', pregunta: meta.pregunta, modulo: (meta.m || '').toUpperCase(),
+      filtros: textoFiltros,
+      kpis: () => kpisImpresion(rows),
+      hallazgos: () => frases(rows).map(txtPlano),
+      graficos: VISTAS.map(([k, t]) => ({ id: k, nombre: t, ok: hayChart && !!ok[k] && rows.length > 0, actual: k === E.vista, detalle: `${medida(E.medida)?.label || ''}${k === 'evolucion' || k === 'cascada' ? ` por ${E.gran === 'dia' ? 'día' : E.gran === 'anio' ? 'año' : 'mes'}` : dimCat() ? ' por ' + dimLabel(dimCat()).toLowerCase() : ''}`, img: () => imagenVista(k, rows) })),
+      tabla: ({ filas }) => {
+        const arr = grupoTabla(rows), M0 = meds[0], tot0 = arr.reduce((s, g) => s + Math.max(0, g.vals[M0?.key] || 0), 0), aditiva = M0 && [undefined, 'sum', 'count'].includes(M0.agg)
+        const dk = E.dim || (fechaDim ? fechaDim.key : ''), lim = filas > 0 ? arr.slice(0, filas) : arr
+        return { cab: [dimLabel(dk) || 'Grupo', ...meds.map(m => m.label), ...(aditiva ? ['Particip.'] : [])],
+          filas: lim.map(g => ({ c: [g.label, ...meds.map(m => fmt(g.vals[m.key], m.formato)), ...(aditiva ? [tot0 ? (Math.max(0, g.vals[M0.key]) / tot0 * 100).toFixed(1) + ' %' : '—'] : [])] })),
+          total: ['TOTAL', ...meds.map(m => fmt(val(m, rows), m.formato)), ...(aditiva ? ['100 %'] : [])],
+          nota: arr.length > lim.length ? `Se muestran ${lim.length} de ${arr.length} filas (ordenadas como en pantalla). Los totales incluyen todas.` : '' }
+      },
+      observaciones: () => observacionesImpresion(rows)
+    })
   })
   const ro = new ResizeObserver(() => chart && chart.resize()); ro.observe($('zsChart'))
   const mo = new MutationObserver(() => pintarChart(filtrar())); mo.observe(document.body, { attributes: true, attributeFilter: ['class'] })

@@ -8,6 +8,7 @@
   <title>JHIRO ERP - Dashboard</title>
   <link rel="stylesheet" href="assets/css/styles.css">
   <link rel="stylesheet" href="assets/css/estadisticas.css">
+  <link rel="stylesheet" href="assets/css/informes-menu.css">
 </head>
 <body>
   <div class="app-container">
@@ -22,6 +23,7 @@
         <li><a href="crm.html" data-page="crm">&#129309; CRM</a></li>
         <li><a href="cobranzas.html" data-page="cobranzas">&#128176; Cobranza y pagos</a></li>
         <li><a href="tesoreria.html" data-page="tesoreria">&#128179; Tesorería</a></li>
+        <li><a href="tareas.html" data-page="tareas">&#9989; Tareas</a></li>
         <li data-solo-admin><a href="rrhh.html" data-page="rrhh">&#128101; RRHH</a></li>
         <li><a href="costeo-importaciones.html" data-page="costeo">&#128674; Carpetas Importación</a></li>
         <li><a href="contabilidad.html" data-page="contabilidad">&#128209; Contabilidad</a></li>
@@ -56,7 +58,7 @@
         <div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:12px;">
           <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
             <h1 class="page-title" style="margin-bottom:0;">Dashboard</h1>
-            <a href="informe/Informe_1er_Avance_JHIRO_ERP.pdf" download class="btn btn-secondary btn-small" style="text-decoration:none;">📄 Informe 1er Avance</a>
+            <div id="informes-menu"></div>
           </div>
           <div id="dash-ultima-act" style="font-size:0.78rem; color:var(--text-secondary);"></div>
         </div>
@@ -290,6 +292,7 @@
   <script type="module" src="assets/js/helpers.js"></script>
   <script type="module" src="assets/js/main.js"></script>
   <script type="module" src="assets/js/dashboard-init.js"></script>
+  <script type="module" src="assets/js/shared/informes-menu.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
   <script type="module" src="assets/js/estadisticas/centro.js"></script>
 </body>

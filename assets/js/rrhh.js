@@ -352,6 +352,8 @@ function _textoHorario(hs) {
   }).join(' · ') || '—'
 }
 
+let _hay161      // SQL 161 (Tareas): columnas area / es_jefe_area en empleados
+async function _checar161() { if (_hay161 !== undefined) return; _hay161 = null; try { const r = await supabase.from('empleados').select('area').limit(1); _hay161 = !r.error } catch (_) { _hay161 = false } }
 let _hay159
 function _checar159() {
   if (_hay159 !== undefined) return
@@ -408,6 +410,9 @@ window.abrirModalEmpleado = function (id = null, usuarioId = null) {
   _llenarSedes()
   $('empVinculo').value = e?.vinculo || 'planilla'
   $('empCargo').value = e?.cargo || ''
+  { const ar = $('empArea'); if (ar) ar.value = e?.area || ''
+    const jf = $('empJefeArea'); if (jf) jf.checked = !!e?.es_jefe_area
+    const dl = $('empAreasLista'); if (dl) dl.innerHTML = [...new Set((_empleados || []).map(x => x.area).filter(Boolean))].map(a => `<option value="${String(a).replace(/"/g, '&quot;')}">`).join('') }
   montarSelectorCargos('empCargo').refrescar()
   $('empIngreso').value = e?.fecha_ingreso || ''
   $('empSueldo').value = e?.sueldo_mensual ?? ''
@@ -430,7 +435,7 @@ window.abrirModalEmpleado = function (id = null, usuarioId = null) {
   else if (u && c) { av.style.display = ''; av.innerHTML = `✔ Se encontró el contacto <strong>${_esc(c.nombre)}</strong> y se usará (sin duplicar). Verifica que sea la misma persona; si no, elige otra en «Persona».` }
   else av.style.display = 'none'
   window.empAlCambiarVinculo(); window.empAlCambiarPension(); window.empAlElegirPersona()
-  _checar159()
+  _checar159(); _checar161()
   { const a = $('empAviso159'); if (a) a.style.display = _hay159 === false ? '' : 'none' }
   window.empPaso(1)
   window.openModal('modal-empleado')
@@ -590,6 +595,7 @@ window.guardarEmpleado = async function () {
     const payload = {
       empresa_id: empresaId, contact_id: contactId, vinculo, user_id: userId,
       cargo: $('empCargo').value.trim() || null,
+      ...(_hay161 === false ? {} : { area: $('empArea').value.trim() || null, es_jefe_area: !!($('empArea').value.trim() && $('empJefeArea').checked) }),
       sede_id: Number($('empSede').value || 0) || null,
       fecha_ingreso: $('empIngreso').value || null,
       sueldo_mensual: sueldo,

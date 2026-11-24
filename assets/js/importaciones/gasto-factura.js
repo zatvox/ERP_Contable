@@ -12,6 +12,7 @@
 //   5. abonos de la liquidación del agente → 'pendiente' de regularizar
 // Uso: window.abrirGastoFactura(costoId)  ·  API sin pantalla: registrarGastoFactura({...})
 // ============================================================================
+import { opcionesIGVHtml, valorIGVDefault, poblarSelectIGV } from '../shared/igv-tipos.js'
 import { montarDetraccion, detraccionAutomatica, espejoCxP, guardarDetraccionCompra } from '../shared/detraccion.js'
 import '../shared/perfil-contacto.js'
 import { query, update, esperarContextoEmpresa } from '../supabase-client.js'
@@ -301,7 +302,7 @@ function _asegurarModal() {
         <strong class="mod-sec">Importes</strong>
         <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px;">
           <div class="form-group"><label id="gfLblBase">Base imponible *</label><input type="number" id="gfBase" step="0.01" oninput="window.gfCalc('base')"></div>
-          <div class="form-group"><label>IGV</label><select id="gfIgvPct" onchange="window.gfCalc('base')"><option value="18">Gravado 18 %</option><option value="0">Sin IGV (exonerado / inafecto / exterior)</option></select></div>
+          <div class="form-group"><label>IGV</label><select id="gfIgvPct" onchange="window.gfCalc('base')">${opcionesIGVHtml()}</select></div>
           <div class="form-group"><label>Monto IGV</label><input type="number" id="gfIgv" step="0.01" oninput="window.gfCalc('igv')"></div>
           <div class="form-group"><label id="gfLblTotal">Total del comprobante</label><input type="number" id="gfTotal" step="0.01" oninput="window.gfCalc('total')"></div>
         </div>
@@ -371,7 +372,7 @@ window.abrirGastoFactura = async function (costoId) {
     if (!costo) { showToast('No se encontró el gasto', 'warning'); return }
     const doc = costo.documento_id ? (await query('documentos_importacion', { id: costo.documento_id }))?.[0] : null
     if (!doc) { showToast('Este gasto no tiene documento', 'warning'); return }
-    _asegurarModal()
+    _asegurarModal(); poblarSelectIGV('gfIgvPct')
     const [provs, cuentas] = await Promise.all([getSuppliers(), getCuentasGasto()])
     const editar = !!doc.compra_id
     _ctx = { costo, doc, editar }
@@ -404,7 +405,7 @@ window.abrirGastoFactura = async function (costoId) {
     $('gfMoneda').value = costo.moneda || doc.moneda || 'USD'
     $('gfTC').value = num(costo.tipo_cambio) > 1 ? costo.tipo_cambio : ''; $('gfTC').dataset.fecha = num(costo.tipo_cambio) > 1 ? ($('gfFecha').value || '') : ''
     $('gfGlosa').value = costo.concepto || ''
-    $('gfIgvPct').value = editar && !(num(costo.igv_monto) > 0) ? '0' : '18'
+    $('gfIgvPct').value = editar && !(num(costo.igv_monto) > 0) ? '0' : valorIGVDefault()
     // Si ya hay IGV separado: base = monto. Si no (IGV 0): el importe registrado es el total de la factura.
     const monto = num(costo.monto_moneda), igv = num(costo.igv_monto)
     if (igv > 0) { $('gfBase').value = monto.toFixed(2); window.gfCalc('base'); $('gfIgv').value = igv.toFixed(2); window.gfCalc('igv') }

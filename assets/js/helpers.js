@@ -2,6 +2,7 @@
 // HELPERS.JS - Funciones auxiliares globales
 // ============================================================================
 
+import './shared/formato-numeros.js'   // estándar de importes (coma de miles) — 2026-11-18
 import { 
   getSupplierById as getSupplierByIdAsync,
   getCustomerById as getCustomerByIdAsync,

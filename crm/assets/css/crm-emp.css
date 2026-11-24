@@ -17,3 +17,51 @@
 .emp-pill[aria-pressed="true"] { border-color: var(--c); box-shadow: 0 0 0 1px var(--c); }
 .nav__link--int { opacity: .75; }
 @media (max-width: 900px) { .emp-pills { display: none; } }
+
+/* ===== Vista del cliente: más compacta y mejor en celular (2026-11-23) ===== */
+.btn-carrito { display: none !important; }
+.nav__logo img:not(.emp-logo) { visibility: hidden; }
+.emp-logo { height: 34px !important; width: auto; max-width: 190px; object-fit: contain; background: #fff; padding: 3px 10px; border-radius: 8px; filter: none !important; }
+.emp-wordmark { font-family: var(--font-label); font-weight: 700; letter-spacing: .14em; text-transform: uppercase; font-size: 1.05rem; color: var(--color-text); }
+:root { --nav-height: 64px; }
+.nav__links { gap: 1.6rem; }
+.nav__link { font-size: .82rem; letter-spacing: .22em; }
+
+.section#products { padding: 1.1rem 0 2.5rem; }
+#products .section-header { margin-bottom: .9rem; display: grid; gap: 2px; }
+#products .section-header .label { margin: 0; font-size: .68rem; }
+#products .section-divider { display: none; }
+#products .section-header h2 { margin: 0; font-size: clamp(1.45rem, 2.6vw, 2rem); line-height: 1.15; }
+#products .section-header p { margin: 2px 0 0; max-width: none; font-size: .92rem; line-height: 1.45; }
+.products-topbar { margin-bottom: 1rem; }
+.products-layout { gap: 1.25rem; }
+
+@media (max-width: 900px) {
+  .products-sidebar { display: block !important; position: static; background: none; border: 0; border-radius: 0; overflow: visible; margin: 0 0 .5rem; }
+  .products-sidebar .sidebar-section { padding: 0 0 .45rem; border: 0; }
+  .products-sidebar .sidebar-heading { display: none; }
+  .sidebar-cat-list, .sidebar-avail-list { flex-direction: row; overflow-x: auto; gap: 6px; padding: 2px 0; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .sidebar-cat-list::-webkit-scrollbar, .sidebar-avail-list::-webkit-scrollbar { display: none; }
+  .sidebar-cat-list li, .sidebar-avail-list li { flex: none; }
+  .sidebar-cat-list li button, .sidebar-avail-list li button, .sidebar-avail-btn { width: auto; white-space: nowrap; border: 1px solid var(--color-border-2); border-radius: 999px; padding: .4rem .9rem; font-size: .8rem; background: var(--color-surface); }
+  .sidebar-cat-btn.active, .sidebar-avail-btn.active { border-color: var(--emp); box-shadow: none; background: color-mix(in srgb, var(--emp) 16%, var(--color-surface)); }
+  .btn-show-filters { display: none !important; }
+  .products-topbar { gap: .6rem; margin-bottom: .75rem; }
+  .search-wrap { order: -1; width: 100%; flex: 1 1 100%; }
+  .products-count-wrap { width: 100%; }
+}
+@media (max-width: 768px) {
+  .emp-logo { height: 30px !important; max-width: 140px; }
+  :root { --nav-height: 58px; }
+  .nav__actions { gap: .5rem; }
+  .nav__actions .btn-primary { font-size: 0; padding: .55rem .8rem; letter-spacing: 0; position: relative; }
+  .nav__actions .btn-primary i { margin: 0 !important; font-size: 1rem; }
+  .nav-carrito-badge { position: absolute; top: -6px; right: -6px; }
+  #products .section-header p { display: none; }
+  .section#products { padding-top: .7rem; }
+}
+@media (max-width: 480px) {
+  .products-grid { gap: .55rem; }
+  .pcard__body { padding: .55rem; }
+  .container { padding-left: .6rem; padding-right: .6rem; }
+}

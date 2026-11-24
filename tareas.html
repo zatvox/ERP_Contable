@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <link rel="icon" type="image/png" href="assets/img/genko-geco.png">
+  <link rel="apple-touch-icon" href="assets/img/genko-geco.png">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JHIRO ERP - Tareas</title>
+  <link rel="stylesheet" href="assets/css/styles.css">
+  <link rel="stylesheet" href="assets/css/modal-moderno.css">
+  <link rel="stylesheet" href="assets/css/tareas.css?v=1">
+</head>
+<body class="ui-moderna">
+  <div class="app-container">
+    <aside class="sidebar">
+      <div class="sidebar-logo">JHIRO</div>
+      <ul class="sidebar-menu">
+        <li><a href="dashboard.html" data-page="dashboard">&#128202; Dashboard</a></li>
+        <li><a href="inventario.html" data-page="inventario">&#128230; Inventario</a></li>
+        <li><a href="compras.html" data-page="compras">&#128722; Compras</a></li>
+        <li><a href="ventas.html" data-page="ventas">&#128200; Ventas</a></li>
+        <li><a href="crm.html" data-page="crm">&#129309; CRM</a></li>
+        <li><a href="cobranzas.html" data-page="cobranzas">&#128176; Cobranza y pagos</a></li>
+        <li><a href="tesoreria.html" data-page="tesoreria">&#128179; Tesorería</a></li>
+        <li><a href="tareas.html" class="active" data-page="tareas">&#9989; Tareas</a></li>
+        <li data-solo-admin><a href="rrhh.html" data-page="rrhh">&#128101; RRHH</a></li>
+        <li><a href="costeo-importaciones.html" data-page="costeo">&#128674; Carpetas Importación</a></li>
+        <li><a href="contabilidad.html" data-page="contabilidad">&#128209; Contabilidad</a></li>
+        <li><a href="perfil.html" data-page="perfil">&#9881;&#65039; Configuración</a></li>
+      </ul>
+      <div class="sidebar-user">
+        <strong id="userDisplay">Admin</strong>
+        <button class="btn-logout" onclick="logout()">Cerrar Sesión</button>
+      </div>
+    </aside>
+
+    <div class="main-content">
+      <header class="header">
+        <div class="header-left">
+          <button class="menu-toggle" id="menuToggle">☰</button>
+          <h2 class="header-title">Tareas</h2>
+        </div>
+
+        <nav class="module-nav" id="tkTabs">
+          <button type="button" class="tab-btn active tk-tab" data-v="mias">📥 Mis tareas</button>
+          <button type="button" class="tab-btn tk-tab" data-v="pedidas">📤 Las que pedí</button>
+          <button type="button" class="tab-btn tk-tab" data-v="gerencia" id="tk-tab-gerencia" hidden>🧭 Gerencia</button>
+        </nav>
+
+        <div class="header-controls">
+          <button class="theme-toggle" id="themeToggle">🌙 Oscuro</button>
+        </div>
+      </header>
+
+      <main class="content">
+        <div id="tk-root">
+          <div class="tk-head">
+            <div class="tk-kpis" id="tk-kpis"></div>
+            <div class="tk-head-acc">
+              <button class="btn btn-secondary btn-small" id="tk-btn-rec" style="display:none">🔁 Recurrentes</button>
+              <button class="btn btn-primary" id="tk-btn-nueva">＋ Nueva tarea</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="tk-tools"><input type="search" id="tk-buscar" placeholder="Buscar tarea, persona o área…"><label class="tk-chk"><input type="checkbox" id="tk-abiertas" checked> Solo abiertas</label><a href="rrhh.html?tab=asistencia" class="tk-link" data-solo-admin>🕐 Ver asistencias (RRHH)</a></div>
+            <div id="tk-lista"></div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script type="module" src="assets/js/config.js"></script>
+  <script type="module" src="assets/js/supabase-client.js"></script>
+  <script type="module" src="assets/js/auth-supabase.js"></script>
+  <script type="module" src="assets/js/auth-init.js"></script>
+  <script type="module" src="assets/js/supabase-data.js"></script>
+  <script type="module" src="assets/js/helpers.js"></script>
+  <script type="module" src="assets/js/main.js"></script>
+  <script type="module" src="assets/js/tareas/init.js?v=1"></script>
+</body>
+</html>
