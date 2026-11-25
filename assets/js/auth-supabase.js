@@ -49,9 +49,9 @@ async function _populateCache(session) {
   // Lee perfil desde public.users (vinculado por auth_id = auth.uid())
   const { data: perfil } = await supabase
     .from('users')
-    .select('id, email, nombre, role, active')
+    .select('id, email, nombre, role, active, tenant_id, es_superadmin')
     .eq('auth_id', session.user.id)
-    .single()
+    .maybeSingle()
 
   _userCache = {
     id:      session.user.id,           // UUID de auth.users
@@ -59,8 +59,11 @@ async function _populateCache(session) {
     email:   session.user.email,
     nombre:  perfil?.nombre || session.user.user_metadata?.nombre || session.user.email,
     role:    perfil?.role   || session.user.user_metadata?.role   || 'user',
-    active:  perfil?.active ?? true
+    active:  perfil?.active ?? true,
+    tenant_id: perfil?.tenant_id ?? null,
+    es_superadmin: !!perfil?.es_superadmin
   }
+  return perfil
 }
 
 // ============================================================================
@@ -82,7 +85,20 @@ export async function login(email, password) {
       return { success: false, message: msg }
     }
 
-    await _populateCache(data.session)
+    let perfil = await _populateCache(data.session)
+    if (perfil && perfil.active === false) {
+      // SQL 167: puede estar pendiente en este tenant pero activa en otro (contador)
+      const { data: mt } = await supabase.rpc('mis_tenants')
+      const ok = (mt || []).find(t => t.activo)
+      if (ok) { await supabase.rpc('cambiar_tenant', { p_tenant: ok.tenant_id }); perfil = await _populateCache(data.session) }
+    }
+    if (!perfil || perfil.active === false) {
+      _userCache = null
+      await supabase.auth.signOut()
+      return { success: false, message: !perfil
+        ? 'Tu cuenta aún no está vinculada a una empresa. Pide al administrador que te vincule.'
+        : 'Tu cuenta está pendiente de aprobación por el administrador de tu empresa.' }
+    }
     return { success: true }
 
   } catch (err) {

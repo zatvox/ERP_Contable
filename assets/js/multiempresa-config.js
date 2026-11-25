@@ -486,7 +486,7 @@ async function _empSubirLogo(ruc) {
   if (!_empLogoArchivo) return null
   const ext = (_empLogoArchivo.name.split('.').pop() || 'png').toLowerCase()
   const path = `${ruc}/logo-${Date.now()}.${ext}`
-  const { error } = await supabase.storage.from('empresa-logos').upload(path, _empLogoArchivo, { upsert: true, contentType: _empLogoArchivo.type })
+  const { error } = await supabase.storage.from('empresa-logos').upload(path, _empLogoArchivo, { upsert: true, contentType: _empLogoArchivo.type, cacheControl: '31536000' })
   if (error) throw new Error(/bucket not found/i.test(error.message) ? 'Falta correr assets/sql/147_empresa_perfil_logo_web.sql (bucket de logos)' : 'No se pudo subir el logo: ' + error.message)
   return supabase.storage.from('empresa-logos').getPublicUrl(path).data?.publicUrl || null
 }

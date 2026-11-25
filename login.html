@@ -67,6 +67,11 @@
               </button>
             </div>
           </div>
+          <details id="premiumBox" style="margin:4px 0 12px; font-size:.85rem; color:#94a3b8;">
+            <summary style="cursor:pointer;">¿Tu empresa tiene sistema propio? Ingresa tu código</summary>
+            <input type="text" id="codigoEmpresa" placeholder="Código de empresa" autocapitalize="characters" autocomplete="off" style="margin-top:8px; width:100%; box-sizing:border-box;">
+          </details>
+          <div id="proyectoBadge" style="display:none; margin-bottom:10px; font-size:.82rem; color:#94a3b8;"></div>
           <button type="submit" class="btn btn-login">Ingresar</button>
         </form>
 
@@ -137,13 +142,9 @@
           </div>
 
           <div class="form-group">
-            <label>Tu rol</label>
-            <div class="login-rol">
-              <label><input type="radio" name="reg-rol" value="oficina" checked>
-                <span>Oficina<small>Administración y apoyo</small></span></label>
-              <label><input type="radio" name="reg-rol" value="vendedor">
-                <span>Vendedor<small>Ventas y clientes</small></span></label>
-            </div>
+            <label for="reg-codigo">Código de empresa</label>
+            <input type="text" id="reg-codigo" placeholder="Ej: JHIRO-GROUP" autocapitalize="characters" autocomplete="off" required>
+            <small style="color:#94a3b8;">Te lo da el administrador. Tu cuenta quedará pendiente hasta que la apruebe.</small>
           </div>
           <button type="submit" class="btn btn-login">Crear cuenta</button>
         </form>
@@ -194,8 +195,22 @@
       document.querySelector('.login-card').classList.add('cargando')
 
       try {
+        const cod = (document.getElementById('codigoEmpresa').value || '').trim()
+        if (cod) {
+          const { supabase } = await import('./assets/js/supabase-client.js')
+          const { data: info } = await supabase.rpc('tenant_login_info', { p_codigo: cod })
+          if (!info) { errorDiv.textContent = 'Código de empresa no encontrado'; errorDiv.style.display = 'block'; return }
+          if (info.supabase_url && info.supabase_anon_key) {
+            localStorage.setItem('erp_proyecto', JSON.stringify({ url: info.supabase_url, key: info.supabase_anon_key, nombre: info.nombre }))
+            location.reload(); return           // la página se recarga conectada al proyecto propio del cliente
+          }
+          if (localStorage.getItem('erp_proyecto')) { localStorage.removeItem('erp_proyecto'); location.reload(); return }
+        }
         const result = await window.login(email, password)
         if (result && result.success) {
+          const ts = await import('./assets/js/shared/tenant-switch.js')
+          const lista = (await ts.listarMisTenants()).filter(t => t.activo)
+          if (lista.length > 1) { mostrarSelectorTenant(lista, ts); return }
           window.location.href = 'dashboard.html'
         } else {
           errorDiv.textContent = (result && result.message) || 'Correo o contraseña incorrectos'
@@ -209,6 +224,21 @@
         btnLogin.disabled = false; btnLogin.textContent = 'Ingresar'
         document.querySelector('.login-card').classList.remove('cargando')
       }
+    }
+
+    // ── ELEGIR TENANT (contador / superadmin con acceso a varios clientes) ──
+    function mostrarSelectorTenant(lista, ts) {
+      const errorDiv = document.getElementById('loginError')
+      const box = document.createElement('div')
+      box.style.cssText = 'position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;z-index:9999'
+      box.innerHTML = '<div style="background:#fff;color:#111;border-radius:12px;padding:20px;min-width:290px;max-width:90vw"><h3 style="margin:0 0 4px">¿A qué cliente ingresas?</h3><p style="margin:0 0 12px;font-size:.8rem;color:#555">Trabajas en uno a la vez; podrás cambiar desde el menú.</p>' +
+        lista.map(t => `<button data-t="${t.tenant_id}" style="display:block;width:100%;margin:6px 0;padding:10px;border-radius:8px;border:1px solid #ccc;background:${t.actual ? '#e8f5e9' : '#fff'};cursor:pointer;text-align:left"><b>${String(t.nombre).replace(/[<>&"]/g,'')}</b><br><small>${t.codigo} · ${t.role}${t.actual ? ' · último usado' : ''}</small></button>`).join('') + '</div>'
+      document.body.appendChild(box)
+      box.querySelectorAll('button').forEach(b => b.onclick = async () => {
+        b.disabled = true
+        try { await ts.cambiarTenant(Number(b.dataset.t)); window.location.href = 'dashboard.html' }
+        catch (e) { errorDiv.textContent = e.message; errorDiv.style.display = 'block'; box.remove() }
+      })
     }
 
     // ── REGISTRO ─────────────────────────────────────────────────────────────
@@ -236,10 +266,16 @@
         // Accedemos a supabase a través del módulo cargado
         const { supabase } = await import('./assets/js/supabase-client.js')
 
+        const codigoReg = document.getElementById('reg-codigo').value.trim().toUpperCase()
+        const { data: info } = await supabase.rpc('tenant_login_info', { p_codigo: codigoReg })
+        if (!info) throw new Error('Código de empresa no válido. Pídelo a tu administrador.')
+        const prop = JSON.parse(localStorage.getItem('erp_proyecto') || 'null')
+        if (info.supabase_url && prop?.url !== info.supabase_url) throw new Error('Tu empresa usa un sistema propio: ve a Iniciar sesión y escribe tu código de empresa.')
+
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: { data: { nombre, role: (document.querySelector('input[name="reg-rol"]:checked') || {}).value || 'oficina' } }
+          options: { data: { nombre, tenant_codigo: codigoReg } }
         })
 
         if (error) throw error
@@ -250,10 +286,11 @@
           okDiv.innerHTML = `✅ Cuenta creada para <strong>${nombre}</strong>.<br>
             Revisa tu correo <strong>${email}</strong> y confirma tu cuenta para poder ingresar.`
         } else {
-          okDiv.innerHTML = `✅ Cuenta creada exitosamente. Ya puedes <button type="button"
+          okDiv.innerHTML = `✅ Cuenta creada exitosamente. Cuando te aprueben podrás <button type="button"
             onclick="mostrarLogin()" style="background:none;border:none;cursor:pointer;
             color:#28a745;font-weight:700;text-decoration:underline;">iniciar sesión</button>.`
         }
+        okDiv.innerHTML += '<br><b>Cuenta pendiente:</b> un administrador de tu empresa debe aprobarla antes de que puedas ingresar.'
         okDiv.style.display = 'block'
         document.getElementById('registroForm').reset()
 
@@ -301,6 +338,14 @@
 
     // ── INIT ─────────────────────────────────────────────────────────────────
     document.addEventListener('DOMContentLoaded', () => {
+      try {
+        const p = JSON.parse(localStorage.getItem('erp_proyecto') || 'null')
+        if (p?.url) {
+          const b = document.getElementById('proyectoBadge'); b.style.display = 'block'
+          b.innerHTML = 'Conectado a: <b>' + (p.nombre || 'sistema propio') + '</b> · <a href="#" id="proyectoCambiar" style="color:#4c6ef5;">cambiar de empresa</a>'
+          document.getElementById('proyectoCambiar').onclick = (e) => { e.preventDefault(); localStorage.removeItem('erp_proyecto'); location.reload() }
+        }
+      } catch (e) {}
       document.getElementById('loginForm').addEventListener('submit', handleLoginSubmit)
       document.getElementById('registroForm').addEventListener('submit', handleRegistroSubmit)
     })

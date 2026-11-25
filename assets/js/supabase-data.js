@@ -903,6 +903,20 @@ export function esPrevisualizable(mime, nombre = '') {
   return /^(image\/|application\/pdf)/.test(mime || '') || /\.(pdf|png|jpe?g|webp|gif)$/i.test(nombre)
 }
 
+/** Reduce fotos pesadas antes de subirlas (máx. 1600 px, JPEG 0.82). Menos Storage y menos egress al verlas. PDFs y demás: intactos. */
+async function _comprimirImg(file) {
+  try {
+    if (!/^image\/(jpeg|png|webp)$/i.test(file.type) || file.size < 300 * 1024) return file
+    const bmp = await createImageBitmap(file)
+    const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height))
+    const cv = document.createElement('canvas'); cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k)
+    const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(bmp, 0, 0, cv.width, cv.height)
+    const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.82))
+    if (!blob || blob.size >= file.size) return file
+    return new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' })
+  } catch { return file }
+}
+
 /**
  * Sube varios archivos a un registro. items = [{ file, concepto }].
  * Devuelve { ok: n, errores: [texto] } — un archivo que falla no frena a los demás.
@@ -910,7 +924,8 @@ export function esPrevisualizable(mime, nombre = '') {
 export async function subirAdjuntos(entidad, entidadId, items, userDbId = null) {
   const errores = []
   let ok = 0
-  for (const [i, { file, concepto }] of (items || []).entries()) {
+  for (const [i, { file: _f0, concepto }] of (items || []).entries()) {
+    const file = await _comprimirImg(_f0)
     const err = validarArchivoAdjunto(file)
     if (err) { errores.push(err); continue }
     const ext = (file.name.split('.').pop() || 'pdf').toLowerCase()

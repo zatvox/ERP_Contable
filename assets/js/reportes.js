@@ -167,6 +167,13 @@ function calcularMedidas(filas, medidas) {
   medidas.forEach(m => {
     // agg 'ratio': Σ num / Σ den (promedio PONDERADO, p.ej. costo unitario
     // = Σ(costo×kg) / Σ kg). num/den son funciones fila → número.
+    // agg 'texto' (2026-11-25): columna de TEXTO (p.ej. Packing asociado). Valores únicos no vacíos:
+    // 0 → '-', 1-2 → "A, B", 3+ → "N <plural>". No suma ni pesa: el % y el orden usan medidas numéricas.
+    if (m.agg === 'texto') {
+      const u = [...new Set(filas.map(f => m.calc ? m.calc(f) : f[m.key]).filter(v => v != null && v !== '' && v !== '-').map(String))]
+      out[m.key] = !u.length ? '-' : (u.length <= 2 ? u.join(', ') : `${u.length} ${m.plural || 'distintos'}`)
+      return
+    }
     if (m.agg === 'ratio') {
       let n = 0, d = 0
       filas.forEach(f => { n += parseFloat(m.num(f)) || 0; d += parseFloat(m.den(f)) || 0 })
@@ -189,6 +196,7 @@ function calcularMedidas(filas, medidas) {
 // ============================================================================
 
 export function formatearMedida(valor, formato) {
+  if (formato === 'texto') return String(valor ?? '-').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
   const n = parseFloat(valor) || 0
   switch (formato) {
     case 'money':   return formatNumber(n, 2)
@@ -829,11 +837,12 @@ function _matrizExport(id) {
       }
       return 0
     }
+    if (typeof a[ok] === 'string' || typeof b[ok] === 'string') return String(a[ok] ?? '').localeCompare(String(b[ok] ?? ''), 'es', { numeric: true }) * dir
     return ((a[ok] ?? 0) - (b[ok] ?? 0)) * dir
   })
   const dims = estado.agrupar.length ? estado.agrupar.map(k => _labelDim(config, k)) : ['Total']
   const dec = (m) => (m.formato === 'money4' ? 6 : (m.formato === 'int' ? 0 : ((m.formato === 'qty' || m.formato === 'tc') ? 3 : 2)))
-  const num = (m, v) => { const n = parseFloat(v) || 0; const p = 10 ** dec(m); return Math.round(n * p) / p }
+  const num = (m, v) => { if (m.agg === 'texto') return String(v ?? '-'); const n = parseFloat(v) || 0; const p = 10 ** dec(m); return Math.round(n * p) / p }
   const cab = [...dims, 'N° registros', ...medidas.map(m => m.label)]
   const filas = grupos.map(g => [...(g._claves.length ? g._claves : ['Total']), g._filas.length, ...medidas.map(m => num(m, g[m.key]))])
   const tot = calcularMedidas(filtrados, medidas)

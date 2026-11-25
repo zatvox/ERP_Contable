@@ -20,7 +20,7 @@ const md = s => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`(.+?)`/g
 function _css() {
   if (document.getElementById('css-ayuda')) return
   const l = document.createElement('link'); l.id = 'css-ayuda'; l.rel = 'stylesheet'
-  l.href = new URL('../../css/ayuda.css?v=1', import.meta.url).href; document.head.appendChild(l)
+  l.href = new URL('../../css/ayuda.css?v=2', import.meta.url).href; document.head.appendChild(l)
 }
 
 /** Helper de los catálogos: E(clave, selector, título, globito, [párrafos…], {txt, q, pv}) */
@@ -29,7 +29,7 @@ export const E = (k, sel, t, tip, ver = null, o = {}) => ({ k, sel, t, tip, ver,
 async function _cargarCatalogos() {
   const base = new URL('../ayuda/', import.meta.url).href
   const lista = ['global', PAGINA]
-  const res = await Promise.all(lista.map(n => import(base + n + '.js?v=1').then(m => m.default || []).catch(() => [])))
+  const res = await Promise.all(lista.map(n => import(base + n + '.js?v=2').then(m => m.default || []).catch(() => [])))
   _entradas = res.flat()
 }
 
@@ -44,8 +44,13 @@ function _aplicar() {
       el.dataset.ay = e.k
       if (e.q) {
         const q = document.createElement('i'); q.className = 'ay-q'; q.textContent = '?'; q.dataset.ayQ = e.k; q.title = ''
-        const fuera = /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)
-        if (fuera) el.insertAdjacentElement('afterend', q); else el.appendChild(q)
+        const campo = /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)
+        if (campo) {
+          // El (?) va SIEMPRE junto al título del campo («Estado (?)»), nunca suelto debajo del control
+          const lab = (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`)) || el.closest('label')
+            || el.parentElement?.querySelector(':scope > label') || el.closest('.form-group, .reporte-filtro, .filtro-grupo')?.querySelector('label')
+          if (lab) lab.appendChild(q); else el.insertAdjacentElement('beforebegin', q)
+        } else el.appendChild(q)
       }
     }
   }

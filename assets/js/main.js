@@ -5,6 +5,7 @@ import { getItems } from './supabase-data.js'
 import { getCurrentUser } from './auth-supabase.js'
 import './modal-guardia.js'   // confirmar cierre de modales con cambios (2026-10-06)
 import './shared/adj-preview.js'   // miniaturas de adjuntos en todos los inputs de archivo (2026-10-22)
+import './shared/tenant-switch.js'   // cambiar de tenant sin cerrar sesión (contador/superadmin, SQL 167)
 import './shared/ver-editar.js'   // estándar Ver (ojito) → Editar (2026-10-23)
 
 const THEME_KEY = 'erp_theme';

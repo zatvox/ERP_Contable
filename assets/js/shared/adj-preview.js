@@ -135,17 +135,42 @@ function _urlDe(path) {
     }, 25)
   })
 }
+// Miniatura guardada en el navegador (2026-11-25, recorte de egress): el archivo completo se baja UNA vez por equipo.
+// La URL firmada cambia en cada sesión, así que el navegador nunca lo cacheaba y cada lista re-bajaba hasta 10 MB por adjunto.
+const _TH = 'adjth:v1:'
+const _thGet = p => { try { return localStorage.getItem(_TH + p) } catch { return null } }
+const _thSet = (p, d) => { try { localStorage.setItem(_TH + p, d) } catch { /* cuota llena: sin caché */ } }
+function _canvasA(cv) { try { return cv.toDataURL('image/jpeg', 0.7) } catch { return null } }
+async function _miniDeImagen(url) {
+  const blob = await (await fetch(url)).blob()
+  const bmp = await createImageBitmap(blob)
+  const k = 112 / Math.max(bmp.width, bmp.height, 1)
+  const cv = document.createElement('canvas'); cv.width = Math.max(1, Math.round(bmp.width * Math.min(k, 1))); cv.height = Math.max(1, Math.round(bmp.height * Math.min(k, 1)))
+  cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height)
+  return _canvasA(cv)
+}
 async function _hidratar(el) {
   el.dataset.ok = '1'
   const path = el.dataset.adjPath, nombre = el.dataset.adjNombre || path
+  const esImg = _esImg('', nombre) || _esImg('', path), esPdf = _esPdf('', nombre) || _esPdf('', path)
+  const abrir = async (ev) => { ev.preventDefault(); ev.stopPropagation(); try { abrirVisor(await _urlDe(path), '', nombre) } catch { /* sin url */ } }
+  el.title = `${nombre} — clic para ver en grande`
+  el.onclick = abrir
+  const cache = (esImg || esPdf) ? _thGet(path) : null
+  if (cache) {   // 0 bytes de Storage: la URL firmada solo se pide si hacen clic
+    el.innerHTML = `<img src="${cache}" alt="">` + (esPdf ? '<span class="adj-thumb-tag">PDF</span>' : '')
+    return
+  }
   try {
     const url = await _urlDe(path)
     if (!url) throw new Error('sin url')
-    el.title = `${nombre} — clic para ver en grande`
-    el.onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); abrirVisor(url, '', nombre) }
-    if (_esImg('', nombre) || _esImg('', path)) el.innerHTML = `<img src="${url}" alt="" loading="lazy">`
-    else if (_esPdf('', nombre) || _esPdf('', path)) await _pintarPdf(el, url)
-    else el.textContent = (nombre.split('.').pop() || '').toUpperCase().slice(0, 4)
+    if (esImg) {
+      let d = null; try { d = await _miniDeImagen(url) } catch { /* sin miniatura */ }
+      if (d) { _thSet(path, d); el.innerHTML = `<img src="${d}" alt="">` } else el.innerHTML = `<img src="${url}" alt="" loading="lazy">`
+    } else if (esPdf) {
+      await _pintarPdf(el, url)
+      const cv = el.querySelector('canvas'); const d = cv && _canvasA(cv); if (d) _thSet(path, d)
+    } else el.textContent = (nombre.split('.').pop() || '').toUpperCase().slice(0, 4)
   } catch { el.textContent = '—' }
 }
 const _scan = (root = document) => root.querySelectorAll?.('.adj-thumb[data-adj-path]:not([data-ok])').forEach(_hidratar)

@@ -117,6 +117,7 @@ export async function initEmpresaContexto() {
     .from('empresa_config')
     .select('id, codigo, ruc, razon_social, nombre_comercial, color, orden, activo, logo_url, igv_porcentaje, moneda_base')
     .eq('activo', true)
+    .match(user?.tenant_id ? { tenant_id: user.tenant_id } : {})
     .order('orden', { ascending: true })
 
   if (error) {

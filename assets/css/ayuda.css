@@ -23,3 +23,4 @@
 .ay-drawer footer button:hover{border-color:var(--color-primary)}
 .ay-com{display:flex;gap:8px;width:100%;align-items:flex-end}.ay-com textarea{flex:1;padding:6px 8px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-primary);color:var(--text-primary);font:inherit}
 .ay-gracias{color:var(--text-primary)}
+label .ay-q,th .ay-q{text-transform:none;letter-spacing:0;margin-left:6px;position:relative;top:-1px}

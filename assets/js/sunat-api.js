@@ -328,7 +328,7 @@ export async function getTipoCambioDia(fecha = null, { permitirApi = true } = {}
     await supabase.from('tipos_cambio').upsert({
       fecha: f, compra, venta, fecha_publicacion: data.date || f,
       moneda: data.base_currency || 'USD', fuente: 'decolecta-sunat', created_by: user?.db_id || null
-    }, { onConflict: 'fecha' })
+    }, { onConflict: 'tenant_id,fecha' })   // 165: único por tenant
   } catch (e) { console.warn('No se pudo guardar el TC en caché:', e) }
 
   return { compra, venta, fecha: f, fechaPublicacion: data.date || f, origen: 'SUNAT', desdeCache: false }

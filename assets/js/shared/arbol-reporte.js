@@ -21,11 +21,15 @@ const RESULTADO = /margen|utilidad|resultado|ganancia/i
 
 const esFecha = (ctx, k) => (ctx.config.dimensiones || []).find(d => d.key === k)?.tipo === 'fecha'
 const resolver = ctx => ctx.resolver || ((f, k) => (f[k] === null || f[k] === undefined || f[k] === '' ? '(sin dato)' : String(f[k])))
-const aditiva = ctx => { const m = ctx.medidas[0]; return !m || [undefined, 'sum', 'count'].includes(m.agg) }
+// Columnas de texto (agg 'texto', p.ej. Packing): van pegadas a la etiqueta, no pesan ni se ordenan como cifra.
+const esTxt = m => m?.agg === 'texto'
+const mNum = ctx => ctx.medidas.find(m => !esTxt(m))
+const colsVista = ctx => [...ctx.medidas.filter(esTxt), ...ctx.medidas.filter(m => !esTxt(m))]
+const aditiva = ctx => { const m = mNum(ctx); return !m || [undefined, 'sum', 'count'].includes(m.agg) }
 
 /** Construye el árbol completo (todos los niveles) con subtotales, orden, alertas y variación. */
 export function construirArbol(ctx) {
-  const { filtrados, medidas, calc, valorOrd, estado } = ctx, niveles = estado.agrupar, res = resolver(ctx), M0 = medidas[0]
+  const { filtrados, medidas, calc, valorOrd, estado } = ctx, niveles = estado.agrupar, res = resolver(ctx), M0 = medidas.find(m => !esTxt(m))
   const idx = new Map()
   const cmpDe = nivel => {
     const fechaNivel = esFecha(ctx, niveles[nivel]), ok = estado.ordenKey, dir = estado.ordenDir === 'asc' ? 1 : -1
@@ -34,6 +38,7 @@ export function construirArbol(ctx) {
       return (a, b) => { const va = valorOrd(a.label), vb = valorOrd(b.label); if (va === vb) return 0; return (typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb), 'es', { numeric: true })) * d }
     }
     const key = ok || M0?.key
+    if (esTxt(medidas.find(m => m.key === key))) return (a, b) => String(a.vals[key] ?? '').localeCompare(String(b.vals[key] ?? ''), 'es', { numeric: true }) * dir
     return (a, b) => ((a.vals[key] ?? 0) - (b.vals[key] ?? 0)) * dir
   }
   const construir = (fs, nivel, path) => {
@@ -70,7 +75,7 @@ const abierto = (ctx, n, forzarAlertas) => {
 
 /** Aplica «solo lo que pesa» (80 %) a una lista de hermanos. */
 function podar(ctx, lista) {
-  const M0 = ctx.medidas[0]
+  const M0 = mNum(ctx)
   if (!ctx.estado.pesa || !aditiva(ctx) || !M0 || lista.length < 4) return { vis: lista, resto: null }
   const pos = lista.map(n => Math.max(0, n.vals[M0.key] || 0)), tot = pos.reduce((s, v) => s + v, 0)
   if (!tot) return { vis: lista, resto: null }
@@ -103,9 +108,10 @@ const celdaCifra = (ctx, m, v, path, extra = '') => `<td class="n rp-cifra" data
 function htmlFilaArbol(ctx, f, M0, sumHermanos) {
   if (f.resto) return `<tr class="rp-resto"><td colspan="${2 + ctx.medidas.length}" style="padding-left:${12 + f.nivel * 22}px">… y ${f.resto.n} grupo(s) menores que suman ${f.resto.pct.toFixed(1)} % <small>(apaga «Solo lo que pesa» para verlos)</small></td></tr>`
   const n = f.n, ab = abierto(ctx, n, ctx.estado.soloAlertas), sub = sumHermanos.get(n)
-  const cel = ctx.medidas.map((m, i) => {
+  const cel = colsVista(ctx).map(m => {
+    if (esTxt(m)) return `<td class="rp-txt" style="color:var(--text-secondary);white-space:nowrap">${ctx.fmt(n.vals[m.key], 'texto')}</td>`
     let extra = '', estilo = ''
-    if (i === 0) {
+    if (m === M0) {
       if (sub && aditiva(ctx)) { const p = Math.max(0, n.vals[m.key] || 0) / sub.tot * 100; estilo = p; extra = ` <span class="rp-pct">${p.toFixed(0)}%</span>` }
       if (n.prev && m) {
         const a = n.vals[m.key] || 0, b = n.prev.vals[m.key] || 0
@@ -139,7 +145,7 @@ export function matrizCruzada(ctx, maxCols = 60) {
   const { filtrados, estado, valorOrd, medidas, calc } = ctx, res = resolver(ctx)
   const [kr, kc] = estado.agrupar
   if (!kr || !kc) return null
-  const M = medidas.find(m => m.key === estado.medCruz) || medidas[0]
+  const M = medidas.find(m => m.key === estado.medCruz && !esTxt(m)) || medidas.find(m => !esTxt(m)) || medidas[0]
   const mp = new Map(), cols = new Map()
   filtrados.forEach(f => {
     const r = String(res(f, kr)), c = String(res(f, kc))
@@ -168,7 +174,7 @@ function htmlCruzada(ctx) {
   const max = Math.max(...X.filas.flatMap(f => f.celdas.map(c => Math.abs(c.v))), 1e-9)
   const registro = new Map(); let n = 0
   const ref = fs => { const k = 'x' + (n++); registro.set(k, fs); return k }
-  const chipsMed = ctx.medidas.length > 1 ? `<div class="rp-grp"><span>Medida</span>${ctx.medidas.map(m => `<button type="button" class="rp-tb ${m.key === X.M.key ? 'on' : ''}" data-rpa="med:${esc(m.key)}">${esc(m.label)}</button>`).join('')}</div>` : ''
+  const chipsMed = ctx.medidas.filter(m => !esTxt(m)).length > 1 ? `<div class="rp-grp"><span>Medida</span>${ctx.medidas.filter(m => !esTxt(m)).map(m => `<button type="button" class="rp-tb ${m.key === X.M.key ? 'on' : ''}" data-rpa="med:${esc(m.key)}">${esc(m.label)}</button>`).join('')}</div>` : ''
   const celda = (v, fs, extra = '') => `<td class="n rp-cifra" data-xdrill="${ref(fs)}" ${extra}>${v ? ctx.fmt(v, X.M.formato) : '<span style="opacity:.3">·</span>'}</td>`
   const head = `<tr><th class="rp-xsticky">${esc(ctx.labelDim(X.kr))} \\ ${esc(ctx.labelDim(X.kc))}</th>${X.colKeys.map(c => `<th class="n" title="${esc(etq(c))}">${esc(etq(c))}</th>`).join('')}<th class="n">Total</th></tr>`
   const body = X.filas.slice(0, 300).map(f => `<tr><td class="rp-xsticky rp-lbl">${esc(f.label)}</td>${f.celdas.map(c => celda(c.v, c.fs, c.v ? `style="background:color-mix(in srgb,var(--color-info,#3b82f6) ${Math.round(8 + 52 * Math.abs(c.v) / max)}%,transparent)"` : '')).join('')}${celda(f.tot, f.fs, 'style="font-weight:700"')}</tr>`).join('')
@@ -185,7 +191,7 @@ export function renderTablaReporte(ctx, plana) {
   if (!e.agrupar.length || !ctx.filtrados.length) return { html: null }
   if (vista === 'plana') return { html: htmlBarra(ctx, null) + plana(), arbol: null }
   if (vista === 'cruzada') return { html: htmlBarra(ctx, null) + htmlCruzada(ctx), arbol: null }
-  const arbol = construirArbol(ctx), vis = filasVisibles(ctx, arbol), M0 = ctx.medidas[0]
+  const arbol = construirArbol(ctx), vis = filasVisibles(ctx, arbol), M0 = mNum(ctx)
   // total de hermanos (para el % de peso de cada fila)
   const sumHermanos = new Map()
   const rec = lista => { const tot = lista.reduce((s, n) => s + Math.max(0, n.vals[M0?.key] || 0), 0) || 1; lista.forEach(n => { sumHermanos.set(n, { tot }); if (n.hijos) rec(n.hijos) }) }
@@ -194,9 +200,9 @@ export function renderTablaReporte(ctx, plana) {
   const tot = ctx.calc(ctx.filtrados, ctx.medidas)
   const html = `${htmlBarra(ctx, arbol)}<table class="rp-arbol"><thead><tr>
     <th class="rp-th-orden" data-rp-orden="_etiqueta">${e.agrupar.map(k => esc(ctx.labelDim(k))).join(' ▸ ')}${ind('_etiqueta')}</th><th class="n" style="width:70px">N°</th>
-    ${ctx.medidas.map(m => `<th class="n rp-th-orden" data-rp-orden="${esc(m.key)}">${esc(m.label)}${ind(m.key)}</th>`).join('')}</tr></thead>
+    ${colsVista(ctx).map(m => `<th class="${esTxt(m) ? '' : 'n '}rp-th-orden" data-rp-orden="${esc(m.key)}">${esc(m.label)}${ind(m.key)}</th>`).join('')}</tr></thead>
     <tbody>${vis.map(f => htmlFilaArbol(ctx, f, M0, sumHermanos)).join('')}</tbody>
-    <tfoot><tr class="rp-total"><td><strong>TOTAL</strong></td><td class="n"><strong>${ctx.filtrados.length}</strong></td>${ctx.medidas.map(m => `<td class="n rp-cifra" data-drill="__total" style="font-weight:700">${ctx.fmt(tot[m.key], m.formato)}</td>`).join('')}</tr></tfoot></table>`
+    <tfoot><tr class="rp-total"><td><strong>TOTAL</strong></td><td class="n"><strong>${ctx.filtrados.length}</strong></td>${colsVista(ctx).map(m => esTxt(m) ? `<td class="rp-txt" style="color:var(--text-secondary)">${ctx.fmt(tot[m.key], 'texto')}</td>` : `<td class="n rp-cifra" data-drill="__total" style="font-weight:700">${ctx.fmt(tot[m.key], m.formato)}</td>`).join('')}</tr></tfoot></table>`
   return { html, arbol }
 }
 
@@ -244,10 +250,10 @@ export function abrirAuditoria(ctx, titulo, filas) {
     .rpa-f{display:flex;gap:8px;align-items:center;padding:10px 18px;border-top:1px solid var(--border-color)}.rpa-f input{flex:1;background:var(--bg-primary);color:inherit;border:1px solid var(--border-color);border-radius:8px;padding:7px 10px}`
     document.head.appendChild(s)
   }
-  const dims = (ctx.config.dimensiones || []).slice(0, 5), meds = ctx.medidas.slice(0, 6)
+  const dims = (ctx.config.dimensiones || []).slice(0, 5), meds = colsVista(ctx).slice(0, 6)
   const celdaDim = (f, d) => { const v = d.tipo === 'fecha' ? String(f[d.campo || d.key] || '').slice(0, 10) : f[d.key]; return etq(v ?? '') }
-  const valor = (f, m) => { const v = m.calc ? m.calc(f) : f[m.key]; const x = parseFloat(v); return isNaN(x) ? null : x }
-  const M0 = meds[0], orden = M0 ? [...filas].sort((a, b) => (valor(b, M0) || 0) - (valor(a, M0) || 0)) : filas
+  const valor = (f, m) => { const v = m.calc ? m.calc(f) : f[m.key]; if (esTxt(m)) return v || '-'; const x = parseFloat(v); return isNaN(x) ? null : x }
+  const M0 = meds.find(m => !esTxt(m)), orden = M0 ? [...filas].sort((a, b) => (valor(b, M0) || 0) - (valor(a, M0) || 0)) : filas
   const ov = document.createElement('div'); ov.className = 'rpa-ov'; ov.id = 'rpAudOv'
   const pintar = q => {
     const t = (q || '').toLowerCase().trim(), l = t ? orden.filter(f => dims.some(d => celdaDim(f, d).toLowerCase().includes(t))) : orden

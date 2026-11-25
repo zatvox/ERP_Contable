@@ -1,5 +1,6 @@
 import { fechaDMY } from './helpers.js'
 import { renderMultiempresa } from './multiempresa-config.js'
+import { renderTenants, esSuperadmin } from './tenants.js'
 // ============================================================================
 // PERFIL.JS — Mi Perfil (para todos los usuarios)
 // ============================================================================
@@ -79,8 +80,11 @@ function initTabs() {
       if (nombre === 'actividad') cargarActividad()
       if (nombre === 'comandos') cargarComandos()
       if (nombre === 'multiempresa') renderMultiempresa('perfil-multiempresa-container')
+      if (nombre === 'tenants') renderTenants('perfil-tenants-container')
     })
   })
+  // Tab Clientes: solo lo ve el superadmin (la RLS igual lo protege en servidor)
+  esSuperadmin().then(ok => { if (ok) { document.getElementById('tabBtnTenants').style.display = ''; _abrirTabPorHash() } })
   _abrirTabPorHash()
 }
 

@@ -10,7 +10,9 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_CONFIG } from './config.js'
 import { invalidarPorEscritura } from './data-cache.js'
 
-export const supabase = createClient(SUPABASE_CONFIG.URL, SUPABASE_CONFIG.ANON_KEY)
+// Clientes premium: login.html guarda su proyecto propio en localStorage['erp_proyecto'] ({url,key,nombre}). Sin eso, proyecto base.
+const _proy = (() => { try { return JSON.parse(localStorage.getItem('erp_proyecto') || 'null') } catch { return null } })()
+export const supabase = createClient(_proy?.url || SUPABASE_CONFIG.URL, _proy?.key || SUPABASE_CONFIG.ANON_KEY)
 
 // ============================================================================
 // CONTEXTO MULTIEMPRESA — EL ÚNICO PUNTO DE FILTRADO DEL SISTEMA

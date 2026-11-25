@@ -10,6 +10,6 @@ export default [
     ['• Si eliges responsable, la tarea hereda su **área** automáticamente.', '• Puedes asignarla a alguien **sin cuenta** en el sistema: la verá su jefe o gerencia.', '• Quien no tiene relación con la tarea no puede verla.']),
   E('tar.rec', '#tk-btn-rec', 'Tareas recurrentes', 'Tareas que se crean solas cada día, semana, quincena o mes (cierres, arqueos, declaraciones).',
     ['La fecha límite se calcula sola. En mensual, si eliges día 31 y el mes tiene menos días, se usa el **último día del mes**.', 'Se generan al abrir este módulo; no se duplican aunque lo abras muchas veces. Puedes **pausar** una recurrente cuando no aplique.']),
-  E('tar.buscar', '#tk-buscar', 'Buscar tareas', 'Escribe parte del título, del nombre de la persona o del área.', null, { q: true }),
+  E('tar.buscar', '#tk-buscar', 'Buscar tareas', 'Escribe parte del título, del nombre de la persona o del área.', null, {}),
   E('tar.abiertas', '#tk-abiertas', 'Solo abiertas', 'Oculta las tareas hechas y anuladas. Desmárcalo para ver el historial reciente.', null),
 ]

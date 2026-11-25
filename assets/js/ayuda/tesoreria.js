@@ -12,6 +12,6 @@ export default [
   E('tes.conc', T('conciliacion'), 'Conciliación', 'Compara el saldo del sistema contra el estado de cuenta del banco para encontrar diferencias.', ['Elige el mes y pulsa **Ver diferencia**: te muestra qué movimientos faltan a un lado u otro.'], { q: true }),
   E('tes.repb', T('reportes-banco'), 'Reportes bancarios', 'Reportes de movimientos y saldos por cuenta bancaria.', null, { q: true }),
   E('tes.rep', T('reportes'), 'Reportes de tesorería', 'Flujo por mes, por categoría, por cuenta y posición de tesorería.', null, { q: true }),
-  E('tes.f.sustento', '#gasFiltroSustento', 'Filtro Sustento', 'Gastos con o sin comprobante.', null, { q: true }),
-  E('tes.f.ambito', '#gasFiltroAmbito', 'Filtro Ámbito', 'Empresa o familiar: separa lo del negocio de lo personal.', null, { q: true }),
+  E('tes.f.sustento', '#gasFiltroSustento', 'Filtro Sustento', 'Gastos con o sin comprobante.', null, {}),
+  E('tes.f.ambito', '#gasFiltroAmbito', 'Filtro Ámbito', 'Empresa o familiar: separa lo del negocio de lo personal.', null, {}),
 ]

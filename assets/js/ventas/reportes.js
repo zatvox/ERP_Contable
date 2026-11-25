@@ -69,6 +69,40 @@ export async function construirReporteVentas(panelId) {
     // (facturación, márgenes, despacho). Queda visible solo en el listado.
     const activas = (ventas || []).filter(v => !estaAnulado(v))
 
+    // Packing asociado (2026-10-30): por línea (detalle_packing_id, facturación
+    // parcial) y, si no, el de la cabecera (ventas.packing_id). Sin PK → '-'.
+    const _chunks = (arr, n = 200) => Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n))
+    const detPkIds = [...new Set((detalles || []).map(d => d.detalle_packing_id).filter(Boolean))]
+    const dpAPk = {}
+    for (const ch of _chunks(detPkIds)) {
+      const { data } = await supabase.from('detalle_packing').select('id, packing_id').in('id', ch)
+      ;(data || []).forEach(r => { dpAPk[r.id] = r.packing_id })
+    }
+    const pkIds = [...new Set([...activas.map(v => v.packing_id), ...Object.values(dpAPk)].filter(Boolean))]
+    const pkNum = {}
+    for (const ch of _chunks(pkIds)) {
+      const { data } = await supabase.from('packing').select('id, numero').in('id', ch)
+      ;(data || []).forEach(r => { pkNum[r.id] = r.numero })
+    }
+    const _pkDe = (v, d) => {
+      const id = (d?.detalle_packing_id && dpAPk[d.detalle_packing_id]) || v.packing_id
+      return id ? (pkNum[id] || `PK #${id}`) : '-'
+    }
+
+    // Packing de la VENTA (2026-11-25, Evolución/Clientes/Despacho): PK de cabecera; si la factura
+    // juntó varios PK por línea → todos; si el PK no está en el ERP → packing_ref escrito. Sin PK → '-'.
+    const _pkVenta = {}
+    ;(detalles || []).forEach(d => {
+      const id = d.detalle_packing_id && dpAPk[d.detalle_packing_id]
+      if (id) (_pkVenta[d.venta_id] ||= new Set()).add(pkNum[id] || `PK #${id}`)
+    })
+    const pkDeVenta = (v) => {
+      const set = new Set(_pkVenta[v.id] || [])
+      if (v.packing_id) set.add(pkNum[v.packing_id] || `PK #${v.packing_id}`)
+      if (!set.size && v.packing_ref) set.add(v.packing_ref)
+      return set.size ? [...set].join(', ') : '-'
+    }
+
     // Las notas de crédito entran con signo negativo para que cualquier
     // agrupación (por mes, cliente, producto) dé la venta NETA real.
     const filas = activas.map(v => {
@@ -79,6 +113,7 @@ export async function construirReporteVentas(panelId) {
         mes: nombreMes((v.fecha_emision || '').slice(0, 7)),
         fecha: v.fecha_emision || '',
         comprobante: _numDoc(v),
+        packing: pkDeVenta(v),
         tipo_comprobante: nombreTipoComprobante(v.tipo_comprobante),
         moneda: v.moneda || 'PEN',
         estado_pago: v.estado_pago || 'pendiente',
@@ -92,7 +127,7 @@ export async function construirReporteVentas(panelId) {
     })
 
     const filtrosBase = [
-      { key: 'buscar', label: 'Buscar', tipo: 'texto', campos: ['cliente', 'comprobante'], placeholder: 'Cliente o comprobante...' },
+      { key: 'buscar', label: 'Buscar', tipo: 'texto', campos: ['cliente', 'comprobante', 'packing'], placeholder: 'Cliente, comprobante o PK...' },
       { key: 'tipo_comprobante', label: 'Tipo', tipo: 'select', opciones: Array.from(new Set(filas.map(f => f.tipo_comprobante))).sort() },
       { key: 'moneda', label: 'Moneda', tipo: 'select', opciones: ['PEN', 'USD'] },
       { key: 'rango', label: 'Emisión', tipo: 'rango', campo: 'fecha' },
@@ -103,7 +138,9 @@ export async function construirReporteVentas(panelId) {
       { key: 'igv', label: 'IGV', agg: 'sum', formato: 'money' },
       { key: 'total', label: 'Total', agg: 'sum', formato: 'money' },
       _medCosto,
-      _medTC('base')
+      _medTC('base'),
+      // Columna de texto: en la fila de cada comprobante muestra su PK; en grupos, los PK (o "N PK")
+      { key: 'packing', label: 'Packing', agg: 'texto', formato: 'texto', plural: 'PK' }
     ]
     const kpisBase = (f) => [
       { label: 'Total vendido', valor: f.reduce((s, x) => s + x.total, 0), formato: 'money', color: 'var(--color-success)' },
@@ -122,7 +159,7 @@ export async function construirReporteVentas(panelId) {
           _dimFecha, _dimComprobante, _dimTipo,
           _dimMoneda, { key: 'cliente', label: 'Cliente' }, _dimVendedor
         ],
-        medidas: medidasBase, filtros: filtrosBase, medidasPorDefecto: ['base', 'igv', 'total', 'costo'],
+        medidas: medidasBase, filtros: filtrosBase, medidasPorDefecto: ['base', 'igv', 'total', 'costo', 'packing'],
         agruparPorDefecto: ['fecha'], orden: { key: '_etiqueta', dir: 'asc' }, kpis: kpisBase
       })
     }
@@ -458,26 +495,6 @@ export async function construirReporteVentas(panelId) {
           ? (parseFloat(lote.costo_unit_original) || 0)
           : (mon === 'USD' ? cuPen / tcLote : cuPen)
         return { cu: mon === 'USD' ? cuOrig : (tcC > 0 ? cuOrig / tcC : 0), tc: tcC }
-      }
-
-      // Packing asociado (2026-10-30): por línea (detalle_packing_id, facturación
-      // parcial) y, si no, el de la cabecera (ventas.packing_id). Sin PK → '-'.
-      const _chunks = (arr, n = 200) => Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n))
-      const detPkIds = [...new Set((detalles || []).map(d => d.detalle_packing_id).filter(Boolean))]
-      const dpAPk = {}
-      for (const ch of _chunks(detPkIds)) {
-        const { data } = await supabase.from('detalle_packing').select('id, packing_id').in('id', ch)
-        ;(data || []).forEach(r => { dpAPk[r.id] = r.packing_id })
-      }
-      const pkIds = [...new Set([...activas.map(v => v.packing_id), ...Object.values(dpAPk)].filter(Boolean))]
-      const pkNum = {}
-      for (const ch of _chunks(pkIds)) {
-        const { data } = await supabase.from('packing').select('id, numero').in('id', ch)
-        ;(data || []).forEach(r => { pkNum[r.id] = r.numero })
-      }
-      const _pkDe = (v, d) => {
-        const id = (d?.detalle_packing_id && dpAPk[d.detalle_packing_id]) || v.packing_id
-        return id ? (pkNum[id] || `PK #${id}`) : '-'
       }
 
       const filasVend = []
